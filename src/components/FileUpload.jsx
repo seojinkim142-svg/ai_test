@@ -2,11 +2,14 @@ function UploadTile({ onFileChange }) {
   return (
     <label
       htmlFor="pdf"
-      className="flex h-full min-h-[220px] cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/20 bg-white/5 text-center transition hover:border-emerald-300/60 hover:bg-emerald-400/5"
+      className="flex h-full min-h-[170px] w-full cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/20 bg-white/5 text-center transition hover:-translate-y-1 hover:border-emerald-300/60 hover:bg-emerald-400/5 sm:w-[260px] sm:flex-shrink-0"
     >
-      <div className="rounded-full bg-white/10 px-3 py-1 text-xs text-emerald-100">PDF 파일 선택</div>
-      <p className="text-lg font-semibold text-white">클릭하거나 끌어와서 업로드</p>
-      <p className="max-w-xs text-sm text-slate-300">최대 30페이지까지 읽습니다(추가 페이지는 무시)</p>
+      <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500/15 text-2xl font-bold text-emerald-200">
+        +
+      </div>
+      <p className="text-base font-semibold text-white">새 PDF 추가</p>
+      <p className="max-w-xs text-sm text-slate-200">클릭하거나 끌어와서 업로드</p>
+      <p className="max-w-xs text-xs text-slate-400">최대 30페이지까지 읽습니다(추가 페이지는 무시)</p>
       <input
         id="pdf"
         name="pdf"
@@ -25,13 +28,13 @@ function PdfTile({ file, thumbnailUrl, pageInfo, isLoadingText, onProceed, activ
     <button
       type="button"
       onClick={onProceed}
-      className={`group flex h-full flex-col overflow-hidden rounded-2xl border bg-slate-900/70 text-left shadow-lg shadow-black/30 ring-1 transition hover:-translate-y-1 hover:border-emerald-300/50 hover:ring-emerald-300/40 ${
+      className={`group flex h-full min-h-[190px] w-full flex-col overflow-hidden rounded-2xl border bg-slate-900/70 text-left shadow-lg shadow-black/30 ring-1 transition hover:-translate-y-1 hover:border-emerald-300/50 hover:ring-emerald-300/40 sm:w-[260px] sm:flex-shrink-0 ${
         active ? "border-emerald-300/60 ring-emerald-300/50" : "border-white/10 ring-white/5"
       }`}
     >
-      <div className="relative h-44 w-full bg-slate-800">
+      <div className="relative h-32 w-full bg-slate-800">
         {thumbnailUrl ? (
-          <img src={thumbnailUrl} alt="PDF 첫 페이지 썸네일" className="h-full w-full object-cover" />
+          <img src={thumbnailUrl} alt="PDF 썸네일 미리보기" className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-slate-300">썸네일 생성 중...</div>
         )}
@@ -78,32 +81,26 @@ function FileUpload({
         )}
       </div>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="mt-4 flex flex-wrap gap-3">
         <UploadTile onFileChange={onFileChange} />
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-1">
-          {uploadedFiles.length === 0 && (
-            <div className="flex min-h-[220px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sm text-slate-300 ring-1 ring-white/5">
-              업로드한 PDF가 여기 카드로 표시됩니다.
-            </div>
-          )}
-          {uploadedFiles.length > 0 && (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-              {uploadedFiles.map((item) => (
-                <PdfTile
-                  key={item.id}
-                  file={item.file}
-                  thumbnailUrl={item.thumbnail || thumbnailUrl}
-                  pageInfo={file?.name === item.file.name ? pageInfo : null}
-                  isLoadingText={isLoadingText && file?.name === item.file.name}
-                  active={selectedFileId === item.id}
-                  onProceed={() => {
-                    onSelectFile?.(item);
-                  }}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+        {uploadedFiles.length === 0 && (
+          <div className="flex min-h-[170px] w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sm text-slate-300 ring-1 ring-white/5 sm:w-[260px] sm:flex-shrink-0">
+            업로드한 PDF가 카드로 표시됩니다.
+          </div>
+        )}
+        {uploadedFiles.map((item) => (
+          <PdfTile
+            key={item.id}
+            file={item.file}
+            thumbnailUrl={item.thumbnail || thumbnailUrl}
+            pageInfo={file?.name === item.file.name ? pageInfo : null}
+            isLoadingText={isLoadingText && file?.name === item.file.name}
+            active={selectedFileId === item.id}
+            onProceed={() => {
+              onSelectFile?.(item);
+            }}
+          />
+        ))}
       </div>
     </div>
   );
