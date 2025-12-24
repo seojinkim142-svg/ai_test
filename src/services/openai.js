@@ -65,11 +65,32 @@ function sanitizeMarkdown(content) {
   return content.replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "");
 }
 
-async function postChatRequest(body) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterSeconds(response) {
+  const retryAfter = response.headers.get("retry-after");
+  if (retryAfter && !Number.isNaN(Number(retryAfter))) {
+    return Number(retryAfter);
+  }
+
+  // OpenAI는 x-ratelimit-reset-requests(초 단위 epoch) 헤더를 줄 수 있음
+  const resetEpoch = response.headers.get("x-ratelimit-reset-requests");
+  if (resetEpoch && !Number.isNaN(Number(resetEpoch))) {
+    const now = Math.floor(Date.now() / 1000);
+    const diff = Number(resetEpoch) - now;
+    if (diff > 0) return diff;
+  }
+
+  return null;
+}
+
+async function postChatRequest(body, { retries = 1 } = {}) {
   const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
 
   if (!apiKey) {
-    throw new Error("환경 변수 VITE_OPENAI_API_KEY를 .env 파일에 설정해주세요.");
+    throw new Error("환경 변수 VITE_OPENAI_API_KEY를 .env 파일에 설정해 주세요.");
   }
 
   const response = await fetch(CHAT_URL, {
@@ -81,9 +102,36 @@ async function postChatRequest(body) {
     body: JSON.stringify(body),
   });
 
+  if (response.status === 429) {
+    let hint = "요청 한도를 초과했습니다. 잠시 후 다시 시도해주세요.";
+    let waitSeconds = parseRetryAfterSeconds(response);
+
+    try {
+      const json = await response.json();
+      hint = json?.error?.message || hint;
+    } catch (_) {
+      // JSON 파싱 실패 시 기본 힌트로 안내
+    }
+
+    if (retries > 0) {
+      // 헤더에 시간이 없으면 10초 기본 대기
+      const delay = (waitSeconds ?? 10) * 1000;
+      await sleep(delay);
+      return postChatRequest(body, { retries: retries - 1 });
+    }
+
+    throw new Error(waitSeconds ? `${hint} (약 ${waitSeconds}초 후 재시도)` : hint);
+  }
+
   if (!response.ok) {
-    const details = await response.text();
-    throw new Error(`OpenAI API 오류: ${response.status} ${details}`);
+    try {
+      const json = await response.json();
+      const message = json?.error?.message || JSON.stringify(json);
+      throw new Error(`OpenAI API 오류: ${response.status} ${message}`);
+    } catch (_) {
+      const details = await response.text();
+      throw new Error(`OpenAI API 오류: ${response.status} ${details}`);
+    }
   }
 
   return response.json();

@@ -1,8 +1,10 @@
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
+import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).toString();
+// Ensure the worker bundle is correctly referenced in production builds.
+GlobalWorkerOptions.workerSrc = workerSrc;
 
-export async function extractPdfText(file, pageLimit = 30) {
+export async function extractPdfText(file, pageLimit = 30, maxLength = 12000) {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await getDocument({ data: arrayBuffer }).promise;
   const totalPages = pdf.numPages;
@@ -17,7 +19,7 @@ export async function extractPdfText(file, pageLimit = 30) {
     chunks.push(strings);
   }
 
-  const normalized = chunks.join("\n").replace(/\s+/g, " ").trim();
+  const normalized = chunks.join("\n").replace(/\s+/g, " ").trim().slice(0, maxLength);
   return {
     text: normalized,
     pagesUsed: pagesToRead,

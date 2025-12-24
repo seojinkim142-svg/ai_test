@@ -28,6 +28,9 @@ function App() {
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [selectedFileId, setSelectedFileId] = useState(null);
+  const [panelTab, setPanelTab] = useState("summary");
+  const summaryRequestedRef = useRef(false);
+  const quizRequestedRef = useRef(false);
 
   const shortPreview = useMemo(
     () => (previewText.length > 700 ? `${previewText.slice(0, 700)}...` : previewText),
@@ -66,7 +69,9 @@ function App() {
       setFile(targetFile);
       setSelectedFileId(item.id);
       resetQuizState();
-        setError(`PDF 추출에 실패했습니다: ${err.message}`);
+      summaryRequestedRef.current = false;
+      quizRequestedRef.current = false;
+      setError("");
       setSummary("");
       setStatus("PDF 텍스트 추출 중입니다...");
       setIsLoadingText(true);
@@ -75,14 +80,13 @@ function App() {
       try {
         const [textResult, thumb] = await Promise.all([extractPdfText(targetFile), generatePdfThumbnail(targetFile)]);
         const { text, pagesUsed, totalPages } = textResult;
-        const trimmed = text.slice(0, 12000);
-        setExtractedText(trimmed);
-        setPreviewText(trimmed);
+        setExtractedText(text);
+        setPreviewText(text);
         setPageInfo({ used: pagesUsed, total: totalPages });
         setThumbnailUrl(thumb);
         setStatus(`추출 완료 (사용 페이지: ${pagesUsed}/${totalPages})`);
       } catch (err) {
-        setError(`PDF ??? ??????: ${err.message}`);
+        setError(`PDF 추출에 실패했습니다: ${err.message}`);
         setExtractedText("");
         setPreviewText("");
         setPageInfo({ used: 0, total: 0 });
@@ -127,6 +131,9 @@ function App() {
     setPreviewText("");
     setPageInfo({ used: 0, total: 0 });
     setSummary("");
+    setPanelTab("summary");
+    summaryRequestedRef.current = false;
+    quizRequestedRef.current = false;
     resetQuizState();
     setStatus("업로드 목록에서 썸네일을 선택해 요약/퀴즈를 시작하세요.");
   }, [pdfUrl]);
@@ -168,6 +175,7 @@ function App() {
 
 
   const requestQuestions = async () => {
+    if (isLoadingQuiz || quizRequestedRef.current) return;
     if (!file) {
       setError("먼저 PDF를 업로드해주세요.");
       return;
@@ -178,6 +186,7 @@ function App() {
       return;
     }
 
+    quizRequestedRef.current = true;
     setIsLoadingQuiz(true);
     setError("");
     setStatus("문제 세트를 생성하는 중입니다...");
@@ -216,6 +225,7 @@ function App() {
   };
 
   const requestSummary = async () => {
+    if (isLoadingSummary || summaryRequestedRef.current) return;
     if (!file) {
       setError("먼저 PDF를 업로드해주세요.");
       return;
@@ -225,28 +235,49 @@ function App() {
       return;
     }
 
+    summaryRequestedRef.current = true;
     setIsLoadingSummary(true);
     setError("");
     setStatus("요약을 생성하는 중입니다...");
-
     try {
       const summarized = await generateSummary(extractedText);
       setSummary(summarized);
       setStatus("요약 생성 완료!");
     } catch (err) {
       setError(`요약 생성에 실패했습니다: ${err.message}`);
+      setStatus("");
     } finally {
       setIsLoadingSummary(false);
     }
   };
 
+  const canAutoRequest = useCallback(() => file && extractedText && !isLoadingText, [file, extractedText, isLoadingText]);
+
   // 파일이 선택되고 텍스트가 준비되면 요약을 자동으로 요청
   useEffect(() => {
-    if (file && extractedText && !summary && !isLoadingSummary) {
+    if (
+      canAutoRequest() &&
+      !summary &&
+      !isLoadingSummary &&
+      !summaryRequestedRef.current
+    ) {
       requestSummary();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file, extractedText]);
+  }, [canAutoRequest, summary, isLoadingSummary]);
+
+  useEffect(() => {
+    if (
+      summary &&
+      canAutoRequest() &&
+      !questions &&
+      !isLoadingQuiz &&
+      !quizRequestedRef.current
+    ) {
+      requestQuestions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summary, canAutoRequest, questions, isLoadingQuiz]);
 
   const renderStartPage = () => (
     <section className="grid grid-cols-1 gap-4">
@@ -256,7 +287,7 @@ function App() {
         isLoadingText={isLoadingText}
         thumbnailUrl={thumbnailUrl}
         uploadedFiles={uploadedFiles}
-        onSelectFile={(item) => processSelectedFile(item)}
+        onSelectFile={processSelectedFile}
         onFileChange={handleFileChange}
         selectedFileId={selectedFileId}
       />
@@ -270,39 +301,69 @@ function App() {
       </div>
 
       <div className="flex flex-col gap-4">
-        <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
-          <p className="text-sm font-semibold text-emerald-200">요약</p>
-          {isLoadingSummary && <p className="mt-2 text-sm text-slate-300">요약 생성 중...</p>}
-          {!isLoadingSummary && summary && <SummaryCard summary={summary} />}
-          {!isLoadingSummary && !summary && <p className="mt-2 text-sm text-slate-400">요약이 준비되면 표시됩니다.</p>}
+        <div className="flex gap-2">
+          {[
+            { id: "summary", label: "요약" },
+            { id: "quiz", label: "퀴즈" },
+          ].map((tab) => {
+            const active = panelTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setPanelTab(tab.id)}
+                className={`rounded-full border px-3 py-1 text-sm font-semibold transition ${
+                  active
+                    ? "border-emerald-300/60 bg-emerald-400/15 text-emerald-100"
+                    : "border-white/15 bg-white/5 text-slate-200 hover:border-emerald-200/40 hover:text-emerald-100"
+                }`}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
 
-        <ActionsPanel
-          title="퀴즈 생성"
-          stepLabel="퀴즈"
-          hideSummary
-          isLoadingQuiz={isLoadingQuiz}
-          isLoadingSummary={isLoadingSummary}
-          isLoadingText={isLoadingText}
-          status={status}
-          error={error}
-          shortPreview={shortPreview}
-          onRequestQuiz={requestQuestions}
-          onRequestSummary={requestSummary}
-        />
+        {panelTab === "summary" && (
+          <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
+            <p className="text-sm font-semibold text-emerald-200">요약</p>
+            {isLoadingSummary && <p className="mt-2 text-sm text-slate-300">요약 생성 중...</p>}
+            {!isLoadingSummary && summary && <SummaryCard summary={summary} />}
+            {!isLoadingSummary && !summary && <p className="mt-2 text-sm text-slate-400">요약이 준비되면 표시됩니다.</p>}
+          </div>
+        )}
 
-        {questions && (
-          <QuizSection
-            questions={questions}
-            summary={null}
-            selectedChoices={selectedChoices}
-            revealedChoices={revealedChoices}
-            shortAnswerInput={shortAnswerInput}
-            shortAnswerResult={shortAnswerResult}
-            onSelectChoice={handleChoiceSelect}
-            onShortAnswerChange={setShortAnswerInput}
-            onShortAnswerCheck={handleShortAnswerCheck}
-          />
+        {panelTab === "quiz" && (
+          <>
+            <ActionsPanel
+              title="퀴즈 생성"
+              stepLabel="퀴즈"
+              hideSummary
+              hideQuiz
+              isLoadingQuiz={isLoadingQuiz}
+              isLoadingSummary={isLoadingSummary}
+              isLoadingText={isLoadingText}
+              status={status}
+              error={error}
+              shortPreview={shortPreview}
+              onRequestQuiz={requestQuestions}
+              onRequestSummary={requestSummary}
+            />
+
+            {questions && (
+              <QuizSection
+                questions={questions}
+                summary={null}
+                selectedChoices={selectedChoices}
+                revealedChoices={revealedChoices}
+                shortAnswerInput={shortAnswerInput}
+                shortAnswerResult={shortAnswerResult}
+                onSelectChoice={handleChoiceSelect}
+                onShortAnswerChange={setShortAnswerInput}
+                onShortAnswerCheck={handleShortAnswerCheck}
+              />
+            )}
+          </>
         )}
       </div>
     </section>
@@ -316,9 +377,9 @@ function App() {
         <div className="absolute bottom-[-120px] left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-indigo-500/10 blur-3xl" />
       </div>
 
-      <main className="relative z-10 mx-auto flex w-full max-w-none flex-col gap-6 py-10">
+      <main className="relative z-10 mx-auto flex w-full max-w-none flex-col gap-4 py-4">
         <Header />
-        <div className="px-6">
+        <div className="px-0">
           {!showDetail && renderStartPage()}
           {showDetail && renderDetailPage()}
         </div>

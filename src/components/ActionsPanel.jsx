@@ -17,7 +17,7 @@ function ActionsPanel({
       <p className="text-sm text-slate-300">{stepLabel}</p>
       <h2 className="text-xl font-semibold text-white">{title}</h2>
       <p className="mt-2 text-sm text-slate-400">
-        OpenAI API를 사용합니다. .env 파일에 <code className="font-mono">VITE_OPENAI_API_KEY</code>를 설정해주세요.
+        퀴즈를 생성중입니다.
       </p>
 
       <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">

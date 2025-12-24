@@ -10,15 +10,6 @@ function Header() {
             Zeusian.ai
           </h1>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="h-12 w-12 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-2 shadow-inner shadow-black/20">
-            <img
-              src="/pnu-logo.png"
-              alt="Pusan National University Industrial Engineering"
-              className="h-full w-full object-contain"
-            />
-          </div>
-        </div>
       </div>
     </header>
   );
