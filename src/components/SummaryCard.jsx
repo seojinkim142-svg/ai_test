@@ -6,10 +6,12 @@ import "katex/dist/katex.min.css";
 
 function sanitizeSummary(text) {
   if (!text) return null;
-  return text.replace(
-    /\[\s*([^[\]]*(?:\\frac|\\cdot|\\lambda|\\mu|\\sigma|\\pi|\\sum|\\int|\\alpha|\\beta|\\gamma|\\theta|\\phi|\\psi)[^[\]]*)\s*\]/g,
-    (_, expr) => `$$${expr.trim()}$$`
-  );
+  return text
+    .replace(/\\\$/g, "$")
+    .replace(
+      /\[\s*([^[\]]*(?:\\frac|\\cdot|\\lambda|\\mu|\\sigma|\\pi|\\sum|\\int|\\alpha|\\beta|\\gamma|\\theta|\\phi|\\psi)[^[\]]*)\s*\]/g,
+      (_, expr) => `$$${expr.trim()}$$`
+    );
 }
 
 function SummaryCard({ summary }) {
@@ -18,14 +20,14 @@ function SummaryCard({ summary }) {
   const sanitized = sanitizeSummary(summary);
 
   return (
-    <div className="mt-4 rounded-2xl bg-gradient-to-br from-emerald-900/40 via-slate-900/40 to-cyan-900/30 p-4 ring-1 ring-emerald-300/30">
+    <div className="mt-4 rounded-2xl bg-gradient-to-br from-slate-900/60 via-slate-900/50 to-slate-900/40 p-4 ring-1 ring-white/10">
       <div className="mb-3 flex items-center justify-between">
-        <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">요약</p>
-        <span className="rounded-full bg-emerald-400/15 px-3 py-1 text-[11px] font-semibold text-emerald-50 ring-1 ring-emerald-300/40">
+        <p className="text-xs uppercase tracking-[0.2em] text-slate-300">요약</p>
+        <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-slate-100 ring-1 ring-white/20">
           Markdown styled
         </span>
       </div>
-      <div className="prose prose-invert max-w-none space-y-2 text-slate-100 prose-p:leading-relaxed prose-headings:text-emerald-100">
+      <div className="prose prose-invert max-w-none space-y-2 text-slate-100 prose-p:leading-relaxed prose-headings:text-slate-50 prose-strong:text-slate-50 prose-a:text-slate-50">
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[rehypeKatex]}
@@ -34,7 +36,7 @@ function SummaryCard({ summary }) {
             h2: ({ node, ...props }) => <h2 className="text-lg font-semibold text-white mt-3" {...props} />,
             h3: ({ node, ...props }) => <h3 className="text-base font-semibold text-emerald-100 mt-2" {...props} />,
             p: ({ node, ...props }) => <p className="text-sm leading-relaxed text-slate-100" {...props} />,
-            strong: ({ node, ...props }) => <strong className="text-emerald-100 font-semibold" {...props} />,
+            strong: ({ node, ...props }) => <strong className="font-semibold text-slate-50" {...props} />,
             ul: ({ node, ...props }) => <ul className="list-disc pl-5 space-y-1 text-sm text-slate-100" {...props} />,
             ol: ({ node, ...props }) => <ol className="list-decimal pl-5 space-y-1 text-sm text-slate-100" {...props} />,
             li: ({ node, ...props }) => <li className="leading-relaxed" {...props} />,

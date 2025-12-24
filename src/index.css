@@ -10,6 +10,10 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  --scrollbar-size: 14px;
+  --scrollbar-track: #0f172a;
+  --scrollbar-thumb: #94a3b8;
+  --scrollbar-thumb-hover: #cbd5e1;
 }
 
 body {
@@ -19,4 +23,24 @@ body {
     radial-gradient(circle at 80% 0%, #12352c 0, transparent 30%),
     radial-gradient(circle at 70% 70%, #1f1b3a 0, transparent 32%),
     #06080f;
+}
+
+* {
+  scrollbar-width: none;
+}
+
+*::-webkit-scrollbar {
+  display: none;
+}
+
+.katex-error {
+  color: #e5e7eb !important;
+  background: transparent !important;
+  font-weight: 500;
+}
+
+.katex .merror {
+  color: #e5e7eb !important;
+  border-color: transparent !important;
+  background: transparent !important;
 }

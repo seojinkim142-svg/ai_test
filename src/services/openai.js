@@ -176,3 +176,33 @@ export async function generateSummary(extractedText) {
   const content = data.choices?.[0]?.message?.content?.trim() || "";
   return sanitizeMarkdown(content);
 }
+
+export async function generateHighlights(extractedText) {
+  const data = await postChatRequest({
+    model: MODEL,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Select up to 5 verbatim Korean sentences from the user's text that best support the summary. Respond with JSON only.",
+      },
+      {
+        role: "user",
+        content: `
+아래 본문에서 요약의 근거가 되는 중요 문장(최대 5개)을 **원문 그대로** 뽑아 JSON으로만 응답하세요.
+- 문장은 반드시 본문에 있는 그대로 사용 (생략/재구성 금지)
+- 이유는 짧게 한 줄로
+- 형식: { "highlights": [ { "sentence": "...", "reason": "..." } ] }
+
+본문:
+${extractedText}
+        `.trim(),
+      },
+    ],
+    temperature: 0.2,
+  });
+
+  const content = data.choices?.[0]?.message?.content?.trim() || "";
+  const sanitized = sanitizeJson(content);
+  return JSON.parse(sanitized);
+}

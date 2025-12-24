@@ -5,7 +5,7 @@ import Header from "./components/Header";
 import PdfPreview from "./components/PdfPreview";
 import QuizSection from "./components/QuizSection";
 import SummaryCard from "./components/SummaryCard";
-import { generateQuiz, generateSummary } from "./services/openai";
+import { generateHighlights, generateQuiz, generateSummary } from "./services/openai";
 import { extractPdfText, generatePdfThumbnail } from "./utils/pdf";
 
 function App() {
@@ -29,8 +29,14 @@ function App() {
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [selectedFileId, setSelectedFileId] = useState(null);
   const [panelTab, setPanelTab] = useState("summary");
+  const [splitPercent, setSplitPercent] = useState(50);
+  const [layout, setLayout] = useState(null);
+  const [highlights, setHighlights] = useState([]);
+  const [isLoadingHighlights, setIsLoadingHighlights] = useState(false);
   const summaryRequestedRef = useRef(false);
   const quizRequestedRef = useRef(false);
+  const isDraggingRef = useRef(false);
+  const detailContainerRef = useRef(null);
 
   const shortPreview = useMemo(
     () => (previewText.length > 700 ? `${previewText.slice(0, 700)}...` : previewText),
@@ -73,16 +79,19 @@ function App() {
       quizRequestedRef.current = false;
       setError("");
       setSummary("");
+      setLayout(null);
+      setHighlights([]);
       setStatus("PDF 텍스트 추출 중입니다...");
       setIsLoadingText(true);
       setThumbnailUrl(null);
 
       try {
         const [textResult, thumb] = await Promise.all([extractPdfText(targetFile), generatePdfThumbnail(targetFile)]);
-        const { text, pagesUsed, totalPages } = textResult;
+        const { text, pagesUsed, totalPages, layout: pageLayout } = textResult;
         setExtractedText(text);
         setPreviewText(text);
         setPageInfo({ used: pagesUsed, total: totalPages });
+        setLayout(pageLayout);
         setThumbnailUrl(thumb);
         setStatus(`추출 완료 (사용 페이지: ${pagesUsed}/${totalPages})`);
       } catch (err) {
@@ -90,6 +99,7 @@ function App() {
         setExtractedText("");
         setPreviewText("");
         setPageInfo({ used: 0, total: 0 });
+        setLayout(null);
       } finally {
         setIsLoadingText(false);
       }
@@ -131,6 +141,8 @@ function App() {
     setPreviewText("");
     setPageInfo({ used: 0, total: 0 });
     setSummary("");
+    setLayout(null);
+    setHighlights([]);
     setPanelTab("summary");
     summaryRequestedRef.current = false;
     quizRequestedRef.current = false;
@@ -154,6 +166,31 @@ function App() {
   }, [processSelectedFile]);
 
   useEffect(() => {
+    const handleMouseMove = (event) => {
+      if (!isDraggingRef.current) return;
+      const container = detailContainerRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const percent = ((event.clientX - rect.left) / rect.width) * 100;
+      const clamped = Math.min(75, Math.max(25, percent));
+      setSplitPercent(clamped);
+    };
+
+    const handleMouseUp = () => {
+      if (!isDraggingRef.current) return;
+      isDraggingRef.current = false;
+      document.body.style.userSelect = "";
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
+
+  useEffect(() => {
     window.history.replaceState({ view: "list" }, "", window.location.pathname);
 
     const handlePopState = (event) => {
@@ -172,7 +209,61 @@ function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
+  const handleDragStart = () => {
+    isDraggingRef.current = true;
+    document.body.style.userSelect = "none";
+  };
 
+  const splitStyle = {
+    flexBasis: `${splitPercent}%`,
+    flexShrink: 0,
+    minWidth: "25%",
+    maxWidth: "75%",
+  };
+
+  const mapSentenceToRect = useCallback(
+    (sentence) => {
+      if (!layout?.pages?.length || !sentence) return null;
+      const cleaned = sentence.replace(/["'“”‘’]+/g, "").trim();
+      const targets = [
+        cleaned,
+        cleaned.replace(/\s+/g, " "),
+      ].filter(Boolean);
+
+      for (const page of layout.pages) {
+        let idx = -1;
+        let targetLen = 0;
+        for (const t of targets) {
+          const found = page.text.toLowerCase().indexOf(t.toLowerCase());
+          if (found !== -1) {
+            idx = found;
+            targetLen = t.length;
+            break;
+          }
+        }
+        if (idx === -1) continue;
+        const endIdx = idx + targetLen;
+        const items = page.items.filter((it) => it.end > idx && it.start < endIdx);
+        if (!items.length) continue;
+        const minX = Math.min(...items.map((it) => it.rect.x));
+        const minY = Math.min(...items.map((it) => it.rect.y));
+        const maxX = Math.max(...items.map((it) => it.rect.x + it.rect.width));
+        const maxY = Math.max(...items.map((it) => it.rect.y + it.rect.height));
+        return {
+          page: page.pageNumber,
+          rect: {
+            x: minX,
+            y: minY,
+            width: maxX - minX,
+            height: maxY - minY,
+          },
+          sentence,
+        };
+      }
+      return null;
+    },
+    [layout]
+  );
 
   const requestQuestions = async () => {
     if (isLoadingQuiz || quizRequestedRef.current) return;
@@ -251,6 +342,29 @@ function App() {
     }
   };
 
+  const requestHighlights = async () => {
+    if (isLoadingHighlights) return;
+    if (!layout?.pages?.length) {
+      setError("PDF 레이아웃 정보를 불러오지 못했습니다. 파일을 다시 업로드해주세요.");
+      return;
+    }
+    if (!extractedText) return;
+
+    setIsLoadingHighlights(true);
+    try {
+      const data = await generateHighlights(extractedText);
+      const mapped =
+        data?.highlights
+          ?.map((h) => mapSentenceToRect(h.sentence))
+          .filter(Boolean) || [];
+      setHighlights(mapped);
+    } catch (err) {
+      setError(`하이라이트 생성에 실패했습니다: ${err.message}`);
+    } finally {
+      setIsLoadingHighlights(false);
+    }
+  };
+
   const canAutoRequest = useCallback(() => file && extractedText && !isLoadingText, [file, extractedText, isLoadingText]);
 
   // 파일이 선택되고 텍스트가 준비되면 요약을 자동으로 요청
@@ -279,6 +393,13 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summary, canAutoRequest, questions, isLoadingQuiz]);
 
+  useEffect(() => {
+    if (summary && layout && !highlights.length && !isLoadingHighlights) {
+      requestHighlights();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summary, layout, highlights.length, isLoadingHighlights]);
+
   const renderStartPage = () => (
     <section className="grid grid-cols-1 gap-4">
       <FileUpload
@@ -295,13 +416,25 @@ function App() {
   );
 
   const renderDetailPage = () => (
-    <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      <div className="flex flex-col gap-3">
-        <PdfPreview pdfUrl={pdfUrl} pageInfo={pageInfo} />
+    <section
+      ref={detailContainerRef}
+      className="flex flex-col gap-4 lg:h-[clamp(70vh,calc(100vh-120px),90vh)] lg:flex-row lg:items-stretch lg:overflow-hidden"
+    >
+      <div className="flex flex-col gap-3 lg:h-full lg:overflow-y-auto" style={splitStyle}>
+        <PdfPreview pdfUrl={pdfUrl} file={file} pageInfo={pageInfo} highlights={highlights} />
       </div>
 
-      <div className="flex flex-col gap-4">
-        <div className="flex gap-2">
+      <div className="hidden w-2 cursor-col-resize items-stretch justify-center lg:flex">
+        <div
+          className="h-full w-1 rounded-full bg-white/10 transition hover:bg-white/30"
+          onMouseDown={handleDragStart}
+          role="separator"
+          aria-label="패널 크기 조절"
+        />
+      </div>
+
+      <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
+        <div className="flex gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
           {[
             { id: "summary", label: "요약" },
             { id: "quiz", label: "퀴즈" },
@@ -324,47 +457,49 @@ function App() {
           })}
         </div>
 
-        {panelTab === "summary" && (
-          <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
-            <p className="text-sm font-semibold text-emerald-200">요약</p>
-            {isLoadingSummary && <p className="mt-2 text-sm text-slate-300">요약 생성 중...</p>}
-            {!isLoadingSummary && summary && <SummaryCard summary={summary} />}
-            {!isLoadingSummary && !summary && <p className="mt-2 text-sm text-slate-400">요약이 준비되면 표시됩니다.</p>}
-          </div>
-        )}
+        <div className="flex-1 overflow-auto pr-1 pb-1">
+          {panelTab === "summary" && (
+            <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
+              <p className="text-sm font-semibold text-emerald-200">요약</p>
+              {isLoadingSummary && <p className="mt-2 text-sm text-slate-300">요약 생성 중...</p>}
+              {!isLoadingSummary && summary && <SummaryCard summary={summary} />}
+              {!isLoadingSummary && !summary && <p className="mt-2 text-sm text-slate-400">요약이 준비되면 표시됩니다.</p>}
+            </div>
+          )}
 
-        {panelTab === "quiz" && (
-          <>
-            <ActionsPanel
-              title="퀴즈 생성"
-              stepLabel="퀴즈"
-              hideSummary
-              hideQuiz
-              isLoadingQuiz={isLoadingQuiz}
-              isLoadingSummary={isLoadingSummary}
-              isLoadingText={isLoadingText}
-              status={status}
-              error={error}
-              shortPreview={shortPreview}
-              onRequestQuiz={requestQuestions}
-              onRequestSummary={requestSummary}
-            />
-
-            {questions && (
-              <QuizSection
-                questions={questions}
-                summary={null}
-                selectedChoices={selectedChoices}
-                revealedChoices={revealedChoices}
-                shortAnswerInput={shortAnswerInput}
-                shortAnswerResult={shortAnswerResult}
-                onSelectChoice={handleChoiceSelect}
-                onShortAnswerChange={setShortAnswerInput}
-                onShortAnswerCheck={handleShortAnswerCheck}
+          {panelTab === "quiz" && (
+            <>
+              <ActionsPanel
+                title="퀴즈 생성"
+                stepLabel="퀴즈"
+                hideSummary
+                hideQuiz
+                isLoadingQuiz={isLoadingQuiz}
+                isLoadingSummary={isLoadingSummary}
+                isLoadingText={isLoadingText}
+                status={status}
+                error={error}
+                shortPreview={shortPreview}
+                onRequestQuiz={requestQuestions}
+                onRequestSummary={requestSummary}
               />
-            )}
-          </>
-        )}
+
+              {questions && (
+                <QuizSection
+                  questions={questions}
+                  summary={null}
+                  selectedChoices={selectedChoices}
+                  revealedChoices={revealedChoices}
+                  shortAnswerInput={shortAnswerInput}
+                  shortAnswerResult={shortAnswerResult}
+                  onSelectChoice={handleChoiceSelect}
+                  onShortAnswerChange={setShortAnswerInput}
+                  onShortAnswerCheck={handleShortAnswerCheck}
+                />
+              )}
+            </>
+          )}
+        </div>
       </div>
     </section>
   );
