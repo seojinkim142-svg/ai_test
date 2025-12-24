@@ -68,19 +68,7 @@ function FileUpload({
   selectedFileId,
 }) {
   return (
-    <div className="col-span-2 rounded-3xl border border-white/5 bg-slate-900/60 p-6 shadow-lg shadow-black/30 backdrop-blur">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-slate-300">1단계</p>
-          <h2 className="text-xl font-semibold text-white">PDF 선택</h2>
-        </div>
-        {pageInfo.used > 0 && (
-          <span className="rounded-full bg-white/5 px-3 py-1 text-xs text-slate-200 ring-1 ring-white/10">
-            {pageInfo.used} / {pageInfo.total} 페이지 사용
-          </span>
-        )}
-      </div>
-
+    <div className="col-span-2 flex flex-col gap-4">
       <div className="mt-4 flex flex-wrap gap-3">
         <UploadTile onFileChange={onFileChange} />
         {uploadedFiles.length === 0 && (

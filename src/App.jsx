@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ActionsPanel from "./components/ActionsPanel";
 import FileUpload from "./components/FileUpload";
 import Header from "./components/Header";
@@ -50,40 +50,48 @@ function App() {
     setShortAnswerResult(null);
   };
 
-  const processSelectedFile = async (item) => {
-    if (!item?.file) return;
-    const targetFile = item.file;
-    if (pdfUrl) {
-      URL.revokeObjectURL(pdfUrl);
-    }
-    setPdfUrl(URL.createObjectURL(targetFile));
-    setFile(targetFile);
-    setSelectedFileId(item.id);
-    resetQuizState();
-    setError("");
-    setSummary("");
-    setStatus("PDF 텍스트를 추출하는 중입니다...");
-    setIsLoadingText(true);
-    setThumbnailUrl(null);
+  const processSelectedFile = useCallback(
+    async (item, { pushState = true } = {}) => {
+      if (!item?.file) return;
+      const targetFile = item.file;
 
-    try {
-      const [textResult, thumb] = await Promise.all([extractPdfText(targetFile), generatePdfThumbnail(targetFile)]);
-      const { text, pagesUsed, totalPages } = textResult;
-      const trimmed = text.slice(0, 12000);
-      setExtractedText(trimmed);
-      setPreviewText(trimmed);
-      setPageInfo({ used: pagesUsed, total: totalPages });
-      setThumbnailUrl(thumb);
-      setStatus(`텍스트 추출 완료 (사용 페이지: ${pagesUsed}/${totalPages})`);
-    } catch (err) {
-      setError(`PDF 텍스트 추출에 실패했습니다: ${err.message}`);
-      setExtractedText("");
-      setPreviewText("");
-      setPageInfo({ used: 0, total: 0 });
-    } finally {
-      setIsLoadingText(false);
-    }
-  };
+      if (pushState && selectedFileId !== item.id) {
+        window.history.pushState({ view: "detail", fileId: item.id }, "", window.location.pathname);
+      }
+
+      if (pdfUrl) {
+        URL.revokeObjectURL(pdfUrl);
+      }
+      setPdfUrl(URL.createObjectURL(targetFile));
+      setFile(targetFile);
+      setSelectedFileId(item.id);
+      resetQuizState();
+        setError(`PDF 추출에 실패했습니다: ${err.message}`);
+      setSummary("");
+      setStatus("PDF 텍스트 추출 중입니다...");
+      setIsLoadingText(true);
+      setThumbnailUrl(null);
+
+      try {
+        const [textResult, thumb] = await Promise.all([extractPdfText(targetFile), generatePdfThumbnail(targetFile)]);
+        const { text, pagesUsed, totalPages } = textResult;
+        const trimmed = text.slice(0, 12000);
+        setExtractedText(trimmed);
+        setPreviewText(trimmed);
+        setPageInfo({ used: pagesUsed, total: totalPages });
+        setThumbnailUrl(thumb);
+        setStatus(`추출 완료 (사용 페이지: ${pagesUsed}/${totalPages})`);
+      } catch (err) {
+        setError(`PDF ??? ??????: ${err.message}`);
+        setExtractedText("");
+        setPreviewText("");
+        setPageInfo({ used: 0, total: 0 });
+      } finally {
+        setIsLoadingText(false);
+      }
+    },
+    [pdfUrl, selectedFileId]
+  );
 
   const handleFileChange = async (event) => {
     const files = Array.from(event.target.files || []);
@@ -106,7 +114,9 @@ function App() {
     setStatus("업로드 목록에서 썸네일을 선택해 요약/퀴즈를 시작하세요.");
   };
 
-  const goBackToList = () => {
+  const showDetail = Boolean(file && selectedFileId);
+
+  const goBackToList = useCallback(() => {
     if (pdfUrl) {
       URL.revokeObjectURL(pdfUrl);
     }
@@ -119,7 +129,43 @@ function App() {
     setSummary("");
     resetQuizState();
     setStatus("업로드 목록에서 썸네일을 선택해 요약/퀴즈를 시작하세요.");
-  };
+  }, [pdfUrl]);
+  const uploadedFilesRef = useRef(uploadedFiles);
+  const goBackToListRef = useRef(goBackToList);
+  const processSelectedFileRef = useRef(processSelectedFile);
+
+  useEffect(() => {
+    uploadedFilesRef.current = uploadedFiles;
+  }, [uploadedFiles]);
+
+  useEffect(() => {
+    goBackToListRef.current = goBackToList;
+  }, [goBackToList]);
+
+  useEffect(() => {
+    processSelectedFileRef.current = processSelectedFile;
+  }, [processSelectedFile]);
+
+  useEffect(() => {
+    window.history.replaceState({ view: "list" }, "", window.location.pathname);
+
+    const handlePopState = (event) => {
+      const state = event.state;
+      if (state?.view === "detail" && state.fileId) {
+        const target = uploadedFilesRef.current.find((f) => f.id === state.fileId);
+        if (target) {
+          processSelectedFileRef.current(target, { pushState: false });
+          return;
+        }
+      }
+      goBackToListRef.current();
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+
 
   const requestQuestions = async () => {
     if (!file) {
@@ -220,15 +266,6 @@ function App() {
   const renderDetailPage = () => (
     <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <div className="flex flex-col gap-3">
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={goBackToList}
-            className="inline-flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2 text-sm font-semibold text-slate-100 ring-1 ring-white/15 transition hover:bg-white/20"
-          >
-            ← 목록으로
-          </button>
-        </div>
         <PdfPreview pdfUrl={pdfUrl} pageInfo={pageInfo} />
       </div>
 
@@ -271,8 +308,6 @@ function App() {
     </section>
   );
 
-  const showDetail = Boolean(file && selectedFileId);
-
   return (
     <div className="relative min-h-screen overflow-hidden text-slate-100">
       <div className="pointer-events-none absolute inset-0">
@@ -281,10 +316,12 @@ function App() {
         <div className="absolute bottom-[-120px] left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-indigo-500/10 blur-3xl" />
       </div>
 
-      <main className="relative z-10 mx-auto flex w-full max-w-none flex-col gap-6 px-6 py-10">
+      <main className="relative z-10 mx-auto flex w-full max-w-none flex-col gap-6 py-10">
         <Header />
-        {!showDetail && renderStartPage()}
-        {showDetail && renderDetailPage()}
+        <div className="px-6">
+          {!showDetail && renderStartPage()}
+          {showDetail && renderDetailPage()}
+        </div>
       </main>
     </div>
   );
