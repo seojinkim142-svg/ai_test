@@ -120,7 +120,7 @@ export async function deleteFlashcard({ userId, cardId }) {
   if (error) throw error;
 }
 
-export async function saveUploadMetadata({ userId, fileName, fileSize, storagePath, bucket, thumbnail }) {
+export async function saveUploadMetadata({ userId, fileName, fileSize, storagePath, bucket, thumbnail, fileHash }) {
   if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
   if (!userId) throw new Error("로그인 정보가 없습니다.");
   const payload = {
@@ -130,6 +130,7 @@ export async function saveUploadMetadata({ userId, fileName, fileSize, storagePa
     storage_path: storagePath,
     bucket: bucket || supabaseBucket,
     thumbnail: thumbnail || null,
+    file_hash: fileHash || null,
   };
   const { data, error } = await supabase.from(UPLOADS_TABLE).insert(payload).select().single();
   if (error) throw error;
@@ -153,4 +154,17 @@ export async function getSignedStorageUrl({ bucket, path, expiresIn = 60 * 60 * 
   const { data, error } = await supabase.storage.from(targetBucket).createSignedUrl(path, expiresIn);
   if (error) throw error;
   return data?.signedUrl;
+}
+
+export async function updateUploadThumbnail({ id, thumbnail }) {
+  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  if (!id) throw new Error("업로드 ID가 필요합니다.");
+  const { error, data } = await supabase
+    .from(UPLOADS_TABLE)
+    .update({ thumbnail })
+    .eq("id", id)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
 }

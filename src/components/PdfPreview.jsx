@@ -8,6 +8,9 @@ function PdfPreview({ pdfUrl, file, pageInfo, onPageChange }) {
   const containerRef = useRef(null);
   const trackRef = useRef(null);
   const [pages, setPages] = useState([]);
+  const [pdfDoc, setPdfDoc] = useState(null);
+  const [targetPages, setTargetPages] = useState(0);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [renderError, setRenderError] = useState(false);
   const [containerWidth, setContainerWidth] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -37,16 +40,21 @@ function PdfPreview({ pdfUrl, file, pageInfo, onPageChange }) {
       if (!file) {
         setPages([]);
         setRenderError(false);
+        setPdfDoc(null);
+        setTargetPages(0);
         return;
       }
       setRenderError(false);
       try {
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await getDocument({ data: arrayBuffer }).promise;
-        const pagesToRender = Math.min(pdf.numPages, pageInfo.used || pageInfo.total || pdf.numPages, 5);
+        setPdfDoc(pdf);
+        const pagesToRender = Math.min(pdf.numPages, pageInfo.used || pageInfo.total || pdf.numPages);
+        setTargetPages(pagesToRender);
+        const initialCount = Math.min(pagesToRender, 3);
         const rendered = [];
 
-        for (let i = 1; i <= pagesToRender; i += 1) {
+        for (let i = 1; i <= initialCount; i += 1) {
           const page = await pdf.getPage(i);
           const baseViewport = page.getViewport({ scale: 1 });
           const scale = containerWidth
@@ -92,6 +100,54 @@ function PdfPreview({ pdfUrl, file, pageInfo, onPageChange }) {
     setActiveIndex(0);
   }, [file, pages.length]);
 
+  const loadMorePages = useCallback(
+    async (startFrom) => {
+      if (!pdfDoc || isLoadingMore) return;
+      if (startFrom > targetPages) return;
+      setIsLoadingMore(true);
+      try {
+        const batchSize = 3;
+        const end = Math.min(targetPages, startFrom + batchSize - 1);
+        const rendered = [];
+        for (let i = startFrom; i <= end; i += 1) {
+          const page = await pdfDoc.getPage(i);
+          const baseViewport = page.getViewport({ scale: 1 });
+          const scale = containerWidth
+            ? Math.min(containerWidth / baseViewport.width, 1.5)
+            : 1.1;
+          const viewport = page.getViewport({ scale });
+          const canvas = document.createElement("canvas");
+          const context = canvas.getContext("2d");
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          await page.render({ canvasContext: context, viewport }).promise;
+          rendered.push({
+            pageNumber: i,
+            src: canvas.toDataURL("image/png"),
+            width: viewport.width,
+            height: viewport.height,
+            displayWidth: viewport.width,
+            displayHeight: viewport.height,
+            aspectRatio: viewport.width / viewport.height,
+          });
+        }
+        setPages((prev) => {
+          const existingNumbers = new Set(prev.map((p) => p.pageNumber));
+          const merged = [...prev];
+          rendered.forEach((r) => {
+            if (!existingNumbers.has(r.pageNumber)) merged.push(r);
+          });
+          return merged.sort((a, b) => a.pageNumber - b.pageNumber);
+        });
+      } catch (err) {
+        console.error("PDF lazy load error", err);
+      } finally {
+        setIsLoadingMore(false);
+      }
+    },
+    [pdfDoc, isLoadingMore, targetPages, containerWidth]
+  );
+
   const clampIndex = useCallback(
     (idx) => Math.min(Math.max(idx, 0), Math.max(pages.length - 1, 0)),
     [pages.length]
@@ -134,6 +190,13 @@ function PdfPreview({ pdfUrl, file, pageInfo, onPageChange }) {
       onPageChange(activeIndex + 1);
     }
   }, [activeIndex, onPageChange]);
+
+  useEffect(() => {
+    if (pages.length && activeIndex >= pages.length - 2 && pages.length < targetPages) {
+      const next = pages.length + 1;
+      loadMorePages(next);
+    }
+  }, [activeIndex, pages.length, targetPages, loadMorePages]);
 
   return (
     <div className="flex h-full flex-col gap-3">

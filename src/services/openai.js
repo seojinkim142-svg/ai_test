@@ -6,18 +6,13 @@ function buildQuizPrompt(extractedText) {
   return `
 당신은 대학 강의 PDF에서 한국어 문제 세트를 만드는 출제자입니다. 아래 지침에 맞춰 문제를 만들어주세요.
 
-1) 텍스트 추출(OCR): 페이지별로 텍스트로 변환
-2) 구조 분석: 목차, 섹션 순서, 주요 주제 파악
-3) 핵심 정보 분류: 정의, 공식, 예시, 개념 관계 정리
-4) 정답 생성: 본문 근거만 활용하여 객관식/주관식 정답 작성 (JSON만 응답)
+요구사항:
+- multipleChoice: 4문항, 보기 4개, 하나의 정답, 해설 포함
+- shortAnswer: 1문항, 계산/서술형 정답
+- 모든 문항/보기/해설은 PDF 본문에만 근거
+- JSON 외 다른 출력 금지
 
-- 객관식 보기 4~5개, 난도는 중간 정도
-- 수치는 숫자/수식 그대로 사용
-- 문제/보기/해설/정답은 모두 한국어
-- 모든 문항은 본문 내용에 근거해야 함
-- JSON 이외의 출력 금지
-
-반환 형식:
+반환 형식(JSON):
 {
   "multipleChoice": [
     { "question": "...", "choices": ["...","...","...","..."], "answerIndex": 1, "explanation": "..." }
@@ -26,6 +21,28 @@ function buildQuizPrompt(extractedText) {
 }
 
 PDF 텍스트:
+${extractedText}
+  `.trim();
+}
+
+function buildOxPrompt(extractedText) {
+  return `
+당신은 학습용 O/X 카드 퀴즈를 만듭니다. 아래 PDF 본문을 읽고 “참/거짓” 문장 5개를 한국어로 만들어 주세요. 각 문장은 반드시 본문 내용에서만 근거를 가져야 합니다.
+
+요구사항:
+- statement: 한 문장 참/거짓 진술
+- answer: true/false
+- explanation: 근거 한 줄
+- JSON 외 내용 금지
+
+반환 형식(JSON):
+{
+  "items": [
+    { "statement": "...", "answer": true, "explanation": "..." }
+  ]
+}
+
+본문:
 ${extractedText}
   `.trim();
 }
@@ -150,6 +167,26 @@ export async function generateQuiz(extractedText) {
       { role: "user", content: prompt },
     ],
     temperature: 0.4,
+  });
+
+  const content = data.choices?.[0]?.message?.content?.trim() || "";
+  const sanitized = sanitizeJson(content);
+  return JSON.parse(sanitized);
+}
+
+export async function generateOxQuiz(extractedText) {
+  const prompt = buildOxPrompt(extractedText);
+
+  const data = await postChatRequest({
+    model: MODEL,
+    messages: [
+      {
+        role: "system",
+        content: "Generate 5 Korean true/false quiz statements strictly from the user's text. Respond with JSON only.",
+      },
+      { role: "user", content: prompt },
+    ],
+    temperature: 0.2,
   });
 
   const content = data.choices?.[0]?.message?.content?.trim() || "";

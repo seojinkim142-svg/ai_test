@@ -4,10 +4,11 @@ import AuthPanel from "./components/AuthPanel";
 import FlashcardsPanel from "./components/FlashcardsPanel";
 import FileUpload from "./components/FileUpload";
 import Header from "./components/Header";
+import OxSection from "./components/OxSection";
 import PdfPreview from "./components/PdfPreview";
 import QuizSection from "./components/QuizSection";
 import SummaryCard from "./components/SummaryCard";
-import { generateQuiz, generateSummary } from "./services/openai";
+import { generateQuiz, generateSummary, generateOxQuiz } from "./services/openai";
 import {
   supabase,
   uploadPdfToStorage,
@@ -21,6 +22,7 @@ import {
   saveUploadMetadata,
   listUploads,
   getSignedStorageUrl,
+  updateUploadThumbnail,
 } from "./services/supabase";
 import { extractPdfText, generatePdfThumbnail } from "./utils/pdf";
 
@@ -37,6 +39,13 @@ function App() {
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
   const [summary, setSummary] = useState("");
   const [quizSets, setQuizSets] = useState([]);
+  const [selectedChoices, setSelectedChoices] = useState({});
+  const [revealedChoices, setRevealedChoices] = useState({});
+  const [shortAnswerInput, setShortAnswerInput] = useState("");
+  const [shortAnswerResult, setShortAnswerResult] = useState(null);
+  const [oxItems, setOxItems] = useState(null);
+  const [oxSelections, setOxSelections] = useState({});
+  const [isLoadingOx, setIsLoadingOx] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [selectedFileId, setSelectedFileId] = useState(null);
@@ -52,10 +61,18 @@ function App() {
   const [flashcards, setFlashcards] = useState([]);
   const [isLoadingFlashcards, setIsLoadingFlashcards] = useState(false);
   const downloadCacheRef = useRef(new Map()); // storagePath -> { file, thumbnail, remoteUrl, bucket }
+  const backfillInProgressRef = useRef(false);
   const summaryRequestedRef = useRef(false);
   const quizAutoRequestedRef = useRef(false);
   const isDraggingRef = useRef(false);
   const detailContainerRef = useRef(null);
+
+  const computeFileHash = useCallback(async (file) => {
+    const buffer = await file.arrayBuffer();
+    const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  }, []);
 
   const shortPreview = useMemo(
     () => (previewText.length > 700 ? `${previewText.slice(0, 700)}...` : previewText),
@@ -138,6 +155,7 @@ function App() {
           bucket: u.bucket,
           thumbnail: u.thumbnail || null,
           remote: true,
+          hash: u.file_hash || null,
         }));
         setUploadedFiles(mapped);
       } catch (err) {
@@ -145,6 +163,35 @@ function App() {
       }
     },
     [user]
+  );
+  const backfillThumbnails = useCallback(
+    async (items) => {
+      if (backfillInProgressRef.current) return;
+      const needs = items.filter((i) => !i.thumbnail);
+      if (!needs.length) return;
+      backfillInProgressRef.current = true;
+      try {
+        await Promise.all(
+          needs.map(async (item) => {
+            try {
+              const ensured = await ensureFileForItemRef.current(item);
+              const thumb = ensured.thumbnail || (await generatePdfThumbnail(ensured.file));
+              if (!thumb) return;
+              await updateUploadThumbnail({ id: item.id, thumbnail: thumb });
+              setUploadedFiles((prev) =>
+                prev.map((p) => (p.id === item.id ? { ...p, thumbnail: thumb } : p))
+              );
+            } catch (err) {
+              // skip failure
+              console.warn("thumbnail backfill failed", err);
+            }
+          })
+        );
+      } finally {
+        backfillInProgressRef.current = false;
+      }
+    },
+    []
   );
   const handleSignOut = useCallback(async () => {
     if (!supabase) return;
@@ -165,11 +212,14 @@ function App() {
 
   useEffect(() => {
     if (user) {
-      loadUploads();
+      loadUploads().then(() => {
+        const current = uploadedFilesRef.current || [];
+        backfillThumbnails(current);
+      });
     } else {
       setUploadedFiles([]);
     }
-  }, [user, loadUploads]);
+  }, [user, loadUploads, backfillThumbnails]);
 
   const ensureFileForItem = useCallback(
     async (item) => {
@@ -217,6 +267,10 @@ function App() {
 
   const resetQuizState = () => {
     setQuizSets([]);
+    setSelectedChoices({});
+    setRevealedChoices({});
+    setShortAnswerInput("");
+    setShortAnswerResult(null);
   };
 
   const processSelectedFile = useCallback(
@@ -274,12 +328,13 @@ function App() {
 
     const withThumbs = await Promise.all(
       files.map(async (f) => {
-        const thumb = await generatePdfThumbnail(f);
+        const [thumb, hash] = await Promise.all([generatePdfThumbnail(f), computeFileHash(f)]);
         return {
           id: `${f.name}-${f.lastModified}-${Math.random().toString(16).slice(2)}`,
           file: f,
           name: f.name,
           size: f.size,
+          hash,
           thumbnail: thumb,
         };
       })
@@ -288,7 +343,22 @@ function App() {
     const withUploads = await Promise.all(
       withThumbs.map(async (item) => {
         if (!supabase || !user) return item;
+
+        // 중복 해시가 이미 DB에 있으면 업로드 생략
+        const existing = uploadedFiles.find((f) => f.hash && item.hash && f.hash === item.hash && f.remotePath);
         try {
+          if (existing) {
+            return {
+              ...item,
+              id: existing.id || item.id,
+              remotePath: existing.remotePath || existing.path,
+              remoteUrl: existing.remoteUrl,
+              bucket: existing.bucket,
+              thumbnail: existing.thumbnail || item.thumbnail,
+              hash: existing.hash || item.hash,
+            };
+          }
+
           const uploaded = await uploadPdfToStorage(user.id, item.file);
           const record = await saveUploadMetadata({
             userId: user.id,
@@ -297,6 +367,7 @@ function App() {
             storagePath: uploaded.path,
             bucket: uploaded.bucket,
             thumbnail: item.thumbnail,
+            fileHash: item.hash,
           });
           return {
             ...item,
@@ -305,6 +376,7 @@ function App() {
             remoteUrl: uploaded.signedUrl,
             bucket: uploaded.bucket,
             thumbnail: record.thumbnail || item.thumbnail,
+            hash: record.file_hash || item.hash,
           };
         } catch (err) {
           setError(`클라우드 업로드 실패: ${err.message}`);
@@ -342,6 +414,8 @@ function App() {
     setBookmarks([]);
     setBookmarkNote("");
     setFlashcards([]);
+    setOxItems(null);
+    setOxSelections({});
     setPanelTab("summary");
     summaryRequestedRef.current = false;
     quizAutoRequestedRef.current = false;
@@ -523,6 +597,31 @@ function App() {
     }
   };
 
+  const requestOxQuiz = async () => {
+    if (isLoadingOx) return;
+    if (!file) {
+      setError("먼저 PDF를 업로드해주세요.");
+      return;
+    }
+    if (!extractedText) {
+      setError("PDF 텍스트가 아직 준비되지 않았습니다. 잠시 후에 시도해주세요.");
+      return;
+    }
+    setIsLoadingOx(true);
+    setError("");
+    setStatus("O/X 퀴즈를 생성하는 중입니다...");
+    try {
+      const ox = await generateOxQuiz(extractedText);
+      setOxItems(ox?.items || []);
+      setOxSelections({});
+      setStatus("O/X 퀴즈 생성 완료!");
+    } catch (err) {
+      setError(`O/X 퀴즈 생성에 실패했습니다: ${err.message}`);
+    } finally {
+      setIsLoadingOx(false);
+    }
+  };
+
   const canAutoRequest = useCallback(() => file && extractedText && !isLoadingText, [file, extractedText, isLoadingText]);
 
   // 파일이 선택되고 텍스트가 준비되면 요약을 자동으로 요청
@@ -616,6 +715,7 @@ function App() {
           {[
             { id: "summary", label: "요약" },
             { id: "quiz", label: "퀴즈" },
+            { id: "ox", label: "O/X" },
             { id: "bookmark", label: "북마크" },
             { id: "flashcards", label: "카드" },
           ].map((tab) => {
@@ -790,6 +890,39 @@ function App() {
                 </div>
               )}
             </>
+          )}
+
+          {panelTab === "ox" && (
+            <div className="space-y-4">
+              <ActionsPanel
+                title="O/X 퀴즈 생성"
+                stepLabel="O/X"
+                hideSummary
+                hideQuiz
+                isLoadingQuiz={isLoadingOx}
+                isLoadingSummary={isLoadingSummary}
+                isLoadingText={isLoadingText}
+                status={status}
+                error={error}
+                shortPreview={shortPreview}
+                onRequestQuiz={requestOxQuiz}
+                onRequestSummary={requestSummary}
+              />
+
+              {oxItems && oxItems.length > 0 && (
+                <OxSection
+                  title="O/X 퀴즈"
+                  items={oxItems}
+                  selections={oxSelections}
+                  onSelect={(qIdx, choice) =>
+                    setOxSelections((prev) => ({
+                      ...prev,
+                      [qIdx]: choice,
+                    }))
+                  }
+                />
+              )}
+            </div>
           )}
 
           {panelTab === "flashcards" && (

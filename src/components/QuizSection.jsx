@@ -61,7 +61,7 @@ function ShortAnswer({ question, userInput, result, onChange, onCheck }) {
     <article className="rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
       <div className="flex items-start justify-between gap-3">
         <h3 className="text-lg font-semibold text-white">Q5. {question.question}</h3>
-        <span className="rounded-full bg-cyan-500/20 px-2 py-1 text-xs font-semibold text-cyan-100">계산형</span>
+        <span className="rounded-full bg-cyan-500/20 px-2 py-1 text-xs font-semibold text-cyan-100">주관식</span>
       </div>
       <div className="mt-3 flex flex-col gap-2">
         <input
@@ -69,7 +69,7 @@ function ShortAnswer({ question, userInput, result, onChange, onCheck }) {
           value={userInput}
           onChange={(e) => onChange(e.target.value)}
           className="w-full rounded-lg bg-slate-900/60 px-3 py-2 text-sm text-slate-100 ring-1 ring-white/10 focus:ring-emerald-400"
-          placeholder="계산 결과를 입력해주세요"
+          placeholder="정답을 입력해주세요"
         />
         <button
           onClick={onCheck}
