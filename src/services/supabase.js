@@ -1,0 +1,89 @@
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseBucket = import.meta.env.VITE_SUPABASE_BUCKET || "pdf-uploads";
+const BOOKMARKS_TABLE = "bookmarks";
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  // eslint-disable-next-line no-console
+  console.warn("Supabase 환경변수(VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)가 설정되지 않았습니다.");
+}
+
+export const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
+
+export async function signInWithEmail(email, password) {
+  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+export async function signUpWithEmail(email, password) {
+  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  const { data, error } = await supabase.auth.signUp({ email, password });
+  if (error) throw error;
+  return data;
+}
+
+export async function signOut() {
+  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  const { error } = await supabase.auth.signOut();
+  if (error) throw error;
+}
+
+export async function uploadPdfToStorage(userId, file) {
+  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  if (!userId) throw new Error("로그인 정보가 없습니다.");
+  if (!file) throw new Error("업로드할 파일이 없습니다.");
+
+  const safeName = file.name.replace(/\s+/g, "-");
+  const path = `${userId}/${Date.now()}-${safeName}`;
+  const { error } = await supabase.storage
+    .from(supabaseBucket)
+    .upload(path, file, { contentType: file.type || "application/pdf", upsert: true });
+  if (error) throw error;
+
+  // 프라이빗 버킷을 가정하고, 읽기용 서명 URL을 발급 (7일 유효)
+  const { data: signedData, error: signedError } = await supabase.storage
+    .from(supabaseBucket)
+    .createSignedUrl(path, 60 * 60 * 24 * 7);
+  if (signedError) throw signedError;
+
+  return { path, signedUrl: signedData?.signedUrl || null };
+}
+
+export async function saveBookmark({ userId, docId, docName, pageNumber, note }) {
+  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  if (!userId) throw new Error("로그인 정보가 없습니다.");
+  const payload = {
+    user_id: userId,
+    doc_id: docId,
+    doc_name: docName,
+    page_number: pageNumber,
+    note: note || "",
+  };
+  const { data, error } = await supabase.from(BOOKMARKS_TABLE).insert(payload).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function fetchBookmarks({ userId, docId }) {
+  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  if (!userId || !docId) return [];
+  const { data, error } = await supabase
+    .from(BOOKMARKS_TABLE)
+    .select("*")
+    .eq("user_id", userId)
+    .eq("doc_id", docId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function deleteBookmark({ userId, bookmarkId }) {
+  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  if (!userId || !bookmarkId) return;
+  const { error } = await supabase.from(BOOKMARKS_TABLE).delete().eq("id", bookmarkId).eq("user_id", userId);
+  if (error) throw error;
+}

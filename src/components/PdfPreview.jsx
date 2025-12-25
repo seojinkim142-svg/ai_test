@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 GlobalWorkerOptions.workerSrc = workerSrc;
 
-function PdfPreview({ pdfUrl, file, pageInfo, highlights = [] }) {
+function PdfPreview({ pdfUrl, file, pageInfo, onPageChange }) {
   const containerRef = useRef(null);
   const trackRef = useRef(null);
   const [pages, setPages] = useState([]);
@@ -13,15 +13,6 @@ function PdfPreview({ pdfUrl, file, pageInfo, highlights = [] }) {
   const [containerWidth, setContainerWidth] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const [thumbOffset, setThumbOffset] = useState(0);
-
-  const highlightsByPage = useMemo(() => {
-    const map = new Map();
-    highlights.forEach((h) => {
-      if (!map.has(h.page)) map.set(h.page, []);
-      map.get(h.page).push(h);
-    });
-    return map;
-  }, [highlights]);
 
   const setContainerNode = useCallback((node) => {
     containerRef.current = node;
@@ -146,6 +137,12 @@ function PdfPreview({ pdfUrl, file, pageInfo, highlights = [] }) {
     setThumbOffset(inset + usable * sliderProgress);
   }, [sliderProgress]);
 
+  useEffect(() => {
+    if (onPageChange) {
+      onPageChange(activeIndex + 1);
+    }
+  }, [activeIndex, onPageChange]);
+
   return (
     <div className="flex h-full flex-col gap-3">
       {pageInfo.used > 0 && (
@@ -172,12 +169,12 @@ function PdfPreview({ pdfUrl, file, pageInfo, highlights = [] }) {
                 onClick={handleBarClick}
                 aria-label="Scroll pages"
               >
-                <div className="absolute inset-x-0 top-[10px] bottom-[10px] mx-auto w-[8px] rounded-full bg-neutral-500/60 shadow-inner shadow-black/40" />
-                <div
-                  className="absolute left-0 right-0 mx-auto w-[12px] rounded-full bg-white/85 shadow-lg shadow-black/50 transition-transform duration-200"
-                  style={{
-                    height: "22px",
-                    transform: `translateY(${thumbOffset}px)`,
+        <div className="absolute inset-x-0 top-[10px] bottom-[10px] mx-auto w-[8px] rounded-full bg-neutral-500/60 shadow-inner shadow-black/40" />
+        <div
+          className="absolute left-0 right-0 mx-auto w-[12px] rounded-full bg-white/85 shadow-lg shadow-black/50 transition-transform duration-200"
+          style={{
+            height: "22px",
+            transform: `translateY(${thumbOffset}px)`,
                   }}
                 />
               </div>
@@ -185,7 +182,6 @@ function PdfPreview({ pdfUrl, file, pageInfo, highlights = [] }) {
           )}
           <div className="relative h-full w-full overflow-hidden">
             {pages.map((page, idx) => {
-              const pageHighlights = highlightsByPage.get(page.pageNumber) || [];
               const availableWidth = containerWidth || page.width;
               const displayWidth = Math.min(page.displayWidth || page.width, availableWidth || page.width);
               const displayHeight = displayWidth / page.aspectRatio;
@@ -210,19 +206,6 @@ function PdfPreview({ pdfUrl, file, pageInfo, highlights = [] }) {
                       alt={`Page ${page.pageNumber}`}
                       className="h-full w-full object-contain"
                     />
-                    {pageHighlights.map((h, idx2) => (
-                      <span
-                        key={`${page.pageNumber}-${idx2}`}
-                        className="absolute rounded-sm bg-amber-300/30 ring-2 ring-amber-400/60"
-                        style={{
-                          left: `${h.rect.x * 100}%`,
-                          top: `${h.rect.y * 100}%`,
-                          width: `${h.rect.width * 100}%`,
-                          height: `${h.rect.height * 100}%`,
-                        }}
-                        title={h.sentence}
-                      />
-                    ))}
                   </div>
                 </div>
               );

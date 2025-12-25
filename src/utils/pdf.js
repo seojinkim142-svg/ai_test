@@ -43,12 +43,13 @@ export async function extractPdfText(file, pageLimit = 30, maxLength = 12000) {
       const scaleY = Math.hypot(transformed[2], transformed[3]);
       const widthPx = scaleX * item.width; // advance width with transform applied
       const heightPx = scaleY * (item.height || Math.abs(transformed[3])); // ascent-ish height
-      const topY = y - heightPx;
+      const highlightHeight = heightPx * 0.6; // underline-style highlight
+      const topY = y - highlightHeight * 0.9; // sit just below baseline, light overlap
       const norm = {
         x: Math.min(1, Math.max(0, x / viewport.width)),
         y: Math.min(1, Math.max(0, topY / viewport.height)),
         width: Math.min(1, widthPx / viewport.width),
-        height: Math.min(1, heightPx / viewport.height),
+        height: Math.min(1, Math.max(0.01, highlightHeight / viewport.height)),
       };
 
       pageLayout.items.push({

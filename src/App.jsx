@@ -1,11 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ActionsPanel from "./components/ActionsPanel";
+import AuthPanel from "./components/AuthPanel";
 import FileUpload from "./components/FileUpload";
 import Header from "./components/Header";
 import PdfPreview from "./components/PdfPreview";
 import QuizSection from "./components/QuizSection";
 import SummaryCard from "./components/SummaryCard";
-import { generateHighlights, generateQuiz, generateSummary } from "./services/openai";
+import { generateQuiz, generateSummary } from "./services/openai";
+import {
+  supabase,
+  uploadPdfToStorage,
+  signOut as supabaseSignOut,
+  saveBookmark,
+  fetchBookmarks,
+  deleteBookmark,
+} from "./services/supabase";
 import { extractPdfText, generatePdfThumbnail } from "./utils/pdf";
 
 function App() {
@@ -19,22 +28,22 @@ function App() {
   const [isLoadingText, setIsLoadingText] = useState(false);
   const [isLoadingQuiz, setIsLoadingQuiz] = useState(false);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
-  const [questions, setQuestions] = useState(null);
   const [summary, setSummary] = useState("");
-  const [selectedChoices, setSelectedChoices] = useState({});
-  const [revealedChoices, setRevealedChoices] = useState({});
-  const [shortAnswerInput, setShortAnswerInput] = useState("");
-  const [shortAnswerResult, setShortAnswerResult] = useState(null);
+  const [quizSets, setQuizSets] = useState([]);
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [selectedFileId, setSelectedFileId] = useState(null);
   const [panelTab, setPanelTab] = useState("summary");
   const [splitPercent, setSplitPercent] = useState(50);
-  const [layout, setLayout] = useState(null);
-  const [highlights, setHighlights] = useState([]);
-  const [isLoadingHighlights, setIsLoadingHighlights] = useState(false);
+  const [user, setUser] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [bookmarks, setBookmarks] = useState([]);
+  const [bookmarkNote, setBookmarkNote] = useState("");
+  const [isLoadingBookmarks, setIsLoadingBookmarks] = useState(false);
   const summaryRequestedRef = useRef(false);
-  const quizRequestedRef = useRef(false);
+  const quizAutoRequestedRef = useRef(false);
   const isDraggingRef = useRef(false);
   const detailContainerRef = useRef(null);
 
@@ -42,6 +51,64 @@ function App() {
     () => (previewText.length > 700 ? `${previewText.slice(0, 700)}...` : previewText),
     [previewText]
   );
+
+  const refreshSession = useCallback(async () => {
+    if (!supabase) {
+      setAuthReady(true);
+      return;
+    }
+    const { data, error } = await supabase.auth.getSession();
+    if (!error) {
+      setUser(data.session?.user || null);
+    }
+    setAuthReady(true);
+  }, []);
+
+  useEffect(() => {
+    refreshSession();
+    if (!supabase) return undefined;
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user || null);
+    });
+    return () => {
+      data?.subscription?.unsubscribe();
+    };
+  }, [refreshSession]);
+  const loadBookmarks = useCallback(
+    async (docId) => {
+      if (!supabase || !user || !docId) {
+        setBookmarks([]);
+        return;
+      }
+      setIsLoadingBookmarks(true);
+      try {
+        const list = await fetchBookmarks({ userId: user.id, docId });
+        setBookmarks(list);
+      } catch (err) {
+        setError(`북마크 불러오기 실패: ${err.message}`);
+      } finally {
+        setIsLoadingBookmarks(false);
+      }
+    },
+    [user]
+  );
+
+  const handleSignOut = useCallback(async () => {
+    if (!supabase) return;
+    setIsSigningOut(true);
+    setError("");
+    setStatus("로그아웃 중...");
+    try {
+      await supabaseSignOut();
+      await refreshSession();
+      setStatus("로그아웃 완료");
+    } catch (err) {
+      setError(`로그아웃 실패: ${err.message}`);
+      setStatus("");
+    } finally {
+      setIsSigningOut(false);
+    }
+  }, [refreshSession]);
 
   useEffect(() => {
     return () => {
@@ -52,11 +119,7 @@ function App() {
   }, [pdfUrl]);
 
   const resetQuizState = () => {
-    setQuestions(null);
-    setSelectedChoices({});
-    setRevealedChoices({});
-    setShortAnswerInput("");
-    setShortAnswerResult(null);
+    setQuizSets([]);
   };
 
   const processSelectedFile = useCallback(
@@ -76,30 +139,29 @@ function App() {
       setSelectedFileId(item.id);
       resetQuizState();
       summaryRequestedRef.current = false;
-      quizRequestedRef.current = false;
+      quizAutoRequestedRef.current = false;
       setError("");
       setSummary("");
-      setLayout(null);
-      setHighlights([]);
       setStatus("PDF 텍스트 추출 중입니다...");
       setIsLoadingText(true);
       setThumbnailUrl(null);
+      setBookmarks([]);
+      setBookmarkNote("");
 
       try {
         const [textResult, thumb] = await Promise.all([extractPdfText(targetFile), generatePdfThumbnail(targetFile)]);
-        const { text, pagesUsed, totalPages, layout: pageLayout } = textResult;
+        const { text, pagesUsed, totalPages } = textResult;
         setExtractedText(text);
         setPreviewText(text);
         setPageInfo({ used: pagesUsed, total: totalPages });
-        setLayout(pageLayout);
         setThumbnailUrl(thumb);
         setStatus(`추출 완료 (사용 페이지: ${pagesUsed}/${totalPages})`);
+        await loadBookmarks(item.id);
       } catch (err) {
         setError(`PDF 추출에 실패했습니다: ${err.message}`);
         setExtractedText("");
         setPreviewText("");
         setPageInfo({ used: 0, total: 0 });
-        setLayout(null);
       } finally {
         setIsLoadingText(false);
       }
@@ -124,7 +186,20 @@ function App() {
       })
     );
 
-    setUploadedFiles((prev) => [...prev, ...withThumbs]);
+    const withUploads = await Promise.all(
+      withThumbs.map(async (item) => {
+        if (!supabase || !user) return item;
+        try {
+          const uploaded = await uploadPdfToStorage(user.id, item.file);
+          return { ...item, remotePath: uploaded.path, remoteUrl: uploaded.signedUrl };
+        } catch (err) {
+          setError(`클라우드 업로드 실패: ${err.message}`);
+          return { ...item, uploadError: err.message };
+        }
+      })
+    );
+
+    setUploadedFiles((prev) => [...prev, ...withUploads]);
     setStatus("업로드 목록에서 썸네일을 선택해 요약/퀴즈를 시작하세요.");
   };
 
@@ -136,16 +211,16 @@ function App() {
     }
     setSelectedFileId(null);
     setFile(null);
-    setPdfUrl(null);
-    setExtractedText("");
-    setPreviewText("");
-    setPageInfo({ used: 0, total: 0 });
-    setSummary("");
-    setLayout(null);
-    setHighlights([]);
+      setPdfUrl(null);
+      setExtractedText("");
+      setPreviewText("");
+      setPageInfo({ used: 0, total: 0 });
+      setSummary("");
+    setBookmarks([]);
+    setBookmarkNote("");
     setPanelTab("summary");
     summaryRequestedRef.current = false;
-    quizRequestedRef.current = false;
+    quizAutoRequestedRef.current = false;
     resetQuizState();
     setStatus("업로드 목록에서 썸네일을 선택해 요약/퀴즈를 시작하세요.");
   }, [pdfUrl]);
@@ -221,52 +296,8 @@ function App() {
     maxWidth: "75%",
   };
 
-  const mapSentenceToRect = useCallback(
-    (sentence) => {
-      if (!layout?.pages?.length || !sentence) return null;
-      const cleaned = sentence.replace(/["'“”‘’]+/g, "").trim();
-      const targets = [
-        cleaned,
-        cleaned.replace(/\s+/g, " "),
-      ].filter(Boolean);
-
-      for (const page of layout.pages) {
-        let idx = -1;
-        let targetLen = 0;
-        for (const t of targets) {
-          const found = page.text.toLowerCase().indexOf(t.toLowerCase());
-          if (found !== -1) {
-            idx = found;
-            targetLen = t.length;
-            break;
-          }
-        }
-        if (idx === -1) continue;
-        const endIdx = idx + targetLen;
-        const items = page.items.filter((it) => it.end > idx && it.start < endIdx);
-        if (!items.length) continue;
-        const minX = Math.min(...items.map((it) => it.rect.x));
-        const minY = Math.min(...items.map((it) => it.rect.y));
-        const maxX = Math.max(...items.map((it) => it.rect.x + it.rect.width));
-        const maxY = Math.max(...items.map((it) => it.rect.y + it.rect.height));
-        return {
-          page: page.pageNumber,
-          rect: {
-            x: minX,
-            y: minY,
-            width: maxX - minX,
-            height: maxY - minY,
-          },
-          sentence,
-        };
-      }
-      return null;
-    },
-    [layout]
-  );
-
   const requestQuestions = async () => {
-    if (isLoadingQuiz || quizRequestedRef.current) return;
+    if (isLoadingQuiz) return;
     if (!file) {
       setError("먼저 PDF를 업로드해주세요.");
       return;
@@ -277,18 +308,21 @@ function App() {
       return;
     }
 
-    quizRequestedRef.current = true;
     setIsLoadingQuiz(true);
     setError("");
     setStatus("문제 세트를 생성하는 중입니다...");
 
     try {
       const quiz = await generateQuiz(extractedText);
-      setQuestions(quiz);
-      setSelectedChoices({});
-      setRevealedChoices({});
-      setShortAnswerInput("");
-      setShortAnswerResult(null);
+      const newSet = {
+        id: `quiz-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        questions: quiz,
+        selectedChoices: {},
+        revealedChoices: {},
+        shortAnswerInput: "",
+        shortAnswerResult: null,
+      };
+      setQuizSets((prev) => [...prev, newSet]);
       setStatus("문제 세트 생성 완료!");
     } catch (err) {
       setError(`문제 생성에 실패했습니다: ${err.message}`);
@@ -297,22 +331,41 @@ function App() {
     }
   };
 
-  const handleChoiceSelect = (qIdx, choiceIdx) => {
-    setSelectedChoices((prev) => ({ ...prev, [qIdx]: choiceIdx }));
-    setRevealedChoices((prev) => ({ ...prev, [qIdx]: true }));
+  const handleChoiceSelect = (setId, qIdx, choiceIdx) => {
+    setQuizSets((prev) =>
+      prev.map((set) =>
+        set.id === setId
+          ? {
+              ...set,
+              selectedChoices: { ...set.selectedChoices, [qIdx]: choiceIdx },
+              revealedChoices: { ...set.revealedChoices, [qIdx]: true },
+            }
+          : set
+      )
+    );
   };
 
-  const handleShortAnswerCheck = () => {
-    if (!questions?.shortAnswer?.answer) return;
-    const user = shortAnswerInput.trim().toLowerCase();
-    const answer = String(questions.shortAnswer.answer).trim().toLowerCase();
-    const normalizedUser = user.replace(/\s+/g, "");
-    const normalizedAnswer = answer.replace(/\s+/g, "");
-    const isCorrect = normalizedUser === normalizedAnswer;
-    setShortAnswerResult({
-      isCorrect,
-      answer: questions.shortAnswer.answer,
-    });
+  const handleShortAnswerChange = (setId, value) => {
+    setQuizSets((prev) =>
+      prev.map((set) => (set.id === setId ? { ...set, shortAnswerInput: value } : set))
+    );
+  };
+
+  const handleShortAnswerCheck = (setId) => {
+    setQuizSets((prev) =>
+      prev.map((set) => {
+        if (set.id !== setId || !set.questions?.shortAnswer?.answer) return set;
+        const user = set.shortAnswerInput.trim().toLowerCase();
+        const answer = String(set.questions.shortAnswer.answer).trim().toLowerCase();
+        const normalizedUser = user.replace(/\s+/g, "");
+        const normalizedAnswer = answer.replace(/\s+/g, "");
+        const isCorrect = normalizedUser === normalizedAnswer;
+        return {
+          ...set,
+          shortAnswerResult: { isCorrect, answer: set.questions.shortAnswer.answer },
+        };
+      })
+    );
   };
 
   const requestSummary = async () => {
@@ -342,29 +395,6 @@ function App() {
     }
   };
 
-  const requestHighlights = async () => {
-    if (isLoadingHighlights) return;
-    if (!layout?.pages?.length) {
-      setError("PDF 레이아웃 정보를 불러오지 못했습니다. 파일을 다시 업로드해주세요.");
-      return;
-    }
-    if (!extractedText) return;
-
-    setIsLoadingHighlights(true);
-    try {
-      const data = await generateHighlights(extractedText);
-      const mapped =
-        data?.highlights
-          ?.map((h) => mapSentenceToRect(h.sentence))
-          .filter(Boolean) || [];
-      setHighlights(mapped);
-    } catch (err) {
-      setError(`하이라이트 생성에 실패했습니다: ${err.message}`);
-    } finally {
-      setIsLoadingHighlights(false);
-    }
-  };
-
   const canAutoRequest = useCallback(() => file && extractedText && !isLoadingText, [file, extractedText, isLoadingText]);
 
   // 파일이 선택되고 텍스트가 준비되면 요약을 자동으로 요청
@@ -384,21 +414,41 @@ function App() {
     if (
       summary &&
       canAutoRequest() &&
-      !questions &&
+      quizSets.length === 0 &&
       !isLoadingQuiz &&
-      !quizRequestedRef.current
+      !quizAutoRequestedRef.current
     ) {
+      quizAutoRequestedRef.current = true;
       requestQuestions();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [summary, canAutoRequest, questions, isLoadingQuiz]);
+  }, [summary, canAutoRequest, quizSets.length, isLoadingQuiz]);
 
-  useEffect(() => {
-    if (summary && layout && !highlights.length && !isLoadingHighlights) {
-      requestHighlights();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [summary, layout, highlights.length, isLoadingHighlights]);
+  if (!authReady) {
+    return (
+      <div className="relative min-h-screen overflow-hidden text-slate-100">
+        <main className="flex min-h-screen items-center justify-center bg-slate-950">
+          <p className="text-sm text-slate-200">로그인 상태 확인 중...</p>
+        </main>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -left-32 top-10 h-72 w-72 rounded-full bg-emerald-500/20 blur-3xl" />
+          <div className="absolute right-[-80px] top-32 h-80 w-80 rounded-full bg-cyan-500/10 blur-3xl" />
+          <div className="absolute bottom-[-120px] left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-indigo-500/10 blur-3xl" />
+        </div>
+        <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-6 px-6 py-10">
+          <Header user={user} onSignOut={handleSignOut} signingOut={isSigningOut} />
+          <AuthPanel user={user} onAuth={refreshSession} />
+        </main>
+      </div>
+    );
+  }
 
   const renderStartPage = () => (
     <section className="grid grid-cols-1 gap-4">
@@ -421,7 +471,7 @@ function App() {
       className="flex flex-col gap-4 lg:h-[clamp(70vh,calc(100vh-120px),90vh)] lg:flex-row lg:items-stretch lg:overflow-hidden"
     >
       <div className="flex flex-col gap-3 lg:h-full lg:overflow-y-auto" style={splitStyle}>
-        <PdfPreview pdfUrl={pdfUrl} file={file} pageInfo={pageInfo} highlights={highlights} />
+        <PdfPreview pdfUrl={pdfUrl} file={file} pageInfo={pageInfo} onPageChange={(page) => setCurrentPage(page)} />
       </div>
 
       <div className="hidden w-2 cursor-col-resize items-stretch justify-center lg:flex">
@@ -438,6 +488,7 @@ function App() {
           {[
             { id: "summary", label: "요약" },
             { id: "quiz", label: "퀴즈" },
+            { id: "bookmark", label: "북마크" },
           ].map((tab) => {
             const active = panelTab === tab.id;
             return (
@@ -467,6 +518,99 @@ function App() {
             </div>
           )}
 
+          {panelTab === "bookmark" && (
+            <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm text-slate-300">현재 페이지: {currentPage || 1}</p>
+                  <h3 className="text-lg font-semibold text-white">북마크 / 메모</h3>
+                </div>
+                <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200 ring-1 ring-white/15">
+                  {bookmarks.length}개
+                </span>
+              </div>
+
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                <input
+                  type="text"
+                  value={bookmarkNote}
+                  onChange={(e) => setBookmarkNote(e.target.value)}
+                  className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none ring-1 ring-transparent transition focus:border-emerald-300/50 focus:ring-emerald-300/40"
+                  placeholder="이 페이지에 대한 메모를 입력하세요"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!file || !selectedFileId) {
+                      setError("먼저 PDF를 선택해주세요.");
+                      return;
+                    }
+                    if (!bookmarkNote.trim()) {
+                      setError("메모를 입력하세요.");
+                      return;
+                    }
+                    setError("");
+                    setStatus("북마크 저장 중...");
+                    try {
+                      const saved = await saveBookmark({
+                        userId: user?.id,
+                        docId: selectedFileId,
+                        docName: file?.name || "",
+                        pageNumber: currentPage || 1,
+                        note: bookmarkNote.trim(),
+                      });
+                      setBookmarks((prev) => [saved, ...prev]);
+                      setBookmarkNote("");
+                      setStatus("북마크 저장 완료");
+                    } catch (err) {
+                      setError(`북마크 저장 실패: ${err.message}`);
+                      setStatus("");
+                    }
+                  }}
+                  disabled={!user || isLoadingText}
+                  className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+                >
+                  북마크 추가
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {isLoadingBookmarks && <p className="text-sm text-slate-300">북마크 불러오는 중...</p>}
+                {!isLoadingBookmarks && bookmarks.length === 0 && (
+                  <p className="text-sm text-slate-400">저장된 북마크가 없습니다.</p>
+                )}
+                {!isLoadingBookmarks &&
+                  bookmarks.map((bm) => (
+                    <div
+                      key={bm.id}
+                      className="flex items-start justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100"
+                    >
+                      <div>
+                        <p className="text-xs text-slate-400">
+                          페이지 {bm.page_number} · {bm.doc_name || "PDF"}
+                        </p>
+                        <p className="text-sm">{bm.note}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            await deleteBookmark({ userId: user?.id, bookmarkId: bm.id });
+                            setBookmarks((prev) => prev.filter((b) => b.id !== bm.id));
+                          } catch (err) {
+                            setError(`북마크 삭제 실패: ${err.message}`);
+                          }
+                        }}
+                        className="rounded-full bg-white/10 px-2 py-1 text-xs text-slate-200 transition hover:bg-white/20"
+                      >
+                        삭제
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
           {panelTab === "quiz" && (
             <>
               <ActionsPanel
@@ -484,18 +628,37 @@ function App() {
                 onRequestSummary={requestSummary}
               />
 
-              {questions && (
-                <QuizSection
-                  questions={questions}
-                  summary={null}
-                  selectedChoices={selectedChoices}
-                  revealedChoices={revealedChoices}
-                  shortAnswerInput={shortAnswerInput}
-                  shortAnswerResult={shortAnswerResult}
-                  onSelectChoice={handleChoiceSelect}
-                  onShortAnswerChange={setShortAnswerInput}
-                  onShortAnswerCheck={handleShortAnswerCheck}
-                />
+              {quizSets.length > 0 && (
+                <div className="space-y-4">
+                  {quizSets.map((set, idx) => (
+                    <QuizSection
+                      key={set.id}
+                      title={`퀴즈 세트 ${idx + 1}`}
+                      questions={set.questions}
+                      summary={null}
+                      selectedChoices={set.selectedChoices}
+                      revealedChoices={set.revealedChoices}
+                      shortAnswerInput={set.shortAnswerInput}
+                      shortAnswerResult={set.shortAnswerResult}
+                      onSelectChoice={(qIdx, choiceIdx) => handleChoiceSelect(set.id, qIdx, choiceIdx)}
+                      onShortAnswerChange={(val) => handleShortAnswerChange(set.id, val)}
+                      onShortAnswerCheck={() => handleShortAnswerCheck(set.id)}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {quizSets.length > 0 && (
+                <div className="mt-4">
+                  <button
+                    type="button"
+                    onClick={requestQuestions}
+                    disabled={isLoadingQuiz || isLoadingText}
+                    className="w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+                  >
+                    {isLoadingQuiz ? "퀴즈 생성 중..." : "퀴즈 5문제 더 생성하기"}
+                  </button>
+                </div>
               )}
             </>
           )}
@@ -513,7 +676,7 @@ function App() {
       </div>
 
       <main className="relative z-10 mx-auto flex w-full max-w-none flex-col gap-4 py-4">
-        <Header />
+        <Header user={user} onSignOut={handleSignOut} signingOut={isSigningOut} />
         <div className="px-0">
           {!showDetail && renderStartPage()}
           {showDetail && renderDetailPage()}

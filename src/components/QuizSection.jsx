@@ -94,6 +94,7 @@ function ShortAnswer({ question, userInput, result, onChange, onCheck }) {
 }
 
 function QuizSection({
+  title = "생성된 퀴즈",
   questions,
   summary,
   selectedChoices,
@@ -109,7 +110,7 @@ function QuizSection({
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm text-slate-300">결과 미리보기</p>
-          <h2 className="text-2xl font-bold text-white">생성된 퀴즈</h2>
+          <h2 className="text-2xl font-bold text-white">{title}</h2>
         </div>
         <div className="rounded-full bg-emerald-400/10 px-3 py-1 text-xs font-semibold uppercase text-emerald-100 ring-1 ring-emerald-300/30">
           5문항
