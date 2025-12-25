@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ActionsPanel from "./components/ActionsPanel";
 import AuthPanel from "./components/AuthPanel";
+import FlashcardsPanel from "./components/FlashcardsPanel";
 import FileUpload from "./components/FileUpload";
 import Header from "./components/Header";
 import PdfPreview from "./components/PdfPreview";
@@ -14,6 +15,12 @@ import {
   saveBookmark,
   fetchBookmarks,
   deleteBookmark,
+  addFlashcard,
+  listFlashcards,
+  deleteFlashcard,
+  saveUploadMetadata,
+  listUploads,
+  getSignedStorageUrl,
 } from "./services/supabase";
 import { extractPdfText, generatePdfThumbnail } from "./utils/pdf";
 
@@ -42,6 +49,9 @@ function App() {
   const [bookmarks, setBookmarks] = useState([]);
   const [bookmarkNote, setBookmarkNote] = useState("");
   const [isLoadingBookmarks, setIsLoadingBookmarks] = useState(false);
+  const [flashcards, setFlashcards] = useState([]);
+  const [isLoadingFlashcards, setIsLoadingFlashcards] = useState(false);
+  const downloadCacheRef = useRef(new Map()); // storagePath -> { file, thumbnail, remoteUrl, bucket }
   const summaryRequestedRef = useRef(false);
   const quizAutoRequestedRef = useRef(false);
   const isDraggingRef = useRef(false);
@@ -74,6 +84,7 @@ function App() {
       data?.subscription?.unsubscribe();
     };
   }, [refreshSession]);
+
   const loadBookmarks = useCallback(
     async (docId) => {
       if (!supabase || !user || !docId) {
@@ -92,7 +103,49 @@ function App() {
     },
     [user]
   );
-
+  const loadFlashcards = useCallback(
+    async (deckId) => {
+      if (!supabase || !user) {
+        setFlashcards([]);
+        return;
+      }
+      setIsLoadingFlashcards(true);
+      try {
+        const list = await listFlashcards({ userId: user.id, deckId });
+        setFlashcards(list);
+      } catch (err) {
+        setError(`카드 불러오기 실패: ${err.message}`);
+      } finally {
+        setIsLoadingFlashcards(false);
+      }
+    },
+    [user]
+  );
+  const loadUploads = useCallback(
+    async () => {
+      if (!supabase || !user) {
+        setUploadedFiles([]);
+        return;
+      }
+      try {
+        const list = await listUploads({ userId: user.id });
+        const mapped = list.map((u) => ({
+          id: u.id || `${u.storage_path}`,
+          file: null,
+          name: u.file_name,
+          size: u.file_size,
+          path: u.storage_path,
+          bucket: u.bucket,
+          thumbnail: u.thumbnail || null,
+          remote: true,
+        }));
+        setUploadedFiles(mapped);
+      } catch (err) {
+        setError(`업로드 이력 불러오기 실패: ${err.message}`);
+      }
+    },
+    [user]
+  );
   const handleSignOut = useCallback(async () => {
     if (!supabase) return;
     setIsSigningOut(true);
@@ -109,6 +162,50 @@ function App() {
       setIsSigningOut(false);
     }
   }, [refreshSession]);
+
+  useEffect(() => {
+    if (user) {
+      loadUploads();
+    } else {
+      setUploadedFiles([]);
+    }
+  }, [user, loadUploads]);
+
+  const ensureFileForItem = useCallback(
+    async (item) => {
+      if (item.file) return item;
+      if (!item.path && !item.remotePath) throw new Error("저장된 파일 경로가 없습니다.");
+      const storagePath = item.path || item.remotePath;
+
+      // 캐시된 파일/썸네일 우선 사용
+      const cached = downloadCacheRef.current.get(storagePath);
+      if (cached) {
+        const enriched = { ...item, ...cached };
+        setUploadedFiles((prev) => prev.map((p) => (p.id === item.id ? enriched : p)));
+        return enriched;
+      }
+
+      const bucket = item.bucket || import.meta.env.VITE_SUPABASE_BUCKET;
+      const signed = await getSignedStorageUrl({ bucket, path: storagePath, expiresIn: 60 * 60 * 24 });
+      const res = await fetch(signed);
+      if (!res.ok) throw new Error("저장된 파일을 불러오지 못했습니다.");
+      const blob = await res.blob();
+      const name = item.name || item.file?.name || "document.pdf";
+      const fileObj = new File([blob], name, { type: blob.type || "application/pdf" });
+      const thumb = await generatePdfThumbnail(fileObj);
+      const enriched = { ...item, file: fileObj, thumbnail: item.thumbnail || thumb, remoteUrl: signed, path: storagePath, bucket };
+      downloadCacheRef.current.set(storagePath, {
+        file: fileObj,
+        thumbnail: item.thumbnail || thumb,
+        remoteUrl: signed,
+        path: storagePath,
+        bucket,
+      });
+      setUploadedFiles((prev) => prev.map((p) => (p.id === item.id ? enriched : p)));
+      return enriched;
+    },
+    [setUploadedFiles]
+  );
 
   useEffect(() => {
     return () => {
@@ -147,6 +244,7 @@ function App() {
       setThumbnailUrl(null);
       setBookmarks([]);
       setBookmarkNote("");
+      setFlashcards([]);
 
       try {
         const [textResult, thumb] = await Promise.all([extractPdfText(targetFile), generatePdfThumbnail(targetFile)]);
@@ -157,6 +255,7 @@ function App() {
         setThumbnailUrl(thumb);
         setStatus(`추출 완료 (사용 페이지: ${pagesUsed}/${totalPages})`);
         await loadBookmarks(item.id);
+        await loadFlashcards(item.id);
       } catch (err) {
         setError(`PDF 추출에 실패했습니다: ${err.message}`);
         setExtractedText("");
@@ -166,7 +265,7 @@ function App() {
         setIsLoadingText(false);
       }
     },
-    [pdfUrl, selectedFileId]
+    [pdfUrl, selectedFileId, loadBookmarks, loadFlashcards]
   );
 
   const handleFileChange = async (event) => {
@@ -191,7 +290,22 @@ function App() {
         if (!supabase || !user) return item;
         try {
           const uploaded = await uploadPdfToStorage(user.id, item.file);
-          return { ...item, remotePath: uploaded.path, remoteUrl: uploaded.signedUrl };
+          const record = await saveUploadMetadata({
+            userId: user.id,
+            fileName: item.name,
+            fileSize: item.size,
+            storagePath: uploaded.path,
+            bucket: uploaded.bucket,
+            thumbnail: item.thumbnail,
+          });
+          return {
+            ...item,
+            id: record.id || item.id,
+            remotePath: uploaded.path,
+            remoteUrl: uploaded.signedUrl,
+            bucket: uploaded.bucket,
+            thumbnail: record.thumbnail || item.thumbnail,
+          };
         } catch (err) {
           setError(`클라우드 업로드 실패: ${err.message}`);
           return { ...item, uploadError: err.message };
@@ -201,6 +315,15 @@ function App() {
 
     setUploadedFiles((prev) => [...prev, ...withUploads]);
     setStatus("업로드 목록에서 썸네일을 선택해 요약/퀴즈를 시작하세요.");
+  };
+
+  const handleSelectFile = async (item) => {
+    try {
+      const ensured = await ensureFileForItemRef.current(item);
+      await processSelectedFileRef.current(ensured);
+    } catch (err) {
+      setError(`파일 불러오기 실패: ${err.message}`);
+    }
   };
 
   const showDetail = Boolean(file && selectedFileId);
@@ -213,11 +336,12 @@ function App() {
     setFile(null);
       setPdfUrl(null);
       setExtractedText("");
-      setPreviewText("");
-      setPageInfo({ used: 0, total: 0 });
-      setSummary("");
+    setPreviewText("");
+    setPageInfo({ used: 0, total: 0 });
+    setSummary("");
     setBookmarks([]);
     setBookmarkNote("");
+    setFlashcards([]);
     setPanelTab("summary");
     summaryRequestedRef.current = false;
     quizAutoRequestedRef.current = false;
@@ -227,6 +351,7 @@ function App() {
   const uploadedFilesRef = useRef(uploadedFiles);
   const goBackToListRef = useRef(goBackToList);
   const processSelectedFileRef = useRef(processSelectedFile);
+  const ensureFileForItemRef = useRef(ensureFileForItem);
 
   useEffect(() => {
     uploadedFilesRef.current = uploadedFiles;
@@ -239,6 +364,9 @@ function App() {
   useEffect(() => {
     processSelectedFileRef.current = processSelectedFile;
   }, [processSelectedFile]);
+  useEffect(() => {
+    ensureFileForItemRef.current = ensureFileForItem;
+  }, [ensureFileForItem]);
 
   useEffect(() => {
     const handleMouseMove = (event) => {
@@ -458,7 +586,7 @@ function App() {
         isLoadingText={isLoadingText}
         thumbnailUrl={thumbnailUrl}
         uploadedFiles={uploadedFiles}
-        onSelectFile={processSelectedFile}
+        onSelectFile={handleSelectFile}
         onFileChange={handleFileChange}
         selectedFileId={selectedFileId}
       />
@@ -489,6 +617,7 @@ function App() {
             { id: "summary", label: "요약" },
             { id: "quiz", label: "퀴즈" },
             { id: "bookmark", label: "북마크" },
+            { id: "flashcards", label: "카드" },
           ].map((tab) => {
             const active = panelTab === tab.id;
             return (
@@ -661,6 +790,44 @@ function App() {
                 </div>
               )}
             </>
+          )}
+
+          {panelTab === "flashcards" && (
+            <FlashcardsPanel
+              cards={flashcards}
+              isLoading={isLoadingFlashcards}
+              onAdd={async (front, back, hint) => {
+                if (!user) {
+                  setError("로그인이 필요합니다.");
+                  return;
+                }
+                const deckId = selectedFileId || "default";
+                setError("");
+                setStatus("카드 저장 중...");
+                try {
+                  const saved = await addFlashcard({
+                    userId: user.id,
+                    deckId,
+                    front,
+                    back,
+                    hint,
+                  });
+                  setFlashcards((prev) => [saved, ...prev]);
+                  setStatus("카드 저장 완료");
+                } catch (err) {
+                  setError(`카드 저장 실패: ${err.message}`);
+                  setStatus("");
+                }
+              }}
+              onDelete={async (cardId) => {
+                try {
+                  await deleteFlashcard({ userId: user?.id, cardId });
+                  setFlashcards((prev) => prev.filter((c) => c.id !== cardId));
+                } catch (err) {
+                  setError(`카드 삭제 실패: ${err.message}`);
+                }
+              }}
+            />
           )}
         </div>
       </div>

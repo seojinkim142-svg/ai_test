@@ -4,9 +4,10 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabaseBucket = import.meta.env.VITE_SUPABASE_BUCKET || "pdf-uploads";
 const BOOKMARKS_TABLE = "bookmarks";
+const FLASHCARDS_TABLE = import.meta.env.VITE_SUPABASE_FLASHCARDS_TABLE || "flashcards";
+const UPLOADS_TABLE = import.meta.env.VITE_SUPABASE_UPLOADS_TABLE || "uploads";
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  // eslint-disable-next-line no-console
   console.warn("Supabase 환경변수(VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)가 설정되지 않았습니다.");
 }
 
@@ -50,7 +51,7 @@ export async function uploadPdfToStorage(userId, file) {
     .createSignedUrl(path, 60 * 60 * 24 * 7);
   if (signedError) throw signedError;
 
-  return { path, signedUrl: signedData?.signedUrl || null };
+  return { path, signedUrl: signedData?.signedUrl || null, bucket: supabaseBucket };
 }
 
 export async function saveBookmark({ userId, docId, docName, pageNumber, note }) {
@@ -86,4 +87,70 @@ export async function deleteBookmark({ userId, bookmarkId }) {
   if (!userId || !bookmarkId) return;
   const { error } = await supabase.from(BOOKMARKS_TABLE).delete().eq("id", bookmarkId).eq("user_id", userId);
   if (error) throw error;
+}
+
+export async function addFlashcard({ userId, deckId, front, back, hint }) {
+  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  if (!userId) throw new Error("로그인 정보가 없습니다.");
+  const payload = {
+    user_id: userId,
+    deck_id: deckId,
+    front: front || "",
+    back: back || "",
+    hint: hint || "",
+  };
+  const { data, error } = await supabase.from(FLASHCARDS_TABLE).insert(payload).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function listFlashcards({ userId, deckId }) {
+  if (!supabase || !userId) return [];
+  const query = supabase.from(FLASHCARDS_TABLE).select("*").eq("user_id", userId).order("created_at", { ascending: false });
+  if (deckId) query.eq("deck_id", deckId);
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+}
+
+export async function deleteFlashcard({ userId, cardId }) {
+  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  if (!userId || !cardId) return;
+  const { error } = await supabase.from(FLASHCARDS_TABLE).delete().eq("id", cardId).eq("user_id", userId);
+  if (error) throw error;
+}
+
+export async function saveUploadMetadata({ userId, fileName, fileSize, storagePath, bucket, thumbnail }) {
+  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  if (!userId) throw new Error("로그인 정보가 없습니다.");
+  const payload = {
+    user_id: userId,
+    file_name: fileName,
+    file_size: fileSize,
+    storage_path: storagePath,
+    bucket: bucket || supabaseBucket,
+    thumbnail: thumbnail || null,
+  };
+  const { data, error } = await supabase.from(UPLOADS_TABLE).insert(payload).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function listUploads({ userId }) {
+  if (!supabase || !userId) return [];
+  const { data, error } = await supabase
+    .from(UPLOADS_TABLE)
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getSignedStorageUrl({ bucket, path, expiresIn = 60 * 60 * 24 }) {
+  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  const targetBucket = bucket || supabaseBucket;
+  const { data, error } = await supabase.storage.from(targetBucket).createSignedUrl(path, expiresIn);
+  if (error) throw error;
+  return data?.signedUrl;
 }

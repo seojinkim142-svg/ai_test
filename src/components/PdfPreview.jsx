@@ -8,7 +8,6 @@ function PdfPreview({ pdfUrl, file, pageInfo, onPageChange }) {
   const containerRef = useRef(null);
   const trackRef = useRef(null);
   const [pages, setPages] = useState([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [renderError, setRenderError] = useState(false);
   const [containerWidth, setContainerWidth] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -19,7 +18,6 @@ function PdfPreview({ pdfUrl, file, pageInfo, onPageChange }) {
   }, []);
 
   useEffect(() => {
-    let canceled = false;
     const node = containerRef.current;
     if (!node) return;
     const observer = new ResizeObserver((entries) => {
@@ -41,12 +39,11 @@ function PdfPreview({ pdfUrl, file, pageInfo, onPageChange }) {
         setRenderError(false);
         return;
       }
-      setIsLoading(true);
       setRenderError(false);
       try {
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await getDocument({ data: arrayBuffer }).promise;
-        const pagesToRender = Math.min(pdf.numPages, pageInfo.used || pageInfo.total || pdf.numPages);
+        const pagesToRender = Math.min(pdf.numPages, pageInfo.used || pageInfo.total || pdf.numPages, 5);
         const rendered = [];
 
         for (let i = 1; i <= pagesToRender; i += 1) {
@@ -80,7 +77,7 @@ function PdfPreview({ pdfUrl, file, pageInfo, onPageChange }) {
           setRenderError(true);
         }
       } finally {
-        if (!canceled) setIsLoading(false);
+        // no-op
       }
     };
 
@@ -108,11 +105,6 @@ function PdfPreview({ pdfUrl, file, pageInfo, onPageChange }) {
     },
     [pages.length, clampIndex]
   );
-
-  const handleSlider = (e) => {
-    const next = Number(e.target.value);
-    setActiveIndex(clampIndex(next));
-  };
 
   const handleBarClick = useCallback(
     (event) => {

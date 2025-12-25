@@ -109,7 +109,7 @@ async function postChatRequest(body, { retries = 1 } = {}) {
     try {
       const json = await response.json();
       hint = json?.error?.message || hint;
-    } catch (_) {
+    } catch {
       // JSON 파싱 실패 시 기본 힌트로 안내
     }
 
@@ -128,7 +128,7 @@ async function postChatRequest(body, { retries = 1 } = {}) {
       const json = await response.json();
       const message = json?.error?.message || JSON.stringify(json);
       throw new Error(`OpenAI API 오류: ${response.status} ${message}`);
-    } catch (_) {
+    } catch {
       const details = await response.text();
       throw new Error(`OpenAI API 오류: ${response.status} ${details}`);
     }

@@ -32,14 +32,14 @@ function SummaryCard({ summary }) {
           remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[rehypeKatex]}
           components={{
-            h1: ({ node, ...props }) => <h1 className="text-xl font-bold text-white mt-4" {...props} />,
-            h2: ({ node, ...props }) => <h2 className="text-lg font-semibold text-white mt-3" {...props} />,
-            h3: ({ node, ...props }) => <h3 className="text-base font-semibold text-emerald-100 mt-2" {...props} />,
-            p: ({ node, ...props }) => <p className="text-sm leading-relaxed text-slate-100" {...props} />,
-            strong: ({ node, ...props }) => <strong className="font-semibold text-slate-50" {...props} />,
-            ul: ({ node, ...props }) => <ul className="list-disc pl-5 space-y-1 text-sm text-slate-100" {...props} />,
-            ol: ({ node, ...props }) => <ol className="list-decimal pl-5 space-y-1 text-sm text-slate-100" {...props} />,
-            li: ({ node, ...props }) => <li className="leading-relaxed" {...props} />,
+            h1: (props) => <h1 className="text-xl font-bold text-white mt-4" {...props} />,
+            h2: (props) => <h2 className="text-lg font-semibold text-white mt-3" {...props} />,
+            h3: (props) => <h3 className="text-base font-semibold text-emerald-100 mt-2" {...props} />,
+            p: (props) => <p className="text-sm leading-relaxed text-slate-100" {...props} />,
+            strong: (props) => <strong className="font-semibold text-slate-50" {...props} />,
+            ul: (props) => <ul className="list-disc pl-5 space-y-1 text-sm text-slate-100" {...props} />,
+            ol: (props) => <ol className="list-decimal pl-5 space-y-1 text-sm text-slate-100" {...props} />,
+            li: (props) => <li className="leading-relaxed" {...props} />,
             code: ({ inline, className, children, ...props }) =>
               inline ? (
                 <code className="rounded bg-slate-800/80 px-1.5 py-0.5 text-[12px] text-emerald-100" {...props}>
@@ -50,15 +50,15 @@ function SummaryCard({ summary }) {
                   <code className={className}>{children}</code>
                 </pre>
               ),
-            table: ({ node, ...props }) => (
+            table: (props) => (
               <div className="overflow-auto">
                 <table className="min-w-full text-sm text-left text-slate-100" {...props} />
               </div>
             ),
-            th: ({ node, ...props }) => (
+            th: (props) => (
               <th className="border-b border-white/10 px-3 py-2 font-semibold text-emerald-100" {...props} />
             ),
-            td: ({ node, ...props }) => (
+            td: (props) => (
               <td className="border-b border-white/5 px-3 py-2 text-slate-100" {...props} />
             ),
           }}

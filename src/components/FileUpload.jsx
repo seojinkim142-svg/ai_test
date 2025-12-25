@@ -79,10 +79,10 @@ function FileUpload({
         {uploadedFiles.map((item) => (
           <PdfTile
             key={item.id}
-            file={item.file}
+            file={item.file || { name: item.name, size: item.size }}
             thumbnailUrl={item.thumbnail || thumbnailUrl}
-            pageInfo={file?.name === item.file.name ? pageInfo : null}
-            isLoadingText={isLoadingText && file?.name === item.file.name}
+            pageInfo={file && item.file && file.name === item.file.name ? pageInfo : null}
+            isLoadingText={isLoadingText && file && item.file && file.name === item.file.name}
             active={selectedFileId === item.id}
             onProceed={() => {
               onSelectFile?.(item);

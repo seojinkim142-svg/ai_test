@@ -76,7 +76,8 @@ export async function extractPdfText(file, pageLimit = 30, maxLength = 12000) {
   };
 }
 
-export async function generatePdfThumbnail(file, { scale = 0.4 } = {}) {
+// 썸네일 생성 속도를 위해 기본 스케일을 낮게 설정합니다.
+export async function generatePdfThumbnail(file, { scale = 0.2 } = {}) {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await getDocument({ data: arrayBuffer }).promise;
   const page = await pdf.getPage(1);
