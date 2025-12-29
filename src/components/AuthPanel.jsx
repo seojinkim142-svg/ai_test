@@ -108,9 +108,11 @@ function AuthPanel({ user, onAuth }) {
         </div>
       </div>
 
-      <label className="flex flex-col gap-1 text-sm text-slate-200">
+      <label className="flex flex-col gap-1 text-sm text-slate-200" htmlFor="auth-email">
         이메일
         <input
+          id="auth-email"
+          name="email"
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -120,9 +122,11 @@ function AuthPanel({ user, onAuth }) {
         />
       </label>
 
-      <label className="flex flex-col gap-1 text-sm text-slate-200">
+      <label className="flex flex-col gap-1 text-sm text-slate-200" htmlFor="auth-password">
         비밀번호
         <input
+          id="auth-password"
+          name="password"
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}

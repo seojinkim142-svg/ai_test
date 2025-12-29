@@ -6,6 +6,7 @@ const supabaseBucket = import.meta.env.VITE_SUPABASE_BUCKET || "pdf-uploads";
 const BOOKMARKS_TABLE = "bookmarks";
 const FLASHCARDS_TABLE = import.meta.env.VITE_SUPABASE_FLASHCARDS_TABLE || "flashcards";
 const UPLOADS_TABLE = import.meta.env.VITE_SUPABASE_UPLOADS_TABLE || "uploads";
+const ARTIFACTS_TABLE = import.meta.env.VITE_SUPABASE_ARTIFACTS_TABLE || "artifacts";
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn("Supabase 환경변수(VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)가 설정되지 않았습니다.");
@@ -159,12 +160,45 @@ export async function getSignedStorageUrl({ bucket, path, expiresIn = 60 * 60 * 
 export async function updateUploadThumbnail({ id, thumbnail }) {
   if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
   if (!id) throw new Error("업로드 ID가 필요합니다.");
-  const { error, data } = await supabase
+  const { error } = await supabase
     .from(UPLOADS_TABLE)
     .update({ thumbnail })
-    .eq("id", id)
+    .eq("id", id);
+  if (error) throw error;
+  return null;
+}
+
+export async function fetchDocArtifacts({ userId, docId }) {
+  if (!supabase || !userId || !docId) return null;
+  const { data, error } = await supabase
+    .from(ARTIFACTS_TABLE)
+    .select("*")
+    .eq("user_id", userId)
+    .eq("doc_id", docId)
+    .single();
+  if (error && error.code !== "PGRST116") throw error; // no rows is fine
+  return data || null;
+}
+
+export async function saveDocArtifacts({ userId, docId, summary, quiz, ox, highlights }) {
+  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  if (!userId || !docId) throw new Error("userId와 docId가 필요합니다.");
+  const payload = {
+    user_id: userId,
+    doc_id: docId,
+  };
+
+  if (summary !== undefined) payload.summary = summary;
+  if (quiz !== undefined) payload.quiz_json = quiz;
+  if (ox !== undefined) payload.ox_json = ox;
+  if (highlights !== undefined) payload.highlights_json = highlights;
+
+  const { data, error } = await supabase
+    .from(ARTIFACTS_TABLE)
+    .upsert(payload, { onConflict: "user_id,doc_id" })
     .select()
     .single();
+
   if (error) throw error;
   return data;
 }

@@ -19,12 +19,14 @@ function FlashcardsPanel({ cards, onAdd, onDelete, isLoading }) {
 
       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
         <textarea
+          name="flashcard-front"
           value={front}
           onChange={(e) => setFront(e.target.value)}
           className="min-h-[80px] rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none ring-1 ring-transparent transition focus:border-emerald-300/50 focus:ring-emerald-300/40"
           placeholder="앞면(용어/질문)"
         />
         <textarea
+          name="flashcard-back"
           value={back}
           onChange={(e) => setBack(e.target.value)}
           className="min-h-[80px] rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none ring-1 ring-transparent transition focus:border-emerald-300/50 focus:ring-emerald-300/40"
@@ -32,6 +34,7 @@ function FlashcardsPanel({ cards, onAdd, onDelete, isLoading }) {
         />
       </div>
       <input
+        name="flashcard-hint"
         type="text"
         value={hint}
         onChange={(e) => setHint(e.target.value)}

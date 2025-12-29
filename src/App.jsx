@@ -23,6 +23,8 @@ import {
   listUploads,
   getSignedStorageUrl,
   updateUploadThumbnail,
+  fetchDocArtifacts,
+  saveDocArtifacts,
 } from "./services/supabase";
 import { extractPdfText, generatePdfThumbnail } from "./utils/pdf";
 
@@ -60,10 +62,12 @@ function App() {
   const [isLoadingBookmarks, setIsLoadingBookmarks] = useState(false);
   const [flashcards, setFlashcards] = useState([]);
   const [isLoadingFlashcards, setIsLoadingFlashcards] = useState(false);
+  const [artifacts, setArtifacts] = useState(null);
   const downloadCacheRef = useRef(new Map()); // storagePath -> { file, thumbnail, remoteUrl, bucket }
   const backfillInProgressRef = useRef(false);
   const summaryRequestedRef = useRef(false);
   const quizAutoRequestedRef = useRef(false);
+  const oxAutoRequestedRef = useRef(false);
   const isDraggingRef = useRef(false);
   const detailContainerRef = useRef(null);
 
@@ -163,6 +167,49 @@ function App() {
       }
     },
     [user]
+  );
+
+  const loadArtifacts = useCallback(
+    async (docId) => {
+      if (!supabase || !user || !docId) {
+        setArtifacts(null);
+        return;
+      }
+      try {
+        const data = await fetchDocArtifacts({ userId: user.id, docId });
+        const mapped = {
+          summary: data?.summary || null,
+          quiz: data?.quiz_json || null,
+          ox: data?.ox_json || null,
+          highlights: data?.highlights_json || null,
+        };
+        setArtifacts(mapped);
+        if (mapped.summary) {
+          setSummary(mapped.summary);
+          summaryRequestedRef.current = true;
+        }
+        if (mapped.quiz) {
+          const cachedSet = {
+            id: `quiz-cached-${docId}`,
+            questions: mapped.quiz,
+            selectedChoices: {},
+            revealedChoices: {},
+            shortAnswerInput: "",
+            shortAnswerResult: null,
+          };
+          setQuizSets([cachedSet]);
+          quizAutoRequestedRef.current = true;
+        }
+        if (mapped.ox) {
+          setOxItems(mapped.ox?.items || []);
+          oxAutoRequestedRef.current = true;
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("Failed to load artifacts", err);
+      }
+    },
+    [user, supabase]
   );
   const backfillThumbnails = useCallback(
     async (items) => {
@@ -299,6 +346,7 @@ function App() {
       setBookmarks([]);
       setBookmarkNote("");
       setFlashcards([]);
+      oxAutoRequestedRef.current = false;
 
       try {
         const [textResult, thumb] = await Promise.all([extractPdfText(targetFile), generatePdfThumbnail(targetFile)]);
@@ -310,6 +358,7 @@ function App() {
         setStatus(`추출 완료 (사용 페이지: ${pagesUsed}/${totalPages})`);
         await loadBookmarks(item.id);
         await loadFlashcards(item.id);
+        await loadArtifacts(item.id);
       } catch (err) {
         setError(`PDF 추출에 실패했습니다: ${err.message}`);
         setExtractedText("");
@@ -319,7 +368,7 @@ function App() {
         setIsLoadingText(false);
       }
     },
-    [pdfUrl, selectedFileId, loadBookmarks, loadFlashcards]
+    [pdfUrl, selectedFileId, loadBookmarks, loadFlashcards, loadArtifacts]
   );
 
   const handleFileChange = async (event) => {
@@ -419,6 +468,8 @@ function App() {
     setPanelTab("summary");
     summaryRequestedRef.current = false;
     quizAutoRequestedRef.current = false;
+    oxAutoRequestedRef.current = false;
+    setArtifacts(null);
     resetQuizState();
     setStatus("업로드 목록에서 썸네일을 선택해 요약/퀴즈를 시작하세요.");
   }, [pdfUrl]);
@@ -426,6 +477,31 @@ function App() {
   const goBackToListRef = useRef(goBackToList);
   const processSelectedFileRef = useRef(processSelectedFile);
   const ensureFileForItemRef = useRef(ensureFileForItem);
+
+  const persistArtifacts = useCallback(
+    async (partial) => {
+      if (!user || !selectedFileId) return;
+      const merged = {
+        ...(artifacts || {}),
+        ...partial,
+      };
+      setArtifacts(merged);
+      try {
+        await saveDocArtifacts({
+          userId: user.id,
+          docId: selectedFileId,
+          summary: merged.summary,
+          quiz: merged.quiz,
+          ox: merged.ox,
+          highlights: merged.highlights,
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("Failed to save artifacts", err);
+      }
+    },
+    [user, selectedFileId, artifacts]
+  );
 
   useEffect(() => {
     uploadedFilesRef.current = uploadedFiles;
@@ -498,8 +574,8 @@ function App() {
     maxWidth: "75%",
   };
 
-  const requestQuestions = async () => {
-    if (isLoadingQuiz) return;
+  const requestQuestions = async ({ force = false } = {}) => {
+    if (isLoadingQuiz && !force) return;
     if (!file) {
       setError("먼저 PDF를 업로드해주세요.");
       return;
@@ -526,11 +602,30 @@ function App() {
       };
       setQuizSets((prev) => [...prev, newSet]);
       setStatus("문제 세트 생성 완료!");
+      persistArtifacts({ quiz });
     } catch (err) {
       setError(`문제 생성에 실패했습니다: ${err.message}`);
     } finally {
       setIsLoadingQuiz(false);
     }
+  };
+
+  const regenerateQuiz = async () => {
+    if (isLoadingQuiz) return;
+    if (!file) {
+      setError("먼저 PDF를 업로드해주세요.");
+      return;
+    }
+    if (!extractedText) {
+      setError("PDF 텍스트가 아직 준비되지 않았습니다. 잠시 후에 시도해주세요.");
+      return;
+    }
+    quizAutoRequestedRef.current = true;
+    resetQuizState();
+    setStatus("퀴즈를 새로 생성하는 중입니다...");
+    setError("");
+    await persistArtifacts({ quiz: null });
+    await requestQuestions({ force: true });
   };
 
   const handleChoiceSelect = (setId, qIdx, choiceIdx) => {
@@ -570,8 +665,8 @@ function App() {
     );
   };
 
-  const requestSummary = async () => {
-    if (isLoadingSummary || summaryRequestedRef.current) return;
+  const requestSummary = async ({ force = false } = {}) => {
+    if (isLoadingSummary || (!force && summaryRequestedRef.current)) return;
     if (!file) {
       setError("먼저 PDF를 업로드해주세요.");
       return;
@@ -589,6 +684,7 @@ function App() {
       const summarized = await generateSummary(extractedText);
       setSummary(summarized);
       setStatus("요약 생성 완료!");
+      persistArtifacts({ summary: summarized });
     } catch (err) {
       setError(`요약 생성에 실패했습니다: ${err.message}`);
       setStatus("");
@@ -597,7 +693,66 @@ function App() {
     }
   };
 
-  const requestOxQuiz = async () => {
+  const regenerateSummary = async () => {
+    if (isLoadingSummary) return;
+    if (!file) {
+      setError("먼저 PDF를 업로드해주세요.");
+      return;
+    }
+    if (!extractedText) {
+      setError("PDF 텍스트가 아직 준비되지 않았습니다. 잠시 후에 시도해주세요.");
+      return;
+    }
+    summaryRequestedRef.current = false;
+    setSummary("");
+    setStatus("요약을 새로 생성하는 중입니다...");
+    setError("");
+    await persistArtifacts({ summary: null, highlights: null });
+    await requestSummary({ force: true });
+  };
+
+  const requestOxQuiz = async ({ auto = false, force = false } = {}) => {
+    if (isLoadingOx && !force) return;
+    if (!file) {
+      setError("먼저 PDF를 업로드해주세요.");
+      return;
+    }
+    if (!extractedText) {
+      setError("PDF 텍스트가 아직 준비되지 않았습니다. 잠시 후에 시도해주세요.");
+      return;
+    }
+    if (auto) oxAutoRequestedRef.current = true;
+    setIsLoadingOx(true);
+    setError("");
+    setStatus("O/X 퀴즈를 생성하는 중입니다...");
+    try {
+      const ox = await generateOxQuiz(extractedText);
+      const items = Array.isArray(ox?.items) ? ox.items : [];
+
+      if (ox?.debug || items.length === 0) {
+        setOxItems([]);
+        setStatus("");
+        setError("O/X 퀴즈를 생성할 수 있는 내용이 부족합니다.");
+        if (ox?.fallback && import.meta.env.DEV) {
+          // 개발 시에만 fallback을 로그로 확인
+          // eslint-disable-next-line no-console
+          console.debug("O/X fallback", ox.fallback);
+        }
+        return;
+      }
+
+      setOxItems(items);
+      setOxSelections({});
+      setStatus("O/X 퀴즈 생성 완료!");
+      persistArtifacts({ ox });
+    } catch (err) {
+      setError(`O/X 퀴즈 생성에 실패했습니다: ${err.message}`);
+    } finally {
+      setIsLoadingOx(false);
+    }
+  };
+
+  const regenerateOxQuiz = async () => {
     if (isLoadingOx) return;
     if (!file) {
       setError("먼저 PDF를 업로드해주세요.");
@@ -607,19 +762,13 @@ function App() {
       setError("PDF 텍스트가 아직 준비되지 않았습니다. 잠시 후에 시도해주세요.");
       return;
     }
-    setIsLoadingOx(true);
+    oxAutoRequestedRef.current = true;
+    setOxItems(null);
+    setOxSelections({});
+    setStatus("O/X 퀴즈를 새로 생성하는 중입니다...");
     setError("");
-    setStatus("O/X 퀴즈를 생성하는 중입니다...");
-    try {
-      const ox = await generateOxQuiz(extractedText);
-      setOxItems(ox?.items || []);
-      setOxSelections({});
-      setStatus("O/X 퀴즈 생성 완료!");
-    } catch (err) {
-      setError(`O/X 퀴즈 생성에 실패했습니다: ${err.message}`);
-    } finally {
-      setIsLoadingOx(false);
-    }
+    await persistArtifacts({ ox: null });
+    await requestOxQuiz({ auto: false, force: true });
   };
 
   const canAutoRequest = useCallback(() => file && extractedText && !isLoadingText, [file, extractedText, isLoadingText]);
@@ -650,6 +799,20 @@ function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summary, canAutoRequest, quizSets.length, isLoadingQuiz]);
+
+  useEffect(() => {
+    if (
+      canAutoRequest() &&
+      quizSets.length > 0 &&
+      !isLoadingOx &&
+      !oxItems &&
+      !oxAutoRequestedRef.current
+    ) {
+      oxAutoRequestedRef.current = true;
+      requestOxQuiz({ auto: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canAutoRequest, quizSets.length, isLoadingOx, oxItems]);
 
   if (!authReady) {
     return (
@@ -740,7 +903,27 @@ function App() {
         <div className="flex-1 overflow-auto pr-1 pb-1">
           {panelTab === "summary" && (
             <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
-              <p className="text-sm font-semibold text-emerald-200">요약</p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-emerald-200">요약</p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => requestSummary({ force: true })}
+                    disabled={isLoadingSummary || isLoadingText}
+                    className="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-semibold text-cyan-950 transition hover:bg-cyan-400 disabled:opacity-60"
+                  >
+                    {isLoadingSummary ? "요약 생성 중..." : "요약 새로 생성"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={regenerateSummary}
+                    disabled={isLoadingSummary || isLoadingText}
+                    className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+                  >
+                    요약 재생성
+                  </button>
+                </div>
+              </div>
               {isLoadingSummary && <p className="mt-2 text-sm text-slate-300">요약 생성 중...</p>}
               {!isLoadingSummary && summary && <SummaryCard summary={summary} />}
               {!isLoadingSummary && !summary && <p className="mt-2 text-sm text-slate-400">요약이 준비되면 표시됩니다.</p>}
@@ -877,18 +1060,24 @@ function App() {
                 </div>
               )}
 
-              {quizSets.length > 0 && (
-                <div className="mt-4">
-                  <button
-                    type="button"
-                    onClick={requestQuestions}
-                    disabled={isLoadingQuiz || isLoadingText}
-                    className="w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
-                  >
-                    {isLoadingQuiz ? "퀴즈 생성 중..." : "퀴즈 5문제 더 생성하기"}
-                  </button>
-                </div>
-              )}
+              <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={requestQuestions}
+                  disabled={isLoadingQuiz || isLoadingText}
+                  className="w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+                >
+                  {isLoadingQuiz ? "퀴즈 생성 중..." : "퀴즈 5문제 더 생성하기"}
+                </button>
+                <button
+                  type="button"
+                  onClick={regenerateQuiz}
+                  disabled={isLoadingQuiz || isLoadingText}
+                  className="w-full rounded-xl bg-amber-400 px-4 py-3 text-sm font-semibold text-amber-950 transition hover:bg-amber-300 disabled:opacity-60"
+                >
+                  {isLoadingQuiz ? "퀴즈 재생성 중..." : "퀴즈 재생성(덮어쓰기)"}
+                </button>
+              </div>
             </>
           )}
 
@@ -908,6 +1097,25 @@ function App() {
                 onRequestQuiz={requestOxQuiz}
                 onRequestSummary={requestSummary}
               />
+
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => requestOxQuiz({ auto: false })}
+                  disabled={isLoadingOx || isLoadingText}
+                  className="w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+                >
+                  {isLoadingOx ? "O/X 생성 중..." : "O/X 퀴즈 생성"}
+                </button>
+                <button
+                  type="button"
+                  onClick={regenerateOxQuiz}
+                  disabled={isLoadingOx || isLoadingText}
+                  className="w-full rounded-xl bg-amber-400 px-4 py-3 text-sm font-semibold text-amber-950 transition hover:bg-amber-300 disabled:opacity-60"
+                >
+                  {isLoadingOx ? "O/X 재생성 중..." : "O/X 퀴즈 재생성(덮어쓰기)"}
+                </button>
+              </div>
 
               {oxItems && oxItems.length > 0 && (
                 <OxSection

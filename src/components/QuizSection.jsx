@@ -65,6 +65,7 @@ function ShortAnswer({ question, userInput, result, onChange, onCheck }) {
       </div>
       <div className="mt-3 flex flex-col gap-2">
         <input
+          name="short-answer"
           type="text"
           value={userInput}
           onChange={(e) => onChange(e.target.value)}
