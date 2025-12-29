@@ -7,6 +7,11 @@ const BOOKMARKS_TABLE = "bookmarks";
 const FLASHCARDS_TABLE = import.meta.env.VITE_SUPABASE_FLASHCARDS_TABLE || "flashcards";
 const UPLOADS_TABLE = import.meta.env.VITE_SUPABASE_UPLOADS_TABLE || "uploads";
 const ARTIFACTS_TABLE = import.meta.env.VITE_SUPABASE_ARTIFACTS_TABLE || "artifacts";
+const USER_TIER_TABLE = import.meta.env.VITE_SUPABASE_USER_TIER_TABLE || "user_tiers";
+const ALLOWED_TIERS = ["mortal", "ascendent", "zeusian"];
+const SUPABASE_REDIRECT =
+  import.meta.env.VITE_SUPABASE_REDIRECT_URL ||
+  (typeof window !== "undefined" ? window.location.origin : undefined);
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn("Supabase 환경변수(VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)가 설정되지 않았습니다.");
@@ -32,6 +37,18 @@ export async function signOut() {
   if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
+}
+
+export async function signInWithProvider(provider) {
+  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider,
+    options: {
+      redirectTo: SUPABASE_REDIRECT,
+    },
+  });
+  if (error) throw error;
+  return data;
 }
 
 export async function uploadPdfToStorage(userId, file) {
@@ -201,4 +218,33 @@ export async function saveDocArtifacts({ userId, docId, summary, quiz, ox, highl
 
   if (error) throw error;
   return data;
+}
+
+export async function getUserTier({ userId }) {
+  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  if (!userId) throw new Error("userId가 필요합니다.");
+  const { data, error } = await supabase
+    .from(USER_TIER_TABLE)
+    .select("tier")
+    .eq("user_id", userId)
+    .single();
+  if (error && error.code !== "PGRST116") throw error; // no rows is fine
+  const tier = data?.tier;
+  return ALLOWED_TIERS.includes(tier) ? tier : "mortal";
+}
+
+export async function setUserTier({ userId, tier }) {
+  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  if (!userId) throw new Error("userId가 필요합니다.");
+  if (!ALLOWED_TIERS.includes(tier)) {
+    throw new Error(`tier는 ${ALLOWED_TIERS.join(", ")} 중 하나여야 합니다.`);
+  }
+  const payload = { user_id: userId, tier };
+  const { data, error } = await supabase
+    .from(USER_TIER_TABLE)
+    .upsert(payload, { onConflict: "user_id" })
+    .select()
+    .single();
+  if (error) throw error;
+  return data?.tier || tier;
 }

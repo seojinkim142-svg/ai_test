@@ -4,6 +4,7 @@ import AuthPanel from "./components/AuthPanel";
 import FlashcardsPanel from "./components/FlashcardsPanel";
 import FileUpload from "./components/FileUpload";
 import Header from "./components/Header";
+import LoginBackground from "./components/LoginBackground";
 import OxSection from "./components/OxSection";
 import PdfPreview from "./components/PdfPreview";
 import QuizSection from "./components/QuizSection";
@@ -828,17 +829,13 @@ function App() {
 
   if (!user) {
     return (
-      <div className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
-        <div className="pointer-events-none absolute inset-0">
-          <div className="absolute -left-32 top-10 h-72 w-72 rounded-full bg-emerald-500/20 blur-3xl" />
-          <div className="absolute right-[-80px] top-32 h-80 w-80 rounded-full bg-cyan-500/10 blur-3xl" />
-          <div className="absolute bottom-[-120px] left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-indigo-500/10 blur-3xl" />
-        </div>
-        <main className="relative z-10 mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-6 px-6 py-10">
-          <Header user={user} onSignOut={handleSignOut} signingOut={isSigningOut} />
-          <AuthPanel user={user} onAuth={refreshSession} />
+      <LoginBackground>
+        <main className="mx-auto flex min-h-screen w-full flex-col items-center justify-center px-4 py-8">
+          <div className="w-full max-w-md">
+            <AuthPanel user={user} onAuth={refreshSession} />
+          </div>
         </main>
-      </div>
+      </LoginBackground>
     );
   }
 
