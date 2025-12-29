@@ -4,15 +4,27 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 
+function sanitizeSummary(text) {
+  if (!text) return null;
+  return text
+    .replace(/\\\$/g, "$")
+    .replace(
+      /\[\s*([^[\]]*(?:\\frac|\\cdot|\\lambda|\\mu|\\sigma|\\pi|\\sum|\\int|\\alpha|\\beta|\\gamma|\\theta|\\phi|\\psi)[^[\]]*)\s*\]/g,
+      (_, expr) => `$$${expr.trim()}$$`
+    );
+}
+
 function SummaryCard({ summary }) {
   if (!summary) return null;
+
+  const sanitized = sanitizeSummary(summary);
 
   return (
     <div className="mt-4 rounded-2xl bg-gradient-to-br from-slate-900/60 via-slate-900/50 to-slate-900/40 p-4 ring-1 ring-white/10">
       <div className="mb-3 flex items-center justify-between">
-        <p className="text-xs uppercase tracking-[0.2em] text-slate-300">요약</p>
+        <p className="text-xs uppercase tracking-[0.2em] text-slate-300">?�약</p>
         <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-slate-100 ring-1 ring-white/20">
-          Markdown + KaTeX
+          Markdown styled
         </span>
       </div>
       <div className="prose prose-invert max-w-none space-y-2 text-slate-100 prose-p:leading-relaxed prose-headings:text-slate-50 prose-strong:text-slate-50 prose-a:text-slate-50">
@@ -20,9 +32,9 @@ function SummaryCard({ summary }) {
           remarkPlugins={[remarkGfm, remarkMath]}
           rehypePlugins={[rehypeKatex]}
           components={{
-            h1: (props) => <h1 className="mt-4 text-xl font-bold text-white" {...props} />,
-            h2: (props) => <h2 className="mt-3 text-lg font-semibold text-white" {...props} />,
-            h3: (props) => <h3 className="mt-2 text-base font-semibold text-emerald-100" {...props} />,
+            h1: (props) => <h1 className="text-xl font-bold text-white mt-4" {...props} />,
+            h2: (props) => <h2 className="text-lg font-semibold text-white mt-3" {...props} />,
+            h3: (props) => <h3 className="text-base font-semibold text-emerald-100 mt-2" {...props} />,
             p: (props) => <p className="text-sm leading-relaxed text-slate-100" {...props} />,
             strong: (props) => <strong className="font-semibold text-slate-50" {...props} />,
             ul: (props) => <ul className="list-disc pl-5 space-y-1 text-sm text-slate-100" {...props} />,
@@ -40,16 +52,18 @@ function SummaryCard({ summary }) {
               ),
             table: (props) => (
               <div className="overflow-auto">
-                <table className="min-w-full text-left text-sm text-slate-100" {...props} />
+                <table className="min-w-full text-sm text-left text-slate-100" {...props} />
               </div>
             ),
             th: (props) => (
               <th className="border-b border-white/10 px-3 py-2 font-semibold text-emerald-100" {...props} />
             ),
-            td: (props) => <td className="border-b border-white/5 px-3 py-2 text-slate-100" {...props} />,
+            td: (props) => (
+              <td className="border-b border-white/5 px-3 py-2 text-slate-100" {...props} />
+            ),
           }}
         >
-          {summary}
+          {sanitized}
         </ReactMarkdown>
       </div>
     </div>

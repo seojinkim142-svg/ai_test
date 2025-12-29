@@ -687,6 +687,8 @@ function App() {
       persistArtifacts({ summary: summarized });
     } catch (err) {
       setError(`요약 생성에 실패했습니다: ${err.message}`);
+      // 실패 시 다시 시도할 수 있도록 플래그 해제
+      summaryRequestedRef.current = false;
       setStatus("");
     } finally {
       setIsLoadingSummary(false);
