@@ -25,7 +25,9 @@ function ActionsPanel({
           <button
             onClick={onRequestQuiz}
             disabled={isLoadingQuiz || isLoadingText}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-emerald-500/50"
+            className="ghost-button w-full text-sm text-emerald-100"
+            data-ghost-size="xl"
+            style={{ "--ghost-color": "52, 211, 153" }}
           >
             {isLoadingQuiz ? "문제 생성 중.." : "퀴즈 생성 (5문항)"}
           </button>
@@ -34,7 +36,9 @@ function ActionsPanel({
           <button
             onClick={onRequestSummary}
             disabled={isLoadingSummary || isLoadingText}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-500 px-4 py-3 text-sm font-semibold text-cyan-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:bg-cyan-500/50"
+            className="ghost-button w-full text-sm text-cyan-100"
+            data-ghost-size="xl"
+            style={{ "--ghost-color": "34, 211, 238" }}
           >
             {isLoadingSummary ? "요약 생성 중.." : "요약 생성"}
           </button>

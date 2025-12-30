@@ -28,6 +28,7 @@ import {
   saveDocArtifacts,
 } from "./services/supabase";
 import { extractPdfText, generatePdfThumbnail } from "./utils/pdf";
+import { exportElementToPdf } from "./utils/pdfExport";
 
 function App() {
   const [file, setFile] = useState(null);
@@ -40,6 +41,7 @@ function App() {
   const [isLoadingText, setIsLoadingText] = useState(false);
   const [isLoadingQuiz, setIsLoadingQuiz] = useState(false);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
+  const [isExportingSummary, setIsExportingSummary] = useState(false);
   const [summary, setSummary] = useState("");
   const [quizSets, setQuizSets] = useState([]);
   const [selectedChoices, setSelectedChoices] = useState({});
@@ -71,6 +73,7 @@ function App() {
   const oxAutoRequestedRef = useRef(false);
   const isDraggingRef = useRef(false);
   const detailContainerRef = useRef(null);
+  const summaryRef = useRef(null);
 
   const computeFileHash = useCallback(async (file) => {
     const buffer = await file.arrayBuffer();
@@ -714,6 +717,31 @@ function App() {
     await requestSummary({ force: true });
   };
 
+  const handleExportSummaryPdf = useCallback(async () => {
+    if (isExportingSummary) return;
+    if (!summary) {
+      setError("요약이 없습니다. 먼저 요약을 생성해주세요.");
+      return;
+    }
+    if (!summaryRef.current) {
+      setError("요약 뷰를 찾지 못했습니다. 새로고침 후 다시 시도해주세요.");
+      return;
+    }
+    setIsExportingSummary(true);
+    setError("");
+    const baseName = (file?.name || "summary").replace(/\.[^/.]+$/, "");
+    try {
+      const target = summaryRef.current;
+      await exportElementToPdf(target, { filename: `${baseName}-summary.pdf` });
+      setStatus("요약 PDF 저장 완료");
+    } catch (err) {
+      setError(`요약 PDF 내보내기에 실패했습니다: ${err.message}`);
+      setStatus("");
+    } finally {
+      setIsExportingSummary(false);
+    }
+  }, [summary, file, isExportingSummary]);
+
   const requestOxQuiz = async ({ auto = false, force = false } = {}) => {
     if (isLoadingOx && !force) return;
     if (!file) {
@@ -887,11 +915,10 @@ function App() {
                 key={tab.id}
                 type="button"
                 onClick={() => setPanelTab(tab.id)}
-                className={`rounded-full border px-3 py-1 text-sm font-semibold transition ${
-                  active
-                    ? "border-emerald-300/60 bg-emerald-400/15 text-emerald-100"
-                    : "border-white/15 bg-white/5 text-slate-200 hover:border-emerald-200/40 hover:text-emerald-100"
-                }`}
+                className="ghost-button text-sm text-slate-200"
+                data-ghost-size="sm"
+                data-ghost-active={active}
+                style={{ "--ghost-color": active ? "52, 211, 153" : "148, 163, 184" }}
               >
                 {tab.label}
               </button>
@@ -904,12 +931,13 @@ function App() {
             <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-sm font-semibold text-emerald-200">요약</p>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap justify-end gap-2">
                   <button
                     type="button"
                     onClick={() => requestSummary({ force: true })}
                     disabled={isLoadingSummary || isLoadingText}
-                    className="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-semibold text-cyan-950 transition hover:bg-cyan-400 disabled:opacity-60"
+                    className="ghost-button text-xs text-cyan-100"
+                    style={{ "--ghost-color": "34, 211, 238" }}
                   >
                     {isLoadingSummary ? "요약 생성 중..." : "요약 새로 생성"}
                   </button>
@@ -917,14 +945,30 @@ function App() {
                     type="button"
                     onClick={regenerateSummary}
                     disabled={isLoadingSummary || isLoadingText}
-                    className="rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+                    className="ghost-button text-xs text-emerald-100"
+                    style={{ "--ghost-color": "52, 211, 153" }}
                   >
                     요약 재생성
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleExportSummaryPdf}
+                    disabled={
+                      isLoadingSummary || isLoadingText || !summary || isExportingSummary
+                    }
+                    className="ghost-button text-xs text-indigo-100"
+                    style={{ "--ghost-color": "99, 102, 241" }}
+                  >
+                    {isExportingSummary ? "PDF 내보내는 중..." : "요약 PDF 다운로드"}
                   </button>
                 </div>
               </div>
               {isLoadingSummary && <p className="mt-2 text-sm text-slate-300">요약 생성 중...</p>}
-              {!isLoadingSummary && summary && <SummaryCard summary={summary} />}
+              {!isLoadingSummary && summary && (
+                <div ref={summaryRef}>
+                  <SummaryCard summary={summary} />
+                </div>
+              )}
               {!isLoadingSummary && !summary && <p className="mt-2 text-sm text-slate-400">요약이 준비되면 표시됩니다.</p>}
             </div>
           )}
@@ -979,7 +1023,9 @@ function App() {
                     }
                   }}
                   disabled={!user || isLoadingText}
-                  className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+                  className="ghost-button text-sm text-emerald-100"
+                  data-ghost-size="lg"
+                  style={{ "--ghost-color": "52, 211, 153" }}
                 >
                   북마크 추가
                 </button>
@@ -1012,7 +1058,9 @@ function App() {
                             setError(`북마크 삭제 실패: ${err.message}`);
                           }
                         }}
-                        className="rounded-full bg-white/10 px-2 py-1 text-xs text-slate-200 transition hover:bg-white/20"
+                        className="ghost-button text-xs text-slate-200"
+                        data-ghost-size="sm"
+                        style={{ "--ghost-color": "226, 232, 240" }}
                       >
                         삭제
                       </button>
@@ -1064,7 +1112,9 @@ function App() {
                   type="button"
                   onClick={requestQuestions}
                   disabled={isLoadingQuiz || isLoadingText}
-                  className="w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+                  className="ghost-button w-full text-sm text-emerald-100"
+                  data-ghost-size="xl"
+                  style={{ "--ghost-color": "52, 211, 153" }}
                 >
                   {isLoadingQuiz ? "퀴즈 생성 중..." : "퀴즈 5문제 더 생성하기"}
                 </button>
@@ -1072,7 +1122,9 @@ function App() {
                   type="button"
                   onClick={regenerateQuiz}
                   disabled={isLoadingQuiz || isLoadingText}
-                  className="w-full rounded-xl bg-amber-400 px-4 py-3 text-sm font-semibold text-amber-950 transition hover:bg-amber-300 disabled:opacity-60"
+                  className="ghost-button w-full text-sm text-amber-100"
+                  data-ghost-size="xl"
+                  style={{ "--ghost-color": "251, 191, 36" }}
                 >
                   {isLoadingQuiz ? "퀴즈 재생성 중..." : "퀴즈 재생성(덮어쓰기)"}
                 </button>
@@ -1102,7 +1154,9 @@ function App() {
                   type="button"
                   onClick={() => requestOxQuiz({ auto: false })}
                   disabled={isLoadingOx || isLoadingText}
-                  className="w-full rounded-xl bg-emerald-500 px-4 py-3 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+                  className="ghost-button w-full text-sm text-emerald-100"
+                  data-ghost-size="xl"
+                  style={{ "--ghost-color": "52, 211, 153" }}
                 >
                   {isLoadingOx ? "O/X 생성 중..." : "O/X 퀴즈 생성"}
                 </button>
@@ -1110,7 +1164,9 @@ function App() {
                   type="button"
                   onClick={regenerateOxQuiz}
                   disabled={isLoadingOx || isLoadingText}
-                  className="w-full rounded-xl bg-amber-400 px-4 py-3 text-sm font-semibold text-amber-950 transition hover:bg-amber-300 disabled:opacity-60"
+                  className="ghost-button w-full text-sm text-amber-100"
+                  data-ghost-size="xl"
+                  style={{ "--ghost-color": "251, 191, 36" }}
                 >
                   {isLoadingOx ? "O/X 재생성 중..." : "O/X 퀴즈 재생성(덮어쓰기)"}
                 </button>

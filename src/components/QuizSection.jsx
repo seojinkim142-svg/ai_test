@@ -74,7 +74,9 @@ function ShortAnswer({ question, userInput, result, onChange, onCheck }) {
         />
         <button
           onClick={onCheck}
-          className="inline-flex items-center justify-center rounded-lg bg-cyan-400 px-3 py-2 text-sm font-semibold text-cyan-950 transition hover:bg-cyan-300"
+          className="ghost-button inline-flex text-sm text-cyan-100"
+          data-ghost-size="sm"
+          style={{ "--ghost-color": "34, 211, 238" }}
         >
           정답 확인
         </button>

@@ -50,7 +50,9 @@ function FlashcardsPanel({ cards, onAdd, onDelete, isLoading }) {
           setBack("");
           setHint("");
         }}
-        className="mt-3 w-full rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+        className="ghost-button mt-3 w-full text-sm text-emerald-100"
+        data-ghost-size="lg"
+        style={{ "--ghost-color": "52, 211, 153" }}
       >
         {isLoading ? "저장 중..." : "카드 추가"}
       </button>
@@ -77,7 +79,9 @@ function FlashcardsPanel({ cards, onAdd, onDelete, isLoading }) {
                 <button
                   type="button"
                   onClick={() => onDelete(card.id)}
-                  className="rounded-full bg-white/10 px-2 py-1 text-xs text-slate-200 transition hover:bg-white/20"
+                  className="ghost-button text-xs text-slate-200"
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": "226, 232, 240" }}
                 >
                   삭제
                 </button>

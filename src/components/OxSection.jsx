@@ -14,9 +14,9 @@ function OxCard({ item, idx, selection, onSelect }) {
 
       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
         {[
-          { id: "o", label: "O (참)", style: "bg-emerald-500 text-emerald-950 hover:bg-emerald-400" },
-          { id: "x", label: "X (거짓)", style: "bg-red-500 text-red-950 hover:bg-red-400" },
-          { id: "skip", label: "문제가 별로에요", style: "bg-white/10 text-slate-100 hover:bg-white/20" },
+          { id: "o", label: "O (참)", color: "52, 211, 153", textClass: "text-emerald-100" },
+          { id: "x", label: "X (거짓)", color: "248, 113, 113", textClass: "text-red-100" },
+          { id: "skip", label: "문제가 별로에요", color: "226, 232, 240", textClass: "text-slate-200" },
         ].map((btn) => {
           const active = selection === btn.id;
           return (
@@ -24,9 +24,10 @@ function OxCard({ item, idx, selection, onSelect }) {
               key={btn.id}
               type="button"
               onClick={() => onSelect(btn.id)}
-              className={`rounded-xl px-3 py-2 text-sm font-semibold transition ${btn.style} ${
-                active ? "ring-2 ring-white/60" : "ring-1 ring-white/10"
-              }`}
+              className={`ghost-button w-full text-sm font-semibold ${btn.textClass}`}
+              data-ghost-active={active}
+              data-ghost-size="lg"
+              style={{ "--ghost-color": btn.color }}
             >
               {btn.label}
             </button>

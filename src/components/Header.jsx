@@ -19,7 +19,9 @@ function Header({ user, onSignOut, signingOut = false }) {
               type="button"
               onClick={onSignOut}
               disabled={signingOut}
-              className="rounded-full bg-emerald-400/80 px-3 py-1 text-xs font-semibold text-emerald-950 transition hover:bg-emerald-300 disabled:opacity-60"
+              className="ghost-button text-xs text-emerald-100"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "52, 211, 153" }}
             >
               {signingOut ? "로그아웃 중..." : "로그아웃"}
             </button>

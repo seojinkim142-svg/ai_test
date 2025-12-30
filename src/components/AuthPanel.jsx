@@ -83,7 +83,8 @@ function AuthPanel({ user, onAuth }) {
           type="button"
           onClick={handleSignOut}
           disabled={loading}
-          className="rounded-full bg-emerald-500 px-3 py-1 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+          className="ghost-button text-sm text-emerald-100"
+          style={{ "--ghost-color": "52, 211, 153" }}
         >
           로그아웃
         </button>
@@ -103,7 +104,9 @@ function AuthPanel({ user, onAuth }) {
             type="button"
             onClick={() => handleProvider("google")}
             disabled={loading}
-            className="flex h-12 w-full max-w-xs items-center justify-center rounded-2xl border border-emerald-200/60 bg-white text-sm font-semibold text-slate-900 transition hover:bg-slate-100 disabled:opacity-60"
+            className="ghost-button h-12 w-full max-w-xs text-sm text-slate-100"
+            data-ghost-size="xl"
+            style={{ "--ghost-color": "226, 232, 240" }}
           >
             Google로 로그인
           </button>
@@ -111,7 +114,9 @@ function AuthPanel({ user, onAuth }) {
             type="button"
             onClick={() => handleProvider("kakao")}
             disabled={loading}
-            className="flex h-12 w-full max-w-xs items-center justify-center rounded-2xl bg-amber-300 text-sm font-semibold text-amber-950 transition hover:bg-amber-200 disabled:opacity-60"
+            className="ghost-button h-12 w-full max-w-xs text-sm text-amber-100"
+            data-ghost-size="xl"
+            style={{ "--ghost-color": "251, 191, 36" }}
           >
             카카오로 로그인
           </button>
@@ -119,7 +124,9 @@ function AuthPanel({ user, onAuth }) {
             type="button"
             onClick={() => setShowEmailForm(true)}
             disabled={loading}
-            className="flex h-12 w-full max-w-xs items-center justify-center rounded-2xl border border-emerald-200/60 bg-emerald-500 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+            className="ghost-button h-12 w-full max-w-xs text-sm text-emerald-100"
+            data-ghost-size="xl"
+            style={{ "--ghost-color": "52, 211, 153" }}
           >
             아이디 로그인
           </button>
@@ -151,14 +158,16 @@ function AuthPanel({ user, onAuth }) {
                 setError("");
                 setMessage("");
               }}
-              className="h-11 flex-1 rounded-2xl border border-slate-300/40 bg-slate-800 text-sm font-semibold text-slate-200 transition hover:bg-slate-700"
+              className="ghost-button h-11 flex-1 text-sm text-slate-200"
+              style={{ "--ghost-color": "148, 163, 184" }}
             >
               취소
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="h-11 flex-1 rounded-2xl bg-emerald-500 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-400 disabled:opacity-60"
+              className="ghost-button h-11 flex-1 text-sm text-emerald-100"
+              style={{ "--ghost-color": "52, 211, 153" }}
             >
               {isSignup ? "회원가입" : "로그인"}
             </button>
@@ -166,7 +175,9 @@ function AuthPanel({ user, onAuth }) {
           <button
             type="button"
             onClick={() => setIsSignup((prev) => !prev)}
-            className="text-xs font-semibold text-emerald-300 underline underline-offset-2"
+            className="ghost-button text-xs text-emerald-200"
+            data-ghost-size="sm"
+            style={{ "--ghost-color": "52, 211, 153" }}
           >
             {isSignup ? "이미 계정이 있으신가요? 로그인" : "계정이 없으신가요? 회원가입"}
           </button>

@@ -44,3 +44,58 @@ body {
   border-color: transparent !important;
   background: transparent !important;
 }
+
+.ghost-button {
+  --ghost-color: 226, 232, 240;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  background: transparent;
+  color: rgb(var(--ghost-color));
+  border: none;
+  border-radius: 0.75rem;
+  padding: 0.55rem 0.85rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: background-color 160ms ease, box-shadow 160ms ease, transform 160ms ease, color 160ms ease;
+}
+
+.ghost-button[data-ghost-size="lg"] {
+  padding: 0.8rem 1.05rem;
+}
+
+.ghost-button[data-ghost-size="sm"] {
+  padding: 0.35rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.ghost-button[data-ghost-size="xl"] {
+  padding: 0.95rem 1.15rem;
+}
+
+.ghost-button[data-ghost-active="true"] {
+  color: rgb(var(--ghost-color));
+  text-shadow: 0 0 12px rgba(var(--ghost-color), 0.65);
+}
+
+.ghost-button:hover:not(:disabled),
+.ghost-button:focus-visible:not(:disabled) {
+  box-shadow: 0 0 0 1px rgba(var(--ghost-color), 0.7);
+  background-color: rgba(var(--ghost-color), 0.12);
+}
+
+.ghost-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(var(--ghost-color), 0.6);
+}
+
+.ghost-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.ghost-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
