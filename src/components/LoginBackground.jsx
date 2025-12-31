@@ -2,8 +2,9 @@
 
 /**
  * 로그인 화면 배경용: 커서를 따라 몽우리 블롭이 부드럽게 움직입니다.
+ * theme: "dark" | "light"
  */
-function LoginBackground({ children, intensity = 80 }) {
+function LoginBackground({ children, intensity = 80, theme = "dark" }) {
   const blobARef = useRef(null);
   const blobBRef = useRef(null);
   const blobCRef = useRef(null);
@@ -62,27 +63,41 @@ function LoginBackground({ children, intensity = 80 }) {
     targetRef.current = { x: 0, y: 0 };
   }, [allowMotion]);
 
+  const isLight = theme === "light";
+
   return (
     <div
-      className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100"
+      className={`relative min-h-screen overflow-hidden ${isLight ? "bg-slate-50 text-slate-900" : "bg-slate-950 text-slate-100"}`}
       onPointerMove={allowMotion ? handleMove : undefined}
       onPointerLeave={allowMotion ? handleLeave : undefined}
     >
       <div className="pointer-events-none absolute inset-0">
-        <div className="absolute inset-0 bg-gradient-to-br from-emerald-900/30 via-slate-950 to-indigo-900/30" />
+        <div
+          className={`absolute inset-0 ${
+            isLight
+              ? "bg-gradient-to-br from-emerald-100/70 via-white to-indigo-100/60"
+              : "bg-gradient-to-br from-emerald-900/30 via-slate-950 to-indigo-900/30"
+          }`}
+        />
         <div
           ref={blobARef}
-          className="absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full bg-emerald-400/35 blur-3xl"
+          className={`absolute left-1/2 top-1/2 h-80 w-80 -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl ${
+            isLight ? "bg-emerald-300/30" : "bg-emerald-400/35"
+          }`}
         />
         <div
           ref={blobBRef}
-          className="absolute left-1/2 top-1/2 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-full bg-cyan-400/28 blur-3xl"
+          className={`absolute left-1/2 top-1/2 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl ${
+            isLight ? "bg-cyan-300/28" : "bg-cyan-400/28"
+          }`}
         />
         <div
           ref={blobCRef}
-          className="absolute left-1/2 top-1/2 h-52 w-52 -translate-x-1/2 -translate-y-1/2 rounded-full bg-indigo-500/22 blur-3xl"
+          className={`absolute left-1/2 top-1/2 h-52 w-52 -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl ${
+            isLight ? "bg-indigo-300/24" : "bg-indigo-500/22"
+          }`}
         />
-        <div className="absolute inset-0 bg-slate-950/40 backdrop-blur" />
+        <div className={`absolute inset-0 ${isLight ? "bg-white/40" : "bg-slate-950/40"} backdrop-blur`} />
       </div>
       <div className="relative z-10">{children}</div>
     </div>

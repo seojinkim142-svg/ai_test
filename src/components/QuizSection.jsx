@@ -24,13 +24,13 @@ function MultipleChoiceItem({ question, idx, selectedChoice, revealed, onSelect 
               className={`flex cursor-pointer items-start gap-2 rounded-xl px-3 py-2 text-sm ring-1 transition ${
                 isCorrectSelection
                   ? "bg-emerald-500/20 text-emerald-50 ring-emerald-400/60"
-                  : isWrongSelection
-                  ? "bg-red-500/10 text-red-100 ring-red-400/40"
-                  : "bg-white/5 text-slate-200 ring-white/5 hover:ring-emerald-300/40"
+                : isWrongSelection
+                ? "bg-red-500/10 text-red-100 ring-red-400/40"
+                : "bg-white/5 text-slate-200 ring-white/5 hover:ring-emerald-300/40"
               }`}
               onClick={() => onSelect(idx, cIdx)}
             >
-              <span className="font-semibold text-white/80">{LETTERS[cIdx] || "-"}</span>
+              <span className="choice-label font-semibold text-white/80">{LETTERS[cIdx] || "-"}</span>
               <span>{choice}</span>
             </li>
           );

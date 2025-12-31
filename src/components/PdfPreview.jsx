@@ -15,6 +15,8 @@ function PdfPreview({ pdfUrl, file, pageInfo, onPageChange }) {
   const [containerWidth, setContainerWidth] = useState(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const [thumbOffset, setThumbOffset] = useState(0);
+  const renderCacheRef = useRef(new Map());
+  const fileKeyRef = useRef(null);
 
   const setContainerNode = useCallback((node) => {
     containerRef.current = node;
@@ -38,6 +40,8 @@ function PdfPreview({ pdfUrl, file, pageInfo, onPageChange }) {
     let canceled = false;
     const loadPages = async () => {
       if (!file) {
+        renderCacheRef.current.clear();
+        fileKeyRef.current = null;
         setPages([]);
         setRenderError(false);
         setPdfDoc(null);
@@ -54,28 +58,44 @@ function PdfPreview({ pdfUrl, file, pageInfo, onPageChange }) {
         const initialCount = Math.min(pagesToRender, 3);
         const rendered = [];
 
-        for (let i = 1; i <= initialCount; i += 1) {
-          const page = await pdf.getPage(i);
+        const key = `${file.name || "file"}-${file.size || 0}-${file.lastModified || 0}`;
+        if (fileKeyRef.current !== key) {
+          renderCacheRef.current.clear();
+          fileKeyRef.current = key;
+        }
+
+        const renderPage = async (pageNumber) => {
+          const cached = renderCacheRef.current.get(pageNumber);
+          const page = await pdf.getPage(pageNumber);
           const baseViewport = page.getViewport({ scale: 1 });
-          const scale = containerWidth
-            ? Math.min(containerWidth / baseViewport.width, 1.5)
-            : 1.1;
+          const scale = containerWidth ? Math.min(containerWidth / baseViewport.width, 1.5) : 1.1;
           const viewport = page.getViewport({ scale });
+          const targetWidth = viewport.width;
+          if (cached && cached.width >= targetWidth - 1) {
+            return cached;
+          }
           const canvas = document.createElement("canvas");
           const context = canvas.getContext("2d");
           canvas.width = viewport.width;
           canvas.height = viewport.height;
           await page.render({ canvasContext: context, viewport }).promise;
-          if (canceled) return;
-          rendered.push({
-            pageNumber: i,
+          const renderedPage = {
+            pageNumber,
             src: canvas.toDataURL("image/png"),
             width: viewport.width,
             height: viewport.height,
             displayWidth: viewport.width,
             displayHeight: viewport.height,
             aspectRatio: viewport.width / viewport.height,
-          });
+          };
+          renderCacheRef.current.set(pageNumber, renderedPage);
+          return renderedPage;
+        };
+
+        for (let i = 1; i <= initialCount; i += 1) {
+          const renderedPage = await renderPage(i);
+          if (canceled) return;
+          rendered.push(renderedPage);
         }
         if (!canceled) setPages(rendered);
       } catch (err) {
@@ -109,27 +129,36 @@ function PdfPreview({ pdfUrl, file, pageInfo, onPageChange }) {
         const batchSize = 3;
         const end = Math.min(targetPages, startFrom + batchSize - 1);
         const rendered = [];
-        for (let i = startFrom; i <= end; i += 1) {
-          const page = await pdfDoc.getPage(i);
+        const renderPage = async (pageNumber) => {
+          const cached = renderCacheRef.current.get(pageNumber);
+          const page = await pdfDoc.getPage(pageNumber);
           const baseViewport = page.getViewport({ scale: 1 });
-          const scale = containerWidth
-            ? Math.min(containerWidth / baseViewport.width, 1.5)
-            : 1.1;
+          const scale = containerWidth ? Math.min(containerWidth / baseViewport.width, 1.5) : 1.1;
           const viewport = page.getViewport({ scale });
+          const targetWidth = viewport.width;
+          if (cached && cached.width >= targetWidth - 1) {
+            return cached;
+          }
           const canvas = document.createElement("canvas");
           const context = canvas.getContext("2d");
           canvas.width = viewport.width;
           canvas.height = viewport.height;
           await page.render({ canvasContext: context, viewport }).promise;
-          rendered.push({
-            pageNumber: i,
+          const renderedPage = {
+            pageNumber,
             src: canvas.toDataURL("image/png"),
             width: viewport.width,
             height: viewport.height,
             displayWidth: viewport.width,
             displayHeight: viewport.height,
             aspectRatio: viewport.width / viewport.height,
-          });
+          };
+          renderCacheRef.current.set(pageNumber, renderedPage);
+          return renderedPage;
+        };
+        for (let i = startFrom; i <= end; i += 1) {
+          const renderedPage = await renderPage(i);
+          rendered.push(renderedPage);
         }
         setPages((prev) => {
           const existingNumbers = new Set(prev.map((p) => p.pageNumber));

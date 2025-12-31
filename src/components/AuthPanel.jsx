@@ -74,7 +74,7 @@ function AuthPanel({ user, onAuth }) {
 
   if (user) {
     return (
-      <div className="flex items-center justify-between rounded-2xl border border-emerald-200/30 bg-slate-900/80 px-4 py-3 shadow-lg">
+      <div className="auth-card auth-card-logged flex items-center justify-between rounded-2xl border border-emerald-200/30 bg-slate-900/80 px-4 py-3 shadow-lg">
         <div>
           <p className="text-xs text-emerald-200/80">로그인됨</p>
           <p className="text-sm font-semibold text-slate-50">{user.email}</p>
@@ -93,7 +93,7 @@ function AuthPanel({ user, onAuth }) {
   }
 
   return (
-    <div className="flex w-full max-w-md flex-col items-center gap-5 rounded-3xl border border-emerald-300/40 bg-slate-950/90 px-8 pt-6 pb-8 text-slate-100 shadow-2xl shadow-black/50 backdrop-blur">
+    <div className="auth-card flex w-full max-w-md flex-col items-center gap-5 rounded-3xl border border-emerald-300/40 bg-slate-950/90 px-8 pt-6 pb-8 text-slate-100 shadow-2xl shadow-black/50 backdrop-blur">
       <div className="text-center leading-tight">
         <h1 className="text-xl font-extrabold tracking-tight text-emerald-300">ZEUSIAN.AI</h1>
       </div>

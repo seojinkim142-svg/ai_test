@@ -9,11 +9,13 @@ import OxSection from "./components/OxSection";
 import PdfPreview from "./components/PdfPreview";
 import QuizSection from "./components/QuizSection";
 import SummaryCard from "./components/SummaryCard";
+import PaymentPage from "./components/PaymentPage";
 import { generateQuiz, generateSummary, generateOxQuiz } from "./services/openai";
+import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
+import { useUserTier } from "./hooks/useUserTier";
 import {
   supabase,
   uploadPdfToStorage,
-  signOut as supabaseSignOut,
   saveBookmark,
   fetchBookmarks,
   deleteBookmark,
@@ -42,6 +44,7 @@ function App() {
   const [isLoadingQuiz, setIsLoadingQuiz] = useState(false);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
   const [isExportingSummary, setIsExportingSummary] = useState(false);
+  const [theme, setTheme] = useState("dark");
   const [summary, setSummary] = useState("");
   const [quizSets, setQuizSets] = useState([]);
   const [selectedChoices, setSelectedChoices] = useState({});
@@ -50,15 +53,15 @@ function App() {
   const [shortAnswerResult, setShortAnswerResult] = useState(null);
   const [oxItems, setOxItems] = useState(null);
   const [oxSelections, setOxSelections] = useState({});
+  const [oxExplanationOpen, setOxExplanationOpen] = useState({});
   const [isLoadingOx, setIsLoadingOx] = useState(false);
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [selectedFileId, setSelectedFileId] = useState(null);
   const [panelTab, setPanelTab] = useState("summary");
   const [splitPercent, setSplitPercent] = useState(50);
-  const [user, setUser] = useState(null);
-  const [authReady, setAuthReady] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [showPayment, setShowPayment] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [bookmarks, setBookmarks] = useState([]);
   const [bookmarkNote, setBookmarkNote] = useState("");
@@ -74,6 +77,10 @@ function App() {
   const isDraggingRef = useRef(false);
   const detailContainerRef = useRef(null);
   const summaryRef = useRef(null);
+  const { user, authReady, refreshSession, handleSignOut: authSignOut } = useSupabaseAuth();
+  const { tier, loadingTier } = useUserTier(user);
+  const isFreeTier = tier === "free";
+  const [usageCounts, setUsageCounts] = useState({ summary: 0, quiz: 0, ox: 0 });
 
   const computeFileHash = useCallback(async (file) => {
     const buffer = await file.arrayBuffer();
@@ -82,33 +89,42 @@ function App() {
     return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
   }, []);
 
+  const limits = useMemo(() => {
+    if (tier === "free") {
+      return { maxUploads: 4, maxSummary: 1, maxQuiz: 1, maxOx: 1 };
+    }
+    if (tier === "pro") {
+      return { maxUploads: Infinity, maxSummary: Infinity, maxQuiz: Infinity, maxOx: Infinity };
+    }
+    return { maxUploads: Infinity, maxSummary: Infinity, maxQuiz: Infinity, maxOx: Infinity };
+  }, [tier]);
+
+  const hasReached = useCallback(
+    (type) => {
+      if (!limits) return false;
+      if (limits[type] === Infinity) return false;
+      return usageCounts[type] >= limits[type];
+    },
+    [limits, usageCounts]
+  );
+
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => (prev === "light" ? "dark" : "light"));
+  }, []);
+
   const shortPreview = useMemo(
     () => (previewText.length > 700 ? `${previewText.slice(0, 700)}...` : previewText),
     [previewText]
   );
 
-  const refreshSession = useCallback(async () => {
-    if (!supabase) {
-      setAuthReady(true);
-      return;
-    }
-    const { data, error } = await supabase.auth.getSession();
-    if (!error) {
-      setUser(data.session?.user || null);
-    }
-    setAuthReady(true);
-  }, []);
-
   useEffect(() => {
-    refreshSession();
-    if (!supabase) return undefined;
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || null);
-    });
-    return () => {
-      data?.subscription?.unsubscribe();
-    };
-  }, [refreshSession]);
+    const root = document.documentElement;
+    if (theme === "light") {
+      root.classList.add("theme-light");
+    } else {
+      root.classList.remove("theme-light");
+    }
+  }, [theme]);
 
   const loadBookmarks = useCallback(
     async (docId) => {
@@ -250,7 +266,7 @@ function App() {
     setError("");
     setStatus("로그아웃 중...");
     try {
-      await supabaseSignOut();
+      await authSignOut();
       await refreshSession();
       setStatus("로그아웃 완료");
     } catch (err) {
@@ -259,7 +275,7 @@ function App() {
     } finally {
       setIsSigningOut(false);
     }
-  }, [refreshSession]);
+  }, [authSignOut, refreshSession]);
 
   useEffect(() => {
     if (user) {
@@ -378,6 +394,11 @@ function App() {
   const handleFileChange = async (event) => {
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
+    const nextCount = uploadedFiles.length + files.length;
+    if (limits.maxUploads !== Infinity && nextCount > limits.maxUploads) {
+      setError(`무료 티어에서는 업로드를 ${limits.maxUploads}개까지만 할 수 있습니다.`);
+      return;
+    }
 
     const withThumbs = await Promise.all(
       files.map(async (f) => {
@@ -584,6 +605,14 @@ function App() {
       setError("먼저 PDF를 업로드해주세요.");
       return;
     }
+    if (isFreeTier && quizSets.length > 0) {
+      setError("무료 티어에서는 퀴즈를 재생성할 수 없습니다.");
+      return;
+    }
+    if (!force && hasReached("maxQuiz")) {
+      setError("무료 티어에서는 퀴즈를 1회까지만 생성할 수 있습니다.");
+      return;
+    }
 
     if (!extractedText) {
       setError("PDF 텍스트가 아직 준비되지 않았습니다. 잠시 후에 시도해주세요.");
@@ -606,6 +635,7 @@ function App() {
       };
       setQuizSets((prev) => [...prev, newSet]);
       setStatus("문제 세트 생성 완료!");
+      setUsageCounts((prev) => ({ ...prev, quiz: prev.quiz + 1 }));
       persistArtifacts({ quiz });
     } catch (err) {
       setError(`문제 생성에 실패했습니다: ${err.message}`);
@@ -618,6 +648,14 @@ function App() {
     if (isLoadingQuiz) return;
     if (!file) {
       setError("먼저 PDF를 업로드해주세요.");
+      return;
+    }
+    if (isFreeTier) {
+      setError("무료 티어에서는 퀴즈를 재생성할 수 없습니다.");
+      return;
+    }
+    if (hasReached("maxQuiz")) {
+      setError("무료 티어에서는 퀴즈를 1회까지만 생성할 수 있습니다.");
       return;
     }
     if (!extractedText) {
@@ -675,6 +713,14 @@ function App() {
       setError("먼저 PDF를 업로드해주세요.");
       return;
     }
+    if (isFreeTier && summary) {
+      setError("무료 티어에서는 요약을 재생성할 수 없습니다.");
+      return;
+    }
+    if (hasReached("maxSummary")) {
+      setError("무료 티어에서는 요약을 1회까지만 생성할 수 있습니다.");
+      return;
+    }
     if (!extractedText) {
       setError("PDF 텍스트가 아직 준비되지 않았습니다. 잠시 후에 시도해주세요.");
       return;
@@ -687,6 +733,7 @@ function App() {
     try {
       const summarized = await generateSummary(extractedText);
       setSummary(summarized);
+      setUsageCounts((prev) => ({ ...prev, summary: prev.summary + 1 }));
       setStatus("요약 생성 완료!");
       persistArtifacts({ summary: summarized });
     } catch (err) {
@@ -703,6 +750,14 @@ function App() {
     if (isLoadingSummary) return;
     if (!file) {
       setError("먼저 PDF를 업로드해주세요.");
+      return;
+    }
+    if (isFreeTier) {
+      setError("무료 티어에서는 요약을 재생성할 수 없습니다.");
+      return;
+    }
+    if (hasReached("maxSummary")) {
+      setError("무료 티어에서는 요약을 1회까지만 생성할 수 있습니다.");
       return;
     }
     if (!extractedText) {
@@ -748,6 +803,10 @@ function App() {
       setError("먼저 PDF를 업로드해주세요.");
       return;
     }
+    if (!force && hasReached("maxOx")) {
+      setError("무료 티어에서는 O/X 퀴즈를 1회까지만 생성할 수 있습니다.");
+      return;
+    }
     if (!extractedText) {
       setError("PDF 텍스트가 아직 준비되지 않았습니다. 잠시 후에 시도해주세요.");
       return;
@@ -774,7 +833,9 @@ function App() {
 
       setOxItems(items);
       setOxSelections({});
+      setOxExplanationOpen({});
       setStatus("O/X 퀴즈 생성 완료!");
+      setUsageCounts((prev) => ({ ...prev, ox: prev.ox + 1 }));
       persistArtifacts({ ox });
     } catch (err) {
       setError(`O/X 퀴즈 생성에 실패했습니다: ${err.message}`);
@@ -789,13 +850,17 @@ function App() {
       setError("먼저 PDF를 업로드해주세요.");
       return;
     }
+    if (hasReached("maxOx")) {
+      setError("무료 티어에서는 O/X 퀴즈를 1회까지만 생성할 수 있습니다.");
+      return;
+    }
     if (!extractedText) {
       setError("PDF 텍스트가 아직 준비되지 않았습니다. 잠시 후에 시도해주세요.");
       return;
     }
     oxAutoRequestedRef.current = true;
     setOxItems(null);
-    setOxSelections({});
+      setOxSelections({});
     setStatus("O/X 퀴즈를 새로 생성하는 중입니다...");
     setError("");
     await persistArtifacts({ ox: null });
@@ -847,9 +912,9 @@ function App() {
 
   if (!authReady) {
     return (
-      <div className="relative min-h-screen overflow-hidden text-slate-100">
-        <main className="flex min-h-screen items-center justify-center bg-slate-950">
-          <p className="text-sm text-slate-200">로그인 상태 확인 중...</p>
+      <div className={`relative min-h-screen overflow-hidden ${theme === "light" ? "text-slate-900" : "text-slate-100"}`}>
+        <main className={`flex min-h-screen items-center justify-center ${theme === "light" ? "bg-slate-50" : "bg-slate-950"}`}>
+          <p className="text-sm text-slate-400">로그인 상태 확인 중...</p>
         </main>
       </div>
     );
@@ -857,7 +922,18 @@ function App() {
 
   if (!user) {
     return (
-      <LoginBackground>
+      <LoginBackground theme={theme}>
+        <div className="absolute right-4 top-4 z-20">
+          <button
+            type="button"
+            onClick={toggleTheme}
+            className="ghost-button text-xs text-slate-700"
+            data-ghost-size="sm"
+            style={{ "--ghost-color": theme === "light" ? "14, 116, 144" : "148, 163, 184" }}
+          >
+            {theme === "light" ? "라이트 모드" : "다크 모드"}
+          </button>
+        </div>
         <main className="mx-auto flex min-h-screen w-full flex-col items-center justify-center px-4 py-8">
           <div className="w-full max-w-md">
             <AuthPanel user={user} onAuth={refreshSession} />
@@ -935,21 +1011,24 @@ function App() {
                   <button
                     type="button"
                     onClick={() => requestSummary({ force: true })}
-                    disabled={isLoadingSummary || isLoadingText}
-                    className="ghost-button text-xs text-cyan-100"
-                    style={{ "--ghost-color": "34, 211, 238" }}
+                    disabled={isLoadingSummary || isLoadingText || (isFreeTier && summary)}
+                    title={isFreeTier && summary ? "무료 티어에서는 요약을 재생성할 수 없습니다." : undefined}
+                    className="ghost-button text-xs text-emerald-100"
+                    style={{ "--ghost-color": "16, 185, 129" }}
                   >
                     {isLoadingSummary ? "요약 생성 중..." : "요약 새로 생성"}
                   </button>
-                  <button
-                    type="button"
-                    onClick={regenerateSummary}
-                    disabled={isLoadingSummary || isLoadingText}
-                    className="ghost-button text-xs text-emerald-100"
-                    style={{ "--ghost-color": "52, 211, 153" }}
-                  >
-                    요약 재생성
-                  </button>
+                  {!isFreeTier && (
+                    <button
+                      type="button"
+                      onClick={regenerateSummary}
+                      disabled={isLoadingSummary || isLoadingText}
+                      className="ghost-button text-xs text-emerald-100"
+                      style={{ "--ghost-color": "52, 211, 153" }}
+                    >
+                      요약 재생성
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={handleExportSummaryPdf}
@@ -1111,23 +1190,26 @@ function App() {
                 <button
                   type="button"
                   onClick={requestQuestions}
-                  disabled={isLoadingQuiz || isLoadingText}
+                  disabled={isLoadingQuiz || isLoadingText || (isFreeTier && quizSets.length > 0)}
+                  title={isFreeTier && quizSets.length > 0 ? "무료 티어에서는 퀴즈를 재생성할 수 없습니다." : undefined}
                   className="ghost-button w-full text-sm text-emerald-100"
                   data-ghost-size="xl"
-                  style={{ "--ghost-color": "52, 211, 153" }}
+                  style={{ "--ghost-color": "16, 185, 129" }}
                 >
                   {isLoadingQuiz ? "퀴즈 생성 중..." : "퀴즈 5문제 더 생성하기"}
                 </button>
-                <button
-                  type="button"
-                  onClick={regenerateQuiz}
-                  disabled={isLoadingQuiz || isLoadingText}
-                  className="ghost-button w-full text-sm text-amber-100"
-                  data-ghost-size="xl"
-                  style={{ "--ghost-color": "251, 191, 36" }}
-                >
-                  {isLoadingQuiz ? "퀴즈 재생성 중..." : "퀴즈 재생성(덮어쓰기)"}
-                </button>
+                {!isFreeTier && (
+                  <button
+                    type="button"
+                    onClick={regenerateQuiz}
+                    disabled={isLoadingQuiz || isLoadingText}
+                    className="ghost-button w-full text-sm text-emerald-100"
+                    data-ghost-size="xl"
+                    style={{ "--ghost-color": "16, 185, 129" }}
+                  >
+                    {isLoadingQuiz ? "퀴즈 재생성 중..." : "퀴즈 재생성(덮어쓰기)"}
+                  </button>
+                )}
               </div>
             </>
           )}
@@ -1156,7 +1238,7 @@ function App() {
                   disabled={isLoadingOx || isLoadingText}
                   className="ghost-button w-full text-sm text-emerald-100"
                   data-ghost-size="xl"
-                  style={{ "--ghost-color": "52, 211, 153" }}
+                  style={{ "--ghost-color": "16, 185, 129" }}
                 >
                   {isLoadingOx ? "O/X 생성 중..." : "O/X 퀴즈 생성"}
                 </button>
@@ -1164,9 +1246,9 @@ function App() {
                   type="button"
                   onClick={regenerateOxQuiz}
                   disabled={isLoadingOx || isLoadingText}
-                  className="ghost-button w-full text-sm text-amber-100"
+                  className="ghost-button w-full text-sm text-emerald-100"
                   data-ghost-size="xl"
-                  style={{ "--ghost-color": "251, 191, 36" }}
+                  style={{ "--ghost-color": "16, 185, 129" }}
                 >
                   {isLoadingOx ? "O/X 재생성 중..." : "O/X 퀴즈 재생성(덮어쓰기)"}
                 </button>
@@ -1177,10 +1259,17 @@ function App() {
                   title="O/X 퀴즈"
                   items={oxItems}
                   selections={oxSelections}
+                  explanationsOpen={oxExplanationOpen}
                   onSelect={(qIdx, choice) =>
                     setOxSelections((prev) => ({
                       ...prev,
                       [qIdx]: choice,
+                    }))
+                  }
+                  onToggleExplanation={(qIdx) =>
+                    setOxExplanationOpen((prev) => ({
+                      ...prev,
+                      [qIdx]: !prev?.[qIdx],
                     }))
                   }
                 />
@@ -1231,7 +1320,8 @@ function App() {
   );
 
   return (
-    <div className="relative min-h-screen overflow-hidden text-slate-100">
+    <div className={`relative min-h-screen overflow-hidden ${theme === "light" ? "text-slate-900" : "text-slate-100"}`}>
+      {showPayment && <PaymentPage onClose={() => setShowPayment(false)} currentTier={tier} theme={theme} />}
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute -left-32 top-10 h-72 w-72 rounded-full bg-emerald-500/20 blur-3xl" />
         <div className="absolute right-[-80px] top-32 h-80 w-80 rounded-full bg-cyan-500/10 blur-3xl" />
@@ -1239,7 +1329,14 @@ function App() {
       </div>
 
       <main className="relative z-10 mx-auto flex w-full max-w-none flex-col gap-4 py-4">
-        <Header user={user} onSignOut={handleSignOut} signingOut={isSigningOut} />
+        <Header
+          user={user}
+          onSignOut={handleSignOut}
+          signingOut={isSigningOut}
+          theme={theme}
+          onOpenBilling={() => setShowPayment(true)}
+          onToggleTheme={toggleTheme}
+        />
         <div className="px-0">
           {!showDetail && renderStartPage()}
           {showDetail && renderDetailPage()}

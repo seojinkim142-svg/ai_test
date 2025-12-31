@@ -1,4 +1,4 @@
-function OxCard({ item, idx, selection, onSelect }) {
+function OxCard({ item, idx, selection, onSelect, showExplanation, onToggleExplanation }) {
   const revealed = selection === "o" || selection === "x";
   const isCorrect =
     revealed && ((selection === "o" && item.answer === true) || (selection === "x" && item.answer === false));
@@ -48,15 +48,28 @@ function OxCard({ item, idx, selection, onSelect }) {
       )}
 
       {item.explanation && (
-        <p className="mt-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-slate-200 ring-1 ring-white/10">
-          해설: {item.explanation}
-        </p>
+        <div className="mt-2 flex flex-col gap-2">
+          <button
+            type="button"
+            className="ghost-button text-xs text-slate-200"
+            data-ghost-size="sm"
+            style={{ "--ghost-color": "148, 163, 184" }}
+            onClick={onToggleExplanation}
+          >
+            {showExplanation ? "해설 숨기기" : "해설 보기"}
+          </button>
+          {showExplanation && (
+            <p className="rounded-lg bg-white/5 px-3 py-2 text-xs text-slate-200 ring-1 ring-white/10">
+              해설: {item.explanation}
+            </p>
+          )}
+        </div>
       )}
     </article>
   );
 }
 
-function OxSection({ title = "O/X 퀴즈", items, selections, onSelect }) {
+function OxSection({ title = "O/X 퀴즈", items, selections, onSelect, explanationsOpen, onToggleExplanation }) {
   const list = items || [];
 
   return (
@@ -79,6 +92,8 @@ function OxSection({ title = "O/X 퀴즈", items, selections, onSelect }) {
             item={item}
             selection={selections?.[idx]}
             onSelect={(choice) => onSelect?.(idx, choice)}
+            showExplanation={explanationsOpen?.[idx]}
+            onToggleExplanation={() => onToggleExplanation?.(idx)}
           />
         ))}
       </div>
