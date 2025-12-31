@@ -115,13 +115,10 @@ function App() {
 
   const refreshFolders = useCallback(
     (items) => {
-      const unique = Array.from(new Set((items || []).map((u) => u.folderId).filter(Boolean)));
-      setFolders(unique);
-      if (selectedFolderId !== "all" && !unique.includes(selectedFolderId)) {
-        setSelectedFolderId("all");
-      }
+      const fromUploads = Array.from(new Set((items || []).map((u) => u.folderId).filter(Boolean)));
+      setFolders((prev) => Array.from(new Set([...prev, ...fromUploads])));
     },
-    [selectedFolderId]
+    []
   );
 
   const handleCreateFolder = useCallback(
@@ -133,7 +130,7 @@ function App() {
       const trimmed = (name || "").trim();
       if (!trimmed) return;
       setFolders((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
-      setSelectedFolderId(trimmed);
+      setSelectedFolderId("all");
       setSelectedUploadIds([]);
     },
     [isFolderFeatureEnabled]
@@ -210,10 +207,6 @@ function App() {
   const shortPreview = useMemo(
     () => (previewText.length > 700 ? `${previewText.slice(0, 700)}...` : previewText),
     [previewText]
-  );
-  const visibleUploads = useMemo(
-    () => (selectedFolderId === "all" ? uploadedFiles : uploadedFiles.filter((u) => u.folderId === selectedFolderId)),
-    [uploadedFiles, selectedFolderId]
   );
 
   useEffect(() => {
@@ -1061,7 +1054,7 @@ function App() {
         pageInfo={pageInfo}
         isLoadingText={isLoadingText}
         thumbnailUrl={thumbnailUrl}
-        uploadedFiles={visibleUploads}
+        uploadedFiles={uploadedFiles}
         onSelectFile={handleSelectFile}
         onFileChange={handleFileChange}
         selectedFileId={selectedFileId}

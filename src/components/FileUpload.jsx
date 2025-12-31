@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import FolderDialog from "./FolderDialog";
 
 const UNSORTED_ID = "unsorted";
@@ -99,6 +99,59 @@ function PdfTile({
   );
 }
 
+function FolderTile({ name, count, active, onClick, onDelete, onDragOver, onDrop, canDrop, onAdd }) {
+  return (
+    <div
+      className={`group flex h-full min-h-[190px] w-full flex-col overflow-hidden rounded-2xl border bg-slate-900/70 text-left shadow-lg shadow-black/30 ring-1 transition hover:-translate-y-1 hover:border-emerald-300/50 hover:ring-emerald-300/40 sm:w-[260px] sm:flex-shrink-0 ${
+        active ? "border-emerald-300/60 ring-emerald-300/50" : "border-white/10 ring-white/5"
+      } ${canDrop ? "cursor-pointer" : ""}`}
+      onClick={onClick}
+      onDragOver={(e) => {
+        if (!canDrop) return;
+        e.preventDefault();
+      }}
+      onDrop={(e) => {
+        if (!canDrop) return;
+        onDrop?.(e);
+      }}
+    >
+      <div className="flex flex-1 flex-col justify-between px-4 py-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/15 text-xl text-emerald-200">
+            📁
+          </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete?.();
+            }}
+            className="flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-white/5 text-[11px] text-slate-200 opacity-80 transition hover:bg-white/10 hover:text-white"
+          >
+            ×
+          </button>
+        </div>
+        <div className="mt-4">
+          <p className="truncate text-base font-semibold text-white">{name}</p>
+          <p className="text-xs text-slate-300">{count}개 파일</p>
+          {active && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onAdd?.();
+              }}
+              className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-emerald-100 underline underline-offset-4 hover:text-emerald-50"
+            >
+              이 폴더에 파일 추가
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FileUpload({
   file,
   pageInfo,
@@ -119,18 +172,13 @@ function FileUpload({
   onClearSelection,
   isFolderFeatureEnabled = false,
 }) {
-  const [newFolder, setNewFolder] = useState("");
   const [moveTarget, setMoveTarget] = useState(UNSORTED_ID);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const fileInputRef = useRef(null);
   const [showFolderDialog, setShowFolderDialog] = useState(false);
 
   const folderItems = useMemo(
-    () => [
-      { id: "all", label: "전체" },
-      { id: UNSORTED_ID, label: "정리 안 됨" },
-      ...folders.map((f) => ({ id: f, label: f })),
-    ],
+    () => folders.map((f) => ({ id: f, label: f })),
     [folders]
   );
 
@@ -142,75 +190,40 @@ function FileUpload({
     onMoveUploads?.([uploadId], target);
   };
 
+  const handleSelectFolder = (folderId) => {
+    const next = selectedFolderId === folderId ? "all" : folderId;
+    onSelectFolder?.(next);
+    onClearSelection?.();
+  };
+
+  const visibleUploads = useMemo(() => uploadedFiles, [uploadedFiles]);
+
+  const folderCounts = useMemo(() => {
+    const map = new Map();
+    uploadedFiles.forEach((u) => {
+      if (!u.folderId) return;
+      map.set(u.folderId, (map.get(u.folderId) || 0) + 1);
+    });
+    return map;
+  }, [uploadedFiles]);
+
+  useEffect(() => {
+    if (selectedFolderId && selectedFolderId !== "all") {
+      setMoveTarget(selectedFolderId);
+    } else if (folders.length > 0) {
+      setMoveTarget(folders[0]);
+    } else {
+      setMoveTarget(UNSORTED_ID);
+    }
+  }, [selectedFolderId, folders]);
+
   const hasSelection = selectedUploadIds.length > 0;
 
   return (
     <div className="col-span-2 flex flex-col gap-4">
-      <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-100 ring-1 ring-white/10">
+      <div className="rounded-2xl bg-transparent px-0 py-0 text-sm text-slate-100">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-wrap gap-2">
-            {folderItems.map((folder) => {
-              const active = selectedFolderId === folder.id;
-              const canDrop = isFolderFeatureEnabled && folder.id !== "all";
-              return (
-                <div
-                  key={folder.id}
-                  onClick={() => onSelectFolder?.(folder.id)}
-                  onDragOver={(e) => {
-                    if (!canDrop) return;
-                    e.preventDefault();
-                  }}
-                  onDrop={(e) => {
-                    if (!canDrop) return;
-                    handleDrop(e, folder.id);
-                  }}
-                  className={`flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                    active ? "border-emerald-300 bg-emerald-500/10 text-emerald-100" : "border-white/10 bg-white/5 text-slate-200"
-                  } ${canDrop ? "cursor-pointer" : ""}`}
-                >
-                  <span>{folder.label}</span>
-                  {folder.id !== "all" && folder.id !== UNSORTED_ID && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeleteFolder?.(folder.id);
-                      }}
-                      className="text-[10px] text-slate-300 hover:text-red-300"
-                    >
-                      삭제
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {isFolderFeatureEnabled ? (
-            <div className="flex flex-wrap gap-2">
-              <input
-                type="text"
-                value={newFolder}
-                onChange={(e) => setNewFolder(e.target.value)}
-                placeholder="새 폴더 이름"
-                className="h-9 rounded-xl border border-white/10 bg-white/5 px-3 text-xs text-slate-100 outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  onCreateFolder?.(newFolder);
-                  setNewFolder("");
-                }}
-                className="ghost-button text-xs text-emerald-100"
-                data-ghost-size="sm"
-                style={{ "--ghost-color": "52, 211, 153" }}
-              >
-                폴더 생성
-              </button>
-            </div>
-          ) : (
-            <p className="text-xs text-slate-300">폴더 기능은 Pro/Premium에서 제공됩니다.</p>
-          )}
+          {!isFolderFeatureEnabled && <p className="text-xs text-slate-300">폴더 기능은 Pro/Premium에서 제공됩니다.</p>}
         </div>
 
         {hasSelection && isFolderFeatureEnabled && (
@@ -287,12 +300,30 @@ function FileUpload({
             </div>
           )}
         </div>
-        {uploadedFiles.length === 0 && (
+        {isFolderFeatureEnabled &&
+          folderItems.map((folder) => {
+            const active = selectedFolderId === folder.id;
+            return (
+              <FolderTile
+                key={folder.id}
+                name={folder.label}
+                count={folderCounts.get(folder.id) || 0}
+                active={active}
+                canDrop
+                onClick={() => handleSelectFolder(folder.id)}
+                onDelete={() => onDeleteFolder?.(folder.id)}
+                onDrop={(e) => handleDrop(e, folder.id)}
+                onAdd={() => fileInputRef.current?.click()}
+              />
+            );
+          })}
+
+        {visibleUploads.length === 0 && uploadedFiles.length === 0 && (
           <div className="flex min-h-[170px] w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sm text-slate-300 ring-1 ring-white/5 sm:w-[260px] sm:flex-shrink-0">
             업로드한 PDF가 카드로 표시됩니다.
           </div>
         )}
-        {uploadedFiles.map((item) => {
+        {visibleUploads.map((item) => {
           const isSelected = selectedUploadIds.includes(item.id);
           const isActive = selectedFileId === item.id;
           return (
@@ -318,6 +349,7 @@ function FileUpload({
         onClose={() => setShowFolderDialog(false)}
         onSubmit={(name) => {
           onCreateFolder?.(name);
+          handleSelectFolder(name);
           setShowFolderDialog(false);
         }}
       />
