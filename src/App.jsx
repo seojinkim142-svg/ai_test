@@ -28,6 +28,7 @@ import {
   updateUploadThumbnail,
   fetchDocArtifacts,
   saveDocArtifacts,
+  updateUploadFolder,
 } from "./services/supabase";
 import { extractPdfText, generatePdfThumbnail } from "./utils/pdf";
 import { exportElementToPdf } from "./utils/pdfExport";
@@ -80,7 +81,11 @@ function App() {
   const { user, authReady, refreshSession, handleSignOut: authSignOut } = useSupabaseAuth();
   const { tier, loadingTier } = useUserTier(user);
   const isFreeTier = tier === "free";
+  const isFolderFeatureEnabled = !isFreeTier;
   const [usageCounts, setUsageCounts] = useState({ summary: 0, quiz: 0, ox: 0 });
+  const [folders, setFolders] = useState([]);
+  const [selectedFolderId, setSelectedFolderId] = useState("all");
+  const [selectedUploadIds, setSelectedUploadIds] = useState([]);
 
   const computeFileHash = useCallback(async (file) => {
     const buffer = await file.arrayBuffer();
@@ -108,6 +113,96 @@ function App() {
     [limits, usageCounts]
   );
 
+  const refreshFolders = useCallback(
+    (items) => {
+      const unique = Array.from(new Set((items || []).map((u) => u.folderId).filter(Boolean)));
+      setFolders(unique);
+      if (selectedFolderId !== "all" && !unique.includes(selectedFolderId)) {
+        setSelectedFolderId("all");
+      }
+    },
+    [selectedFolderId]
+  );
+
+  const handleCreateFolder = useCallback(
+    (name) => {
+      if (!isFolderFeatureEnabled) {
+        setError("폴더 기능은 Pro/Premium에서만 사용할 수 있습니다.");
+        return;
+      }
+      const trimmed = (name || "").trim();
+      if (!trimmed) return;
+      setFolders((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
+      setSelectedFolderId(trimmed);
+      setSelectedUploadIds([]);
+    },
+    [isFolderFeatureEnabled]
+  );
+
+  const handleDeleteFolder = useCallback(
+    (folderId) => {
+      if (!isFolderFeatureEnabled) return;
+      if (!folderId || folderId === "all") return;
+      const hasFiles = uploadedFiles.some((u) => u.folderId === folderId);
+      if (hasFiles) {
+        setError("폴더를 삭제하려면 먼저 파일을 이동하거나 삭제하세요.");
+        return;
+      }
+      setFolders((prev) => prev.filter((f) => f !== folderId));
+      if (selectedFolderId === folderId) {
+        setSelectedFolderId("all");
+      }
+    },
+    [isFolderFeatureEnabled, uploadedFiles, selectedFolderId]
+  );
+
+  const handleSelectFolder = useCallback((folderId) => {
+    setSelectedFolderId(folderId);
+    setSelectedUploadIds([]);
+  }, []);
+
+  const handleToggleUploadSelect = useCallback(
+    (uploadId) => {
+      if (!isFolderFeatureEnabled) return;
+      setSelectedUploadIds((prev) =>
+        prev.includes(uploadId) ? prev.filter((id) => id !== uploadId) : [...prev, uploadId]
+      );
+    },
+    [isFolderFeatureEnabled]
+  );
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedUploadIds([]);
+  }, []);
+
+  const handleMoveUploadsToFolder = useCallback(
+    async (uploadIds, targetFolderId) => {
+      if (!isFolderFeatureEnabled) return;
+      if (!uploadIds || uploadIds.length === 0) return;
+      if (!user) {
+        setError("로그인 후 이용해주세요.");
+        return;
+      }
+      try {
+        await updateUploadFolder({ userId: user.id, uploadIds, folderId: targetFolderId });
+        let nextUploads = [];
+        setUploadedFiles((prev) => {
+          const updated = prev.map((item) =>
+            uploadIds.includes(item.id) ? { ...item, folderId: targetFolderId || null } : item
+          );
+          nextUploads = updated;
+          return updated;
+        });
+        refreshFolders(nextUploads);
+        setSelectedUploadIds([]);
+        setStatus("폴더로 이동했습니다.");
+      } catch (err) {
+        setError(`폴더 이동에 실패했습니다: ${err.message}`);
+      }
+    },
+    [isFolderFeatureEnabled, user, uploadedFiles, refreshFolders]
+  );
+
   const toggleTheme = useCallback(() => {
     setTheme((prev) => (prev === "light" ? "dark" : "light"));
   }, []);
@@ -115,6 +210,10 @@ function App() {
   const shortPreview = useMemo(
     () => (previewText.length > 700 ? `${previewText.slice(0, 700)}...` : previewText),
     [previewText]
+  );
+  const visibleUploads = useMemo(
+    () => (selectedFolderId === "all" ? uploadedFiles : uploadedFiles.filter((u) => u.folderId === selectedFolderId)),
+    [uploadedFiles, selectedFolderId]
   );
 
   useEffect(() => {
@@ -166,6 +265,8 @@ function App() {
     async () => {
       if (!supabase || !user) {
         setUploadedFiles([]);
+        setFolders([]);
+        setSelectedFolderId("all");
         return;
       }
       try {
@@ -180,13 +281,15 @@ function App() {
           thumbnail: u.thumbnail || null,
           remote: true,
           hash: u.file_hash || null,
+          folderId: u.folder_id || null,
         }));
         setUploadedFiles(mapped);
+        refreshFolders(mapped);
       } catch (err) {
         setError(`업로드 이력 불러오기 실패: ${err.message}`);
       }
     },
-    [user]
+    [user, refreshFolders]
   );
 
   const loadArtifacts = useCallback(
@@ -394,6 +497,7 @@ function App() {
   const handleFileChange = async (event) => {
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
+    const activeFolderId = isFolderFeatureEnabled && selectedFolderId !== "all" ? selectedFolderId : null;
     const nextCount = uploadedFiles.length + files.length;
     if (limits.maxUploads !== Infinity && nextCount > limits.maxUploads) {
       setError(`무료 티어에서는 업로드를 ${limits.maxUploads}개까지만 할 수 있습니다.`);
@@ -410,6 +514,7 @@ function App() {
           size: f.size,
           hash,
           thumbnail: thumb,
+          folderId: activeFolderId,
         };
       })
     );
@@ -451,6 +556,7 @@ function App() {
             bucket: uploaded.bucket,
             thumbnail: record.thumbnail || item.thumbnail,
             hash: record.file_hash || item.hash,
+            folderId: record.folder_id || activeFolderId || null,
           };
         } catch (err) {
           setError(`클라우드 업로드 실패: ${err.message}`);
@@ -459,7 +565,11 @@ function App() {
       })
     );
 
-    setUploadedFiles((prev) => [...prev, ...withUploads]);
+    setUploadedFiles((prev) => {
+      const merged = [...prev, ...withUploads];
+      refreshFolders(merged);
+      return merged;
+    });
     setStatus("업로드 목록에서 썸네일을 선택해 요약/퀴즈를 시작하세요.");
   };
 
@@ -497,6 +607,7 @@ function App() {
     setArtifacts(null);
     resetQuizState();
     setStatus("업로드 목록에서 썸네일을 선택해 요약/퀴즈를 시작하세요.");
+    setSelectedUploadIds([]);
   }, [pdfUrl]);
   const uploadedFilesRef = useRef(uploadedFiles);
   const goBackToListRef = useRef(goBackToList);
@@ -950,10 +1061,20 @@ function App() {
         pageInfo={pageInfo}
         isLoadingText={isLoadingText}
         thumbnailUrl={thumbnailUrl}
-        uploadedFiles={uploadedFiles}
+        uploadedFiles={visibleUploads}
         onSelectFile={handleSelectFile}
         onFileChange={handleFileChange}
         selectedFileId={selectedFileId}
+        folders={folders}
+        selectedFolderId={selectedFolderId}
+        onSelectFolder={handleSelectFolder}
+        onCreateFolder={handleCreateFolder}
+        onDeleteFolder={handleDeleteFolder}
+        selectedUploadIds={selectedUploadIds}
+        onToggleUploadSelect={handleToggleUploadSelect}
+        onMoveUploads={handleMoveUploadsToFolder}
+        onClearSelection={handleClearSelection}
+        isFolderFeatureEnabled={isFolderFeatureEnabled}
       />
     </section>
   );

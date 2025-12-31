@@ -153,7 +153,7 @@ export async function deleteFlashcard({ userId, cardId }) {
   if (error) throw error;
 }
 
-export async function saveUploadMetadata({ userId, fileName, fileSize, storagePath, bucket, thumbnail, fileHash }) {
+export async function saveUploadMetadata({ userId, fileName, fileSize, storagePath, bucket, thumbnail, fileHash, folderId }) {
   const client = requireSupabase();
   requireUser(userId);
   const payload = {
@@ -164,6 +164,7 @@ export async function saveUploadMetadata({ userId, fileName, fileSize, storagePa
     bucket: bucket || supabaseBucket,
     thumbnail: thumbnail || null,
     file_hash: fileHash || null,
+    folder_id: folderId || null,
   };
   const { data, error } = await client.from(UPLOADS_TABLE).insert(payload).select().single();
   if (error) throw error;
@@ -198,6 +199,20 @@ export async function updateUploadThumbnail({ id, thumbnail }) {
     .eq("id", id);
   if (error) throw error;
   return null;
+}
+
+export async function updateUploadFolder({ userId, uploadIds = [], folderId = null }) {
+  const client = requireSupabase();
+  requireUser(userId);
+  if (!Array.isArray(uploadIds) || uploadIds.length === 0) return [];
+  const { data, error } = await client
+    .from(UPLOADS_TABLE)
+    .update({ folder_id: folderId || null })
+    .in("id", uploadIds)
+    .eq("user_id", userId)
+    .select();
+  if (error) throw error;
+  return data || [];
 }
 
 export async function fetchDocArtifacts({ userId, docId }) {
