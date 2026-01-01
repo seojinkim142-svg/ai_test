@@ -490,7 +490,7 @@ function App() {
   const handleFileChange = async (event) => {
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
-    const activeFolderId = isFolderFeatureEnabled && selectedFolderId !== "all" ? selectedFolderId : null;
+    const activeFolderId = null; // 새 업로드는 기본적으로 폴더 미지정
     const nextCount = uploadedFiles.length + files.length;
     if (limits.maxUploads !== Infinity && nextCount > limits.maxUploads) {
       setError(`무료 티어에서는 업로드를 ${limits.maxUploads}개까지만 할 수 있습니다.`);
@@ -631,6 +631,17 @@ function App() {
     },
     [user, selectedFileId, artifacts]
   );
+
+  const handleManualSave = useCallback(async () => {
+    const currentQuiz = quizSets[0]?.questions || null;
+    const currentOx = oxItems ? { items: oxItems } : null;
+    await persistArtifacts({
+      summary: summary || null,
+      quiz: currentQuiz,
+      ox: currentOx,
+    });
+    setStatus("저장 완료");
+  }, [quizSets, oxItems, summary, persistArtifacts]);
 
   useEffect(() => {
     uploadedFilesRef.current = uploadedFiles;
@@ -1090,8 +1101,8 @@ function App() {
         />
       </div>
 
-      <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
-        <div className="flex gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
+        <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
+        <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
           {[
             { id: "summary", label: "요약" },
             { id: "quiz", label: "퀴즈" },
@@ -1114,6 +1125,17 @@ function App() {
               </button>
             );
           })}
+          <div className="ml-auto flex items-center">
+            <button
+              type="button"
+              onClick={handleManualSave}
+              className="ghost-button text-xs text-emerald-100"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "52, 211, 153" }}
+            >
+              저장
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-auto pr-1 pb-1">
