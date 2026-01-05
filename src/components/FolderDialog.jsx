@@ -4,7 +4,7 @@ function FolderDialog({ open, onClose, onSubmit }) {
   return (
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 px-4 py-6 backdrop-blur-sm">
       <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900/90 p-5 text-slate-100 shadow-2xl ring-1 ring-white/15">
-        <h3 className="text-lg font-semibold text-white">새 폴더 만들기</h3>
+        <h3 className="text-lg font-semibold text-white">폴더 만들기</h3>
         <p className="mt-1 text-sm text-slate-300">폴더 이름을 입력하세요.</p>
         <form
           className="mt-4 space-y-3"
@@ -21,7 +21,7 @@ function FolderDialog({ open, onClose, onSubmit }) {
             type="text"
             autoFocus
             className="w-full rounded-xl border border-white/10 bg-slate-800/80 px-3 py-2 text-sm text-slate-100 outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40"
-            placeholder="예) 1주차 강의, 중간고사 대비"
+            placeholder="예: 1주차 강의, 중간고사 요약"
           />
           <div className="flex justify-end gap-2">
             <button

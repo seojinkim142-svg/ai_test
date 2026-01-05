@@ -4,8 +4,6 @@ import UploadTile from "./UploadTile";
 import PdfTile from "./PdfTile";
 import FolderTile from "./FolderTile";
 
-const UNSORTED_ID = "unsorted";
-
 function FileUpload({
   file,
   pageInfo,
@@ -25,72 +23,106 @@ function FileUpload({
   onMoveUploads,
   onClearSelection,
   isFolderFeatureEnabled = false,
+  onDeleteUpload,
 }) {
   const [showAddMenu, setShowAddMenu] = useState(false);
+  const addMenuRef = useRef(null);
   const fileInputRef = useRef(null);
   const [showFolderDialog, setShowFolderDialog] = useState(false);
-  const [draggingUploadId, setDraggingUploadId] = useState(null);
-  const [dragOverFolder, setDragOverFolder] = useState(null);
   const [folderModalId, setFolderModalId] = useState(null);
+  const [uploadTargetFolderId, setUploadTargetFolderId] = useState(null); // 업로드 시 적용할 폴더 ID
+  const [contextMenu, setContextMenu] = useState(null); // { x, y, uploadId }
+  const contextMenuRef = useRef(null);
+  const selectedFolderIdStr = selectedFolderId?.toString() || null;
+  const normalizeFolderId = (fid) => (fid ? fid.toString() : null);
 
   const folderItems = useMemo(
-    () => folders.map((f) => ({ id: f, label: f })),
+    () => folders.map((f) => ({ id: f.id, label: f.name || f.id })),
     [folders]
   );
 
-  const handleDrop = (event, folderId) => {
-    event.preventDefault();
-    event.stopPropagation();
-    const uploadId =
-      event.dataTransfer.getData("text/upload-id") ||
-      event.dataTransfer.getData("text/plain") ||
-      draggingUploadId;
-    if (!uploadId) return;
-    const target = folderId === UNSORTED_ID ? null : folderId;
-    onMoveUploads?.([uploadId], target);
-    setDragOverFolder(null);
-    setDraggingUploadId(null);
-  };
-
   const handleOpenFolderModal = (folderId) => {
     setFolderModalId(folderId);
-    onSelectFolder?.(folderId);
   };
 
   const handleCloseFolderModal = () => {
     setFolderModalId(null);
-  };
-
-  const handleDragStartUpload = (uploadId) => {
-    setDraggingUploadId(uploadId);
-  };
-
-  const handleDragEndUpload = () => {
-    setDraggingUploadId(null);
-    setDragOverFolder(null);
+    onSelectFolder?.("all");
+    setUploadTargetFolderId(null);
   };
 
   const visibleUploads = useMemo(() => {
     if (!isFolderFeatureEnabled) return uploadedFiles;
-    if (selectedFolderId === "all") return uploadedFiles.filter((u) => !u.folderId);
-    // 기본 리스트에서는 폴더 항목을 숨김
-    return [];
-  }, [uploadedFiles, isFolderFeatureEnabled, selectedFolderId]);
+    const selected = selectedFolderIdStr;
+    return uploadedFiles.filter((u) => {
+      const fid = normalizeFolderId(u.folderId);
+      if (selected === "all") return !fid;
+      return fid === selected;
+    });
+  }, [uploadedFiles, isFolderFeatureEnabled, selectedFolderIdStr]);
+  const hasAnyUploads = uploadedFiles.length > 0;
+  const showEmptyState = visibleUploads.length === 0 && (selectedFolderIdStr !== "all" || !hasAnyUploads);
 
-  const folderItemsList = useMemo(
-    () => (folderModalId ? uploadedFiles.filter((u) => u.folderId === folderModalId) : []),
-    [uploadedFiles, folderModalId]
-  );
+  const folderItemsList = useMemo(() => {
+    if (!folderModalId) return [];
+    const target = normalizeFolderId(folderModalId);
+    return uploadedFiles.filter((u) => {
+      const fid = normalizeFolderId(u.folderId);
+      return fid === target;
+    });
+  }, [uploadedFiles, folderModalId]);
   const hasFolderItems = folderItemsList.length > 0;
+  const folderModalName = useMemo(
+    () => folderItems.find((f) => f.id === folderModalId)?.label || folderModalId,
+    [folderItems, folderModalId]
+  );
 
   const folderCounts = useMemo(() => {
     const map = new Map();
     uploadedFiles.forEach((u) => {
       if (!u.folderId) return;
-      map.set(u.folderId, (map.get(u.folderId) || 0) + 1);
+      const key = u.folderId.toString();
+      map.set(key, (map.get(key) || 0) + 1);
     });
     return map;
   }, [uploadedFiles]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      // 오른쪽 클릭으로 띄운 컨텍스트 메뉴가 즉시 닫히지 않도록 우클릭은 무시
+      if (e.button === 2) return;
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target)) {
+        setShowAddMenu(false);
+      }
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target)) {
+        setContextMenu(null);
+      }
+    };
+    const handleEsc = (e) => {
+      if (e.key === "Escape") {
+        setContextMenu(null);
+        setShowAddMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEsc);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEsc);
+    };
+  }, []);
+
+  const handleContextMenuUpload = (event, item) => {
+    if (!isFolderFeatureEnabled) return;
+    event.preventDefault();
+    setContextMenu({ x: event.clientX, y: event.clientY, uploadId: item.id });
+  };
+
+  const handleContextAction = (folderId) => {
+    if (!contextMenu?.uploadId) return;
+    onMoveUploads?.([contextMenu.uploadId], folderId || null);
+    setContextMenu(null);
+  };
 
   return (
     <div className="col-span-2 flex flex-col gap-4">
@@ -101,11 +133,13 @@ function FileUpload({
       </div>
 
       <div className="relative mt-2 flex flex-wrap gap-3">
-        <div className="relative">
+        <div className="relative" ref={addMenuRef}>
           <UploadTile
             onFileChange={(e) => {
               setShowAddMenu(false);
-              onFileChange?.(e);
+              const target = uploadTargetFolderId && uploadTargetFolderId !== "all" ? uploadTargetFolderId : null;
+              setUploadTargetFolderId(null);
+              onFileChange?.(e, target);
             }}
             onOpenMenu={() => setShowAddMenu((prev) => !prev)}
             inputRef={fileInputRef}
@@ -129,6 +163,7 @@ function FileUpload({
                 onClick={() => {
                   if (!isFolderFeatureEnabled) return;
                   setShowFolderDialog(true);
+                  setUploadTargetFolderId(null);
                   setShowAddMenu(false);
                 }}
               >
@@ -139,28 +174,27 @@ function FileUpload({
         </div>
         {isFolderFeatureEnabled &&
           folderItems.map((folder) => {
-            const active = selectedFolderId === folder.id;
+            const active = selectedFolderId?.toString() === folder.id?.toString();
             return (
               <FolderTile
                 key={folder.id}
                 name={folder.label}
                 count={folderCounts.get(folder.id) || 0}
                 active={active}
-                canDrop
+                canDrop={false}
                 onClick={() => handleOpenFolderModal(folder.id)}
                 onDelete={() => onDeleteFolder?.(folder.id)}
-                onDragEnter={() => setDragOverFolder(folder.id)}
-                onDragLeave={() => setDragOverFolder(null)}
-                onDrop={(e) => handleDrop(e, folder.id)}
                 onAdd={() => fileInputRef.current?.click()}
-                dragHighlight={dragOverFolder === folder.id}
+                dragHighlight={false}
               />
             );
           })}
 
-        {visibleUploads.length === 0 && uploadedFiles.length === 0 && (
+        {showEmptyState && (
           <div className="flex min-h-[170px] w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sm text-slate-300 ring-1 ring-white/5 sm:w-[260px] sm:flex-shrink-0">
-            업로드한 PDF가 카드로 표시됩니다.
+            {selectedFolderId === "all"
+              ? "파일이 없습니다."
+              : "이 폴더에 파일이 없습니다."}
           </div>
         )}
         {visibleUploads.map((item) => {
@@ -179,9 +213,11 @@ function FileUpload({
               selected={false}
               onToggleSelect={undefined}
               draggable={isFolderFeatureEnabled}
-              onDragStart={(uploadId) => handleDragStartUpload(uploadId)}
-              onDragEnd={handleDragEndUpload}
+              onDragStart={undefined}
+              onDragEnd={undefined}
               onProceed={() => onSelectFile?.(item)}
+              onContextMenu={(e) => handleContextMenuUpload(e, item)}
+              onDelete={() => onDeleteUpload?.(item)}
             />
           );
         })}
@@ -190,29 +226,46 @@ function FileUpload({
         open={showFolderDialog}
         onClose={() => setShowFolderDialog(false)}
         onSubmit={(name) => {
-          onCreateFolder?.(name);
-          handleSelectFolder(name);
-          setShowFolderDialog(false);
+          try {
+            onCreateFolder?.(name);
+            onSelectFolder?.("all");
+          } finally {
+            setShowFolderDialog(false);
+          }
         }}
       />
 
       {folderModalId && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60 px-4 py-8 backdrop-blur-sm">
-          <div className="relative flex w-full max-w-6xl flex-col rounded-3xl border border-white/10 bg-slate-900/95 p-6 text-slate-100 shadow-2xl shadow-black/40 aspect-[4/3] max-h-[80vh]">
+          <div className="relative flex w-full max-w-6xl flex-col rounded-3xl border border-white/10 bg-slate-900/95 p-6 text-slate-100 shadow-2xl shadow-black/40 max-h-[80vh] min-h-[320px]">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
                 <p className="text-xs uppercase tracking-wide text-emerald-300/80">Folder</p>
-                <h3 className="text-xl font-semibold">{folderModalId}</h3>
+                <h3 className="text-xl font-semibold">{folderModalName}</h3>
               </div>
-              <button
-                type="button"
-                onClick={handleCloseFolderModal}
-                className="ghost-button text-sm text-slate-200"
-                data-ghost-size="sm"
-                style={{ "--ghost-color": "148, 163, 184" }}
-              >
-                닫기
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUploadTargetFolderId(folderModalId);
+                    fileInputRef.current?.click();
+                  }}
+                  className="ghost-button text-sm text-emerald-100"
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": "52, 211, 153" }}
+                >
+                  이 폴더에 PDF 추가
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCloseFolderModal}
+                  className="ghost-button text-sm text-slate-200"
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": "148, 163, 184" }}
+                >
+                  닫기
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 overflow-auto pr-1">
@@ -226,11 +279,11 @@ function FileUpload({
                     const isSelected = selectedUploadIds.includes(item.id);
                     const isActive = selectedFileId === item.id;
                     const isCurrent = selectedFileId === item.id;
-                    return (
-                      <PdfTile
-                        key={item.id}
-                        file={item.file || { name: item.name, size: item.size, id: item.id }}
-                        thumbnailUrl={item.thumbnail || thumbnailUrl}
+                  return (
+                    <PdfTile
+                      key={item.id}
+                      file={item.file || { name: item.name, size: item.size, id: item.id }}
+                      thumbnailUrl={item.thumbnail || thumbnailUrl}
                         pageInfo={isCurrent ? pageInfo : null}
                         isLoadingText={isCurrent && isLoadingText}
                         active={isActive}
@@ -238,16 +291,48 @@ function FileUpload({
                         selected={false}
                         onToggleSelect={undefined}
                         draggable={isFolderFeatureEnabled}
-                        onDragStart={(uploadId) => handleDragStartUpload(uploadId)}
-                        onDragEnd={handleDragEndUpload}
-                        onProceed={() => onSelectFile?.(item)}
-                        fullWidth
-                      />
-                    );
-                  })}
+                        onDragStart={undefined}
+                        onDragEnd={undefined}
+                      onProceed={() => onSelectFile?.(item)}
+                      onContextMenu={(e) => handleContextMenuUpload(e, item)}
+                      onDelete={() => onDeleteUpload?.(item)}
+                      fullWidth
+                    />
+                  );
+                })}
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="fixed z-50 min-w-[180px] rounded-xl border border-white/10 bg-slate-900/95 py-2 text-sm text-slate-100 shadow-2xl ring-1 ring-white/10"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+        >
+          <button
+            type="button"
+            className="flex w-full items-center px-4 py-2 text-left hover:bg-white/10"
+            onClick={() => handleContextAction(null)}
+          >
+            폴더 밖으로 이동
+          </button>
+          <div className="my-1 h-px bg-white/10" />
+          {folderItems.length === 0 && (
+            <div className="px-4 py-2 text-xs text-slate-400">폴더가 없습니다.</div>
+          )}
+          {folderItems.map((folder) => (
+            <button
+              key={folder.id}
+              type="button"
+              className="flex w-full items-center px-4 py-2 text-left hover:bg-white/10"
+              onClick={() => handleContextAction(folder.id)}
+            >
+              {folder.label}
+            </button>
+          ))}
         </div>
       )}
     </div>

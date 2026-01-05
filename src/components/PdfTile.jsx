@@ -14,6 +14,8 @@ function PdfTile({
   onDragStart,
   onDragEnd,
   fullWidth = false,
+  onDelete,
+  onContextMenu,
 }) {
   return (
     <div
@@ -23,20 +25,13 @@ function PdfTile({
         active ? "border-emerald-300/60 ring-emerald-300/50" : "border-white/10 ring-white/5"
       } ${selectable ? "cursor-pointer" : ""}`}
       onClick={onProceed}
-      draggable={draggable}
-      onDragStart={(e) => {
-        if (!draggable) return;
-        const uploadId = file?.id || file?.name || "";
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/upload-id", uploadId);
-        e.dataTransfer.setData("text/plain", uploadId);
-        if (e.currentTarget) {
-          const { offsetWidth, offsetHeight } = e.currentTarget;
-          e.dataTransfer.setDragImage(e.currentTarget, offsetWidth / 2, offsetHeight / 2);
+      onContextMenu={(e) => {
+        if (onContextMenu) {
+          e.preventDefault();
+          onContextMenu(e);
         }
-        onDragStart?.(uploadId, e);
       }}
-      onDragEnd={() => onDragEnd?.()}
+      draggable={false}
     >
       <div className={`relative w-full bg-slate-800 ${fullWidth ? "h-40" : "h-32"}`}>
         {thumbnailUrl ? (
@@ -48,6 +43,19 @@ function PdfTile({
           <span className="absolute left-2 top-2 rounded-full bg-emerald-500/80 px-2 py-1 text-[11px] font-semibold text-emerald-950">
             추출 중...
           </span>
+        )}
+        {onDelete && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-sm text-white/90 transition hover:bg-rose-500 hover:text-white"
+            title="삭제"
+          >
+            ×
+          </button>
         )}
         {selectable && (
           <button
@@ -100,6 +108,8 @@ PdfTile.propTypes = {
   onDragStart: PropTypes.func,
   onDragEnd: PropTypes.func,
   fullWidth: PropTypes.bool,
+  onDelete: PropTypes.func,
+  onContextMenu: PropTypes.func,
 };
 
 export default PdfTile;

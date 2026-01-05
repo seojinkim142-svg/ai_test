@@ -22,6 +22,10 @@ import {
   addFlashcard,
   listFlashcards,
   deleteFlashcard,
+  createFolder,
+  listFolders,
+  deleteFolder,
+  deleteUpload,
   saveUploadMetadata,
   listUploads,
   getSignedStorageUrl,
@@ -76,6 +80,7 @@ function App() {
   const quizAutoRequestedRef = useRef(false);
   const oxAutoRequestedRef = useRef(false);
   const isDraggingRef = useRef(false);
+  const loadUploadsRef = useRef(null);
   const detailContainerRef = useRef(null);
   const summaryRef = useRef(null);
   const { user, authReady, refreshSession, handleSignOut: authSignOut } = useSupabaseAuth();
@@ -113,44 +118,78 @@ function App() {
     [limits, usageCounts]
   );
 
-  const refreshFolders = useCallback(
-    (items) => {
-      const fromUploads = Array.from(new Set((items || []).map((u) => u.folderId).filter(Boolean)));
-      setFolders((prev) => Array.from(new Set([...prev, ...fromUploads])));
+  const loadFolders = useCallback(
+    async () => {
+      if (!supabase || !user) {
+        setFolders([]);
+        setSelectedFolderId("all");
+        return;
+      }
+      try {
+        const list = await listFolders({ userId: user.id });
+        setFolders(list || []);
+      } catch (err) {
+        setError(`폴더 불러오기 실패: ${err.message}`);
+      }
     },
-    []
+    [user, supabase]
   );
 
   const handleCreateFolder = useCallback(
-    (name) => {
+    async (name) => {
       if (!isFolderFeatureEnabled) {
         setError("폴더 기능은 Pro/Premium에서만 사용할 수 있습니다.");
         return;
       }
+      if (!user) {
+        setError("로그인 후 이용해주세요.");
+        return;
+      }
       const trimmed = (name || "").trim();
       if (!trimmed) return;
-      setFolders((prev) => (prev.includes(trimmed) ? prev : [...prev, trimmed]));
-      setSelectedFolderId("all");
-      setSelectedUploadIds([]);
+      if (folders.some((f) => f.name === trimmed)) {
+        setStatus("이미 같은 이름의 폴더가 있습니다.");
+        return;
+      }
+      try {
+        const created = await createFolder({ userId: user.id, name: trimmed });
+        if (created) {
+          setFolders((prev) => [...prev, created]);
+        }
+        setSelectedFolderId("all");
+        setSelectedUploadIds([]);
+        setStatus("폴더를 만들었습니다.");
+      } catch (err) {
+        setError(`폴더 생성 실패: ${err.message}`);
+      }
     },
-    [isFolderFeatureEnabled]
+    [isFolderFeatureEnabled, user, folders]
   );
 
   const handleDeleteFolder = useCallback(
-    (folderId) => {
+    async (folderId) => {
       if (!isFolderFeatureEnabled) return;
       if (!folderId || folderId === "all") return;
+      if (!user) {
+        setError("로그인 후 이용해주세요.");
+        return;
+      }
       const hasFiles = uploadedFiles.some((u) => u.folderId === folderId);
       if (hasFiles) {
         setError("폴더를 삭제하려면 먼저 파일을 이동하거나 삭제하세요.");
         return;
       }
-      setFolders((prev) => prev.filter((f) => f !== folderId));
-      if (selectedFolderId === folderId) {
-        setSelectedFolderId("all");
+      try {
+        await deleteFolder({ userId: user.id, folderId });
+        setFolders((prev) => prev.filter((f) => f.id !== folderId));
+        if (selectedFolderId === folderId) {
+          setSelectedFolderId("all");
+        }
+      } catch (err) {
+        setError(`폴더 삭제 실패: ${err.message}`);
       }
     },
-    [isFolderFeatureEnabled, uploadedFiles, selectedFolderId]
+    [isFolderFeatureEnabled, uploadedFiles, selectedFolderId, user]
   );
 
   const handleSelectFolder = useCallback((folderId) => {
@@ -172,6 +211,37 @@ function App() {
     setSelectedUploadIds([]);
   }, []);
 
+  const handleDeleteUpload = useCallback(
+    async (upload) => {
+      if (!user) {
+        setError("로그인 후 이용해주세요.");
+        return;
+      }
+      const uploadId = upload?.id || null;
+      const storagePath = upload?.path || upload?.remotePath || null;
+      if (!uploadId && !storagePath) {
+        setError("삭제할 파일 정보를 찾을 수 없습니다.");
+        return;
+      }
+      const before = uploadedFiles;
+      setUploadedFiles((prev) => prev.filter((u) => u.id !== uploadId));
+      try {
+        await deleteUpload({
+          userId: user.id,
+          uploadId,
+          bucket: upload.bucket,
+          path: storagePath,
+        });
+        setStatus("파일을 삭제했습니다.");
+        await loadUploadsRef.current?.();
+      } catch (err) {
+        setUploadedFiles(before);
+        setError(`파일 삭제 실패: ${err.message}`);
+      }
+    },
+    [user, uploadedFiles]
+  );
+
   const handleMoveUploadsToFolder = useCallback(
     async (uploadIds, targetFolderId) => {
       if (!isFolderFeatureEnabled) return;
@@ -180,24 +250,57 @@ function App() {
         setError("로그인 후 이용해주세요.");
         return;
       }
+      const normalizedIds = uploadIds.map((id) => id?.toString()).filter(Boolean);
+      const target = targetFolderId && targetFolderId !== "all" ? targetFolderId.toString() : null;
+      const before = uploadedFiles;
+      const targetEntries = before.filter((item) => normalizedIds.includes(item.id?.toString()));
+      const remoteIds = targetEntries.map((item) => item.id).filter(Boolean);
+      const remotePaths = targetEntries.map((item) => item.path || item.remotePath).filter(Boolean);
       try {
-        await updateUploadFolder({ userId: user.id, uploadIds, folderId: targetFolderId });
-        let nextUploads = [];
-        setUploadedFiles((prev) => {
-          const updated = prev.map((item) =>
-            uploadIds.includes(item.id) ? { ...item, folderId: targetFolderId || null } : item
+        if (remoteIds.length > 0 || remotePaths.length > 0) {
+          const updated = await updateUploadFolder({
+            userId: user.id,
+            uploadIds: remoteIds,
+            storagePaths: remotePaths,
+            folderId: target,
+          });
+          const updatedMap = new Map();
+          (updated || []).forEach((u) => {
+            const folderVal = u.folder_id || null;
+            const infolderVal = Number(u.infolder ?? (folderVal ? 1 : 0));
+            if (u.id) updatedMap.set(u.id.toString(), { folderId: folderVal, infolder: infolderVal });
+            if (u.storage_path) updatedMap.set(u.storage_path, { folderId: folderVal, infolder: infolderVal });
+          });
+          setUploadedFiles((prev) =>
+            prev.map((item) => {
+              const key = item.id?.toString();
+              if (!normalizedIds.includes(key)) return item;
+              const mapped = updatedMap.get(key) || updatedMap.get(item.path || item.remotePath);
+              const nextFolder = mapped?.folderId ?? target;
+              const nextInFolder = Number(mapped?.infolder ?? (nextFolder ? 1 : 0));
+              return { ...item, folderId: nextFolder, infolder: nextInFolder };
+            })
           );
-          nextUploads = updated;
-          return updated;
-        });
-        refreshFolders(nextUploads);
+        } else {
+          // 로컬 항목만 있는 경우 로컬 상태만 갱신
+          setUploadedFiles((prev) =>
+            prev.map((item) =>
+              normalizedIds.includes(item.id?.toString())
+                ? { ...item, folderId: target, infolder: target ? 1 : 0 }
+                : item
+            )
+          );
+        }
         setSelectedUploadIds([]);
         setStatus("폴더로 이동했습니다.");
+        // 서버 반영 상태를 다시 받아와 UI가 되돌아가지 않도록 동기화
+        await loadUploadsRef.current?.();
       } catch (err) {
+        setUploadedFiles(before);
         setError(`폴더 이동에 실패했습니다: ${err.message}`);
       }
     },
-    [isFolderFeatureEnabled, user, uploadedFiles, refreshFolders]
+    [isFolderFeatureEnabled, user, uploadedFiles]
   );
 
   const toggleTheme = useCallback(() => {
@@ -275,15 +378,18 @@ function App() {
           remote: true,
           hash: u.file_hash || null,
           folderId: u.folder_id || null,
+          infolder: Number(u.infolder ?? (u.folder_id ? 1 : 0)) || 0,
         }));
         setUploadedFiles(mapped);
-        refreshFolders(mapped);
       } catch (err) {
         setError(`업로드 이력 불러오기 실패: ${err.message}`);
       }
     },
-    [user, refreshFolders]
+    [user, supabase]
   );
+  useEffect(() => {
+    loadUploadsRef.current = loadUploads;
+  }, [loadUploads]);
 
   const loadArtifacts = useCallback(
     async (docId) => {
@@ -372,6 +478,15 @@ function App() {
       setIsSigningOut(false);
     }
   }, [authSignOut, refreshSession]);
+
+  useEffect(() => {
+    if (user) {
+      loadFolders();
+    } else {
+      setFolders([]);
+      setSelectedFolderId("all");
+    }
+  }, [user, loadFolders]);
 
   useEffect(() => {
     if (user) {
@@ -487,10 +602,10 @@ function App() {
     [pdfUrl, selectedFileId, loadBookmarks, loadFlashcards, loadArtifacts]
   );
 
-  const handleFileChange = async (event) => {
+  const handleFileChange = async (event, targetFolderId = null) => {
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
-    const activeFolderId = null; // 새 업로드는 기본적으로 폴더 미지정
+    const activeFolderId = targetFolderId && targetFolderId !== "all" ? targetFolderId.toString() : null;
     const nextCount = uploadedFiles.length + files.length;
     if (limits.maxUploads !== Infinity && nextCount > limits.maxUploads) {
       setError(`무료 티어에서는 업로드를 ${limits.maxUploads}개까지만 할 수 있습니다.`);
@@ -508,6 +623,7 @@ function App() {
           hash,
           thumbnail: thumb,
           folderId: activeFolderId,
+          infolder: activeFolderId ? 1 : 0,
         };
       })
     );
@@ -528,6 +644,11 @@ function App() {
               bucket: existing.bucket,
               thumbnail: existing.thumbnail || item.thumbnail,
               hash: existing.hash || item.hash,
+              folderId: existing.folderId || existing.folder_id || item.folderId || null,
+              infolder: Number(
+                existing.infolder ??
+                  (existing.folderId || existing.folder_id || item.folderId ? 1 : 0)
+              ),
             };
           }
 
@@ -540,6 +661,7 @@ function App() {
             bucket: uploaded.bucket,
             thumbnail: item.thumbnail,
             fileHash: item.hash,
+            folderId: activeFolderId,
           });
           return {
             ...item,
@@ -550,6 +672,7 @@ function App() {
             thumbnail: record.thumbnail || item.thumbnail,
             hash: record.file_hash || item.hash,
             folderId: record.folder_id || activeFolderId || null,
+            infolder: Number(record.infolder ?? (record.folder_id || activeFolderId ? 1 : 0)),
           };
         } catch (err) {
           setError(`클라우드 업로드 실패: ${err.message}`);
@@ -560,7 +683,6 @@ function App() {
 
     setUploadedFiles((prev) => {
       const merged = [...prev, ...withUploads];
-      refreshFolders(merged);
       return merged;
     });
     setStatus("업로드 목록에서 썸네일을 선택해 요약/퀴즈를 시작하세요.");
@@ -1079,6 +1201,7 @@ function App() {
         onMoveUploads={handleMoveUploadsToFolder}
         onClearSelection={handleClearSelection}
         isFolderFeatureEnabled={isFolderFeatureEnabled}
+        onDeleteUpload={handleDeleteUpload}
       />
     </section>
   );

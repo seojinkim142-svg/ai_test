@@ -57,9 +57,9 @@ function FolderTile({
                 onDelete?.();
               }}
               className="flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-white/5 text-[11px] text-slate-200 opacity-80 transition hover:bg-white/10 hover:text-white"
-            >
-              X
-            </button>
+              >
+                X
+              </button>
           )}
         </div>
         <div className="mt-4">

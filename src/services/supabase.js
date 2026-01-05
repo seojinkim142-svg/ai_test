@@ -153,6 +153,73 @@ export async function deleteFlashcard({ userId, cardId }) {
   if (error) throw error;
 }
 
+export async function deleteUpload({ userId, uploadId, bucket, path }) {
+  const client = requireSupabase();
+  requireUser(userId);
+  if (!uploadId && !path) return;
+
+  // 스토리지 파일 삭제는 실패해도 메타데이터 삭제를 시도
+  if (bucket && path) {
+    try {
+      await client.storage.from(bucket).remove([path]);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn("storage remove failed", err);
+    }
+  }
+
+  let lastError = null;
+  if (uploadId) {
+    const { error } = await client.from(UPLOADS_TABLE).delete().eq("id", uploadId).eq("user_id", userId);
+    if (!error) return;
+    lastError = error;
+  }
+
+  // id가 uuid가 아니거나 실패했을 때 storage_path 기준으로 한 번 더 시도
+  if (path) {
+    const { error } = await client.from(UPLOADS_TABLE).delete().eq("storage_path", path).eq("user_id", userId);
+    if (error) {
+      throw error;
+    }
+    return;
+  }
+
+  if (lastError) throw lastError;
+}
+
+export async function createFolder({ userId, name }) {
+  const client = requireSupabase();
+  requireUser(userId);
+  const trimmed = (name || "").trim();
+  if (!trimmed) throw new Error("폴더 이름이 필요합니다.");
+  const payload = {
+    user_id: userId,
+    name: trimmed,
+  };
+  const { data, error } = await client.from("folders").insert(payload).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export async function listFolders({ userId }) {
+  if (!supabase || !userId) return [];
+  const { data, error } = await supabase
+    .from("folders")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function deleteFolder({ userId, folderId }) {
+  const client = requireSupabase();
+  requireUser(userId);
+  if (!folderId) return;
+  const { error } = await client.from("folders").delete().eq("id", folderId).eq("user_id", userId);
+  if (error) throw error;
+}
+
 export async function saveUploadMetadata({ userId, fileName, fileSize, storagePath, bucket, thumbnail, fileHash, folderId }) {
   const client = requireSupabase();
   requireUser(userId);
@@ -165,6 +232,7 @@ export async function saveUploadMetadata({ userId, fileName, fileSize, storagePa
     thumbnail: thumbnail || null,
     file_hash: fileHash || null,
     folder_id: folderId || null,
+    infolder: folderId ? 1 : 0,
   };
   const { data, error } = await client.from(UPLOADS_TABLE).insert(payload).select().single();
   if (error) throw error;
@@ -201,18 +269,45 @@ export async function updateUploadThumbnail({ id, thumbnail }) {
   return null;
 }
 
-export async function updateUploadFolder({ userId, uploadIds = [], folderId = null }) {
+export async function updateUploadFolder({ userId, uploadIds = [], folderId = null, storagePaths = [] }) {
   const client = requireSupabase();
   requireUser(userId);
-  if (!Array.isArray(uploadIds) || uploadIds.length === 0) return [];
-  const { data, error } = await client
-    .from(UPLOADS_TABLE)
-    .update({ folder_id: folderId || null })
-    .in("id", uploadIds)
-    .eq("user_id", userId)
-    .select();
-  if (error) throw error;
-  return data || [];
+  const ids = Array.isArray(uploadIds) ? uploadIds.filter(Boolean) : [];
+  const paths = Array.isArray(storagePaths) ? storagePaths.filter(Boolean) : [];
+  if (ids.length === 0 && paths.length === 0) return [];
+
+  const updates = { folder_id: folderId || null, infolder: folderId ? 1 : 0 };
+  let results = [];
+
+  if (ids.length > 0) {
+    const { data, error } = await client
+      .from(UPLOADS_TABLE)
+      .update(updates)
+      .in("id", ids)
+      .eq("user_id", userId)
+      .select();
+    if (error) throw error;
+    results = data || [];
+  }
+
+  const pendingPaths = paths.filter((p) => !results.some((row) => row.storage_path === p));
+  if (pendingPaths.length > 0) {
+    const { data, error } = await client
+      .from(UPLOADS_TABLE)
+      .update(updates)
+      .in("storage_path", pendingPaths)
+      .eq("user_id", userId)
+      .select();
+    if (error) throw error;
+    results = [...results, ...(data || [])];
+  }
+
+  // 업데이트가 하나도 되지 않은 경우(권한/RLS 등) 에러로 처리해 호출 측에서 알 수 있게 함
+  if ((results || []).length === 0) {
+    throw new Error("폴더 이동에 실패했습니다. 권한이나 RLS 정책을 확인해주세요.");
+  }
+
+  return results;
 }
 
 export async function fetchDocArtifacts({ userId, docId }) {
