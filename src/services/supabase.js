@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabaseBucket = import.meta.env.VITE_SUPABASE_BUCKET || "pdf-uploads";
-const BOOKMARKS_TABLE = "bookmarks";
+const MOCK_EXAMS_TABLE = "mock_exams";
 const FLASHCARDS_TABLE = import.meta.env.VITE_SUPABASE_FLASHCARDS_TABLE || "flashcards";
 const UPLOADS_TABLE = import.meta.env.VITE_SUPABASE_UPLOADS_TABLE || "uploads";
 const ARTIFACTS_TABLE = import.meta.env.VITE_SUPABASE_ARTIFACTS_TABLE || "artifacts";
@@ -87,26 +87,27 @@ export async function uploadPdfToStorage(userId, file) {
   return { path, signedUrl: signedData?.signedUrl || null, bucket: supabaseBucket };
 }
 
-export async function saveBookmark({ userId, docId, docName, pageNumber, note }) {
+export async function saveMockExam({ userId, docId, docName, title, totalQuestions, payload }) {
   const client = requireSupabase();
   requireUser(userId);
-  const payload = {
+  const body = {
     user_id: userId,
     doc_id: docId,
     doc_name: docName,
-    page_number: pageNumber,
-    note: note || "",
+    title: title || "",
+    total_questions: totalQuestions ?? null,
+    payload: payload || null,
   };
-  const { data, error } = await client.from(BOOKMARKS_TABLE).insert(payload).select().single();
+  const { data, error } = await client.from(MOCK_EXAMS_TABLE).insert(body).select().single();
   if (error) throw error;
   return data;
 }
 
-export async function fetchBookmarks({ userId, docId }) {
+export async function fetchMockExams({ userId, docId }) {
   const client = requireSupabase();
   if (!userId || !docId) return [];
   const { data, error } = await client
-    .from(BOOKMARKS_TABLE)
+    .from(MOCK_EXAMS_TABLE)
     .select("*")
     .eq("user_id", userId)
     .eq("doc_id", docId)
@@ -115,10 +116,10 @@ export async function fetchBookmarks({ userId, docId }) {
   return data || [];
 }
 
-export async function deleteBookmark({ userId, bookmarkId }) {
+export async function deleteMockExam({ userId, examId }) {
   const client = requireSupabase();
-  if (!userId || !bookmarkId) return;
-  const { error } = await client.from(BOOKMARKS_TABLE).delete().eq("id", bookmarkId).eq("user_id", userId);
+  if (!userId || !examId) return;
+  const { error } = await client.from(MOCK_EXAMS_TABLE).delete().eq("id", examId).eq("user_id", userId);
   if (error) throw error;
 }
 
@@ -135,6 +136,26 @@ export async function addFlashcard({ userId, deckId, front, back, hint }) {
   const { data, error } = await client.from(FLASHCARDS_TABLE).insert(payload).select().single();
   if (error) throw error;
   return data;
+}
+
+export async function addFlashcards({ userId, deckId, cards }) {
+  const client = requireSupabase();
+  requireUser(userId);
+  const normalized = Array.isArray(cards)
+    ? cards
+        .map((card) => ({
+          user_id: userId,
+          deck_id: deckId,
+          front: card?.front || "",
+          back: card?.back || "",
+          hint: card?.hint || "",
+        }))
+        .filter((card) => card.front && card.back)
+    : [];
+  if (normalized.length === 0) return [];
+  const { data, error } = await client.from(FLASHCARDS_TABLE).insert(normalized).select();
+  if (error) throw error;
+  return data || [];
 }
 
 export async function listFlashcards({ userId, deckId }) {

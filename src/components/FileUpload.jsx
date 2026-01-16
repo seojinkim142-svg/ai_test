@@ -124,6 +124,12 @@ function FileUpload({
     setContextMenu(null);
   };
 
+  const isInFolder = (uploadId) => {
+    const target = uploadedFiles.find((u) => u.id === uploadId);
+    const fid = target?.folderId ? target.folderId.toString() : null;
+    return Boolean(fid);
+  };
+
   return (
     <div className="col-span-2 flex flex-col gap-4">
       <div className="rounded-2xl bg-transparent px-0 py-0 text-sm text-slate-100">
@@ -312,14 +318,18 @@ function FileUpload({
           className="fixed z-50 min-w-[180px] rounded-xl border border-white/10 bg-slate-900/95 py-2 text-sm text-slate-100 shadow-2xl ring-1 ring-white/10"
           style={{ top: contextMenu.y, left: contextMenu.x }}
         >
-          <button
-            type="button"
-            className="flex w-full items-center px-4 py-2 text-left hover:bg-white/10"
-            onClick={() => handleContextAction(null)}
-          >
-            폴더 밖으로 이동
-          </button>
-          <div className="my-1 h-px bg-white/10" />
+          {isInFolder(contextMenu.uploadId) && (
+            <>
+              <button
+                type="button"
+                className="flex w-full items-center px-4 py-2 text-left hover:bg-white/10"
+                onClick={() => handleContextAction(null)}
+              >
+                폴더 밖으로 이동
+              </button>
+              <div className="my-1 h-px bg-white/10" />
+            </>
+          )}
           {folderItems.length === 0 && (
             <div className="px-4 py-2 text-xs text-slate-400">폴더가 없습니다.</div>
           )}

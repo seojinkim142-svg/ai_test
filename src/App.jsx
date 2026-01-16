@@ -7,19 +7,22 @@ import Header from "./components/Header";
 import LoginBackground from "./components/LoginBackground";
 import OxSection from "./components/OxSection";
 import PdfPreview from "./components/PdfPreview";
+import ProgressPanel from "./components/ProgressPanel";
 import QuizSection from "./components/QuizSection";
 import SummaryCard from "./components/SummaryCard";
 import PaymentPage from "./components/PaymentPage";
-import { generateQuiz, generateSummary, generateOxQuiz } from "./services/openai";
+import { generateQuiz, generateSummary, generateOxQuiz, generateFlashcards, generateHardQuiz } from "./services/openai";
+import { LETTERS } from "./constants";
 import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
 import { useUserTier } from "./hooks/useUserTier";
 import {
   supabase,
   uploadPdfToStorage,
-  saveBookmark,
-  fetchBookmarks,
-  deleteBookmark,
+  saveMockExam,
+  fetchMockExams,
+  deleteMockExam,
   addFlashcard,
+  addFlashcards,
   listFlashcards,
   deleteFlashcard,
   createFolder,
@@ -68,11 +71,20 @@ function App() {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
-  const [bookmarks, setBookmarks] = useState([]);
-  const [bookmarkNote, setBookmarkNote] = useState("");
-  const [isLoadingBookmarks, setIsLoadingBookmarks] = useState(false);
+  const [visitedPages, setVisitedPages] = useState(() => new Set());
+  const [mockExams, setMockExams] = useState([]);
+  const [isLoadingMockExams, setIsLoadingMockExams] = useState(false);
+  const [isGeneratingMockExam, setIsGeneratingMockExam] = useState(false);
+  const [mockExamStatus, setMockExamStatus] = useState("");
+  const [mockExamError, setMockExamError] = useState("");
+  const [activeMockExamId, setActiveMockExamId] = useState(null);
+  const [showMockExamAnswers, setShowMockExamAnswers] = useState(false);
   const [flashcards, setFlashcards] = useState([]);
   const [isLoadingFlashcards, setIsLoadingFlashcards] = useState(false);
+  const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false);
+  const [flashcardStatus, setFlashcardStatus] = useState("");
+  const [flashcardError, setFlashcardError] = useState("");
+  const [flashcardExamStats, setFlashcardExamStats] = useState(null);
   const [artifacts, setArtifacts] = useState(null);
   const downloadCacheRef = useRef(new Map()); // storagePath -> { file, thumbnail, remoteUrl, bucket }
   const backfillInProgressRef = useRef(false);
@@ -83,6 +95,7 @@ function App() {
   const loadUploadsRef = useRef(null);
   const detailContainerRef = useRef(null);
   const summaryRef = useRef(null);
+  const mockExamPrintRef = useRef(null);
   const { user, authReady, refreshSession, handleSignOut: authSignOut } = useSupabaseAuth();
   const { tier, loadingTier } = useUserTier(user);
   const isFreeTier = tier === "free";
@@ -321,20 +334,34 @@ function App() {
     }
   }, [theme]);
 
-  const loadBookmarks = useCallback(
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem("flashcardExamHistory");
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        setFlashcardExamStats(parsed[0]);
+      }
+    } catch (err) {
+      // ignore parse errors
+    }
+  }, []);
+
+  const loadMockExams = useCallback(
     async (docId) => {
       if (!supabase || !user || !docId) {
-        setBookmarks([]);
+        setMockExams([]);
         return;
       }
-      setIsLoadingBookmarks(true);
+      setIsLoadingMockExams(true);
       try {
-        const list = await fetchBookmarks({ userId: user.id, docId });
-        setBookmarks(list);
+        const list = await fetchMockExams({ userId: user.id, docId });
+        setMockExams(list);
       } catch (err) {
-        setError(`북마크 불러오기 실패: ${err.message}`);
+        setMockExamError(`모의고사 불러오기 실패: ${err.message}`);
       } finally {
-        setIsLoadingBookmarks(false);
+        setIsLoadingMockExams(false);
       }
     },
     [user]
@@ -574,9 +601,16 @@ function App() {
       setStatus("PDF 텍스트 추출 중입니다...");
       setIsLoadingText(true);
       setThumbnailUrl(null);
-      setBookmarks([]);
-      setBookmarkNote("");
+        setMockExams([]);
+        setMockExamStatus("");
+        setMockExamError("");
+        setActiveMockExamId(null);
+        setShowMockExamAnswers(false);
       setFlashcards([]);
+      setVisitedPages(new Set());
+      setFlashcardStatus("");
+      setFlashcardError("");
+      setIsGeneratingFlashcards(false);
       oxAutoRequestedRef.current = false;
 
       try {
@@ -587,9 +621,9 @@ function App() {
         setPageInfo({ used: pagesUsed, total: totalPages });
         setThumbnailUrl(thumb);
         setStatus(`추출 완료 (사용 페이지: ${pagesUsed}/${totalPages})`);
-        await loadBookmarks(item.id);
-        await loadFlashcards(item.id);
-        await loadArtifacts(item.id);
+          await loadMockExams(item.id);
+          await loadFlashcards(item.id);
+          await loadArtifacts(item.id);
       } catch (err) {
         setError(`PDF 추출에 실패했습니다: ${err.message}`);
         setExtractedText("");
@@ -599,7 +633,7 @@ function App() {
         setIsLoadingText(false);
       }
     },
-    [pdfUrl, selectedFileId, loadBookmarks, loadFlashcards, loadArtifacts]
+    [pdfUrl, selectedFileId, loadMockExams, loadFlashcards, loadArtifacts]
   );
 
   const handleFileChange = async (event, targetFolderId = null) => {
@@ -710,9 +744,16 @@ function App() {
     setPreviewText("");
     setPageInfo({ used: 0, total: 0 });
     setSummary("");
-    setBookmarks([]);
-    setBookmarkNote("");
+      setMockExams([]);
+      setMockExamStatus("");
+      setMockExamError("");
+      setActiveMockExamId(null);
+      setShowMockExamAnswers(false);
     setFlashcards([]);
+    setVisitedPages(new Set());
+    setFlashcardStatus("");
+    setFlashcardError("");
+    setIsGeneratingFlashcards(false);
     setOxItems(null);
     setOxSelections({});
     setPanelTab("summary");
@@ -828,6 +869,17 @@ function App() {
     isDraggingRef.current = true;
     document.body.style.userSelect = "none";
   };
+
+  const handlePageChange = useCallback((page) => {
+    setCurrentPage(page);
+    if (!page) return;
+    setVisitedPages((prev) => {
+      if (prev.has(page)) return prev;
+      const next = new Set(prev);
+      next.add(page);
+      return next;
+    });
+  }, []);
 
   const splitStyle = {
     flexBasis: `${splitPercent}%`,
@@ -1104,81 +1156,439 @@ function App() {
     await requestOxQuiz({ auto: false, force: true });
   };
 
-  const canAutoRequest = useCallback(() => file && extractedText && !isLoadingText, [file, extractedText, isLoadingText]);
+  const handleAddFlashcard = useCallback(
+    async (front, back, hint) => {
+      if (!user) {
+        setFlashcardError("로그인이 필요합니다.");
+        return;
+      }
+      const deckId = selectedFileId || "default";
+      setFlashcardError("");
+      setFlashcardStatus("카드 저장 중..");
+      try {
+        const saved = await addFlashcard({
+          userId: user.id,
+          deckId,
+          front,
+          back,
+          hint,
+        });
+        setFlashcards((prev) => [saved, ...prev]);
+        setFlashcardStatus("카드 저장 완료");
+      } catch (err) {
+        setFlashcardError(`카드 저장 실패: ${err.message}`);
+        setFlashcardStatus("");
+      }
+    },
+    [user, selectedFileId]
+  );
 
-  // 파일이 선택되고 텍스트가 준비되면 요약을 자동으로 요청
-  useEffect(() => {
-    if (
-      canAutoRequest() &&
-      !summary &&
-      !isLoadingSummary &&
-      !summaryRequestedRef.current
-    ) {
-      requestSummary();
+  const handleDeleteFlashcard = useCallback(
+    async (cardId) => {
+      if (!user) {
+        setFlashcardError("로그인이 필요합니다.");
+        return;
+      }
+      setFlashcardError("");
+      try {
+        await deleteFlashcard({ userId: user.id, cardId });
+        setFlashcards((prev) => prev.filter((c) => c.id !== cardId));
+        setFlashcardStatus("카드 삭제 완료");
+      } catch (err) {
+        setFlashcardError(`카드 삭제 실패: ${err.message}`);
+      }
+    },
+    [user]
+  );
+
+  const handleGenerateFlashcards = useCallback(async () => {
+    if (isGeneratingFlashcards) return;
+    if (!user) {
+      setFlashcardError("로그인이 필요합니다.");
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canAutoRequest, summary, isLoadingSummary]);
-
-  useEffect(() => {
-    if (
-      summary &&
-      canAutoRequest() &&
-      quizSets.length === 0 &&
-      !isLoadingQuiz &&
-      !quizAutoRequestedRef.current
-    ) {
-      quizAutoRequestedRef.current = true;
-      requestQuestions();
+    if (!file || !selectedFileId) {
+      setFlashcardError("먼저 PDF를 선택해주세요.");
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [summary, canAutoRequest, quizSets.length, isLoadingQuiz]);
-
-  useEffect(() => {
-    if (
-      canAutoRequest() &&
-      quizSets.length > 0 &&
-      !isLoadingOx &&
-      !oxItems &&
-      !oxAutoRequestedRef.current
-    ) {
-      oxAutoRequestedRef.current = true;
-      requestOxQuiz({ auto: true });
+    if (isLoadingText) {
+      setFlashcardError("PDF 추출 중입니다. 잠시만 기다려주세요.");
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canAutoRequest, quizSets.length, isLoadingOx, oxItems]);
+    const trimmedText = (extractedText || "").trim();
+    if (trimmedText.length < 80) {
+      setFlashcardError("PDF에서 텍스트를 추출할 수 없습니다.");
+      return;
+    }
 
-  if (!authReady) {
+    setFlashcardError("");
+    setFlashcardStatus("AI 플래시카드 생성 중..");
+    setIsGeneratingFlashcards(true);
+    try {
+      const result = await generateFlashcards(trimmedText, { count: 8 });
+      const rawCards = Array.isArray(result?.cards)
+        ? result.cards
+        : Array.isArray(result)
+          ? result
+          : [];
+      const cleaned = rawCards
+        .map((card) => ({
+          front: String(card?.front || "").trim(),
+          back: String(card?.back || "").trim(),
+          hint: String(card?.hint || "").trim(),
+        }))
+        .filter((card) => card.front && card.back);
+      if (cleaned.length === 0) {
+        throw new Error("생성된 카드가 없습니다.");
+      }
+      const deckId = selectedFileId || "default";
+      const saved = await addFlashcards({ userId: user.id, deckId, cards: cleaned });
+      if (!saved.length) {
+        throw new Error("카드 저장에 실패했습니다.");
+      }
+      setFlashcards((prev) => [...saved, ...prev]);
+      setFlashcardStatus(`AI 플래시카드 ${saved.length}장 생성 완료`);
+    } catch (err) {
+      setFlashcardError(`AI 플래시카드 생성 실패: ${err.message}`);
+      setFlashcardStatus("");
+    } finally {
+      setIsGeneratingFlashcards(false);
+    }
+    }, [isGeneratingFlashcards, user, file, selectedFileId, isLoadingText, extractedText]);
+
+  const pickRandomItems = useCallback((items, count) => {
+    if (!Array.isArray(items) || count <= 0) return [];
+    const copy = [...items];
+    for (let i = copy.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy.slice(0, count);
+  }, []);
+
+  const handleCreateMockExam = useCallback(async () => {
+    if (isGeneratingMockExam) return;
+    if (!user) {
+      setMockExamError("로그인이 필요합니다.");
+      return;
+    }
+    if (!file || !selectedFileId) {
+      setMockExamError("먼저 PDF를 선택해주세요.");
+      return;
+    }
+    if (isLoadingText) {
+      setMockExamError("PDF 추출 중입니다. 잠시만 기다려주세요.");
+      return;
+    }
+
+    const oxPool = Array.isArray(oxItems) ? oxItems : [];
+    if (oxPool.length < 3) {
+      setMockExamError("O/X 퀴즈가 3문항 이상 필요합니다.");
+      return;
+    }
+
+    const quizPool = [];
+    quizSets.forEach((set) => {
+      const multipleChoice = set.questions?.multipleChoice || [];
+      multipleChoice.forEach((question) => {
+        const prompt = String(question?.question || "").trim();
+        if (!prompt) return;
+        quizPool.push({
+          type: "quiz-mc",
+          prompt,
+          choices: Array.isArray(question?.choices) ? question.choices : [],
+          answerIndex: Number.isFinite(question?.answerIndex) ? question.answerIndex : null,
+          explanation: String(question?.explanation || "").trim(),
+        });
+      });
+      if (set.questions?.shortAnswer) {
+        const prompt = String(set.questions.shortAnswer.question || "").trim();
+        if (!prompt) return;
+        quizPool.push({
+          type: "quiz-short",
+          prompt,
+          answer: String(set.questions.shortAnswer.answer || "").trim(),
+          explanation: String(set.questions.shortAnswer.explanation || "").trim(),
+        });
+      }
+    });
+
+    if (quizPool.length < 4) {
+      setMockExamError("퀴즈 문항이 4문항 이상 필요합니다.");
+      return;
+    }
+
+    const trimmedText = (extractedText || "").trim();
+    if (trimmedText.length < 80) {
+      setMockExamError("PDF에서 텍스트를 추출할 수 없습니다.");
+      return;
+    }
+
+    setMockExamStatus("모의고사 생성 중...");
+    setMockExamError("");
+    setIsGeneratingMockExam(true);
+
+    try {
+      const pickedOx = pickRandomItems(oxPool, 3);
+      const pickedQuiz = pickRandomItems(quizPool, 4);
+      const hardCount = Math.max(3, 10 - (pickedOx.length + pickedQuiz.length));
+      const hardResult = await generateHardQuiz(trimmedText, { count: hardCount });
+      const hardItems = Array.isArray(hardResult?.items) ? hardResult.items.slice(0, hardCount) : [];
+
+      if (hardItems.length < hardCount) {
+        throw new Error("고난도 문항 생성에 실패했습니다.");
+      }
+
+      const mappedOx = pickedOx.map((item) => ({
+        type: "ox",
+        prompt: String(item?.statement || "").trim(),
+        answer: item?.answer === true ? "O" : "X",
+        explanation: String(item?.explanation || "").trim(),
+        evidence: String(item?.evidence || "").trim(),
+      }));
+
+      const mappedQuiz = pickedQuiz.map((item) => ({ ...item }));
+
+      const mappedHard = hardItems.map((item) => ({
+        type: "hard",
+        prompt: String(item?.question || "").trim(),
+        choices: Array.isArray(item?.choices) ? item.choices : [],
+        answerIndex: Number.isFinite(item?.answerIndex) ? item.answerIndex : null,
+        explanation: String(item?.explanation || "").trim(),
+      }));
+
+      const examItems = [...mappedOx, ...mappedQuiz, ...mappedHard].map((item, idx) => ({
+        ...item,
+        order: idx + 1,
+      }));
+
+      if (examItems.length !== 10) {
+        throw new Error("모의고사 10문항을 구성하지 못했습니다.");
+      }
+
+      const now = new Date();
+      const dateStamp = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
+      const nextIndex = mockExams.length + 1;
+      const title = `${dateStamp} ${nextIndex}번째 모의고사`;
+      const payload = {
+        title,
+        items: examItems,
+        source: {
+          oxCount: mappedOx.length,
+          quizCount: mappedQuiz.length,
+          hardCount: mappedHard.length,
+        },
+        generatedAt: new Date().toISOString(),
+      };
+
+      const saved = await saveMockExam({
+        userId: user.id,
+        docId: selectedFileId,
+        docName: file?.name || "",
+        title,
+        totalQuestions: examItems.length,
+        payload,
+      });
+
+      setMockExams((prev) => [saved, ...prev]);
+      setActiveMockExamId(saved.id);
+      setShowMockExamAnswers(false);
+      setMockExamStatus("모의고사 저장 완료");
+    } catch (err) {
+      setMockExamError(`모의고사 생성 실패: ${err.message}`);
+      setMockExamStatus("");
+    } finally {
+      setIsGeneratingMockExam(false);
+    }
+  }, [
+    extractedText,
+    file,
+    isGeneratingMockExam,
+    isLoadingText,
+    oxItems,
+    pickRandomItems,
+    mockExams.length,
+    quizSets,
+    selectedFileId,
+    user,
+  ]);
+
+  const handleDeleteMockExam = useCallback(
+    async (examId) => {
+      if (!user) {
+        setMockExamError("로그인이 필요합니다.");
+        return;
+      }
+      try {
+        await deleteMockExam({ userId: user.id, examId });
+        setMockExams((prev) => prev.filter((item) => item.id !== examId));
+        if (activeMockExamId === examId) {
+          setActiveMockExamId(null);
+        }
+        setMockExamStatus("모의고사를 삭제했습니다.");
+      } catch (err) {
+        setMockExamError(`모의고사 삭제 실패: ${err.message}`);
+      }
+    },
+    [activeMockExamId, user]
+  );
+
+  const handleExportMockExam = useCallback(
+    async (exam) => {
+      if (!exam) {
+        setMockExamError("내보낼 모의고사가 없습니다.");
+        return;
+      }
+      if (!mockExamPrintRef.current) {
+        setMockExamError("내보낼 영역을 찾지 못했습니다.");
+        return;
+      }
+      setMockExamError("");
+      try {
+        const safeTitle = (exam.title || "mock-exam").replace(/[^\w\-]+/g, "-");
+        await exportElementToPdf(mockExamPrintRef.current, { filename: `${safeTitle}.pdf` });
+      } catch (err) {
+        setMockExamError(`PDF 저장 실패: ${err.message}`);
+      }
+    },
+    [mockExamPrintRef]
+  );
+
+  const quizProgress = useMemo(() => {
+    let total = 0;
+    let answered = 0;
+    let correct = 0;
+
+    quizSets.forEach((set) => {
+      const multipleChoice = set.questions?.multipleChoice || [];
+      multipleChoice.forEach((question, idx) => {
+        total += 1;
+        const selection = set.selectedChoices?.[idx];
+        const hasAnswer = selection !== undefined || set.revealedChoices?.[idx];
+        if (!hasAnswer) return;
+        answered += 1;
+        if (selection === question.answerIndex) {
+          correct += 1;
+        }
+      });
+
+      if (set.questions?.shortAnswer) {
+        total += 1;
+        if (set.shortAnswerResult) {
+          answered += 1;
+          if (set.shortAnswerResult.isCorrect) {
+            correct += 1;
+          }
+        }
+      }
+    });
+
+    return { total, answered, correct };
+  }, [quizSets]);
+
+  const oxProgress = useMemo(() => {
+    let total = 0;
+    let answered = 0;
+    let correct = 0;
+
+    const oxList = Array.isArray(oxItems) ? oxItems : [];
+    oxList.forEach((item, idx) => {
+      total += 1;
+      const selection = oxSelections?.[idx];
+      if (!selection) return;
+      answered += 1;
+      if ((selection === "o" && item.answer === true) || (selection === "x" && item.answer === false)) {
+        correct += 1;
+      }
+    });
+
+    return { total, answered, correct };
+  }, [oxItems, oxSelections]);
+
+  const questionProgress = useMemo(
+    () => ({
+      total: quizProgress.total + oxProgress.total,
+      answered: quizProgress.answered + oxProgress.answered,
+      correct: quizProgress.correct + oxProgress.correct,
+    }),
+    [quizProgress, oxProgress]
+  );
+
+  const pageProgress = useMemo(() => {
+    const totalPages = pageInfo.total || 0;
+    const visitedCount = visitedPages.size || 0;
+    const progress = totalPages ? visitedCount / totalPages : 0;
+    return { totalPages, visitedCount, progress };
+  }, [pageInfo.total, visitedPages]);
+
+  const activeMockExam = useMemo(() => {
+    if (!mockExams.length) return null;
+    if (activeMockExamId) {
+      return mockExams.find((exam) => exam.id === activeMockExamId) || mockExams[0];
+    }
+    return mockExams[0];
+  }, [activeMockExamId, mockExams]);
+  const formatMockExamTitle = useCallback((exam, index) => {
+    if (!exam) return "모의고사";
+    const rawTitle = String(exam.title || "").trim();
+    if (/^\d{4}\.\d{1,2}\.\d{1,2}\s+\d+번째\s+모의고사$/.test(rawTitle)) {
+      return rawTitle;
+    }
+    const date = exam.created_at ? new Date(exam.created_at) : new Date();
+    const dateStamp = `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}`;
+    const seq = Math.max(1, (index ?? 0) + 1);
+    return `${dateStamp} ${seq}번째 모의고사`;
+  }, []);
+  const activeMockExamIndex = useMemo(
+    () => (activeMockExam ? mockExams.findIndex((exam) => exam.id === activeMockExam.id) : -1),
+    [activeMockExam, mockExams]
+  );
+  const activeMockExamTitle = useMemo(
+    () => formatMockExamTitle(activeMockExam, activeMockExamIndex),
+    [activeMockExam, activeMockExamIndex, formatMockExamTitle]
+  );
+
+  const mockExamOrderedItems = useMemo(() => {
+    const items = Array.isArray(activeMockExam?.payload?.items) ? activeMockExam.payload.items : [];
+    if (!items.length) return [];
+    return [...items].sort((a, b) => (a.order || 0) - (b.order || 0));
+  }, [activeMockExam]);
+
+  const mockExamPages = useMemo(() => {
+    if (!mockExamOrderedItems.length) return [];
+    return [
+      mockExamOrderedItems.slice(0, 4),
+      mockExamOrderedItems.slice(4, 8),
+      mockExamOrderedItems.slice(8, 10),
+    ];
+  }, [mockExamOrderedItems]);
+
+  const renderMockExamItem = (item, number) => {
+    const choices = Array.isArray(item?.choices) ? item.choices : [];
+    const isOx = item?.type === "ox";
+    const isShort = item?.type === "quiz-short";
+    const isMultiple = !isOx && !isShort;
+
     return (
-      <div className={`relative min-h-screen overflow-hidden ${theme === "light" ? "text-slate-900" : "text-slate-100"}`}>
-        <main className={`flex min-h-screen items-center justify-center ${theme === "light" ? "bg-slate-50" : "bg-slate-950"}`}>
-          <p className="text-sm text-slate-400">로그인 상태 확인 중...</p>
-        </main>
+      <div key={`mock-exam-q-${number}`} className="space-y-2">
+        <p className="text-[13px] font-semibold text-black">
+          {number}. {item?.prompt}
+        </p>
+        {isOx && <p className="text-[12px] text-black/80">1) O  2) X</p>}
+        {isShort && <p className="text-[12px] text-black/80">답: ____________________</p>}
+        {isMultiple && choices.length > 0 && (
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[12px] text-black/85">
+            {choices.slice(0, 4).map((choice, idx) => (
+              <div key={`choice-${number}-${idx}`} className="flex gap-2">
+                <span className="w-4">{idx + 1})</span>
+                <span>{choice}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
-  }
-
-  if (!user) {
-    return (
-      <LoginBackground theme={theme}>
-        <div className="absolute right-4 top-4 z-20">
-          <button
-            type="button"
-            onClick={toggleTheme}
-            className="ghost-button text-xs text-slate-700"
-            data-ghost-size="sm"
-            style={{ "--ghost-color": theme === "light" ? "14, 116, 144" : "148, 163, 184" }}
-          >
-            {theme === "light" ? "라이트 모드" : "다크 모드"}
-          </button>
-        </div>
-        <main className="mx-auto flex min-h-screen w-full flex-col items-center justify-center px-4 py-8">
-          <div className="w-full max-w-md">
-            <AuthPanel user={user} onAuth={refreshSession} />
-          </div>
-        </main>
-      </LoginBackground>
-    );
-  }
+  };
 
   const renderStartPage = () => (
     <section className="grid grid-cols-1 gap-4">
@@ -1212,7 +1622,7 @@ function App() {
       className="flex flex-col gap-4 lg:h-[clamp(70vh,calc(100vh-120px),90vh)] lg:flex-row lg:items-stretch lg:overflow-hidden"
     >
       <div className="flex flex-col gap-3 lg:h-full lg:overflow-y-auto" style={splitStyle}>
-        <PdfPreview pdfUrl={pdfUrl} file={file} pageInfo={pageInfo} onPageChange={(page) => setCurrentPage(page)} />
+        <PdfPreview pdfUrl={pdfUrl} file={file} pageInfo={pageInfo} onPageChange={handlePageChange} />
       </div>
 
       <div className="hidden w-2 cursor-col-resize items-stretch justify-center lg:flex">
@@ -1225,40 +1635,32 @@ function App() {
       </div>
 
         <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
-        <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
+        <div className="grid grid-cols-7 items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
           {[
-            { id: "summary", label: "요약" },
-            { id: "quiz", label: "퀴즈" },
-            { id: "ox", label: "O/X" },
-            { id: "bookmark", label: "북마크" },
-            { id: "flashcards", label: "카드" },
-          ].map((tab) => {
-            const active = panelTab === tab.id;
+            { id: "summary", label: "\uC694\uC57D", type: "tab" },
+            { id: "progress", label: "\uC9C4\uB3C4", type: "tab" },
+            { id: "quiz", label: "\uD034\uC988", type: "tab" },
+            { id: "ox", label: "O/X", type: "tab" },
+            { id: "mockExam", label: "\uBAA8\uC758\uACE0\uC0AC", type: "tab" },
+            { id: "flashcards", label: "\uCE74\uB4DC", type: "tab" },
+            { id: "save", label: "\uC800\uC7A5", type: "action" },
+          ].map((item) => {
+            const isAction = item.type === "action";
+            const active = !isAction && panelTab === item.id;
             return (
               <button
-                key={tab.id}
+                key={item.id}
                 type="button"
-                onClick={() => setPanelTab(tab.id)}
-                className="ghost-button text-sm text-slate-200"
+                onClick={isAction ? handleManualSave : () => setPanelTab(item.id)}
+                className={`ghost-button w-full text-sm ${isAction ? "text-emerald-100" : "text-slate-200"}`}
                 data-ghost-size="sm"
-                data-ghost-active={active}
-                style={{ "--ghost-color": active ? "52, 211, 153" : "148, 163, 184" }}
+                data-ghost-active={!isAction && active}
+                style={{ "--ghost-color": isAction || active ? "52, 211, 153" : "148, 163, 184" }}
               >
-                {tab.label}
+                {item.label}
               </button>
             );
           })}
-          <div className="ml-auto flex items-center">
-            <button
-              type="button"
-              onClick={handleManualSave}
-              className="ghost-button text-xs text-emerald-100"
-              data-ghost-size="sm"
-              style={{ "--ghost-color": "52, 211, 153" }}
-            >
-              저장
-            </button>
-          </div>
         </div>
 
         <div className="flex-1 overflow-auto pr-1 pb-1">
@@ -1310,100 +1712,197 @@ function App() {
               {!isLoadingSummary && !summary && <p className="mt-2 text-sm text-slate-400">요약이 준비되면 표시됩니다.</p>}
             </div>
           )}
+          {panelTab === "progress" && (
+            <ProgressPanel
+              totalQuestions={questionProgress.total}
+              answeredQuestions={questionProgress.answered}
+              correctQuestions={questionProgress.correct}
+              quizProgress={quizProgress}
+              oxProgress={oxProgress}
+              flashcardProgress={flashcardExamStats}
+              pageTotal={pageProgress.totalPages}
+              pageVisited={pageProgress.visitedCount}
+              pageProgress={pageProgress.progress}
+            />
+          )}
 
-          {panelTab === "bookmark" && (
+          {panelTab === "mockExam" && (
             <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm text-slate-300">현재 페이지: {currentPage || 1}</p>
-                  <h3 className="text-lg font-semibold text-white">북마크 / 메모</h3>
+                  <p className="text-sm text-slate-300">총 모의고사</p>
+                  <h3 className="text-lg font-semibold text-white">모의고사</h3>
                 </div>
                 <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200 ring-1 ring-white/15">
-                  {bookmarks.length}개
+                  {mockExams.length}개
                 </span>
               </div>
 
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                <input
-                  type="text"
-                  value={bookmarkNote}
-                  onChange={(e) => setBookmarkNote(e.target.value)}
-                  className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none ring-1 ring-transparent transition focus:border-emerald-300/50 focus:ring-emerald-300/40"
-                  placeholder="이 페이지에 대한 메모를 입력하세요"
-                />
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!file || !selectedFileId) {
-                      setError("먼저 PDF를 선택해주세요.");
-                      return;
-                    }
-                    if (!bookmarkNote.trim()) {
-                      setError("메모를 입력하세요.");
-                      return;
-                    }
-                    setError("");
-                    setStatus("북마크 저장 중...");
-                    try {
-                      const saved = await saveBookmark({
-                        userId: user?.id,
-                        docId: selectedFileId,
-                        docName: file?.name || "",
-                        pageNumber: currentPage || 1,
-                        note: bookmarkNote.trim(),
-                      });
-                      setBookmarks((prev) => [saved, ...prev]);
-                      setBookmarkNote("");
-                      setStatus("북마크 저장 완료");
-                    } catch (err) {
-                      setError(`북마크 저장 실패: ${err.message}`);
-                      setStatus("");
-                    }
-                  }}
-                  disabled={!user || isLoadingText}
-                  className="ghost-button text-sm text-emerald-100"
-                  data-ghost-size="lg"
-                  style={{ "--ghost-color": "52, 211, 153" }}
-                >
-                  북마크 추가
-                </button>
-              </div>
+              <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[260px,1fr]">
+                <div className="space-y-2">
+                  {isLoadingMockExams && <p className="text-sm text-slate-300">모의고사 불러오는 중...</p>}
+                  {!isLoadingMockExams && mockExams.length === 0 && (
+                    <p className="text-sm text-slate-400">저장된 모의고사가 없습니다.</p>
+                  )}
+                  {!isLoadingMockExams &&
+                    mockExams.map((exam, idx) => {
+                      const isActive = activeMockExam?.id === exam.id;
+                      const displayTitle = formatMockExamTitle(exam, idx);
+                      return (
+                        <div
+                          key={exam.id}
+                          className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-sm ${
+                            isActive
+                              ? "border-emerald-300/50 bg-emerald-500/10"
+                              : "border-white/10 bg-white/5"
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setActiveMockExamId(exam.id)}
+                            className="flex flex-1 flex-col items-start text-left"
+                          >
+                            <span className="text-sm font-semibold text-white">{displayTitle}</span>
+                            <span className="text-xs text-slate-400">
+                              {new Date(exam.created_at).toLocaleString("ko-KR")}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteMockExam(exam.id)}
+                            className="ghost-button text-xs text-slate-200"
+                            data-ghost-size="sm"
+                            style={{ "--ghost-color": "226, 232, 240" }}
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      );
+                    })}
+                </div>
 
-              <div className="mt-4 space-y-2">
-                {isLoadingBookmarks && <p className="text-sm text-slate-300">북마크 불러오는 중...</p>}
-                {!isLoadingBookmarks && bookmarks.length === 0 && (
-                  <p className="text-sm text-slate-400">저장된 북마크가 없습니다.</p>
-                )}
-                {!isLoadingBookmarks &&
-                  bookmarks.map((bm) => (
-                    <div
-                      key={bm.id}
-                      className="flex items-start justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100"
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCreateMockExam}
+                      disabled={isGeneratingMockExam || isLoadingText || !selectedFileId}
+                      className="ghost-button text-sm text-emerald-100"
+                      data-ghost-size="lg"
+                      style={{ "--ghost-color": "52, 211, 153" }}
                     >
-                      <div>
-                        <p className="text-xs text-slate-400">
-                          페이지 {bm.page_number} · {bm.doc_name || "PDF"}
-                        </p>
-                        <p className="text-sm">{bm.note}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            await deleteBookmark({ userId: user?.id, bookmarkId: bm.id });
-                            setBookmarks((prev) => prev.filter((b) => b.id !== bm.id));
-                          } catch (err) {
-                            setError(`북마크 삭제 실패: ${err.message}`);
-                          }
-                        }}
-                        className="ghost-button text-xs text-slate-200"
-                        data-ghost-size="sm"
-                        style={{ "--ghost-color": "226, 232, 240" }}
-                      >
-                        삭제
-                      </button>
+                      {isGeneratingMockExam ? "모의고사 생성 중..." : "모의고사 생성"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleExportMockExam(activeMockExam)}
+                      disabled={!activeMockExam || mockExamOrderedItems.length === 0}
+                      className="ghost-button text-sm text-indigo-100"
+                      data-ghost-size="lg"
+                      style={{ "--ghost-color": "99, 102, 241" }}
+                    >
+                      PDF 저장
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowMockExamAnswers((prev) => !prev)}
+                      disabled={!activeMockExam}
+                      className="ghost-button text-sm text-slate-200"
+                      data-ghost-size="lg"
+                      style={{ "--ghost-color": "148, 163, 184" }}
+                    >
+                      {showMockExamAnswers ? "정답 숨기기" : "정답 보기"}
+                    </button>
+                  </div>
+
+                  {mockExamStatus && <p className="text-sm text-emerald-200">{mockExamStatus}</p>}
+                  {mockExamError && (
+                    <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-200 ring-1 ring-red-400/30">
+                      {mockExamError}
+                    </p>
+                  )}
+                </div>
+
+                <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-100 overflow-auto">
+                  {!activeMockExam && <p className="text-sm text-slate-400">선택된 모의고사가 없습니다.</p>}
+                  {activeMockExam && (
+                    <div className="space-y-6">
+                      {mockExamOrderedItems.length === 0 && (
+                        <p className="text-sm text-slate-400">모의고사 문항이 없습니다.</p>
+                      )}
+                      {mockExamOrderedItems.length > 0 && (
+                        <div ref={mockExamPrintRef} className="space-y-10 flex flex-col items-center">
+                          {mockExamPages.map((pageItems, pageIndex) => {
+                            const isFourGrid = pageItems.length === 4;
+                            const pageStart = pageIndex === 0 ? 1 : pageIndex === 1 ? 5 : 9;
+                            return (
+                              <section
+                                key={`mock-exam-page-${pageIndex}`}
+                                className="relative mx-auto bg-white text-black shadow-sm"
+                                style={{ width: "794px", minHeight: "1123px", padding: "44px 52px 48px" }}
+                              >
+                                <div className="relative flex items-start justify-center">
+                                  <h4 className="text-[18px] font-semibold">{activeMockExamTitle}</h4>
+                                  <span className="absolute right-0 top-0 text-[18px] font-semibold">
+                                    {pageIndex + 1}
+                                  </span>
+                                </div>
+                                <div className="mt-3 border-t border-black" />
+                                <div
+                                  className={`relative mt-6 grid gap-8 ${
+                                    isFourGrid ? "grid-cols-2 grid-rows-2" : "grid-cols-2"
+                                  }`}
+                                  style={{
+                                    minHeight: "900px",
+                                    gridAutoFlow: isFourGrid ? "column" : "row",
+                                  }}
+                                >
+                                  <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-black/80" />
+                                  {pageItems.map((item, idx) => {
+                                    const columnIndex = isFourGrid ? Math.floor(idx / 2) : idx % 2;
+                                    const paddingClass = columnIndex === 0 ? "pr-6" : "pl-6";
+                                    return (
+                                      <div key={`mock-exam-cell-${pageIndex}-${idx}`} className={paddingClass}>
+                                        {renderMockExamItem(item, pageStart + idx)}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </section>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {showMockExamAnswers && (
+                        <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+                          <p className="text-sm font-semibold text-emerald-200">정답/해설</p>
+                          <div className="mt-3 space-y-2 text-xs text-slate-200">
+                            {mockExamOrderedItems.map((item, idx) => {
+                              const answerText =
+                                item.type === "ox"
+                                  ? item.answer || "-"
+                                  : item.type === "quiz-short"
+                                    ? item.answer || "-"
+                                    : Number.isFinite(item.answerIndex)
+                                      ? LETTERS[item.answerIndex] || "-"
+                                      : "-";
+                              return (
+                                <div key={`mock-exam-answer-${idx}`} className="rounded-lg bg-white/5 px-3 py-2">
+                                  <p className="font-semibold text-emerald-200">
+                                    {idx + 1}번 정답: {answerText}
+                                  </p>
+                                  {item.explanation && <p className="mt-1">해설: {item.explanation}</p>}
+                                  {item.evidence && <p className="mt-1">근거: {item.evidence}</p>}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                  ))}
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -1540,43 +2039,42 @@ function App() {
             <FlashcardsPanel
               cards={flashcards}
               isLoading={isLoadingFlashcards}
-              onAdd={async (front, back, hint) => {
-                if (!user) {
-                  setError("로그인이 필요합니다.");
-                  return;
-                }
-                const deckId = selectedFileId || "default";
-                setError("");
-                setStatus("카드 저장 중...");
-                try {
-                  const saved = await addFlashcard({
-                    userId: user.id,
-                    deckId,
-                    front,
-                    back,
-                    hint,
-                  });
-                  setFlashcards((prev) => [saved, ...prev]);
-                  setStatus("카드 저장 완료");
-                } catch (err) {
-                  setError(`카드 저장 실패: ${err.message}`);
-                  setStatus("");
-                }
-              }}
-              onDelete={async (cardId) => {
-                try {
-                  await deleteFlashcard({ userId: user?.id, cardId });
-                  setFlashcards((prev) => prev.filter((c) => c.id !== cardId));
-                } catch (err) {
-                  setError(`카드 삭제 실패: ${err.message}`);
-                }
-              }}
+              onAdd={handleAddFlashcard}
+              onDelete={handleDeleteFlashcard}
+              onGenerate={handleGenerateFlashcards}
+              isGenerating={isGeneratingFlashcards}
+              canGenerate={Boolean(file && selectedFileId && extractedText && !isLoadingText)}
+              status={flashcardStatus}
+              error={flashcardError}
+              onExamComplete={setFlashcardExamStats}
             />
           )}
         </div>
       </div>
     </section>
   );
+
+  if (!authReady) {
+    return (
+      <LoginBackground theme={theme}>
+        <div className="relative z-10 flex min-h-screen items-center justify-center px-4">
+          <div className="rounded-2xl border border-white/10 bg-slate-900/70 px-4 py-3 text-sm text-slate-200 shadow-lg">
+            Loading...
+          </div>
+        </div>
+      </LoginBackground>
+    );
+  }
+
+  if (!user) {
+    return (
+      <LoginBackground theme={theme}>
+        <div className="relative z-10 flex min-h-screen items-center justify-center px-4 py-8">
+          <AuthPanel user={user} onAuth={refreshSession} />
+        </div>
+      </LoginBackground>
+    );
+  }
 
   return (
     <div className={`relative min-h-screen overflow-hidden ${theme === "light" ? "text-slate-900" : "text-slate-100"}`}>

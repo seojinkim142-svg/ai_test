@@ -34,6 +34,33 @@ ${extractedText}
   `.trim();
 }
 
+function buildHardQuizPrompt(extractedText, count) {
+  return `
+당신은 대학원 수준의 고난도 모의고사를 출제하는 교수입니다.
+
+[출제 원칙]
+- 단순 암기형/사실 회상형 문제 금지
+- 개념 간 비교/적용/추론/오해 판별을 요구
+- 정답은 한 줄 베껴쓰기 형태가 아니어야 함
+- 헷갈리기 쉬운 선택지를 포함하되, 정답은 명확하게
+
+[출력 형식]
+- ${count}문항, 4지선다
+- 각 문항에 answerIndex와 explanation 포함
+- 모든 내용은 한국어, JSON만 출력
+
+[반환 포맷(JSON)]
+{
+  "items": [
+    { "question": "...", "choices": ["...","...","...","..."], "answerIndex": 1, "explanation": "..." }
+  ]
+}
+
+[문서 본문]
+${extractedText}
+  `.trim();
+}
+
 function buildOxPrompt(contextText, highlightText = "") {
   return `
 당신은 업로드된 PDF를 검토하고 이해하는 보조 AI입니다.
@@ -112,6 +139,40 @@ function buildSummaryPrompt(extractedText) {
 
 본문:
 ${extractedText}
+  `.trim();
+}
+
+function buildFlashcardsContext(extractedText, count) {
+  const trimmed = (extractedText || "").trim();
+  if (!trimmed) return "";
+  const chunked = chunkText(trimmed, {
+    maxChunks: Math.min(8, Math.max(3, count)),
+    maxChunkLength: 1400,
+  });
+  return chunked || limitText(trimmed, 6000);
+}
+
+function buildFlashcardsPrompt(contextText, count) {
+  return `
+You generate study flashcards from a PDF.
+
+[Flashcard rules]
+- Create ${count} cards in Korean.
+- Focus on key concepts/definitions/principles/terms.
+- Remove duplicates or near-duplicates.
+- front: question/term, back: concise answer/explanation, hint: only if needed (optional).
+- Do not repeat identical meaning.
+- If the source is English, translate to Korean.
+
+[Output format (JSON)]
+{
+  "cards": [
+    { "front": "...", "back": "...", "hint": "" }
+  ]
+}
+
+[Document]
+${contextText}
   `.trim();
 }
 
@@ -329,6 +390,33 @@ export async function generateQuiz(extractedText) {
   return parseJsonSafe(sanitized, "quiz JSON");
 }
 
+export async function generateHardQuiz(extractedText, { count = 3 } = {}) {
+  const prompt = buildHardQuizPrompt(extractedText, count);
+
+  const data = await postChatRequest(
+    {
+      model: MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Generate high-difficulty Korean multiple-choice questions from the user's text only. Each item must test reasoning/application, not verbatim recall. Output JSON only with the provided schema.",
+        },
+        { role: "user", content: prompt },
+      ],
+      temperature: 1,
+      response_format: { type: "json_object" },
+    },
+    { retries: 0 }
+  );
+
+  const content = data.choices?.[0]?.message?.content?.trim() || "";
+  const sanitized = sanitizeJson(content);
+  const parsed = parseJsonSafe(sanitized, "hard quiz JSON");
+  const items = Array.isArray(parsed?.items) ? parsed.items : [];
+  return { items };
+}
+
 export async function generateOxQuiz(extractedText) {
   const chunked = chunkText(extractedText, { maxChunks: 5, maxChunkLength: 1400 });
   let summaryForOx = "";
@@ -418,6 +506,35 @@ export async function generateSummary(extractedText) {
 
   const content = data.choices?.[0]?.message?.content?.trim() || "";
   return sanitizeMarkdown(content);
+}
+
+export async function generateFlashcards(extractedText, { count = 8 } = {}) {
+  const contextText = buildFlashcardsContext(extractedText, count);
+  if (!contextText) {
+    throw new Error("먼저 PDF 텍스트를 준비해주세요.");
+  }
+  const prompt = buildFlashcardsPrompt(contextText, count);
+
+  const data = await postChatRequest(
+    {
+      model: MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Create Korean flashcards strictly from the user's text. Return JSON only with an array of {front, back, hint}. Keep front/back concise, avoid duplicates, and translate to Korean if needed.",
+        },
+        { role: "user", content: prompt },
+      ],
+      temperature: 1,
+      response_format: { type: "json_object" },
+    },
+    { retries: 0 }
+  );
+
+  const content = data.choices?.[0]?.message?.content?.trim() || "";
+  const sanitized = sanitizeJson(content);
+  return parseJsonSafe(sanitized, "flashcards JSON");
 }
 
 export async function generateHighlights(extractedText) {
