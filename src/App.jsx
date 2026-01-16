@@ -79,6 +79,7 @@ function App() {
   const [mockExamError, setMockExamError] = useState("");
   const [activeMockExamId, setActiveMockExamId] = useState(null);
   const [showMockExamAnswers, setShowMockExamAnswers] = useState(false);
+  const [isMockExamMenuOpen, setIsMockExamMenuOpen] = useState(false);
   const [flashcards, setFlashcards] = useState([]);
   const [isLoadingFlashcards, setIsLoadingFlashcards] = useState(false);
   const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false);
@@ -96,6 +97,8 @@ function App() {
   const detailContainerRef = useRef(null);
   const summaryRef = useRef(null);
   const mockExamPrintRef = useRef(null);
+  const mockExamMenuRef = useRef(null);
+  const mockExamMenuButtonRef = useRef(null);
   const { user, authReady, refreshSession, handleSignOut: authSignOut } = useSupabaseAuth();
   const { tier, loadingTier } = useUserTier(user);
   const isFreeTier = tier === "free";
@@ -333,6 +336,29 @@ function App() {
       root.classList.remove("theme-light");
     }
   }, [theme]);
+
+  useEffect(() => {
+    if (!isMockExamMenuOpen) return;
+    const handleClickOutside = (event) => {
+      if (event.button === 2) return;
+      const menu = mockExamMenuRef.current;
+      const button = mockExamMenuButtonRef.current;
+      if (menu && menu.contains(event.target)) return;
+      if (button && button.contains(event.target)) return;
+      setIsMockExamMenuOpen(false);
+    };
+    const handleEsc = (event) => {
+      if (event.key === "Escape") {
+        setIsMockExamMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEsc);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEsc);
+    };
+  }, [isMockExamMenuOpen]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1742,92 +1768,113 @@ function App() {
                 </span>
               </div>
 
-              <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[260px,1fr]">
-                <div className="space-y-2">
-                  {isLoadingMockExams && <p className="text-sm text-slate-300">모의고사 불러오는 중...</p>}
-                  {!isLoadingMockExams && mockExams.length === 0 && (
-                    <p className="text-sm text-slate-400">저장된 모의고사가 없습니다.</p>
-                  )}
-                  {!isLoadingMockExams &&
-                    mockExams.map((exam, idx) => {
-                      const isActive = activeMockExam?.id === exam.id;
-                      const displayTitle = formatMockExamTitle(exam, idx);
-                      return (
-                        <div
-                          key={exam.id}
-                          className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-sm ${
-                            isActive
-                              ? "border-emerald-300/50 bg-emerald-500/10"
-                              : "border-white/10 bg-white/5"
-                          }`}
-                        >
-                          <button
-                            type="button"
-                            onClick={() => setActiveMockExamId(exam.id)}
-                            className="flex flex-1 flex-col items-start text-left"
-                          >
-                            <span className="text-sm font-semibold text-white">{displayTitle}</span>
-                            <span className="text-xs text-slate-400">
-                              {new Date(exam.created_at).toLocaleString("ko-KR")}
-                            </span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteMockExam(exam.id)}
-                            className="ghost-button text-xs text-slate-200"
-                            data-ghost-size="sm"
-                            style={{ "--ghost-color": "226, 232, 240" }}
-                          >
-                            삭제
-                          </button>
-                        </div>
-                      );
-                    })}
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex flex-wrap items-center gap-2">
+              <div className="mt-4 space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative" ref={mockExamMenuRef}>
                     <button
+                      ref={mockExamMenuButtonRef}
                       type="button"
-                      onClick={handleCreateMockExam}
-                      disabled={isGeneratingMockExam || isLoadingText || !selectedFileId}
+                      onClick={() => setIsMockExamMenuOpen((prev) => !prev)}
                       className="ghost-button text-sm text-emerald-100"
                       data-ghost-size="lg"
                       style={{ "--ghost-color": "52, 211, 153" }}
                     >
-                      {isGeneratingMockExam ? "모의고사 생성 중..." : "모의고사 생성"}
+                      모의고사 고르기
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => handleExportMockExam(activeMockExam)}
-                      disabled={!activeMockExam || mockExamOrderedItems.length === 0}
-                      className="ghost-button text-sm text-indigo-100"
-                      data-ghost-size="lg"
-                      style={{ "--ghost-color": "99, 102, 241" }}
-                    >
-                      PDF 저장
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowMockExamAnswers((prev) => !prev)}
-                      disabled={!activeMockExam}
-                      className="ghost-button text-sm text-slate-200"
-                      data-ghost-size="lg"
-                      style={{ "--ghost-color": "148, 163, 184" }}
-                    >
-                      {showMockExamAnswers ? "정답 숨기기" : "정답 보기"}
-                    </button>
+                    {isMockExamMenuOpen && (
+                      <div className="absolute left-0 top-full z-20 mt-2 w-72 overflow-hidden rounded-xl border border-white/10 bg-slate-900/95 text-sm text-slate-100 shadow-lg ring-1 ring-white/10">
+                        {isLoadingMockExams && (
+                          <div className="px-4 py-3 text-xs text-slate-400">모의고사 불러오는 중...</div>
+                        )}
+                        {!isLoadingMockExams && mockExams.length === 0 && (
+                          <div className="px-4 py-3 text-xs text-slate-400">저장된 모의고사가 없습니다.</div>
+                        )}
+                        {!isLoadingMockExams &&
+                          mockExams.map((exam, idx) => {
+                            const isActive = activeMockExam?.id === exam.id;
+                            const displayTitle = formatMockExamTitle(exam, idx);
+                            return (
+                              <div
+                                key={exam.id}
+                                className={`flex items-center justify-between gap-2 px-4 py-2 text-sm ${
+                                  idx === 0 ? "" : "border-t border-white/10"
+                                } ${isActive ? "bg-emerald-500/10" : "hover:bg-white/5"}`}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setActiveMockExamId(exam.id);
+                                    setIsMockExamMenuOpen(false);
+                                  }}
+                                  className="flex flex-1 flex-col items-start text-left"
+                                >
+                                  <span className="text-sm font-semibold text-slate-100">{displayTitle}</span>
+                                  <span className="text-[11px] text-slate-400">
+                                    {new Date(exam.created_at).toLocaleString("ko-KR")}
+                                  </span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    handleDeleteMockExam(exam.id);
+                                    setIsMockExamMenuOpen(false);
+                                  }}
+                                  className="ghost-button text-[11px] text-slate-200"
+                                  data-ghost-size="sm"
+                                  style={{ "--ghost-color": "226, 232, 240" }}
+                                >
+                                  삭제
+                                </button>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
                   </div>
-
-                  {mockExamStatus && <p className="text-sm text-emerald-200">{mockExamStatus}</p>}
-                  {mockExamError && (
-                    <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-200 ring-1 ring-red-400/30">
-                      {mockExamError}
-                    </p>
+                  {activeMockExam && (
+                    <span className="text-xs text-slate-300">선택됨: {activeMockExamTitle}</span>
                   )}
+                  <button
+                    type="button"
+                    onClick={handleCreateMockExam}
+                    disabled={isGeneratingMockExam || isLoadingText || !selectedFileId}
+                    className="ghost-button text-sm text-emerald-100"
+                    data-ghost-size="lg"
+                    style={{ "--ghost-color": "52, 211, 153" }}
+                  >
+                    {isGeneratingMockExam ? "모의고사 생성 중..." : "모의고사 생성"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleExportMockExam(activeMockExam)}
+                    disabled={!activeMockExam || mockExamOrderedItems.length === 0}
+                    className="ghost-button text-sm text-indigo-100"
+                    data-ghost-size="lg"
+                    style={{ "--ghost-color": "99, 102, 241" }}
+                  >
+                    PDF 저장
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowMockExamAnswers((prev) => !prev)}
+                    disabled={!activeMockExam}
+                    className="ghost-button text-sm text-slate-200"
+                    data-ghost-size="lg"
+                    style={{ "--ghost-color": "148, 163, 184" }}
+                  >
+                    {showMockExamAnswers ? "정답 숨기기" : "정답 보기"}
+                  </button>
                 </div>
 
-                <div className="lg:col-span-2 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-100 overflow-auto">
+                {mockExamStatus && <p className="text-sm text-emerald-200">{mockExamStatus}</p>}
+                {mockExamError && (
+                  <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-200 ring-1 ring-red-400/30">
+                    {mockExamError}
+                  </p>
+                )}
+
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-100 overflow-auto">
                   {!activeMockExam && <p className="text-sm text-slate-400">선택된 모의고사가 없습니다.</p>}
                   {activeMockExam && (
                     <div className="space-y-6">
