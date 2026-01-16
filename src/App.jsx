@@ -38,7 +38,7 @@ import {
   updateUploadFolder,
 } from "./services/supabase";
 import { extractPdfText, generatePdfThumbnail } from "./utils/pdf";
-import { exportElementToPdf } from "./utils/pdfExport";
+import { exportElementToPdf, exportPagedElementToPdf } from "./utils/pdfExport";
 
 function App() {
   const [file, setFile] = useState(null);
@@ -1446,7 +1446,11 @@ function App() {
       setMockExamError("");
       try {
         const safeTitle = (exam.title || "mock-exam").replace(/[^\w\-]+/g, "-");
-        await exportElementToPdf(mockExamPrintRef.current, { filename: `${safeTitle}.pdf` });
+        await exportPagedElementToPdf(mockExamPrintRef.current, {
+          filename: `${safeTitle}.pdf`,
+          margin: 0,
+          pageSelector: ".mock-exam-page",
+        });
       } catch (err) {
         setMockExamError(`PDF 저장 실패: ${err.message}`);
       }
@@ -1838,7 +1842,7 @@ function App() {
                             return (
                               <section
                                 key={`mock-exam-page-${pageIndex}`}
-                                className="relative mx-auto bg-white text-black shadow-sm"
+                                className="mock-exam-page relative mx-auto bg-white text-black shadow-sm"
                                 style={{ width: "794px", minHeight: "1123px", padding: "44px 52px 48px" }}
                               >
                                 <div className="relative flex items-start justify-center">
