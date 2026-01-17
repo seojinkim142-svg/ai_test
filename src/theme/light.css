@@ -2,6 +2,9 @@
   color: #0f172a;
   background-color: #f8fafc;
   color-scheme: light;
+  --scrollbar-track: #e2e8f0;
+  --scrollbar-thumb: #94a3b8;
+  --scrollbar-thumb-hover: #64748b;
 }
 
 :root.theme-light body {

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ActionsPanel from "./components/ActionsPanel";
 import AuthPanel from "./components/AuthPanel";
+import AiTutorPanel from "./components/AiTutorPanel";
 import FlashcardsPanel from "./components/FlashcardsPanel";
 import FileUpload from "./components/FileUpload";
 import Header from "./components/Header";
@@ -11,7 +12,14 @@ import ProgressPanel from "./components/ProgressPanel";
 import QuizSection from "./components/QuizSection";
 import SummaryCard from "./components/SummaryCard";
 import PaymentPage from "./components/PaymentPage";
-import { generateQuiz, generateSummary, generateOxQuiz, generateFlashcards, generateHardQuiz } from "./services/openai";
+import {
+  generateQuiz,
+  generateSummary,
+  generateOxQuiz,
+  generateFlashcards,
+  generateHardQuiz,
+  generateTutorReply,
+} from "./services/openai";
 import { LETTERS } from "./constants";
 import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
 import { useUserTier } from "./hooks/useUserTier";
@@ -86,6 +94,9 @@ function App() {
   const [flashcardStatus, setFlashcardStatus] = useState("");
   const [flashcardError, setFlashcardError] = useState("");
   const [flashcardExamStats, setFlashcardExamStats] = useState(null);
+  const [tutorMessages, setTutorMessages] = useState([]);
+  const [isTutorLoading, setIsTutorLoading] = useState(false);
+  const [tutorError, setTutorError] = useState("");
   const [artifacts, setArtifacts] = useState(null);
   const downloadCacheRef = useRef(new Map()); // storagePath -> { file, thumbnail, remoteUrl, bucket }
   const backfillInProgressRef = useRef(false);
@@ -327,6 +338,20 @@ function App() {
     () => (previewText.length > 700 ? `${previewText.slice(0, 700)}...` : previewText),
     [previewText]
   );
+
+  const tutorNotice = useMemo(() => {
+    if (!file || !selectedFileId) {
+      return "먼저 PDF를 선택해주세요.";
+    }
+    if (isLoadingText) {
+      return "PDF 추출 중입니다. 잠시만 기다려주세요.";
+    }
+    const trimmed = (extractedText || "").trim();
+    if (!trimmed) {
+      return "PDF에서 텍스트를 추출할 수 없습니다.";
+    }
+    return "";
+  }, [extractedText, file, isLoadingText, selectedFileId]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -637,6 +662,9 @@ function App() {
       setFlashcardStatus("");
       setFlashcardError("");
       setIsGeneratingFlashcards(false);
+      setTutorMessages([]);
+      setTutorError("");
+      setIsTutorLoading(false);
       oxAutoRequestedRef.current = false;
 
       try {
@@ -780,6 +808,9 @@ function App() {
     setFlashcardStatus("");
     setFlashcardError("");
     setIsGeneratingFlashcards(false);
+    setTutorMessages([]);
+    setTutorError("");
+    setIsTutorLoading(false);
     setOxItems(null);
     setOxSelections({});
     setPanelTab("summary");
@@ -820,17 +851,6 @@ function App() {
     },
     [user, selectedFileId, artifacts]
   );
-
-  const handleManualSave = useCallback(async () => {
-    const currentQuiz = quizSets[0]?.questions || null;
-    const currentOx = oxItems ? { items: oxItems } : null;
-    await persistArtifacts({
-      summary: summary || null,
-      quiz: currentQuiz,
-      ox: currentOx,
-    });
-    setStatus("저장 완료");
-  }, [quizSets, oxItems, summary, persistArtifacts]);
 
   useEffect(() => {
     uploadedFilesRef.current = uploadedFiles;
@@ -1282,6 +1302,51 @@ function App() {
     }
     }, [isGeneratingFlashcards, user, file, selectedFileId, isLoadingText, extractedText]);
 
+  const handleResetTutor = useCallback(() => {
+    setTutorMessages([]);
+    setTutorError("");
+    setIsTutorLoading(false);
+  }, []);
+
+  const handleSendTutorMessage = useCallback(
+    async (prompt) => {
+      const trimmed = String(prompt || "").trim();
+      if (!trimmed || isTutorLoading) return;
+      if (!file || !selectedFileId) {
+        setTutorError("먼저 PDF를 선택해주세요.");
+        return;
+      }
+      if (isLoadingText) {
+        setTutorError("PDF 추출 중입니다. 잠시만 기다려주세요.");
+        return;
+      }
+      const docText = (extractedText || "").trim();
+      if (!docText) {
+        setTutorError("PDF에서 텍스트를 추출할 수 없습니다.");
+        return;
+      }
+
+      setTutorError("");
+      const history = tutorMessages.slice(-12);
+      const userMessage = { role: "user", content: trimmed };
+      setTutorMessages((prev) => [...prev, userMessage]);
+      setIsTutorLoading(true);
+      try {
+        const reply = await generateTutorReply({
+          question: trimmed,
+          extractedText: docText,
+          messages: history,
+        });
+        setTutorMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+      } catch (err) {
+        setTutorError(`AI 튜터 답변 생성 실패: ${err.message}`);
+      } finally {
+        setIsTutorLoading(false);
+      }
+    },
+    [extractedText, file, isLoadingText, isTutorLoading, selectedFileId, tutorMessages]
+  );
+
   const pickRandomItems = useCallback((items, count) => {
     if (!Array.isArray(items) || count <= 0) return [];
     const copy = [...items];
@@ -1660,7 +1725,7 @@ function App() {
           className="h-full w-1 rounded-full bg-white/10 transition hover:bg-white/30"
           onMouseDown={handleDragStart}
           role="separator"
-          aria-label="패널 크기 조절"
+          aria-label="Resize panel"
         />
       </div>
 
@@ -1673,19 +1738,18 @@ function App() {
             { id: "ox", label: "O/X", type: "tab" },
             { id: "mockExam", label: "\uBAA8\uC758\uACE0\uC0AC", type: "tab" },
             { id: "flashcards", label: "\uCE74\uB4DC", type: "tab" },
-            { id: "save", label: "\uC800\uC7A5", type: "action" },
+            { id: "tutor", label: "AI 튜터", type: "tab" },
           ].map((item) => {
-            const isAction = item.type === "action";
-            const active = !isAction && panelTab === item.id;
+            const active = panelTab === item.id;
             return (
               <button
                 key={item.id}
                 type="button"
-                onClick={isAction ? handleManualSave : () => setPanelTab(item.id)}
-                className={`ghost-button w-full text-sm ${isAction ? "text-emerald-100" : "text-slate-200"}`}
+                onClick={() => setPanelTab(item.id)}
+                className="ghost-button w-full text-sm text-slate-200"
                 data-ghost-size="sm"
-                data-ghost-active={!isAction && active}
-                style={{ "--ghost-color": isAction || active ? "52, 211, 153" : "148, 163, 184" }}
+                data-ghost-active={active}
+                style={{ "--ghost-color": active ? "52, 211, 153" : "148, 163, 184" }}
               >
                 {item.label}
               </button>
@@ -2098,6 +2162,18 @@ function App() {
               status={flashcardStatus}
               error={flashcardError}
               onExamComplete={setFlashcardExamStats}
+            />
+          )}
+          {panelTab === "tutor" && (
+            <AiTutorPanel
+              messages={tutorMessages}
+              isLoading={isTutorLoading}
+              error={tutorError}
+              canChat={!tutorNotice}
+              notice={tutorNotice}
+              fileName={file?.name || ""}
+              onSend={handleSendTutorMessage}
+              onReset={handleResetTutor}
             />
           )}
         </div>

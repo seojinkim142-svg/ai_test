@@ -176,6 +176,29 @@ ${contextText}
   `.trim();
 }
 
+function buildTutorSystemPrompt() {
+  return `
+You are an AI tutor that teaches from the user's PDF content.
+- Answer in Korean using polite speech by default.
+- If the user explicitly asks for a different tone (e.g., casual, formal, concise), follow that tone.
+- Be friendly and concise.
+- Base answers strictly on the provided document content.
+- If the user greets or sends a short social message, respond warmly and ask what topic they want to learn.
+- Do not mention the document, file name, or whether something is in/out of the document unless the user explicitly asks about coverage.
+- If key info is missing, say you need more details and ask a brief follow-up question.
+  `.trim();
+}
+
+function buildTutorContext(extractedText) {
+  const trimmed = (extractedText || "").trim();
+  if (!trimmed) return "";
+  const maxChars = 16000;
+  if (trimmed.length <= maxChars) return trimmed;
+  const head = trimmed.slice(0, 8000);
+  const tail = trimmed.slice(-8000);
+  return `${head}\n\n[...]\n\n${tail}`;
+}
+
 function sanitizeJson(content) {
   if (!content) return "";
   const cleaned = content.replace(/```[\s\S]*?```/g, (match) =>
@@ -535,6 +558,54 @@ export async function generateFlashcards(extractedText, { count = 8 } = {}) {
   const content = data.choices?.[0]?.message?.content?.trim() || "";
   const sanitized = sanitizeJson(content);
   return parseJsonSafe(sanitized, "flashcards JSON");
+}
+
+export async function generateTutorReply({ question, extractedText, messages = [] }) {
+  const contextText = buildTutorContext(extractedText);
+  if (!contextText) {
+    throw new Error("먼저 PDF 텍스트를 준비해주세요.");
+  }
+
+  const history = (messages || [])
+    .filter((msg) => msg && (msg.role === "user" || msg.role === "assistant") && msg.content)
+    .map((msg) => ({ role: msg.role, content: String(msg.content) }));
+
+  const data = await postChatRequest(
+    {
+      model: MODEL,
+      messages: [
+        { role: "system", content: buildTutorSystemPrompt() },
+        { role: "system", content: `Document content:\n${contextText}` },
+        ...history,
+        { role: "user", content: question },
+      ],
+      max_completion_tokens: 800,
+    },
+    { retries: 0 }
+  );
+
+  let content = data.choices?.[0]?.message?.content?.trim() || "";
+  if (!content) {
+    const retryContext = contextText.length > 8000 ? contextText.slice(0, 8000) : contextText;
+    const retry = await postChatRequest(
+      {
+        model: MODEL,
+        messages: [
+          { role: "system", content: buildTutorSystemPrompt() },
+          { role: "system", content: `Document content:\n${retryContext}` },
+          ...history,
+          { role: "user", content: question },
+        ],
+        max_completion_tokens: 800,
+      },
+      { retries: 0 }
+    );
+    content = retry.choices?.[0]?.message?.content?.trim() || "";
+  }
+  if (!content) {
+    return "죄송합니다. 지금은 답변을 생성하지 못했습니다. 질문을 조금 더 구체적으로 다시 알려주실 수 있을까요?";
+  }
+  return content;
 }
 
 export async function generateHighlights(extractedText) {
