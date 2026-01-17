@@ -100,8 +100,23 @@ function buildSummaryPrompt(extractedText) {
   return `
 당신은 대학 강의 자료를 한국어로 상세 요약하는 조교입니다. 아래 지침에 따라 길고 구조적인 마크다운 요약을 작성하세요.
 
+[사전 판단]
+아래 본문이 실제 강의의 학습 내용을 포함하는지 먼저 판단하세요.
+
+- 다음에 해당하면 요약하지 마세요:
+  · 표지, 목차, 안내 페이지
+  · 질문, 의견, 메타 설명
+  · 그래프/표/이미지 중심으로 설명 문장이 거의 없는 경우
+
+- 이 경우:
+  → 요약을 수행하지 말고,
+    “학습 내용을 포함하지 않은 페이지임”을 한두 문장으로만 설명하세요.
+
+- 설명 문단이 명확히 존재하는 경우에만 요약을 진행하세요.
+-이 내용을 요약문에 명시하지 마세요.
 [요약 지침]
-1. 전체 개요(2~3문장): 강의 주제와 목표를 명확히
+1. 전체 개요 (2~3문장)
+   - 강의 주제와 학습 목표를 명확히 설명
 
 2. 주요 섹션/개념 정리
    - 섹션 제목과 핵심 내용
@@ -509,8 +524,14 @@ export async function generateOxQuiz(extractedText) {
   };
 }
 
-export async function generateSummary(extractedText) {
+export async function generateSummary(extractedText, { scope } = {}) {
   const prompt = buildSummaryPrompt(extractedText);
+  const scopeGuard = scope
+    ? {
+        role: "system",
+        content: `요약 범위는 ${scope}에 포함된 본문만입니다. 다른 페이지/문서 내용이나 일반 지식은 사용하지 말고, 본문에 없는 내용은 추측하지 말고 생략하세요.`,
+      }
+    : null;
 
   const data = await postChatRequest(
     {
@@ -521,6 +542,7 @@ export async function generateSummary(extractedText) {
           content:
             "Produce a detailed Korean markdown summary of the user's academic text. Follow their instructions for sections, subsections, bold emphasis, LaTeX math, tables/lists, and sufficient length (long-form; do not shorten to a few lines).",
         },
+        ...(scopeGuard ? [scopeGuard] : []),
         { role: "user", content: prompt },
       ],
       temperature: 1, // gpt-5-mini default temperature

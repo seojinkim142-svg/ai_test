@@ -1,17 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ActionsPanel from "./components/ActionsPanel";
 import AuthPanel from "./components/AuthPanel";
-import AiTutorPanel from "./components/AiTutorPanel";
-import FlashcardsPanel from "./components/FlashcardsPanel";
-import FileUpload from "./components/FileUpload";
 import Header from "./components/Header";
 import LoginBackground from "./components/LoginBackground";
-import OxSection from "./components/OxSection";
-import PdfPreview from "./components/PdfPreview";
-import ProgressPanel from "./components/ProgressPanel";
-import QuizSection from "./components/QuizSection";
-import SummaryCard from "./components/SummaryCard";
 import PaymentPage from "./components/PaymentPage";
+import DetailPage from "./pages/DetailPage";
+import StartPage from "./pages/StartPage";
 import {
   generateQuiz,
   generateSummary,
@@ -20,7 +13,6 @@ import {
   generateHardQuiz,
   generateTutorReply,
 } from "./services/openai";
-import { LETTERS } from "./constants";
 import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
 import { useUserTier } from "./hooks/useUserTier";
 import {
@@ -45,7 +37,7 @@ import {
   saveDocArtifacts,
   updateUploadFolder,
 } from "./services/supabase";
-import { extractPdfText, generatePdfThumbnail } from "./utils/pdf";
+import { extractPdfText, extractPdfTextFromPages, generatePdfThumbnail } from "./utils/pdf";
 import { exportElementToPdf, exportPagedElementToPdf } from "./utils/pdfExport";
 
 function App() {
@@ -97,6 +89,10 @@ function App() {
   const [tutorMessages, setTutorMessages] = useState([]);
   const [isTutorLoading, setIsTutorLoading] = useState(false);
   const [tutorError, setTutorError] = useState("");
+  const [isPageSummaryOpen, setIsPageSummaryOpen] = useState(false);
+  const [pageSummaryInput, setPageSummaryInput] = useState("");
+  const [pageSummaryError, setPageSummaryError] = useState("");
+  const [isPageSummaryLoading, setIsPageSummaryLoading] = useState(false);
   const [artifacts, setArtifacts] = useState(null);
   const downloadCacheRef = useRef(new Map()); // storagePath -> { file, thumbnail, remoteUrl, bucket }
   const backfillInProgressRef = useRef(false);
@@ -649,6 +645,10 @@ function App() {
       quizAutoRequestedRef.current = false;
       setError("");
       setSummary("");
+      const extractStart =
+        typeof performance !== "undefined" && typeof performance.now === "function"
+          ? performance.now()
+          : Date.now();
       setStatus("PDF 텍스트 추출 중입니다...");
       setIsLoadingText(true);
       setThumbnailUrl(null);
@@ -665,6 +665,10 @@ function App() {
       setTutorMessages([]);
       setTutorError("");
       setIsTutorLoading(false);
+      setIsPageSummaryOpen(false);
+      setPageSummaryInput("");
+      setPageSummaryError("");
+      setIsPageSummaryLoading(false);
       oxAutoRequestedRef.current = false;
 
       try {
@@ -674,7 +678,13 @@ function App() {
         setPreviewText(text);
         setPageInfo({ used: pagesUsed, total: totalPages });
         setThumbnailUrl(thumb);
-        setStatus(`추출 완료 (사용 페이지: ${pagesUsed}/${totalPages})`);
+        const extractEnd =
+          typeof performance !== "undefined" && typeof performance.now === "function"
+            ? performance.now()
+            : Date.now();
+        const elapsedSeconds = Math.max(0, (extractEnd - extractStart) / 1000);
+        setStatus(`추출 완료 (사용 페이지: ${pagesUsed}/${totalPages}) · ${elapsedSeconds.toFixed(1)}초`);
+        setError("");
           await loadMockExams(item.id);
           await loadFlashcards(item.id);
           await loadArtifacts(item.id);
@@ -811,6 +821,10 @@ function App() {
     setTutorMessages([]);
     setTutorError("");
     setIsTutorLoading(false);
+    setIsPageSummaryOpen(false);
+    setPageSummaryInput("");
+    setPageSummaryError("");
+    setIsPageSummaryLoading(false);
     setOxItems(null);
     setOxSelections({});
     setPanelTab("summary");
@@ -1106,6 +1120,114 @@ function App() {
     await persistArtifacts({ summary: null, highlights: null });
     await requestSummary({ force: true });
   };
+
+  const parsePageSelection = useCallback((raw, totalPages) => {
+    const cleaned = String(raw || "").replace(/\s+/g, "");
+    if (!cleaned) {
+      return { pages: [], error: "페이지를 입력해주세요." };
+    }
+    const pages = new Set();
+    const parts = cleaned.split(",").filter(Boolean);
+    for (const part of parts) {
+      if (part.includes("-")) {
+        const range = part.split("-");
+        if (range.length !== 2) {
+          return { pages: [], error: "페이지 범위 형식이 올바르지 않습니다." };
+        }
+        const start = Number.parseInt(range[0], 10);
+        const end = Number.parseInt(range[1], 10);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0 || start > end) {
+          return { pages: [], error: "페이지 범위 형식이 올바르지 않습니다." };
+        }
+        for (let i = start; i <= end; i += 1) {
+          pages.add(i);
+        }
+      } else {
+        const page = Number.parseInt(part, 10);
+        if (!Number.isFinite(page) || page <= 0) {
+          return { pages: [], error: "페이지 번호 형식이 올바르지 않습니다." };
+        }
+        pages.add(page);
+      }
+    }
+    const total = Number.isFinite(totalPages) ? totalPages : 0;
+    const filtered = [...pages].filter((p) => (total ? p <= total : true)).sort((a, b) => a - b);
+    if (filtered.length === 0) {
+      return { pages: [], error: "유효한 페이지가 없습니다." };
+    }
+    return { pages: filtered, error: "" };
+  }, []);
+
+  const handleSummaryByPages = useCallback(async () => {
+    if (isPageSummaryLoading || isLoadingSummary) return;
+    if (!file || !selectedFileId) {
+      setPageSummaryError("먼저 PDF를 선택해주세요.");
+      return;
+    }
+    if (isFreeTier && summary) {
+      setPageSummaryError("무료 티어에서는 요약을 재생성할 수 없습니다.");
+      return;
+    }
+    if (hasReached("maxSummary")) {
+      setPageSummaryError("무료 티어에서는 요약을 1회만 생성할 수 있습니다.");
+      return;
+    }
+    const totalPages = pageInfo.total || pageInfo.used || 0;
+    if (!totalPages) {
+      setPageSummaryError("페이지 정보를 불러오지 못했습니다.");
+      return;
+    }
+    const parsed = parsePageSelection(pageSummaryInput, totalPages);
+    if (parsed.error) {
+      setPageSummaryError(parsed.error);
+      return;
+    }
+
+    setPageSummaryError("");
+    setError("");
+    setStatus("선택 페이지 요약을 생성 중입니다...");
+    setIsPageSummaryLoading(true);
+    summaryRequestedRef.current = true;
+    try {
+      const extracted = await extractPdfTextFromPages(file, parsed.pages, 12000, {
+        useOcr: true,
+        ocrLang: "kor+eng",
+        onOcrProgress: (message) => setStatus(message),
+      });
+      if (!extracted?.text) {
+        const suffix = extracted?.ocrUsed ? " OCR로도 텍스트를 찾지 못했습니다." : "";
+        throw new Error(`선택한 페이지에서 텍스트를 찾지 못했습니다.${suffix}`);
+      }
+      if (extracted?.ocrUsed) {
+        setStatus("OCR 완료. 요약을 생성하는 중입니다...");
+      }
+      const summarized = await generateSummary(extracted.text, { scope: "사용자가 지정한 페이지" });
+      setSummary(summarized);
+      setUsageCounts((prev) => ({ ...prev, summary: prev.summary + 1 }));
+      setStatus("선택 페이지 요약 생성 완료!");
+      persistArtifacts({ summary: summarized });
+    } catch (err) {
+      setError(`선택 페이지 요약 실패: ${err.message}`);
+      setStatus("");
+      summaryRequestedRef.current = false;
+    } finally {
+      setIsPageSummaryLoading(false);
+    }
+  }, [
+    extractPdfTextFromPages,
+    file,
+    hasReached,
+    isFreeTier,
+    isLoadingSummary,
+    isPageSummaryLoading,
+    pageInfo.total,
+    pageInfo.used,
+    pageSummaryInput,
+    parsePageSelection,
+    persistArtifacts,
+    selectedFileId,
+    summary,
+  ]);
 
   const handleExportSummaryPdf = useCallback(async () => {
     if (isExportingSummary) return;
@@ -1685,501 +1807,118 @@ function App() {
     );
   };
 
-  const renderStartPage = () => (
-    <section className="grid grid-cols-1 gap-4">
-      <FileUpload
-        file={file}
-        pageInfo={pageInfo}
-        isLoadingText={isLoadingText}
-        thumbnailUrl={thumbnailUrl}
-        uploadedFiles={uploadedFiles}
-        onSelectFile={handleSelectFile}
-        onFileChange={handleFileChange}
-        selectedFileId={selectedFileId}
-        folders={folders}
-        selectedFolderId={selectedFolderId}
-        onSelectFolder={handleSelectFolder}
-        onCreateFolder={handleCreateFolder}
-        onDeleteFolder={handleDeleteFolder}
-        selectedUploadIds={selectedUploadIds}
-        onToggleUploadSelect={handleToggleUploadSelect}
-        onMoveUploads={handleMoveUploadsToFolder}
-        onClearSelection={handleClearSelection}
-        isFolderFeatureEnabled={isFolderFeatureEnabled}
-        onDeleteUpload={handleDeleteUpload}
-      />
-    </section>
-  );
+  const startPageProps = {
+    file,
+    pageInfo,
+    isLoadingText,
+    thumbnailUrl,
+    uploadedFiles,
+    onSelectFile: handleSelectFile,
+    onFileChange: handleFileChange,
+    selectedFileId,
+    folders,
+    selectedFolderId,
+    onSelectFolder: handleSelectFolder,
+    onCreateFolder: handleCreateFolder,
+    onDeleteFolder: handleDeleteFolder,
+    selectedUploadIds,
+    onToggleUploadSelect: handleToggleUploadSelect,
+    onMoveUploads: handleMoveUploadsToFolder,
+    onClearSelection: handleClearSelection,
+    isFolderFeatureEnabled,
+    onDeleteUpload: handleDeleteUpload,
+  };
+  const detailPageProps = {
+    detailContainerRef,
+    splitStyle,
+    pdfUrl,
+    file,
+    pageInfo,
+    handlePageChange,
+    handleDragStart,
+    panelTab,
+    setPanelTab,
+    requestSummary,
+    isLoadingSummary,
+    isLoadingText,
+    isFreeTier,
+    summary,
+    regenerateSummary,
+    setIsPageSummaryOpen,
+    setPageSummaryError,
+    isPageSummaryOpen,
+    pageSummaryInput,
+    setPageSummaryInput,
+    pageSummaryError,
+    handleSummaryByPages,
+    isPageSummaryLoading,
+    handleExportSummaryPdf,
+    isExportingSummary,
+    status,
+    error,
+    summaryRef,
+    questionProgress,
+    quizProgress,
+    oxProgress,
+    flashcardExamStats,
+    pageProgress,
+    mockExams,
+    mockExamMenuRef,
+    mockExamMenuButtonRef,
+    isMockExamMenuOpen,
+    setIsMockExamMenuOpen,
+    isLoadingMockExams,
+    activeMockExam,
+    activeMockExamTitle,
+    formatMockExamTitle,
+    handleDeleteMockExam,
+    handleCreateMockExam,
+    isGeneratingMockExam,
+    selectedFileId,
+    handleExportMockExam,
+    mockExamOrderedItems,
+    mockExamPrintRef,
+    mockExamPages,
+    showMockExamAnswers,
+    setShowMockExamAnswers,
+    mockExamStatus,
+    mockExamError,
+    renderMockExamItem,
+    setActiveMockExamId,
+    isLoadingQuiz,
+    shortPreview,
+    requestQuestions,
+    quizSets,
+    handleChoiceSelect,
+    handleShortAnswerChange,
+    handleShortAnswerCheck,
+    regenerateQuiz,
+    isLoadingOx,
+    requestOxQuiz,
+    regenerateOxQuiz,
+    oxItems,
+    oxSelections,
+    setOxSelections,
+    oxExplanationOpen,
+    setOxExplanationOpen,
+    flashcards,
+    isLoadingFlashcards,
+    handleAddFlashcard,
+    handleDeleteFlashcard,
+    handleGenerateFlashcards,
+    isGeneratingFlashcards,
+    extractedText,
+    flashcardStatus,
+    flashcardError,
+    setFlashcardExamStats,
+    tutorMessages,
+    isTutorLoading,
+    tutorError,
+    tutorNotice,
+    handleSendTutorMessage,
+    handleResetTutor,
+  };
 
-  const renderDetailPage = () => (
-    <section
-      ref={detailContainerRef}
-      className="flex flex-col gap-4 lg:h-[clamp(70vh,calc(100vh-120px),90vh)] lg:flex-row lg:items-stretch lg:overflow-hidden"
-    >
-      <div className="flex flex-col gap-3 lg:h-full lg:overflow-y-auto" style={splitStyle}>
-        <PdfPreview pdfUrl={pdfUrl} file={file} pageInfo={pageInfo} onPageChange={handlePageChange} />
-      </div>
-
-      <div className="hidden w-2 cursor-col-resize items-stretch justify-center lg:flex">
-        <div
-          className="h-full w-1 rounded-full bg-white/10 transition hover:bg-white/30"
-          onMouseDown={handleDragStart}
-          role="separator"
-          aria-label="Resize panel"
-        />
-      </div>
-
-        <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
-        <div className="grid grid-cols-7 items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
-          {[
-            { id: "summary", label: "\uC694\uC57D", type: "tab" },
-            { id: "progress", label: "\uC9C4\uB3C4", type: "tab" },
-            { id: "quiz", label: "\uD034\uC988", type: "tab" },
-            { id: "ox", label: "O/X", type: "tab" },
-            { id: "mockExam", label: "\uBAA8\uC758\uACE0\uC0AC", type: "tab" },
-            { id: "flashcards", label: "\uCE74\uB4DC", type: "tab" },
-            { id: "tutor", label: "AI 튜터", type: "tab" },
-          ].map((item) => {
-            const active = panelTab === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setPanelTab(item.id)}
-                className="ghost-button w-full text-sm text-slate-200"
-                data-ghost-size="sm"
-                data-ghost-active={active}
-                style={{ "--ghost-color": active ? "52, 211, 153" : "148, 163, 184" }}
-              >
-                {item.label}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="flex-1 overflow-auto pr-1 pb-1">
-          {panelTab === "summary" && (
-            <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-semibold text-emerald-200">요약</p>
-                <div className="flex flex-wrap justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => requestSummary({ force: true })}
-                    disabled={isLoadingSummary || isLoadingText || (isFreeTier && summary)}
-                    title={isFreeTier && summary ? "무료 티어에서는 요약을 재생성할 수 없습니다." : undefined}
-                    className="ghost-button text-xs text-emerald-100"
-                    style={{ "--ghost-color": "16, 185, 129" }}
-                  >
-                    {isLoadingSummary ? "요약 생성 중..." : "요약 새로 생성"}
-                  </button>
-                  {!isFreeTier && (
-                    <button
-                      type="button"
-                      onClick={regenerateSummary}
-                      disabled={isLoadingSummary || isLoadingText}
-                      className="ghost-button text-xs text-emerald-100"
-                      style={{ "--ghost-color": "52, 211, 153" }}
-                    >
-                      요약 재생성
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleExportSummaryPdf}
-                    disabled={
-                      isLoadingSummary || isLoadingText || !summary || isExportingSummary
-                    }
-                    className="ghost-button text-xs text-indigo-100"
-                    style={{ "--ghost-color": "99, 102, 241" }}
-                  >
-                    {isExportingSummary ? "PDF 내보내는 중..." : "요약 PDF 다운로드"}
-                  </button>
-                </div>
-              </div>
-              {isLoadingSummary && <p className="mt-2 text-sm text-slate-300">요약 생성 중...</p>}
-              {!isLoadingSummary && summary && (
-                <div ref={summaryRef}>
-                  <SummaryCard summary={summary} />
-                </div>
-              )}
-              {!isLoadingSummary && !summary && <p className="mt-2 text-sm text-slate-400">요약이 준비되면 표시됩니다.</p>}
-            </div>
-          )}
-          {panelTab === "progress" && (
-            <ProgressPanel
-              totalQuestions={questionProgress.total}
-              answeredQuestions={questionProgress.answered}
-              correctQuestions={questionProgress.correct}
-              quizProgress={quizProgress}
-              oxProgress={oxProgress}
-              flashcardProgress={flashcardExamStats}
-              pageTotal={pageProgress.totalPages}
-              pageVisited={pageProgress.visitedCount}
-              pageProgress={pageProgress.progress}
-            />
-          )}
-
-          {panelTab === "mockExam" && (
-            <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm text-slate-300">총 모의고사</p>
-                  <h3 className="text-lg font-semibold text-white">모의고사</h3>
-                </div>
-                <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200 ring-1 ring-white/15">
-                  {mockExams.length}개
-                </span>
-              </div>
-
-              <div className="mt-4 space-y-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="relative" ref={mockExamMenuRef}>
-                    <button
-                      ref={mockExamMenuButtonRef}
-                      type="button"
-                      onClick={() => setIsMockExamMenuOpen((prev) => !prev)}
-                      className="ghost-button text-sm text-emerald-100"
-                      data-ghost-size="lg"
-                      style={{ "--ghost-color": "52, 211, 153" }}
-                    >
-                      모의고사 고르기
-                    </button>
-                    {isMockExamMenuOpen && (
-                      <div className="absolute left-0 top-full z-20 mt-2 w-72 overflow-hidden rounded-xl border border-white/10 bg-slate-900/95 text-sm text-slate-100 shadow-lg ring-1 ring-white/10">
-                        {isLoadingMockExams && (
-                          <div className="px-4 py-3 text-xs text-slate-400">모의고사 불러오는 중...</div>
-                        )}
-                        {!isLoadingMockExams && mockExams.length === 0 && (
-                          <div className="px-4 py-3 text-xs text-slate-400">저장된 모의고사가 없습니다.</div>
-                        )}
-                        {!isLoadingMockExams &&
-                          mockExams.map((exam, idx) => {
-                            const isActive = activeMockExam?.id === exam.id;
-                            const displayTitle = formatMockExamTitle(exam, idx);
-                            return (
-                              <div
-                                key={exam.id}
-                                className={`flex items-center justify-between gap-2 px-4 py-2 text-sm ${
-                                  idx === 0 ? "" : "border-t border-white/10"
-                                } ${isActive ? "bg-emerald-500/10" : "hover:bg-white/5"}`}
-                              >
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setActiveMockExamId(exam.id);
-                                    setIsMockExamMenuOpen(false);
-                                  }}
-                                  className="flex flex-1 flex-col items-start text-left"
-                                >
-                                  <span className="text-sm font-semibold text-slate-100">{displayTitle}</span>
-                                  <span className="text-[11px] text-slate-400">
-                                    {new Date(exam.created_at).toLocaleString("ko-KR")}
-                                  </span>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    handleDeleteMockExam(exam.id);
-                                    setIsMockExamMenuOpen(false);
-                                  }}
-                                  className="ghost-button text-[11px] text-slate-200"
-                                  data-ghost-size="sm"
-                                  style={{ "--ghost-color": "226, 232, 240" }}
-                                >
-                                  삭제
-                                </button>
-                              </div>
-                            );
-                          })}
-                      </div>
-                    )}
-                  </div>
-                  {activeMockExam && (
-                    <span className="text-xs text-slate-300">선택됨: {activeMockExamTitle}</span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={handleCreateMockExam}
-                    disabled={isGeneratingMockExam || isLoadingText || !selectedFileId}
-                    className="ghost-button text-sm text-emerald-100"
-                    data-ghost-size="lg"
-                    style={{ "--ghost-color": "52, 211, 153" }}
-                  >
-                    {isGeneratingMockExam ? "모의고사 생성 중..." : "모의고사 생성"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleExportMockExam(activeMockExam)}
-                    disabled={!activeMockExam || mockExamOrderedItems.length === 0}
-                    className="ghost-button text-sm text-indigo-100"
-                    data-ghost-size="lg"
-                    style={{ "--ghost-color": "99, 102, 241" }}
-                  >
-                    PDF 저장
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowMockExamAnswers((prev) => !prev)}
-                    disabled={!activeMockExam}
-                    className="ghost-button text-sm text-slate-200"
-                    data-ghost-size="lg"
-                    style={{ "--ghost-color": "148, 163, 184" }}
-                  >
-                    {showMockExamAnswers ? "정답 숨기기" : "정답 보기"}
-                  </button>
-                </div>
-
-                {mockExamStatus && <p className="text-sm text-emerald-200">{mockExamStatus}</p>}
-                {mockExamError && (
-                  <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-200 ring-1 ring-red-400/30">
-                    {mockExamError}
-                  </p>
-                )}
-
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-100 overflow-auto">
-                  {!activeMockExam && <p className="text-sm text-slate-400">선택된 모의고사가 없습니다.</p>}
-                  {activeMockExam && (
-                    <div className="space-y-6">
-                      {mockExamOrderedItems.length === 0 && (
-                        <p className="text-sm text-slate-400">모의고사 문항이 없습니다.</p>
-                      )}
-                      {mockExamOrderedItems.length > 0 && (
-                        <div ref={mockExamPrintRef} className="space-y-10 flex flex-col items-center">
-                          {mockExamPages.map((pageItems, pageIndex) => {
-                            const isFourGrid = pageItems.length === 4;
-                            const pageStart = pageIndex === 0 ? 1 : pageIndex === 1 ? 5 : 9;
-                            return (
-                              <section
-                                key={`mock-exam-page-${pageIndex}`}
-                                className="mock-exam-page relative mx-auto bg-white text-black shadow-sm"
-                                style={{ width: "794px", minHeight: "1123px", padding: "44px 52px 48px" }}
-                              >
-                                <div className="relative flex items-start justify-center">
-                                  <h4 className="text-[18px] font-semibold">{activeMockExamTitle}</h4>
-                                  <span className="absolute right-0 top-0 text-[18px] font-semibold">
-                                    {pageIndex + 1}
-                                  </span>
-                                </div>
-                                <div className="mt-3 border-t border-black" />
-                                <div
-                                  className={`relative mt-6 grid gap-8 ${
-                                    isFourGrid ? "grid-cols-2 grid-rows-2" : "grid-cols-2"
-                                  }`}
-                                  style={{
-                                    minHeight: "900px",
-                                    gridAutoFlow: isFourGrid ? "column" : "row",
-                                  }}
-                                >
-                                  <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-black/80" />
-                                  {pageItems.map((item, idx) => {
-                                    const columnIndex = isFourGrid ? Math.floor(idx / 2) : idx % 2;
-                                    const paddingClass = columnIndex === 0 ? "pr-6" : "pl-6";
-                                    return (
-                                      <div key={`mock-exam-cell-${pageIndex}-${idx}`} className={paddingClass}>
-                                        {renderMockExamItem(item, pageStart + idx)}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </section>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      {showMockExamAnswers && (
-                        <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-                          <p className="text-sm font-semibold text-emerald-200">정답/해설</p>
-                          <div className="mt-3 space-y-2 text-xs text-slate-200">
-                            {mockExamOrderedItems.map((item, idx) => {
-                              const answerText =
-                                item.type === "ox"
-                                  ? item.answer || "-"
-                                  : item.type === "quiz-short"
-                                    ? item.answer || "-"
-                                    : Number.isFinite(item.answerIndex)
-                                      ? LETTERS[item.answerIndex] || "-"
-                                      : "-";
-                              return (
-                                <div key={`mock-exam-answer-${idx}`} className="rounded-lg bg-white/5 px-3 py-2">
-                                  <p className="font-semibold text-emerald-200">
-                                    {idx + 1}번 정답: {answerText}
-                                  </p>
-                                  {item.explanation && <p className="mt-1">해설: {item.explanation}</p>}
-                                  {item.evidence && <p className="mt-1">근거: {item.evidence}</p>}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {panelTab === "quiz" && (
-            <>
-              <ActionsPanel
-                title="퀴즈 생성"
-                stepLabel="퀴즈"
-                hideSummary
-                hideQuiz
-                isLoadingQuiz={isLoadingQuiz}
-                isLoadingSummary={isLoadingSummary}
-                isLoadingText={isLoadingText}
-                status={status}
-                error={error}
-                shortPreview={shortPreview}
-                onRequestQuiz={requestQuestions}
-                onRequestSummary={requestSummary}
-              />
-
-              {quizSets.length > 0 && (
-                <div className="space-y-4">
-                  {quizSets.map((set, idx) => (
-                    <QuizSection
-                      key={set.id}
-                      title={`퀴즈 세트 ${idx + 1}`}
-                      questions={set.questions}
-                      summary={null}
-                      selectedChoices={set.selectedChoices}
-                      revealedChoices={set.revealedChoices}
-                      shortAnswerInput={set.shortAnswerInput}
-                      shortAnswerResult={set.shortAnswerResult}
-                      onSelectChoice={(qIdx, choiceIdx) => handleChoiceSelect(set.id, qIdx, choiceIdx)}
-                      onShortAnswerChange={(val) => handleShortAnswerChange(set.id, val)}
-                      onShortAnswerCheck={() => handleShortAnswerCheck(set.id)}
-                    />
-                  ))}
-                </div>
-              )}
-
-              <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <button
-                  type="button"
-                  onClick={requestQuestions}
-                  disabled={isLoadingQuiz || isLoadingText || (isFreeTier && quizSets.length > 0)}
-                  title={isFreeTier && quizSets.length > 0 ? "무료 티어에서는 퀴즈를 재생성할 수 없습니다." : undefined}
-                  className="ghost-button w-full text-sm text-emerald-100"
-                  data-ghost-size="xl"
-                  style={{ "--ghost-color": "16, 185, 129" }}
-                >
-                  {isLoadingQuiz ? "퀴즈 생성 중..." : "퀴즈 5문제 더 생성하기"}
-                </button>
-                {!isFreeTier && (
-                  <button
-                    type="button"
-                    onClick={regenerateQuiz}
-                    disabled={isLoadingQuiz || isLoadingText}
-                    className="ghost-button w-full text-sm text-emerald-100"
-                    data-ghost-size="xl"
-                    style={{ "--ghost-color": "16, 185, 129" }}
-                  >
-                    {isLoadingQuiz ? "퀴즈 재생성 중..." : "퀴즈 재생성(덮어쓰기)"}
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-
-          {panelTab === "ox" && (
-            <div className="space-y-4">
-              <ActionsPanel
-                title="O/X 퀴즈 생성"
-                stepLabel="O/X"
-                hideSummary
-                hideQuiz
-                isLoadingQuiz={isLoadingOx}
-                isLoadingSummary={isLoadingSummary}
-                isLoadingText={isLoadingText}
-                status={status}
-                error={error}
-                shortPreview={shortPreview}
-                onRequestQuiz={requestOxQuiz}
-                onRequestSummary={requestSummary}
-              />
-
-              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <button
-                  type="button"
-                  onClick={() => requestOxQuiz({ auto: false })}
-                  disabled={isLoadingOx || isLoadingText}
-                  className="ghost-button w-full text-sm text-emerald-100"
-                  data-ghost-size="xl"
-                  style={{ "--ghost-color": "16, 185, 129" }}
-                >
-                  {isLoadingOx ? "O/X 생성 중..." : "O/X 퀴즈 생성"}
-                </button>
-                <button
-                  type="button"
-                  onClick={regenerateOxQuiz}
-                  disabled={isLoadingOx || isLoadingText}
-                  className="ghost-button w-full text-sm text-emerald-100"
-                  data-ghost-size="xl"
-                  style={{ "--ghost-color": "16, 185, 129" }}
-                >
-                  {isLoadingOx ? "O/X 재생성 중..." : "O/X 퀴즈 재생성(덮어쓰기)"}
-                </button>
-              </div>
-
-              {oxItems && oxItems.length > 0 && (
-                <OxSection
-                  title="O/X 퀴즈"
-                  items={oxItems}
-                  selections={oxSelections}
-                  explanationsOpen={oxExplanationOpen}
-                  onSelect={(qIdx, choice) =>
-                    setOxSelections((prev) => ({
-                      ...prev,
-                      [qIdx]: choice,
-                    }))
-                  }
-                  onToggleExplanation={(qIdx) =>
-                    setOxExplanationOpen((prev) => ({
-                      ...prev,
-                      [qIdx]: !prev?.[qIdx],
-                    }))
-                  }
-                />
-              )}
-            </div>
-          )}
-
-          {panelTab === "flashcards" && (
-            <FlashcardsPanel
-              cards={flashcards}
-              isLoading={isLoadingFlashcards}
-              onAdd={handleAddFlashcard}
-              onDelete={handleDeleteFlashcard}
-              onGenerate={handleGenerateFlashcards}
-              isGenerating={isGeneratingFlashcards}
-              canGenerate={Boolean(file && selectedFileId && extractedText && !isLoadingText)}
-              status={flashcardStatus}
-              error={flashcardError}
-              onExamComplete={setFlashcardExamStats}
-            />
-          )}
-          {panelTab === "tutor" && (
-            <AiTutorPanel
-              messages={tutorMessages}
-              isLoading={isTutorLoading}
-              error={tutorError}
-              canChat={!tutorNotice}
-              notice={tutorNotice}
-              fileName={file?.name || ""}
-              onSend={handleSendTutorMessage}
-              onReset={handleResetTutor}
-            />
-          )}
-        </div>
-      </div>
-    </section>
-  );
 
   if (!authReady) {
     return (
@@ -2222,8 +1961,8 @@ function App() {
           onToggleTheme={toggleTheme}
         />
         <div className="px-0">
-          {!showDetail && renderStartPage()}
-          {showDetail && renderDetailPage()}
+          {!showDetail && <StartPage {...startPageProps} />}
+          {showDetail && <DetailPage {...detailPageProps} />}
         </div>
       </main>
     </div>

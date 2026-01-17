@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 
 function AiTutorPanel({
   messages,
@@ -11,13 +11,6 @@ function AiTutorPanel({
   fileName,
 }) {
   const [input, setInput] = useState("");
-  const bottomRef = useRef(null);
-
-  useEffect(() => {
-    if (!bottomRef.current) return;
-    bottomRef.current.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [messages, isLoading]);
-
   const handleSubmit = () => {
     const trimmed = input.trim();
     if (!trimmed || !canChat || isLoading) return;
@@ -102,7 +95,6 @@ function AiTutorPanel({
             </div>
           )}
 
-          <div ref={bottomRef} />
         </div>
       </div>
 
