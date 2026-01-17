@@ -54,13 +54,15 @@ function MultipleChoiceItem({ question, idx, selectedChoice, revealed, onSelect 
   );
 }
 
-function ShortAnswer({ question, userInput, result, onChange, onCheck }) {
+function ShortAnswer({ question, questionNumber, index, userInput, result, onChange, onCheck }) {
   if (!question) return null;
 
   return (
     <article className="rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
       <div className="flex items-start justify-between gap-3">
-        <h3 className="text-lg font-semibold text-white">Q5. {question.question}</h3>
+        <h3 className="text-lg font-semibold text-white">
+          Q{questionNumber}. {question.question}
+        </h3>
         <span className="rounded-full bg-cyan-500/20 px-2 py-1 text-xs font-semibold text-cyan-100">주관식</span>
       </div>
       <div className="mt-3 flex flex-col gap-2">
@@ -68,12 +70,12 @@ function ShortAnswer({ question, userInput, result, onChange, onCheck }) {
           name="short-answer"
           type="text"
           value={userInput}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(index, e.target.value)}
           className="w-full rounded-lg bg-slate-900/60 px-3 py-2 text-sm text-slate-100 ring-1 ring-white/10 focus:ring-emerald-400"
           placeholder="정답을 입력해주세요"
         />
         <button
-          onClick={onCheck}
+          onClick={() => onCheck(index)}
           className="ghost-button inline-flex text-sm text-cyan-100"
           data-ghost-size="sm"
           style={{ "--ghost-color": "34, 211, 238" }}
@@ -108,6 +110,10 @@ function QuizSection({
   onShortAnswerChange,
   onShortAnswerCheck,
 }) {
+  const multipleChoice = questions?.multipleChoice || [];
+  const shortAnswers = Array.isArray(questions?.shortAnswer) ? questions.shortAnswer : [];
+  const totalCount = multipleChoice.length + shortAnswers.length;
+
   return (
     <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-6 shadow-2xl shadow-black/30 backdrop-blur">
       <div className="flex items-center justify-between gap-3">
@@ -116,14 +122,14 @@ function QuizSection({
           <h2 className="text-2xl font-bold text-white">{title}</h2>
         </div>
         <div className="rounded-full bg-emerald-400/10 px-3 py-1 text-xs font-semibold uppercase text-emerald-100 ring-1 ring-emerald-300/30">
-          5문항
+          {totalCount || 0}문항
         </div>
       </div>
 
       {summary}
 
       <div className="mt-4 space-y-4">
-        {(questions?.multipleChoice || []).map((q, idx) => (
+        {multipleChoice.map((q, idx) => (
           <MultipleChoiceItem
             key={`mc-${idx}`}
             idx={idx}
@@ -134,13 +140,18 @@ function QuizSection({
           />
         ))}
 
-        <ShortAnswer
-          question={questions?.shortAnswer}
-          userInput={shortAnswerInput}
-          result={shortAnswerResult}
-          onChange={onShortAnswerChange}
-          onCheck={onShortAnswerCheck}
-        />
+        {shortAnswers.map((question, idx) => (
+          <ShortAnswer
+            key={`sa-${idx}`}
+            question={question}
+            questionNumber={multipleChoice.length + idx + 1}
+            index={idx}
+            userInput={shortAnswerInput?.[idx] || ""}
+            result={shortAnswerResult?.[idx] || null}
+            onChange={onShortAnswerChange}
+            onCheck={onShortAnswerCheck}
+          />
+        ))}
       </div>
     </div>
   );

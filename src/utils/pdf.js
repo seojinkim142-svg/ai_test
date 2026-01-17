@@ -6,7 +6,16 @@ import workerSrc from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 GlobalWorkerOptions.workerSrc = workerSrc;
 
 export async function extractPdfText(file, pageLimit = 30, maxLength = 12000, options = {}) {
-  const { includeLayout = false } = options || {};
+  const {
+    includeLayout = false,
+    useOcr = false,
+    ocrLang = "kor+eng",
+    ocrScale = 2,
+    onOcrProgress,
+  } = options || {};
+  const notifyOcr = (message) => {
+    if (typeof onOcrProgress === "function") onOcrProgress(message);
+  };
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await getDocument({ data: arrayBuffer }).promise;
   const totalPages = pdf.numPages;
@@ -83,11 +92,54 @@ export async function extractPdfText(file, pageLimit = 30, maxLength = 12000, op
   }
 
   const normalized = chunks.join("\n").replace(/\s+/g, " ").trim().slice(0, maxLength);
+  if (normalized || !useOcr) {
+    return {
+      text: normalized,
+      pagesUsed,
+      totalPages,
+      layout: includeLayout ? { pages: layoutPages } : null,
+      ocrUsed: false,
+    };
+  }
+
+  // OCR fallback for scanned PDFs.
+  notifyOcr("텍스트가 없어 OCR을 시작합니다...");
+  const { createWorker } = await import("tesseract.js");
+  const worker = await createWorker(ocrLang, 1, {
+    logger: (info) => {
+      if (!info || typeof info.progress !== "number") return;
+      const pct = Math.round(info.progress * 100);
+      notifyOcr(`OCR ${info.status || "processing"}... ${pct}%`);
+    },
+  });
+  const ocrChunks = [];
+  let ocrLength = 0;
+  try {
+    for (let idx = 1; idx <= pagesToRead; idx += 1) {
+      if (ocrLength >= maxLength) break;
+      notifyOcr(`OCR 진행 중... (${idx}/${pagesToRead}페이지)`);
+      const page = await pdf.getPage(idx);
+      const canvas = await renderPageToCanvas(page, ocrScale);
+      const result = await worker.recognize(canvas);
+      const text = String(result?.data?.text || "").replace(/\s+/g, " ").trim();
+      if (text) {
+        ocrChunks.push(text);
+        ocrLength += text.length + 1;
+      }
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+  } finally {
+    await worker.terminate();
+  }
+
+  const ocrNormalized = ocrChunks.join("\n").replace(/\s+/g, " ").trim().slice(0, maxLength);
   return {
-    text: normalized,
+    text: ocrNormalized,
     pagesUsed,
     totalPages,
     layout: includeLayout ? { pages: layoutPages } : null,
+    ocrUsed: true,
   };
 }
 

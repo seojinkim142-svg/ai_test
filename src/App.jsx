@@ -40,6 +40,13 @@ import {
 import { extractPdfText, extractPdfTextFromPages, generatePdfThumbnail } from "./utils/pdf";
 import { exportElementToPdf, exportPagedElementToPdf } from "./utils/pdfExport";
 
+const normalizeQuizPayload = (payload) => {
+  const multipleChoice = Array.isArray(payload?.multipleChoice) ? payload.multipleChoice : [];
+  const rawShort = payload?.shortAnswer;
+  const shortAnswer = Array.isArray(rawShort) ? rawShort : rawShort ? [rawShort] : [];
+  return { multipleChoice, shortAnswer };
+};
+
 function App() {
   const [file, setFile] = useState(null);
   const [extractedText, setExtractedText] = useState("");
@@ -55,10 +62,11 @@ function App() {
   const [theme, setTheme] = useState("dark");
   const [summary, setSummary] = useState("");
   const [quizSets, setQuizSets] = useState([]);
+  const [quizMix, setQuizMix] = useState({ multipleChoice: 4, shortAnswer: 1 });
   const [selectedChoices, setSelectedChoices] = useState({});
   const [revealedChoices, setRevealedChoices] = useState({});
-  const [shortAnswerInput, setShortAnswerInput] = useState("");
-  const [shortAnswerResult, setShortAnswerResult] = useState(null);
+  const [shortAnswerInput, setShortAnswerInput] = useState({});
+  const [shortAnswerResult, setShortAnswerResult] = useState({});
   const [oxItems, setOxItems] = useState(null);
   const [oxSelections, setOxSelections] = useState({});
   const [oxExplanationOpen, setOxExplanationOpen] = useState({});
@@ -485,13 +493,14 @@ function App() {
           summaryRequestedRef.current = true;
         }
         if (mapped.quiz) {
+          const normalizedQuiz = normalizeQuizPayload(mapped.quiz);
           const cachedSet = {
             id: `quiz-cached-${docId}`,
-            questions: mapped.quiz,
+            questions: normalizedQuiz,
             selectedChoices: {},
             revealedChoices: {},
-            shortAnswerInput: "",
-            shortAnswerResult: null,
+            shortAnswerInput: {},
+            shortAnswerResult: {},
           };
           setQuizSets([cachedSet]);
           quizAutoRequestedRef.current = true;
@@ -621,8 +630,8 @@ function App() {
     setQuizSets([]);
     setSelectedChoices({});
     setRevealedChoices({});
-    setShortAnswerInput("");
-    setShortAnswerResult(null);
+    setShortAnswerInput({});
+    setShortAnswerResult({});
   };
 
   const processSelectedFile = useCallback(
@@ -672,7 +681,14 @@ function App() {
       oxAutoRequestedRef.current = false;
 
       try {
-        const [textResult, thumb] = await Promise.all([extractPdfText(targetFile), generatePdfThumbnail(targetFile)]);
+        const [textResult, thumb] = await Promise.all([
+          extractPdfText(targetFile, 30, 12000, {
+            useOcr: true,
+            ocrLang: "kor+eng",
+            onOcrProgress: (message) => setStatus(message),
+          }),
+          generatePdfThumbnail(targetFile),
+        ]);
         const { text, pagesUsed, totalPages } = textResult;
         setExtractedText(text);
         setPreviewText(text);
@@ -973,19 +989,28 @@ function App() {
     setStatus("문제 세트를 생성하는 중입니다...");
 
     try {
-      const quiz = await generateQuiz(extractedText);
+      const quiz = normalizeQuizPayload(
+        await generateQuiz(extractedText, {
+          multipleChoiceCount: quizMix.multipleChoice,
+          shortAnswerCount: quizMix.shortAnswer,
+        })
+      );
+      const trimmedQuiz = {
+        multipleChoice: quiz.multipleChoice.slice(0, quizMix.multipleChoice),
+        shortAnswer: quiz.shortAnswer.slice(0, quizMix.shortAnswer),
+      };
       const newSet = {
         id: `quiz-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        questions: quiz,
+        questions: trimmedQuiz,
         selectedChoices: {},
         revealedChoices: {},
-        shortAnswerInput: "",
-        shortAnswerResult: null,
+        shortAnswerInput: {},
+        shortAnswerResult: {},
       };
       setQuizSets((prev) => [...prev, newSet]);
       setStatus("문제 세트 생성 완료!");
       setUsageCounts((prev) => ({ ...prev, quiz: prev.quiz + 1 }));
-      persistArtifacts({ quiz });
+      persistArtifacts({ quiz: trimmedQuiz });
     } catch (err) {
       setError(`문제 생성에 실패했습니다: ${err.message}`);
     } finally {
@@ -1033,24 +1058,33 @@ function App() {
     );
   };
 
-  const handleShortAnswerChange = (setId, value) => {
+  const handleShortAnswerChange = (setId, idx, value) => {
     setQuizSets((prev) =>
-      prev.map((set) => (set.id === setId ? { ...set, shortAnswerInput: value } : set))
+      prev.map((set) =>
+        set.id === setId
+          ? { ...set, shortAnswerInput: { ...set.shortAnswerInput, [idx]: value } }
+          : set
+      )
     );
   };
 
-  const handleShortAnswerCheck = (setId) => {
+  const handleShortAnswerCheck = (setId, idx) => {
     setQuizSets((prev) =>
       prev.map((set) => {
-        if (set.id !== setId || !set.questions?.shortAnswer?.answer) return set;
-        const user = set.shortAnswerInput.trim().toLowerCase();
-        const answer = String(set.questions.shortAnswer.answer).trim().toLowerCase();
+        const shortAnswers = Array.isArray(set.questions?.shortAnswer) ? set.questions.shortAnswer : [];
+        const target = shortAnswers[idx];
+        if (set.id !== setId || !target?.answer) return set;
+        const user = String(set.shortAnswerInput?.[idx] || "").trim().toLowerCase();
+        const answer = String(target.answer).trim().toLowerCase();
         const normalizedUser = user.replace(/\s+/g, "");
         const normalizedAnswer = answer.replace(/\s+/g, "");
         const isCorrect = normalizedUser === normalizedAnswer;
         return {
           ...set,
-          shortAnswerResult: { isCorrect, answer: set.questions.shortAnswer.answer },
+          shortAnswerResult: {
+            ...set.shortAnswerResult,
+            [idx]: { isCorrect, answer: target.answer },
+          },
         };
       })
     );
@@ -1503,6 +1537,7 @@ function App() {
     const quizPool = [];
     quizSets.forEach((set) => {
       const multipleChoice = set.questions?.multipleChoice || [];
+      const shortAnswers = Array.isArray(set.questions?.shortAnswer) ? set.questions.shortAnswer : [];
       multipleChoice.forEach((question) => {
         const prompt = String(question?.question || "").trim();
         if (!prompt) return;
@@ -1514,16 +1549,16 @@ function App() {
           explanation: String(question?.explanation || "").trim(),
         });
       });
-      if (set.questions?.shortAnswer) {
-        const prompt = String(set.questions.shortAnswer.question || "").trim();
+      shortAnswers.forEach((item) => {
+        const prompt = String(item?.question || "").trim();
         if (!prompt) return;
         quizPool.push({
           type: "quiz-short",
           prompt,
-          answer: String(set.questions.shortAnswer.answer || "").trim(),
-          explanation: String(set.questions.shortAnswer.explanation || "").trim(),
+          answer: String(item?.answer || "").trim(),
+          explanation: String(item?.explanation || "").trim(),
         });
-      }
+      });
     });
 
     if (quizPool.length < 4) {
@@ -1678,6 +1713,7 @@ function App() {
 
     quizSets.forEach((set) => {
       const multipleChoice = set.questions?.multipleChoice || [];
+      const shortAnswers = Array.isArray(set.questions?.shortAnswer) ? set.questions.shortAnswer : [];
       multipleChoice.forEach((question, idx) => {
         total += 1;
         const selection = set.selectedChoices?.[idx];
@@ -1689,15 +1725,13 @@ function App() {
         }
       });
 
-      if (set.questions?.shortAnswer) {
+      shortAnswers.forEach((_, idx) => {
         total += 1;
-        if (set.shortAnswerResult) {
-          answered += 1;
-          if (set.shortAnswerResult.isCorrect) {
-            correct += 1;
-          }
-        }
-      }
+        const result = set.shortAnswerResult?.[idx];
+        if (!result) return;
+        answered += 1;
+        if (result.isCorrect) correct += 1;
+      });
     });
 
     return { total, answered, correct };
@@ -1888,6 +1922,8 @@ function App() {
     isLoadingQuiz,
     shortPreview,
     requestQuestions,
+    quizMix,
+    setQuizMix,
     quizSets,
     handleChoiceSelect,
     handleShortAnswerChange,

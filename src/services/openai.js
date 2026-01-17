@@ -7,7 +7,7 @@ const OPENAI_BASE_URL = import.meta.env.DEV
 const CHAT_URL = `${OPENAI_BASE_URL}/v1/chat/completions`;
 const RESPONSES_URL = `${OPENAI_BASE_URL}/v1/responses`;
 
-function buildQuizPrompt(extractedText) {
+function buildQuizPrompt(extractedText, { multipleChoiceCount, shortAnswerCount }) {
   return `
 당신은 대학 강의 자료를 기반으로 퀴즈를 출제하는 교수입니다.
 
@@ -17,7 +17,7 @@ function buildQuizPrompt(extractedText) {
 - URL/숫자/이름 같은 암기형 문제는 금지.
 
 [출력 형식]
-- 객관식 4문항(각 4지선다) + 주관식 1문항(계산/서술형)
+- 객관식 ${multipleChoiceCount}문항(각 4지선다) + 주관식 ${shortAnswerCount}문항(계산/서술형)
 - 객관식: answerIndex, explanation 포함
 - 주관식: answer(단답/수식/값)와 explanation 포함
 - 모든 내용은 한국어, JSON만 출력
@@ -27,7 +27,9 @@ function buildQuizPrompt(extractedText) {
   "multipleChoice": [
     { "question": "...", "choices": ["...","...","...","..."], "answerIndex": 1, "explanation": "..." }
   ],
-  "shortAnswer": { "question": "...", "answer": "...", "explanation": "..." }
+  "shortAnswer": [
+    { "question": "...", "answer": "...", "explanation": "..." }
+  ]
 }
 
 [문서 본문]
@@ -227,8 +229,35 @@ function sanitizeJson(content) {
     .trim();
 }
 
+function stripSummaryPreface(content) {
+  const text = String(content || "");
+  if (!text) return "";
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  let idx = 0;
+  while (idx < lines.length && lines[idx].trim() === "") idx += 1;
+  if (idx >= lines.length) return text;
+  const prefaceRe = /^\s*\[?\s*\uC0AC\uC804\s*\uD310\uB2E8\s*\]?\s*/; // "사전 판단"
+  if (!prefaceRe.test(lines[idx])) return text;
+
+  lines.splice(idx, 1);
+  while (idx < lines.length && lines[idx].trim() === "") lines.splice(idx, 1);
+
+  if (idx < lines.length) {
+    const line = lines[idx].trim();
+    const looksLikeHeading = /^(?:#{1,6}\s|[-*]\s|\d+[.)]\s)/;
+    const prefaceSentenceRe = /\uC694\uC57D.*(?:\uD569\uB2C8\uB2E4|\uD558\uACA0)/;
+    if (!looksLikeHeading.test(line) && prefaceSentenceRe.test(line)) {
+      lines.splice(idx, 1);
+      while (idx < lines.length && lines[idx].trim() === "") lines.splice(idx, 1);
+    }
+  }
+
+  return lines.join("\n").trim();
+}
+
 function sanitizeMarkdown(content) {
-  return content.replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "");
+  const cleaned = String(content || "").replace(/^```(?:json)?\s*/i, "").replace(/```$/i, "");
+  return stripSummaryPreface(cleaned);
 }
 
 function parseJsonSafe(content, context = "response") {
@@ -405,8 +434,16 @@ async function postResponseRequest(body) {
   return response.json();
 }
 
-export async function generateQuiz(extractedText) {
-  const prompt = buildQuizPrompt(extractedText);
+export async function generateQuiz(
+  extractedText,
+  { multipleChoiceCount = 4, shortAnswerCount = 1 } = {}
+) {
+  const mcCount = Math.max(0, Math.min(5, Number(multipleChoiceCount) || 0));
+  const saCount = Math.max(0, Math.min(5, Number(shortAnswerCount) || 0));
+  const prompt = buildQuizPrompt(extractedText, {
+    multipleChoiceCount: mcCount,
+    shortAnswerCount: saCount,
+  });
 
   const data = await postChatRequest(
     {
@@ -414,8 +451,7 @@ export async function generateQuiz(extractedText) {
       messages: [
         {
           role: "system",
-          content:
-            "Generate 4 Korean multiple-choice items (4 options each) plus 1 Korean short-answer (calculation/explanation) item from the user's text only. Each question must assess understanding/apply/disambiguate/misconception check, not verbatim recall. Avoid asking for raw facts/URLs/names/numbers. Respond with JSON only using the provided schema.",
+          content: `Generate ${mcCount} Korean multiple-choice items (4 options each) plus ${saCount} Korean short-answer (calculation/explanation) items from the user's text only. Each question must assess understanding/apply/disambiguate/misconception check, not verbatim recall. Avoid asking for raw facts/URLs/names/numbers. Respond with JSON only using the provided schema. shortAnswer must be an array with ${saCount} items (empty if 0).`,
         },
         { role: "user", content: prompt },
       ],

@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import ActionsPanel from "../components/ActionsPanel";
 import AiTutorPanel from "../components/AiTutorPanel";
 import FlashcardsPanel from "../components/FlashcardsPanel";
@@ -68,6 +69,8 @@ export default function DetailPage({
   isLoadingQuiz,
   shortPreview,
   requestQuestions,
+  quizMix,
+  setQuizMix,
   quizSets,
   handleChoiceSelect,
   handleShortAnswerChange,
@@ -98,6 +101,93 @@ export default function DetailPage({
   handleSendTutorMessage,
   handleResetTutor,
 }) {
+    const quizMixOptions = useMemo(
+    () => [
+      { multipleChoice: 5, shortAnswer: 0, label: "개관식 5 / 주관식 0" },
+      { multipleChoice: 4, shortAnswer: 1, label: "개관식 4 / 주관식 1" },
+      { multipleChoice: 3, shortAnswer: 2, label: "개관식 3 / 주관식 2" },
+      { multipleChoice: 2, shortAnswer: 3, label: "개관식 2 / 주관식 3" },
+      { multipleChoice: 1, shortAnswer: 4, label: "개관식 1 / 주관식 4" },
+      { multipleChoice: 0, shortAnswer: 5, label: "개관식 0 / 주관식 5" },
+    ],
+    []
+  );
+  const quizMixScrollRef = useRef(null);
+  const quizMixScrollRafRef = useRef(null);
+  const quizMixScrollEndRef = useRef(null);
+  const quizMixSkipCenterRef = useRef(false);
+  const quizMixHasCenteredRef = useRef(false);
+
+  const findQuizMixIndex = useCallback(
+    (mix) =>
+      quizMixOptions.findIndex(
+        (option) =>
+          option.multipleChoice === mix?.multipleChoice && option.shortAnswer === mix?.shortAnswer
+      ),
+    [quizMixOptions]
+  );
+
+  const centerQuizMix = useCallback((index, behavior = "smooth") => {
+    const container = quizMixScrollRef.current;
+    if (!container) return;
+    const target = container.querySelector(`[data-mix-index="${index}"]`);
+    if (!target) return;
+    const left = target.offsetLeft + target.offsetWidth / 2 - container.clientWidth / 2;
+    container.scrollTo({ left, behavior });
+  }, []);
+
+  const handleQuizMixScroll = useCallback(() => {
+    const container = quizMixScrollRef.current;
+    if (!container) return;
+    quizMixSkipCenterRef.current = true;
+    if (quizMixScrollEndRef.current) clearTimeout(quizMixScrollEndRef.current);
+    quizMixScrollEndRef.current = setTimeout(() => {
+      quizMixSkipCenterRef.current = false;
+    }, 160);
+
+    if (quizMixScrollRafRef.current) cancelAnimationFrame(quizMixScrollRafRef.current);
+    quizMixScrollRafRef.current = requestAnimationFrame(() => {
+      const center = container.scrollLeft + container.clientWidth / 2;
+      const items = container.querySelectorAll("[data-mix-index]");
+      let closestIndex = null;
+      let closestDistance = Number.POSITIVE_INFINITY;
+      items.forEach((item) => {
+        const itemCenter = item.offsetLeft + item.offsetWidth / 2;
+        const distance = Math.abs(center - itemCenter);
+        if (distance < closestDistance) {
+          closestDistance = distance;
+          closestIndex = Number(item.dataset.mixIndex);
+        }
+      });
+      if (closestIndex === null || Number.isNaN(closestIndex)) return;
+      const option = quizMixOptions[closestIndex];
+      if (!option) return;
+      if (
+        option.multipleChoice !== quizMix?.multipleChoice ||
+        option.shortAnswer !== quizMix?.shortAnswer
+      ) {
+        setQuizMix(option);
+      }
+    });
+  }, [quizMix, quizMixOptions, setQuizMix]);
+
+  useEffect(() => {
+    const index = findQuizMixIndex(quizMix);
+    if (index < 0) return;
+    if (quizMixSkipCenterRef.current) return;
+    const behavior = quizMixHasCenteredRef.current ? "smooth" : "auto";
+    quizMixHasCenteredRef.current = true;
+    centerQuizMix(index, behavior);
+  }, [centerQuizMix, findQuizMixIndex, quizMix]);
+
+  useEffect(() => {
+    return () => {
+      if (quizMixScrollEndRef.current) clearTimeout(quizMixScrollEndRef.current);
+      if (quizMixScrollRafRef.current) cancelAnimationFrame(quizMixScrollRafRef.current);
+    };
+  }, []);
+
+
   return (
     <section
       ref={detailContainerRef}
@@ -474,6 +564,7 @@ export default function DetailPage({
             </div>
           )}
 
+          
           {panelTab === "quiz" && (
             <>
               <ActionsPanel
@@ -491,6 +582,38 @@ export default function DetailPage({
                 onRequestSummary={requestSummary}
               />
 
+              <div className="rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-300">문항 비율</p>
+                <div
+                  ref={quizMixScrollRef}
+                  onScroll={handleQuizMixScroll}
+                  className="show-scrollbar mt-3 flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scroll-smooth"
+                >
+                  {quizMixOptions.map((option, index) => {
+                    const isActive =
+                      quizMix?.multipleChoice === option.multipleChoice &&
+                      quizMix?.shortAnswer === option.shortAnswer;
+                    return (
+                      <button
+                        key={`mix-${option.multipleChoice}-${option.shortAnswer}`}
+                        data-mix-index={index}
+                        type="button"
+                        onClick={() => setQuizMix(option)}
+                        disabled={isLoadingQuiz || isLoadingText}
+                        aria-pressed={isActive}
+                        className={`w-full shrink-0 snap-center rounded-xl px-3 py-2 text-xs font-semibold ring-1 transition ${
+                          isActive
+                            ? "bg-emerald-500/20 text-emerald-100 ring-emerald-400/60"
+                            : "bg-white/5 text-slate-200 ring-white/10 hover:ring-emerald-300/40"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               {quizSets.length > 0 && (
                 <div className="space-y-4">
                   {quizSets.map((set, idx) => (
@@ -504,8 +627,8 @@ export default function DetailPage({
                       shortAnswerInput={set.shortAnswerInput}
                       shortAnswerResult={set.shortAnswerResult}
                       onSelectChoice={(qIdx, choiceIdx) => handleChoiceSelect(set.id, qIdx, choiceIdx)}
-                      onShortAnswerChange={(val) => handleShortAnswerChange(set.id, val)}
-                      onShortAnswerCheck={() => handleShortAnswerCheck(set.id)}
+                      onShortAnswerChange={(idx, val) => handleShortAnswerChange(set.id, idx, val)}
+                      onShortAnswerCheck={(idx) => handleShortAnswerCheck(set.id, idx)}
                     />
                   ))}
                 </div>
@@ -516,12 +639,18 @@ export default function DetailPage({
                   type="button"
                   onClick={requestQuestions}
                   disabled={isLoadingQuiz || isLoadingText || (isFreeTier && quizSets.length > 0)}
-                  title={isFreeTier && quizSets.length > 0 ? "무료 티어에서는 퀴즈를 재생성할 수 없습니다." : undefined}
+                  title={
+                    isFreeTier && quizSets.length > 0
+                      ? "무료 티어에서는 퀴즈를 재생성할 수 없습니다."
+                      : undefined
+                  }
                   className="ghost-button w-full text-sm text-emerald-100"
                   data-ghost-size="xl"
                   style={{ "--ghost-color": "16, 185, 129" }}
                 >
-                  {isLoadingQuiz ? "퀴즈 생성 중..." : "퀴즈 5문제 더 생성하기"}
+                  {isLoadingQuiz
+                    ? "퀴즈 생성 중.."
+                    : `퀴즈 5문제 바로 생성하기 (객관식 ${quizMix?.multipleChoice ?? 0} / 주관식 ${quizMix?.shortAnswer ?? 0})`}
                 </button>
                 {!isFreeTier && (
                   <button
@@ -532,14 +661,16 @@ export default function DetailPage({
                     data-ghost-size="xl"
                     style={{ "--ghost-color": "16, 185, 129" }}
                   >
-                    {isLoadingQuiz ? "퀴즈 재생성 중..." : "퀴즈 재생성(덮어쓰기)"}
+                    {isLoadingQuiz
+                      ? "퀴즈 재생성 중..."
+                      : "퀴즈 재생성(덮어쓰기)"}
                   </button>
                 )}
               </div>
             </>
           )}
 
-          {panelTab === "ox" && (
+{panelTab === "ox" && (
             <div className="space-y-4">
               <ActionsPanel
                 title="O/X 퀴즈 생성"
