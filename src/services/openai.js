@@ -1,8 +1,9 @@
 import { MODEL } from "../constants";
 
-// Dev: Vite proxy (/api/openai) for CORS; Prod: api.openai.com or VITE_OPENAI_BASE_URL
-const OPENAI_BASE_URL =
-  import.meta.env.VITE_OPENAI_BASE_URL || (import.meta.env.DEV ? "/api/openai" : "https://api.openai.com");
+// Dev: force Vite proxy (/api/openai) for CORS; Prod: api.openai.com or VITE_OPENAI_BASE_URL
+const OPENAI_BASE_URL = import.meta.env.DEV
+  ? "/api/openai"
+  : import.meta.env.VITE_OPENAI_BASE_URL || "https://api.openai.com";
 const CHAT_URL = `${OPENAI_BASE_URL}/v1/chat/completions`;
 const RESPONSES_URL = `${OPENAI_BASE_URL}/v1/responses`;
 

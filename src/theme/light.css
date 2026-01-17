@@ -29,13 +29,11 @@
   color: #334155 !important;
 }
 
+:root.theme-light .text-emerald-100,
 :root.theme-light .text-emerald-200,
-:root.theme-light .text-emerald-200\/80 {
-  color: #0f766e !important;
-}
-
+:root.theme-light .text-emerald-200\/80,
 :root.theme-light .text-emerald-300\/80 {
-  color: #0f766e !important;
+  color: #115e59 !important;
 }
 
 :root.theme-light .bg-slate-950,
@@ -266,11 +264,19 @@
 }
 
 :root.theme-light .ghost-button {
-  border-color: rgba(15, 23, 42, 0.2);
+  color: #0f172a !important;
+  border-color: rgba(15, 23, 42, 0.2) !important;
+  text-shadow: none !important;
 }
 
 :root.theme-light .ghost-button:hover:not(:disabled),
 :root.theme-light .ghost-button:focus-visible:not(:disabled) {
   box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.25);
   background-color: rgba(15, 23, 42, 0.06);
+}
+
+:root.theme-light .ghost-button[data-ghost-active="true"] {
+  color: #0f172a !important;
+  text-shadow: none !important;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.25) !important;
 }
