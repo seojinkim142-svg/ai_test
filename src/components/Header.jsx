@@ -1,4 +1,12 @@
-function Header({ user, onSignOut, signingOut = false, theme = "dark", onToggleTheme, onOpenBilling }) {
+function Header({
+  user,
+  onSignOut,
+  signingOut = false,
+  theme = "dark",
+  onToggleTheme,
+  onOpenBilling,
+  onOpenLogin,
+}) {
   return (
     <header className="flex w-full items-center border-b border-white/10 px-10 py-3">
       <div className="flex w-full flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
@@ -46,6 +54,17 @@ function Header({ user, onSignOut, signingOut = false, theme = "dark", onToggleT
                 {signingOut ? "로그아웃 중..." : "로그아웃"}
               </button>
             </div>
+          )}
+          {!user && (
+            <button
+              type="button"
+              onClick={onOpenLogin}
+              className="ghost-button text-xs text-emerald-100"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "52, 211, 153" }}
+            >
+              로그인하기
+            </button>
           )}
         </div>
       </div>

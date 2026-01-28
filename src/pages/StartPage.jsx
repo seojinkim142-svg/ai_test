@@ -20,6 +20,8 @@ export default function StartPage({
   onClearSelection,
   isFolderFeatureEnabled,
   onDeleteUpload,
+  isGuest = false,
+  onRequireAuth,
 }) {
   return (
     <section className="grid grid-cols-1 gap-4">
@@ -43,6 +45,8 @@ export default function StartPage({
         onClearSelection={onClearSelection}
         isFolderFeatureEnabled={isFolderFeatureEnabled}
         onDeleteUpload={onDeleteUpload}
+        isGuest={isGuest}
+        onRequireAuth={onRequireAuth}
       />
     </section>
   );

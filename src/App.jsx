@@ -78,6 +78,7 @@ function App() {
   const [splitPercent, setSplitPercent] = useState(50);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [visitedPages, setVisitedPages] = useState(() => new Set());
   const [mockExams, setMockExams] = useState([]);
@@ -115,7 +116,7 @@ function App() {
   const mockExamMenuRef = useRef(null);
   const mockExamMenuButtonRef = useRef(null);
   const { user, authReady, refreshSession, handleSignOut: authSignOut } = useSupabaseAuth();
-  const { tier, loadingTier } = useUserTier(user);
+  const { tier, loadingTier, refreshTier } = useUserTier(user);
   const isFreeTier = tier === "free";
   const isFolderFeatureEnabled = !isFreeTier;
   const [usageCounts, setUsageCounts] = useState({ summary: 0, quiz: 0, ox: 0 });
@@ -148,6 +149,20 @@ function App() {
     },
     [limits, usageCounts]
   );
+
+  const openAuth = useCallback(() => {
+    setShowAuth(true);
+  }, []);
+
+  const closeAuth = useCallback(() => {
+    setShowAuth(false);
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      setShowAuth(false);
+    }
+  }, [user]);
 
   const loadFolders = useCallback(
     async () => {
@@ -365,6 +380,14 @@ function App() {
       root.classList.remove("theme-light");
     }
   }, [theme]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("pg_token") || params.get("kakaoPay") || params.get("tossPay") || params.get("paymentKey")) {
+      setShowPayment(true);
+    }
+  }, []);
 
   useEffect(() => {
     if (!isMockExamMenuOpen) return;
@@ -717,6 +740,10 @@ function App() {
   );
 
   const handleFileChange = async (event, targetFolderId = null) => {
+    if (!user) {
+      openAuth();
+      return;
+    }
     const files = Array.from(event.target.files || []);
     if (!files.length) return;
     const activeFolderId = targetFolderId && targetFolderId !== "all" ? targetFolderId.toString() : null;
@@ -1861,6 +1888,8 @@ function App() {
     onClearSelection: handleClearSelection,
     isFolderFeatureEnabled,
     onDeleteUpload: handleDeleteUpload,
+    isGuest: !user,
+    onRequireAuth: openAuth,
   };
   const detailPageProps = {
     detailContainerRef,
@@ -1968,10 +1997,21 @@ function App() {
     );
   }
 
-  if (!user) {
+  if (!user && showAuth) {
     return (
       <LoginBackground theme={theme}>
-        <div className="relative z-10 flex min-h-screen items-center justify-center px-4 py-8">
+        <div className="relative z-10 flex min-h-screen flex-col items-center justify-center gap-4 px-4 py-8">
+          <div className="flex w-full max-w-md justify-end">
+            <button
+              type="button"
+              onClick={closeAuth}
+              className="ghost-button text-xs text-slate-200"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "148, 163, 184" }}
+            >
+              돌아가기
+            </button>
+          </div>
           <AuthPanel user={user} onAuth={refreshSession} />
         </div>
       </LoginBackground>
@@ -1980,7 +2020,15 @@ function App() {
 
   return (
     <div className={`relative min-h-screen overflow-hidden ${theme === "light" ? "text-slate-900" : "text-slate-100"}`}>
-      {showPayment && <PaymentPage onClose={() => setShowPayment(false)} currentTier={tier} theme={theme} />}
+      {showPayment && (
+        <PaymentPage
+          onClose={() => setShowPayment(false)}
+          currentTier={tier}
+          theme={theme}
+          user={user}
+          onTierUpdated={refreshTier}
+        />
+      )}
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute -left-32 top-10 h-72 w-72 rounded-full bg-emerald-500/20 blur-3xl" />
         <div className="absolute right-[-80px] top-32 h-80 w-80 rounded-full bg-cyan-500/10 blur-3xl" />
@@ -1995,6 +2043,7 @@ function App() {
           theme={theme}
           onOpenBilling={() => setShowPayment(true)}
           onToggleTheme={toggleTheme}
+          onOpenLogin={openAuth}
         />
         <div className="px-0">
           {!showDetail && <StartPage {...startPageProps} />}

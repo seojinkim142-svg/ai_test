@@ -30,6 +30,14 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           rewrite: (p) => p.replace(/^\/api\/openai/, ""),
         },
+        "/api/kakaopay": {
+          target: "http://localhost:8787",
+          changeOrigin: true,
+        },
+        "/api/tosspayments": {
+          target: "http://localhost:8790",
+          changeOrigin: true,
+        },
       },
     },
   };

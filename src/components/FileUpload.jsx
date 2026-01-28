@@ -24,6 +24,8 @@ function FileUpload({
   onClearSelection,
   isFolderFeatureEnabled = false,
   onDeleteUpload,
+  isGuest = false,
+  onRequireAuth,
 }) {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const addMenuRef = useRef(null);
@@ -87,6 +89,37 @@ function FileUpload({
     return map;
   }, [uploadedFiles]);
 
+  const requestAuth = () => {
+    onRequireAuth?.();
+  };
+
+  const handleOpenAddMenu = () => {
+    if (isGuest) {
+      requestAuth();
+      return;
+    }
+    setShowAddMenu((prev) => !prev);
+  };
+
+  const handleFileSelect = (event) => {
+    if (isGuest) {
+      requestAuth();
+      return;
+    }
+    setShowAddMenu(false);
+    const target = uploadTargetFolderId && uploadTargetFolderId !== "all" ? uploadTargetFolderId : null;
+    setUploadTargetFolderId(null);
+    onFileChange?.(event, target);
+  };
+
+  const handleTriggerFileInput = () => {
+    if (isGuest) {
+      requestAuth();
+      return;
+    }
+    fileInputRef.current?.click();
+  };
+
   useEffect(() => {
     const handleClickOutside = (e) => {
       // 오른쪽 클릭으로 띄운 컨텍스트 메뉴가 즉시 닫히지 않도록 우클릭은 무시
@@ -141,13 +174,8 @@ function FileUpload({
       <div className="relative mt-2 flex flex-wrap gap-3">
         <div className="relative" ref={addMenuRef}>
           <UploadTile
-            onFileChange={(e) => {
-              setShowAddMenu(false);
-              const target = uploadTargetFolderId && uploadTargetFolderId !== "all" ? uploadTargetFolderId : null;
-              setUploadTargetFolderId(null);
-              onFileChange?.(e, target);
-            }}
-            onOpenMenu={() => setShowAddMenu((prev) => !prev)}
+            onFileChange={handleFileSelect}
+            onOpenMenu={handleOpenAddMenu}
             inputRef={fileInputRef}
           />
           {showAddMenu && (
@@ -157,7 +185,7 @@ function FileUpload({
                 className="px-4 py-3 text-left hover:bg-white/5"
                 onClick={() => {
                   setShowAddMenu(false);
-                  fileInputRef.current?.click();
+                  handleTriggerFileInput();
                 }}
               >
                 PDF 추가
@@ -254,7 +282,7 @@ function FileUpload({
                   type="button"
                   onClick={() => {
                     setUploadTargetFolderId(folderModalId);
-                    fileInputRef.current?.click();
+                    handleTriggerFileInput();
                   }}
                   className="ghost-button text-sm text-emerald-100"
                   data-ghost-size="sm"

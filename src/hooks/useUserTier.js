@@ -1,9 +1,14 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { DEFAULT_TIER, getUserTier } from "../services/supabase";
 
 export function useUserTier(user) {
   const [tier, setTier] = useState(DEFAULT_TIER);
   const [loadingTier, setLoadingTier] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const refreshTier = useCallback(() => {
+    setRefreshKey((prev) => prev + 1);
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -26,7 +31,7 @@ export function useUserTier(user) {
     return () => {
       mounted = false;
     };
-  }, [user?.id]);
+  }, [user?.id, refreshKey]);
 
-  return { tier, loadingTier };
+  return { tier, loadingTier, refreshTier };
 }

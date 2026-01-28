@@ -1,4 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { approveKakaoPay, requestKakaoPayReady } from "../services/kakaopay";
+import { setUserTier } from "../services/supabase";
+import { useCardPayment } from "../hooks/useCardPayment";
 
 const tierMeta = {
   free: "Free",
@@ -6,8 +9,20 @@ const tierMeta = {
   premium: "Premium",
 };
 
-function PaymentPage({ onClose, currentTier = "free", theme = "dark" }) {
+const KAKAOPAY_STORAGE_KEY = "kakaopay_session";
+const kakaoPayPlans = {
+  Pro: {
+    amount: 19900,
+    tier: "pro",
+    itemName: "Zeusian Pro (Monthly)",
+  },
+};
+function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTierUpdated }) {
   const [selectedPlan, setSelectedPlan] = useState(tierMeta[currentTier] || "Free");
+  const [paying, setPaying] = useState(false);
+  const [paymentError, setPaymentError] = useState("");
+  const [paymentNotice, setPaymentNotice] = useState("");
+  const handledKakaoReturnRef = useRef(false);
   const isLight = theme === "light";
   const surfaceClass = isLight
     ? "border-slate-200 bg-white/95 text-slate-900 ring-slate-200/80 shadow-black/10"
@@ -15,8 +30,180 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark" }) {
   const headerClass = isLight ? "border-slate-200/80 bg-white/80" : "border-white/5 bg-white/5";
   const pillClass = isLight ? "bg-slate-100 text-slate-700" : "bg-white/10 text-slate-100";
   const accentText = isLight ? "text-emerald-600" : "text-emerald-300";
-
   const currentPlan = tierMeta[currentTier] || "Free";
+  const selectedKakaoPlan = kakaoPayPlans[selectedPlan];
+  const canPayWithKakao = Boolean(selectedKakaoPlan) && currentPlan !== selectedPlan && !paying;
+  const {
+    selectedCardPlan,
+    canPayWithCard,
+    cardPaying,
+    showCardWidget,
+    setShowCardWidget,
+    cardWidgetReady,
+    openCardWidget,
+    requestCardPayment,
+  } = useCardPayment({
+    user,
+    selectedPlan,
+    currentPlan,
+    onTierUpdated,
+    setPaymentError,
+    setPaymentNotice,
+  });
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (handledKakaoReturnRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const pgToken = params.get("pg_token");
+    const kakaoState = params.get("kakaoPay");
+
+    if (!pgToken && !kakaoState) return;
+    handledKakaoReturnRef.current = true;
+
+    const clearUrl = () => {
+      const cleanUrl = `${window.location.origin}${window.location.pathname}`;
+      window.history.replaceState({}, document.title, cleanUrl);
+    };
+
+    if (kakaoState === "cancel") {
+      setPaymentNotice("");
+      setPaymentError("결제가 취소되었습니다.");
+      localStorage.removeItem(KAKAOPAY_STORAGE_KEY);
+      clearUrl();
+      return;
+    }
+
+    if (kakaoState === "fail") {
+      setPaymentNotice("");
+      setPaymentError("결제에 실패했습니다. 다시 시도해주세요.");
+      localStorage.removeItem(KAKAOPAY_STORAGE_KEY);
+      clearUrl();
+      return;
+    }
+
+    if (!pgToken) return;
+
+    let stored;
+    try {
+      stored = JSON.parse(localStorage.getItem(KAKAOPAY_STORAGE_KEY) || "{}");
+    } catch {
+      stored = {};
+    }
+
+    if (!stored?.tid || !stored?.orderId) {
+      setPaymentError("결제 정보를 찾을 수 없습니다. 다시 시도해주세요.");
+      clearUrl();
+      return;
+    }
+
+    if (!user?.id) {
+      setPaymentError("결제 승인에 로그인 정보가 필요합니다.");
+      return;
+    }
+
+    setPaying(true);
+    setPaymentError("");
+    setPaymentNotice("");
+
+    (async () => {
+      try {
+        await approveKakaoPay({
+          tid: stored.tid,
+          orderId: stored.orderId,
+          userId: user.id,
+          pgToken,
+        });
+
+        let tierError = null;
+        if (stored.tier) {
+          try {
+            await setUserTier({ userId: user.id, tier: stored.tier });
+          } catch (err) {
+            tierError = err;
+          }
+        }
+
+        if (tierError) {
+          setPaymentError(`결제 승인 완료, 권한 반영 실패: ${tierError?.message || "권한 반영 실패"}`);
+        } else {
+          onTierUpdated?.(stored.tier);
+          setPaymentNotice("결제가 완료되었습니다.");
+        }
+      } catch (err) {
+        setPaymentError(`결제 승인 실패: ${err.message}`);
+      } finally {
+        localStorage.removeItem(KAKAOPAY_STORAGE_KEY);
+        setPaying(false);
+        clearUrl();
+      }
+    })();
+  }, [user?.id, onTierUpdated]);
+
+  const handleKakaoPay = async () => {
+    if (!user?.id) {
+      setPaymentNotice("");
+      setPaymentError("결제는 로그인 후 진행할 수 있습니다.");
+      return;
+    }
+
+    if (!selectedKakaoPlan) {
+      setPaymentNotice("");
+      setPaymentError("카카오페이는 Pro 플랜에서만 지원됩니다.");
+      return;
+    }
+
+    if (currentPlan === selectedPlan) {
+      setPaymentError("");
+      setPaymentNotice("이미 이용 중인 플랜입니다.");
+      return;
+    }
+
+    setPaymentError("");
+    setPaymentNotice("");
+    setPaying(true);
+
+    const orderId = `kpay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const approvalUrl = `${window.location.origin}/?kakaoPay=approve`;
+    const cancelUrl = `${window.location.origin}/?kakaoPay=cancel`;
+    const failUrl = `${window.location.origin}/?kakaoPay=fail`;
+
+    try {
+      const data = await requestKakaoPayReady({
+        orderId,
+        userId: user.id,
+        amount: selectedKakaoPlan.amount,
+        itemName: selectedKakaoPlan.itemName,
+        plan: selectedPlan,
+        approvalUrl,
+        cancelUrl,
+        failUrl,
+      });
+
+      const redirectUrl =
+        data?.next_redirect_pc_url || data?.next_redirect_mobile_url || data?.next_redirect_app_url;
+
+      if (!data?.tid || !redirectUrl) {
+        throw new Error("결제 요청에 실패했습니다. 다시 시도해주세요.");
+      }
+
+      localStorage.setItem(
+        KAKAOPAY_STORAGE_KEY,
+        JSON.stringify({
+          tid: data.tid,
+          orderId,
+          tier: selectedKakaoPlan.tier,
+          planName: selectedPlan,
+        })
+      );
+
+      window.location.href = redirectUrl;
+    } catch (err) {
+      setPaymentError(err?.message || "결제 요청에 실패했습니다.");
+      setPaying(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/50 px-4 py-6 backdrop-blur">
       <div
@@ -130,13 +317,24 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark" }) {
               카드/계좌 이체 결제(월 구독) · 부가세 별도 · 취소/환불 정책 별도 안내
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <button
               type="button"
+              onClick={handleKakaoPay}
+              disabled={!canPayWithKakao}
+              className={`ghost-button text-sm ${isLight ? "text-amber-700" : "text-amber-100"}`}
+              style={{ "--ghost-color": "234, 179, 8" }}
+            >
+              {paying ? "카카오페이 결제 진행중" : "카카오페이 결제"}
+            </button>
+            <button
+              type="button"
+              onClick={openCardWidget}
+              disabled={!canPayWithCard}
               className={`ghost-button text-sm ${isLight ? "text-emerald-700" : "text-emerald-100"}`}
               style={{ "--ghost-color": "16, 185, 129" }}
             >
-              카드 결제 바로가기
+              {cardPaying ? "카드 결제 준비 중" : "카드 결제"}
             </button>
             <button
               type="button"
@@ -147,6 +345,79 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark" }) {
             </button>
           </div>
         </div>
+
+        <div
+          className={`${showCardWidget ? "block" : "hidden"} border-t px-6 py-4 text-sm ${
+            isLight ? "border-slate-200/80 bg-slate-50 text-slate-700" : "border-white/5 bg-white/5 text-slate-200"
+          }`}
+        >
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="font-semibold">카드 결제</p>
+              <p className={isLight ? "text-slate-600" : "text-slate-300"}>
+                선택 플랜: {selectedPlan}
+                {selectedCardPlan ? ` · ${selectedCardPlan.amount.toLocaleString()}원` : ""}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowCardWidget(false)}
+              className={`ghost-button text-xs ${isLight ? "text-slate-600" : "text-slate-200"}`}
+              style={{ "--ghost-color": isLight ? "100, 116, 139" : "148, 163, 184" }}
+            >
+              닫기
+            </button>
+          </div>
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div
+              id="toss-payment-method"
+              className={`min-h-[260px] rounded-2xl border p-4 ${
+                isLight ? "border-slate-200 bg-white" : "border-white/10 bg-white/5"
+              }`}
+            >
+              {!cardWidgetReady && (
+                <p className={isLight ? "text-xs text-slate-400" : "text-xs text-slate-400"}>
+                  결제 수단 로딩 중...
+                </p>
+              )}
+            </div>
+            <div
+              id="toss-agreement"
+              className={`min-h-[160px] rounded-2xl border p-4 ${
+                isLight ? "border-slate-200 bg-white" : "border-white/10 bg-white/5"
+              }`}
+            >
+              {!cardWidgetReady && (
+                <p className={isLight ? "text-xs text-slate-400" : "text-xs text-slate-400"}>
+                  약관 로딩 중...
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="mt-4 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={requestCardPayment}
+              disabled={!cardWidgetReady || cardPaying}
+              className={`ghost-button text-sm ${isLight ? "text-emerald-700" : "text-emerald-100"}`}
+              style={{ "--ghost-color": "16, 185, 129" }}
+            >
+              {cardPaying ? "결제 진행 중" : "결제 진행"}
+            </button>
+          </div>
+        </div>
+
+
+        {paymentError && (
+          <p className="mx-6 mb-4 rounded-lg bg-red-900/30 px-3 py-2 text-sm text-red-200 ring-1 ring-red-500/40">
+            {paymentError}
+          </p>
+        )}
+        {paymentNotice && (
+          <p className="mx-6 mb-4 rounded-lg bg-emerald-900/20 px-3 py-2 text-sm text-emerald-200 ring-1 ring-emerald-400/30">
+            {paymentNotice}
+          </p>
+        )}
       </div>
     </div>
   );

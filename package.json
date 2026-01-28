@@ -5,12 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:kakaopay": "node server/kakaopay.js",
+    "dev:tosspayments": "node server/tosspayments.js",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",
+    "@tosspayments/payment-widget-sdk": "^0.12.1",
     "html2canvas": "^1.4.1",
     "jspdf": "^3.0.4",
     "katex": "^0.16.27",
