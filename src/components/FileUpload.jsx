@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import FolderDialog from "./FolderDialog";
 import UploadTile from "./UploadTile";
 import PdfTile from "./PdfTile";
 import FolderTile from "./FolderTile";
 
-function FileUpload({
+const FileUpload = memo(function FileUpload({
   file,
   pageInfo,
   isLoadingText,
@@ -375,6 +375,6 @@ function FileUpload({
       )}
     </div>
   );
-}
+});
 
 export default FileUpload;

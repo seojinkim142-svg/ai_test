@@ -1,6 +1,7 @@
+import { memo } from "react";
 import FileUpload from "../components/FileUpload";
 
-export default function StartPage({
+const StartPage = memo(function StartPage({
   file,
   pageInfo,
   isLoadingText,
@@ -50,4 +51,6 @@ export default function StartPage({
       />
     </section>
   );
-}
+});
+
+export default StartPage;

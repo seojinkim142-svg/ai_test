@@ -12,7 +12,7 @@ const tierMeta = {
 const KAKAOPAY_STORAGE_KEY = "kakaopay_session";
 const kakaoPayPlans = {
   Pro: {
-    amount: 19900,
+    amount: 4900,
     tier: "pro",
     itemName: "Zeusian Pro (Monthly)",
   },
@@ -243,7 +243,7 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
             },
             {
               name: "Pro",
-              price: "₩19,900 /월",
+              price: "₩4,900 /월",
               desc: "스터디 · 강의 대비 추천",
               features: [
                 "무제한 PDF 업로드",
@@ -368,31 +368,20 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
               닫기
             </button>
           </div>
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            <div
-              id="toss-payment-method"
-              className={`min-h-[260px] rounded-2xl border p-4 ${
-                isLight ? "border-slate-200 bg-white" : "border-white/10 bg-white/5"
-              }`}
-            >
-              {!cardWidgetReady && (
-                <p className={isLight ? "text-xs text-slate-400" : "text-xs text-slate-400"}>
-                  결제 수단 로딩 중...
-                </p>
-              )}
-            </div>
-            <div
-              id="toss-agreement"
-              className={`min-h-[160px] rounded-2xl border p-4 ${
-                isLight ? "border-slate-200 bg-white" : "border-white/10 bg-white/5"
-              }`}
-            >
-              {!cardWidgetReady && (
-                <p className={isLight ? "text-xs text-slate-400" : "text-xs text-slate-400"}>
-                  약관 로딩 중...
-                </p>
-              )}
-            </div>
+          <div
+            className={`mt-4 rounded-2xl border p-4 ${
+              isLight ? "border-slate-200 bg-white" : "border-white/10 bg-white/5"
+            }`}
+          >
+            <p className="text-sm font-semibold">결제 안내</p>
+            <p className={isLight ? "mt-2 text-xs text-slate-500" : "mt-2 text-xs text-slate-300"}>
+              결제창은 새 창/팝업으로 열립니다. 팝업 차단을 해제해 주세요.
+            </p>
+            {!cardWidgetReady && (
+              <p className={isLight ? "mt-3 text-xs text-slate-400" : "mt-3 text-xs text-slate-400"}>
+                나이스페이먼츠 모듈 로딩 중..
+              </p>
+            )}
           </div>
           <div className="mt-4 flex items-center justify-end gap-2">
             <button

@@ -158,6 +158,10 @@ function App() {
     setShowAuth(false);
   }, []);
 
+  const openBilling = useCallback(() => {
+    setShowPayment(true);
+  }, []);
+
   useEffect(() => {
     if (user) {
       setShowAuth(false);
@@ -384,7 +388,7 @@ function App() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    if (params.get("pg_token") || params.get("kakaoPay") || params.get("tossPay") || params.get("paymentKey")) {
+    if (params.get("pg_token") || params.get("kakaoPay") || params.get("nicePay") || params.get("np_token")) {
       setShowPayment(true);
     }
   }, []);
@@ -739,104 +743,105 @@ function App() {
     [pdfUrl, selectedFileId, loadMockExams, loadFlashcards, loadArtifacts]
   );
 
-  const handleFileChange = async (event, targetFolderId = null) => {
-    if (!user) {
-      openAuth();
-      return;
-    }
-    const files = Array.from(event.target.files || []);
-    if (!files.length) return;
-    const activeFolderId = targetFolderId && targetFolderId !== "all" ? targetFolderId.toString() : null;
-    const nextCount = uploadedFiles.length + files.length;
-    if (limits.maxUploads !== Infinity && nextCount > limits.maxUploads) {
-      setError(`무료 티어에서는 업로드를 ${limits.maxUploads}개까지만 할 수 있습니다.`);
-      return;
-    }
+  const handleFileChange = useCallback(
+    async (event, targetFolderId = null) => {
+      if (!user) {
+        openAuth();
+        return;
+      }
+      const files = Array.from(event.target.files || []);
+      if (!files.length) return;
+      const activeFolderId = targetFolderId && targetFolderId !== "all" ? targetFolderId.toString() : null;
+      const nextCount = uploadedFiles.length + files.length;
+      if (limits.maxUploads !== Infinity && nextCount > limits.maxUploads) {
+        setError(`무료 티어에서는 업로드를 ${limits.maxUploads}개까지만 할 수 있습니다.`);
+        return;
+      }
 
-    const withThumbs = await Promise.all(
-      files.map(async (f) => {
-        const [thumb, hash] = await Promise.all([generatePdfThumbnail(f), computeFileHash(f)]);
-        return {
-          id: `${f.name}-${f.lastModified}-${Math.random().toString(16).slice(2)}`,
-          file: f,
-          name: f.name,
-          size: f.size,
-          hash,
-          thumbnail: thumb,
-          folderId: activeFolderId,
-          infolder: activeFolderId ? 1 : 0,
-        };
-      })
-    );
+      const existingByHash = new Map();
+      uploadedFiles.forEach((item) => {
+        if (!item?.hash) return;
+        if (!item.remotePath && !item.path) return;
+        existingByHash.set(item.hash, item);
+      });
 
-    const withUploads = await Promise.all(
-      withThumbs.map(async (item) => {
-        if (!supabase || !user) return item;
+      const withThumbs = await Promise.all(
+        files.map(async (f) => {
+          const [thumb, hash] = await Promise.all([generatePdfThumbnail(f), computeFileHash(f)]);
+          return {
+            id: `${f.name}-${f.lastModified}-${Math.random().toString(16).slice(2)}`,
+            file: f,
+            name: f.name,
+            size: f.size,
+            hash,
+            thumbnail: thumb,
+            folderId: activeFolderId,
+            infolder: activeFolderId ? 1 : 0,
+          };
+        })
+      );
 
-        // 중복 해시가 이미 DB에 있으면 업로드 생략
-        const existing = uploadedFiles.find((f) => f.hash && item.hash && f.hash === item.hash && f.remotePath);
-        try {
-          if (existing) {
+      const withUploads = await Promise.all(
+        withThumbs.map(async (item) => {
+          if (!supabase || !user) return item;
+
+          // 중복 해시가 이미 DB에 있으면 업로드 생략 (맵 조회로 O(1) 처리)
+          const existing = item.hash ? existingByHash.get(item.hash) : null;
+          try {
+            if (existing) {
+              return {
+                ...item,
+                id: existing.id || item.id,
+                remotePath: existing.remotePath || existing.path,
+                remoteUrl: existing.remoteUrl,
+                bucket: existing.bucket,
+                thumbnail: existing.thumbnail || item.thumbnail,
+                hash: existing.hash || item.hash,
+                folderId: existing.folderId || existing.folder_id || item.folderId || null,
+                infolder: Number(
+                  existing.infolder ??
+                    (existing.folderId || existing.folder_id || item.folderId ? 1 : 0)
+                ),
+              };
+            }
+
+            const uploaded = await uploadPdfToStorage(user.id, item.file);
+            const record = await saveUploadMetadata({
+              userId: user.id,
+              fileName: item.name,
+              fileSize: item.size,
+              storagePath: uploaded.path,
+              bucket: uploaded.bucket,
+              thumbnail: item.thumbnail,
+              fileHash: item.hash,
+              folderId: activeFolderId,
+            });
             return {
               ...item,
-              id: existing.id || item.id,
-              remotePath: existing.remotePath || existing.path,
-              remoteUrl: existing.remoteUrl,
-              bucket: existing.bucket,
-              thumbnail: existing.thumbnail || item.thumbnail,
-              hash: existing.hash || item.hash,
-              folderId: existing.folderId || existing.folder_id || item.folderId || null,
-              infolder: Number(
-                existing.infolder ??
-                  (existing.folderId || existing.folder_id || item.folderId ? 1 : 0)
-              ),
+              id: record.id || item.id,
+              remotePath: uploaded.path,
+              remoteUrl: uploaded.signedUrl,
+              bucket: uploaded.bucket,
+              thumbnail: record.thumbnail || item.thumbnail,
+              hash: record.file_hash || item.hash,
+              folderId: record.folder_id || activeFolderId || null,
+              infolder: Number(record.infolder ?? (record.folder_id || activeFolderId ? 1 : 0)),
             };
+          } catch (err) {
+            setError(`클라우드 업로드 실패: ${err.message}`);
+            return { ...item, uploadError: err.message };
           }
+        })
+      );
 
-          const uploaded = await uploadPdfToStorage(user.id, item.file);
-          const record = await saveUploadMetadata({
-            userId: user.id,
-            fileName: item.name,
-            fileSize: item.size,
-            storagePath: uploaded.path,
-            bucket: uploaded.bucket,
-            thumbnail: item.thumbnail,
-            fileHash: item.hash,
-            folderId: activeFolderId,
-          });
-          return {
-            ...item,
-            id: record.id || item.id,
-            remotePath: uploaded.path,
-            remoteUrl: uploaded.signedUrl,
-            bucket: uploaded.bucket,
-            thumbnail: record.thumbnail || item.thumbnail,
-            hash: record.file_hash || item.hash,
-            folderId: record.folder_id || activeFolderId || null,
-            infolder: Number(record.infolder ?? (record.folder_id || activeFolderId ? 1 : 0)),
-          };
-        } catch (err) {
-          setError(`클라우드 업로드 실패: ${err.message}`);
-          return { ...item, uploadError: err.message };
-        }
-      })
-    );
-
-    setUploadedFiles((prev) => {
-      const merged = [...prev, ...withUploads];
-      return merged;
-    });
-    setStatus("업로드 목록에서 썸네일을 선택해 요약/퀴즈를 시작하세요.");
-  };
-
-  const handleSelectFile = async (item) => {
-    try {
-      const ensured = await ensureFileForItemRef.current(item);
-      await processSelectedFileRef.current(ensured);
-    } catch (err) {
-      setError(`파일 불러오기 실패: ${err.message}`);
-    }
-  };
+      setUploadedFiles((prev) => {
+        const merged = [...prev, ...withUploads];
+        return merged;
+      });
+      setStatus("업로드 목록에서 썸네일을 선택해 요약/퀴즈를 시작하세요.");
+    },
+    [user, openAuth, uploadedFiles, limits, supabase, computeFileHash]
+  );
 
   const showDetail = Boolean(file && selectedFileId);
 
@@ -883,6 +888,19 @@ function App() {
   const goBackToListRef = useRef(goBackToList);
   const processSelectedFileRef = useRef(processSelectedFile);
   const ensureFileForItemRef = useRef(ensureFileForItem);
+
+  const handleSelectFile = useCallback(
+    async (item) => {
+      try {
+        const ensured = await ensureFileForItemRef.current(item);
+        await processSelectedFileRef.current(ensured);
+      } catch (err) {
+        setError(`파일 불러오기 실패: ${err.message}`);
+      }
+    },
+    [ensureFileForItemRef, processSelectedFileRef]
+  );
+
 
   const persistArtifacts = useCallback(
     async (partial) => {
@@ -2041,7 +2059,7 @@ function App() {
           onSignOut={handleSignOut}
           signingOut={isSigningOut}
           theme={theme}
-          onOpenBilling={() => setShowPayment(true)}
+          onOpenBilling={openBilling}
           onToggleTheme={toggleTheme}
           onOpenLogin={openAuth}
         />

@@ -1,7 +1,6 @@
-const TOSS_PAYMENTS_BASE_URL = (import.meta.env.VITE_TOSS_PAYMENTS_API_BASE || "/api/tosspayments").replace(
-  /\/$/,
-  ""
-);
+const NICE_PAYMENTS_BASE_URL = (
+  import.meta.env.VITE_NICEPAYMENTS_API_BASE || "/api/nicepayments"
+).replace(/\/$/, "");
 
 async function postJson(url, payload) {
   let response;
@@ -12,7 +11,7 @@ async function postJson(url, payload) {
       body: JSON.stringify(payload),
     });
   } catch (err) {
-    throw new Error(`Toss Payments request failed: ${err.message || err}`);
+    throw new Error(`Nice Payments request failed: ${err.message || err}`);
   }
 
   const text = await response.text();
@@ -31,6 +30,6 @@ async function postJson(url, payload) {
   return data;
 }
 
-export function confirmTossPayment(payload) {
-  return postJson(`${TOSS_PAYMENTS_BASE_URL}/confirm`, payload);
+export function confirmNicePayment(payload) {
+  return postJson(`${NICE_PAYMENTS_BASE_URL}/confirm`, payload);
 }

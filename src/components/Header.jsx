@@ -1,4 +1,6 @@
-function Header({
+import { memo } from "react";
+
+const Header = memo(function Header({
   user,
   onSignOut,
   signingOut = false,
@@ -70,6 +72,6 @@ function Header({
       </div>
     </header>
   );
-}
+});
 
 export default Header;

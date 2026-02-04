@@ -1,16 +1,63 @@
 import { useEffect, useRef, useState } from "react";
-import { loadPaymentWidget } from "@tosspayments/payment-widget-sdk";
-import { confirmTossPayment } from "../services/tosspayments";
+import { confirmNicePayment } from "../services/nicepayments";
 import { setUserTier } from "../services/supabase";
 
-const CARD_PAYMENT_STORAGE_KEY = "tosspayments_session";
+const CARD_PAYMENT_STORAGE_KEY = "nicepayments_session";
 const cardPayPlans = {
   Pro: {
-    amount: 19900,
+    amount: 4900,
     tier: "pro",
     orderName: "Zeusian Pro (Monthly)",
   },
 };
+
+const NICEPAYMENTS_SCRIPT_ID = "nicepayments-js-sdk";
+const DEFAULT_NICEPAYMENTS_SCRIPT = "https://pay.nicepay.co.kr/v1/js/";
+let niceScriptPromise = null;
+
+function loadNicePaymentsScript(src) {
+  if (typeof window === "undefined") {
+    return Promise.reject(new Error("window is undefined"));
+  }
+
+  if (window.AUTHNICE) {
+    return Promise.resolve(window.AUTHNICE);
+  }
+
+  if (niceScriptPromise) return niceScriptPromise;
+
+  niceScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.getElementById(NICEPAYMENTS_SCRIPT_ID);
+    const script = existing || document.createElement("script");
+
+    if (!existing) {
+      script.id = NICEPAYMENTS_SCRIPT_ID;
+      script.src = src;
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+
+    const handleLoad = () => {
+      if (window.AUTHNICE) {
+        resolve(window.AUTHNICE);
+      } else {
+        niceScriptPromise = null;
+        reject(new Error("AUTHNICE is not available"));
+      }
+    };
+
+    const handleError = () => {
+      niceScriptPromise = null;
+      reject(new Error("Failed to load Nice Payments SDK"));
+    };
+
+    script.addEventListener("load", handleLoad, { once: true });
+    script.addEventListener("error", handleError, { once: true });
+  });
+
+  return niceScriptPromise;
+}
 
 export function useCardPayment({
   user,
@@ -24,10 +71,8 @@ export function useCardPayment({
   const [showCardWidget, setShowCardWidget] = useState(false);
   const [cardWidgetReady, setCardWidgetReady] = useState(false);
   const handledCardReturnRef = useRef(false);
-  const widgetRef = useRef(null);
-  const paymentMethodsRef = useRef(null);
-  const agreementRef = useRef(null);
-  const cardClientKey = import.meta.env.VITE_TOSS_PAYMENTS_CLIENT_KEY;
+  const cardClientId = import.meta.env.VITE_NICEPAYMENTS_CLIENT_ID;
+  const scriptUrl = import.meta.env.VITE_NICEPAYMENTS_JS_URL || DEFAULT_NICEPAYMENTS_SCRIPT;
 
   const selectedCardPlan = cardPayPlans[selectedPlan];
   const canPayWithCard = Boolean(selectedCardPlan) && currentPlan !== selectedPlan && !cardPaying;
@@ -35,14 +80,15 @@ export function useCardPayment({
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (handledCardReturnRef.current) return;
+
     const params = new URLSearchParams(window.location.search);
-    const cardState = params.get("tossPay");
-    const paymentKey = params.get("paymentKey");
+    const cardState = params.get("nicePay");
+    const token = params.get("np_token");
     const orderId = params.get("orderId");
     const amountParam = params.get("amount");
     const failMessage = params.get("message");
 
-    if (!cardState && !paymentKey) return;
+    if (!cardState && !token) return;
     handledCardReturnRef.current = true;
 
     const clearUrl = () => {
@@ -53,15 +99,22 @@ export function useCardPayment({
     if (cardState === "fail") {
       setPaymentNotice("");
       setPaymentError(
-        failMessage ? `토스페이먼츠 결제 실패: ${failMessage}` : "토스페이먼츠 결제에 실패했습니다."
+        failMessage
+          ? `나이스페이먼츠 결제 실패: ${failMessage}`
+          : "나이스페이먼츠 결제가 실패했습니다."
       );
       localStorage.removeItem(CARD_PAYMENT_STORAGE_KEY);
       clearUrl();
       return;
     }
 
-    if (!paymentKey || !orderId || !amountParam) {
-      setPaymentError("결제 정보를 찾을 수 없습니다. 다시 시도해주세요.");
+    if (cardState !== "success") {
+      clearUrl();
+      return;
+    }
+
+    if (!token || !orderId || !amountParam) {
+      setPaymentError("결제 정보를 찾을 수 없습니다. 다시 시도해 주세요.");
       clearUrl();
       return;
     }
@@ -77,19 +130,19 @@ export function useCardPayment({
     const storedAmount = Number(stored.amount);
 
     if (!Number.isFinite(amount) || amount <= 0) {
-      setPaymentError("결제 금액이 올바르지 않습니다. 다시 시도해주세요.");
+      setPaymentError("결제 금액이 올바른 형태가 아닙니다. 다시 시도해 주세요.");
       clearUrl();
       return;
     }
 
     if (storedAmount && storedAmount !== amount) {
-      setPaymentError("결제 금액이 일치하지 않습니다. 다시 시도해주세요.");
+      setPaymentError("결제 금액이 일치하지 않습니다. 다시 시도해 주세요.");
       clearUrl();
       return;
     }
 
     if (!user?.id) {
-      setPaymentError("결제 승인에 로그인 정보가 필요합니다.");
+      setPaymentError("결제 확인에는 로그인 정보가 필요합니다.");
       return;
     }
 
@@ -99,7 +152,17 @@ export function useCardPayment({
 
     (async () => {
       try {
-        await confirmTossPayment({ paymentKey, orderId, amount });
+        const confirmation = await confirmNicePayment({ token });
+        const confirmedOrderId = confirmation?.orderId || orderId;
+        const confirmedAmount = Number(confirmation?.amount ?? amount);
+
+        if (stored?.orderId && confirmedOrderId && stored.orderId !== confirmedOrderId) {
+          throw new Error("결제 주문 번호가 일치하지 않습니다.");
+        }
+
+        if (storedAmount && confirmedAmount && storedAmount !== confirmedAmount) {
+          throw new Error("결제 금액이 일치하지 않습니다.");
+        }
 
         let tierError = null;
         if (stored.tier) {
@@ -111,13 +174,15 @@ export function useCardPayment({
         }
 
         if (tierError) {
-          setPaymentError(`결제 승인 완료, 권한 반영 실패: ${tierError?.message || "권한 반영 실패"}`);
+          setPaymentError(
+            `결제 확인 완료, 권한 반영 실패: ${tierError?.message || "권한 반영 실패"}`
+          );
         } else {
           onTierUpdated?.(stored.tier);
           setPaymentNotice("결제가 완료되었습니다.");
         }
       } catch (err) {
-        setPaymentError(`결제 승인 실패: ${err.message}`);
+        setPaymentError(`결제 확인 실패: ${err.message}`);
       } finally {
         localStorage.removeItem(CARD_PAYMENT_STORAGE_KEY);
         setCardPaying(false);
@@ -129,46 +194,28 @@ export function useCardPayment({
   useEffect(() => {
     if (!showCardWidget) return;
     if (!selectedCardPlan) return;
-    if (!cardClientKey) {
-      setPaymentError("토스페이먼츠 Client Key가 설정되지 않았습니다.");
+    if (!cardClientId) {
+      setPaymentError("NICEPAYMENTS Client ID가 설정되어 있지 않습니다.");
       return;
     }
 
     let active = true;
     setCardWidgetReady(false);
 
-    (async () => {
-      try {
-        const customerKey = user?.id || "ANONYMOUS";
-        const widget = widgetRef.current || (await loadPaymentWidget(cardClientKey, customerKey));
-
-        widgetRef.current = widget;
-
-        if (!paymentMethodsRef.current) {
-          paymentMethodsRef.current = widget.renderPaymentMethods(
-            "#toss-payment-method",
-            selectedCardPlan.amount,
-            { variantKey: "DEFAULT" }
-          );
-          agreementRef.current = widget.renderAgreement("#toss-agreement", { variantKey: "AGREEMENT" });
-        } else {
-          paymentMethodsRef.current.updateAmount(selectedCardPlan.amount);
-        }
-
+    loadNicePaymentsScript(scriptUrl)
+      .then(() => {
+        if (active) setCardWidgetReady(true);
+      })
+      .catch((err) => {
         if (active) {
-          setCardWidgetReady(true);
+          setPaymentError(`나이스페이먼츠 결제 모듈 로드 실패: ${err.message}`);
         }
-      } catch (err) {
-        if (active) {
-          setPaymentError(`토스페이먼츠 위젯 로드 실패: ${err.message}`);
-        }
-      }
-    })();
+      });
 
     return () => {
       active = false;
     };
-  }, [cardClientKey, selectedCardPlan, setPaymentError, showCardWidget, user?.id]);
+  }, [cardClientId, scriptUrl, selectedCardPlan, setPaymentError, showCardWidget]);
 
   const openCardWidget = () => {
     if (!user?.id) {
@@ -179,7 +226,7 @@ export function useCardPayment({
 
     if (!selectedCardPlan) {
       setPaymentNotice("");
-      setPaymentError("토스페이먼츠는 Pro 플랜에서만 지원합니다.");
+      setPaymentError("나이스페이먼츠는 Pro 플랜에서만 지원합니다.");
       return;
     }
 
@@ -194,9 +241,19 @@ export function useCardPayment({
     setShowCardWidget(true);
   };
 
-  const requestCardPayment = async () => {
-    if (!widgetRef.current || !selectedCardPlan) {
-      setPaymentError("토스페이먼츠 위젯이 준비되지 않았습니다.");
+  const requestCardPayment = () => {
+    if (!selectedCardPlan) {
+      setPaymentError("결제 플랜을 선택해 주세요.");
+      return;
+    }
+
+    if (!cardClientId) {
+      setPaymentError("NICEPAYMENTS Client ID가 설정되어 있지 않습니다.");
+      return;
+    }
+
+    if (!cardWidgetReady || typeof window === "undefined" || !window.AUTHNICE) {
+      setPaymentError("나이스페이먼츠 결제 준비 중입니다. 잠시 후 다시 시도해 주세요.");
       return;
     }
 
@@ -209,10 +266,10 @@ export function useCardPayment({
     setPaymentNotice("");
     setCardPaying(true);
 
-    const orderId = `toss_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const successUrl = `${window.location.origin}/?tossPay=success`;
-    const failUrl = `${window.location.origin}/?tossPay=fail`;
+    const orderId = `nice_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const amount = selectedCardPlan.amount;
+    const fallbackReturnUrl = `${window.location.origin}/api/nicepayments/return`;
+    const returnUrl = import.meta.env.VITE_NICEPAYMENTS_RETURN_URL || fallbackReturnUrl;
 
     localStorage.setItem(
       CARD_PAYMENT_STORAGE_KEY,
@@ -225,16 +282,23 @@ export function useCardPayment({
     );
 
     try {
-      await widgetRef.current.requestPayment({
+      window.AUTHNICE.requestPay({
+        clientId: cardClientId,
+        method: "card",
         orderId,
-        orderName: selectedCardPlan.orderName,
-        successUrl,
-        failUrl,
-        customerEmail: user?.email,
-        customerName: user?.user_metadata?.name || user?.email?.split("@")[0] || "사용자",
+        amount,
+        goodsName: selectedCardPlan.orderName,
+        returnUrl,
+        buyerName: user?.user_metadata?.name || user?.email?.split("@")[0] || "user",
+        buyerEmail: user?.email || "",
+        fnError: (err) => {
+          const message = err?.errorMsg || err?.message || "결제 요청이 취소되었습니다.";
+          setPaymentError(`나이스페이먼츠 결제 요청 실패: ${message}`);
+          setCardPaying(false);
+        },
       });
     } catch (err) {
-      setPaymentError(err?.message || "토스페이먼츠 결제 요청에 실패했습니다.");
+      setPaymentError(err?.message || "나이스페이먼츠 결제 요청을 진행할 수 없습니다.");
       setCardPaying(false);
     }
   };

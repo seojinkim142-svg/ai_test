@@ -34,8 +34,8 @@ export default defineConfig(({ mode }) => {
           target: "http://localhost:8787",
           changeOrigin: true,
         },
-        "/api/tosspayments": {
-          target: "http://localhost:8790",
+        "/api/nicepayments": {
+          target: "http://localhost:8791",
           changeOrigin: true,
         },
       },
