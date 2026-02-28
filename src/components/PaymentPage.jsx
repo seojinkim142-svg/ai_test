@@ -16,6 +16,11 @@ const kakaoPayPlans = {
     tier: "pro",
     itemName: "Zeusian Pro (Monthly)",
   },
+  Premium: {
+    amount: 16000,
+    tier: "premium",
+    itemName: "Zeusian Premium (Monthly)",
+  },
 };
 function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTierUpdated }) {
   const [selectedPlan, setSelectedPlan] = useState(tierMeta[currentTier] || "Free");
@@ -149,7 +154,7 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
 
     if (!selectedKakaoPlan) {
       setPaymentNotice("");
-      setPaymentError("카카오페이는 Pro 플랜에서만 지원됩니다.");
+      setPaymentError("카카오페이는 Pro/Premium 플랜에서만 지원됩니다.");
       return;
     }
 
@@ -236,19 +241,19 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
             {
               name: "Free",
               price: "무료",
-              desc: "가벼운 사용 · 테스트",
-              features: ["PDF 업로드 최대 4개/회", "요약 · 퀴즈 기본 기능", "기본 저장소 제공"],
+              desc: "가볍게 시작하는 개인 학습",
+              features: ["PDF 업로드 최대 4개", "요약/퀴즈/OX 기본 기능", "기본 저장소 제공"],
               cta: "그대로 사용",
               accent: "148, 163, 184",
             },
             {
               name: "Pro",
               price: "₩4,900 /월",
-              desc: "스터디 · 강의 대비 추천",
+              desc: "자주 공부하는 사용자에게 추천",
               features: [
                 "무제한 PDF 업로드",
-                "퀴즈/OX/카드 무제한 생성",
-                "요약/하이라이트 우선 처리",
+                "요약/퀴즈/OX/카드 무제한 생성",
+                "요약/처리 우선 처리",
               ],
               cta: "Pro로 업그레이드",
               accent: "16, 185, 129",
@@ -256,10 +261,10 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
             },
             {
               name: "Premium",
-              price: "맞춤 견적",
+              price: "₩16,000 /월",
               desc: "강의 · 팀 프로젝트",
               features: ["팀 스페이스/공유", "관리자 권한/사용량 대시보드", "우선 지원 · SLA"],
-              cta: "도입 상담",
+              cta: "Premium로 업그레이드",
               accent: "56, 189, 248",
             },
           ].map((plan) => (
@@ -334,7 +339,7 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
               className={`ghost-button text-sm ${isLight ? "text-emerald-700" : "text-emerald-100"}`}
               style={{ "--ghost-color": "16, 185, 129" }}
             >
-              {cardPaying ? "카드 결제 준비 중" : "카드 결제"}
+              {cardPaying ? "카드 결제 준비중" : "카드 결제"}
             </button>
             <button
               type="button"
@@ -413,3 +418,4 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
 }
 
 export default PaymentPage;
+

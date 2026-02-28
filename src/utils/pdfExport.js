@@ -1,12 +1,27 @@
-import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
+let exportRuntimePromise = null;
+
+async function loadExportRuntime() {
+  if (!exportRuntimePromise) {
+    exportRuntimePromise = (async () => {
+      const [html2canvasModule, jsPdfModule] = await Promise.all([
+        import("html2canvas"),
+        import("jspdf"),
+      ]);
+      const html2canvas = html2canvasModule?.default || html2canvasModule;
+      const jsPDF = jsPdfModule?.default || jsPdfModule?.jsPDF || jsPdfModule;
+      return { html2canvas, jsPDF };
+    })();
+  }
+  return exportRuntimePromise;
+}
 
 export async function exportElementToPdf(element, { filename = "summary.pdf", margin = 10 } = {}) {
-  if (!element) throw new Error("내보낼 요소가 없습니다.");
+  if (!element) throw new Error("Element not found.");
 
+  const { html2canvas, jsPDF } = await loadExportRuntime();
   const canvas = await html2canvas(element, {
     scale: 2,
-    backgroundColor: null, // keep existing styles
+    backgroundColor: null,
     useCORS: true,
   });
 
@@ -37,7 +52,9 @@ export async function exportPagedElementToPdf(
   container,
   { filename = "mock-exam.pdf", margin = 0, pageSelector = ".mock-exam-page", background = "#ffffff" } = {}
 ) {
-  if (!container) throw new Error("내보낼 요소가 없습니다.");
+  if (!container) throw new Error("Element not found.");
+
+  const { html2canvas, jsPDF } = await loadExportRuntime();
   const pages = Array.from(container.querySelectorAll(pageSelector));
   if (pages.length === 0) {
     return exportElementToPdf(container, { filename, margin });

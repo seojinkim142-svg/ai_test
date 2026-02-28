@@ -4,6 +4,19 @@ import UploadTile from "./UploadTile";
 import PdfTile from "./PdfTile";
 import FolderTile from "./FolderTile";
 
+const MB = 1024 * 1024;
+const TIER_LABEL = {
+  free: "Free",
+  pro: "Pro",
+  premium: "Premium",
+};
+
+const formatUploadLimitText = (tier, maxPdfSizeBytes) => {
+  const safeBytes = Number(maxPdfSizeBytes) || 0;
+  const sizeLabel = `${Math.max(1, Math.round(safeBytes / MB))}MB`;
+  return `${TIER_LABEL[tier] || "Free"} 요금제: PDF 1개당 최대 ${sizeLabel}`;
+};
+
 const FileUpload = memo(function FileUpload({
   file,
   pageInfo,
@@ -26,6 +39,8 @@ const FileUpload = memo(function FileUpload({
   onDeleteUpload,
   isGuest = false,
   onRequireAuth,
+  currentTier = "free",
+  maxPdfSizeBytes = 0,
 }) {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const addMenuRef = useRef(null);
@@ -92,6 +107,11 @@ const FileUpload = memo(function FileUpload({
   const requestAuth = () => {
     onRequireAuth?.();
   };
+
+  const uploadLimitText = useMemo(
+    () => formatUploadLimitText(currentTier, maxPdfSizeBytes),
+    [currentTier, maxPdfSizeBytes]
+  );
 
   const handleOpenAddMenu = () => {
     if (isGuest) {
@@ -167,6 +187,7 @@ const FileUpload = memo(function FileUpload({
     <div className="col-span-2 flex flex-col gap-4">
       <div className="rounded-2xl bg-transparent px-0 py-0 text-sm text-slate-100">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-slate-300">{uploadLimitText}</p>
           {!isFolderFeatureEnabled && <p className="text-xs text-slate-300">폴더 기능은 Pro/Premium에서 제공됩니다.</p>}
         </div>
       </div>

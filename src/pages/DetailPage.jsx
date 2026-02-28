@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useMemo } from "react";
 import ActionsPanel from "../components/ActionsPanel";
 import AiTutorPanel from "../components/AiTutorPanel";
 import FlashcardsPanel from "../components/FlashcardsPanel";
 import OxSection from "../components/OxSection";
 import PdfPreview from "../components/PdfPreview";
-import ProgressPanel from "../components/ProgressPanel";
 import QuizSection from "../components/QuizSection";
 import SummaryCard from "../components/SummaryCard";
+import { useQuizMixCarousel } from "../hooks/useQuizMixCarousel";
 import { LETTERS } from "../constants";
 
 export default function DetailPage({
@@ -15,7 +15,7 @@ export default function DetailPage({
   pdfUrl,
   file,
   pageInfo,
-  handlePageChange,
+  currentPage,
   handleDragStart,
   panelTab,
   setPanelTab,
@@ -33,16 +33,20 @@ export default function DetailPage({
   pageSummaryError,
   handleSummaryByPages,
   isPageSummaryLoading,
+  isChapterRangeOpen,
+  setIsChapterRangeOpen,
+  chapterRangeInput,
+  setChapterRangeInput,
+  chapterRangeError,
+  setChapterRangeError,
+  handleAutoDetectChapterRanges,
+  isDetectingChapterRanges,
+  handleConfirmChapterRanges,
   handleExportSummaryPdf,
   isExportingSummary,
   status,
   error,
   summaryRef,
-  questionProgress,
-  quizProgress,
-  oxProgress,
-  flashcardExamStats,
-  pageProgress,
   mockExams,
   mockExamMenuRef,
   mockExamMenuButtonRef,
@@ -93,7 +97,6 @@ export default function DetailPage({
   extractedText,
   flashcardStatus,
   flashcardError,
-  setFlashcardExamStats,
   tutorMessages,
   isTutorLoading,
   tutorError,
@@ -101,7 +104,7 @@ export default function DetailPage({
   handleSendTutorMessage,
   handleResetTutor,
 }) {
-    const quizMixOptions = useMemo(
+  const quizMixOptions = useMemo(
     () => [
       { multipleChoice: 5, shortAnswer: 0, label: "개관식 5 / 주관식 0" },
       { multipleChoice: 4, shortAnswer: 1, label: "개관식 4 / 주관식 1" },
@@ -112,105 +115,40 @@ export default function DetailPage({
     ],
     []
   );
-  const quizMixScrollRef = useRef(null);
-  const quizMixScrollRafRef = useRef(null);
-  const quizMixScrollEndRef = useRef(null);
-  const quizMixSkipCenterRef = useRef(false);
-  const quizMixHasCenteredRef = useRef(false);
-
-  const findQuizMixIndex = useCallback(
-    (mix) =>
-      quizMixOptions.findIndex(
-        (option) =>
-          option.multipleChoice === mix?.multipleChoice && option.shortAnswer === mix?.shortAnswer
-      ),
-    [quizMixOptions]
-  );
-
-  const centerQuizMix = useCallback((index, behavior = "smooth") => {
-    const container = quizMixScrollRef.current;
-    if (!container) return;
-    const target = container.querySelector(`[data-mix-index="${index}"]`);
-    if (!target) return;
-    const left = target.offsetLeft + target.offsetWidth / 2 - container.clientWidth / 2;
-    container.scrollTo({ left, behavior });
-  }, []);
-
-  const handleQuizMixScroll = useCallback(() => {
-    const container = quizMixScrollRef.current;
-    if (!container) return;
-    quizMixSkipCenterRef.current = true;
-    if (quizMixScrollEndRef.current) clearTimeout(quizMixScrollEndRef.current);
-    quizMixScrollEndRef.current = setTimeout(() => {
-      quizMixSkipCenterRef.current = false;
-    }, 160);
-
-    if (quizMixScrollRafRef.current) cancelAnimationFrame(quizMixScrollRafRef.current);
-    quizMixScrollRafRef.current = requestAnimationFrame(() => {
-      const center = container.scrollLeft + container.clientWidth / 2;
-      const items = container.querySelectorAll("[data-mix-index]");
-      let closestIndex = null;
-      let closestDistance = Number.POSITIVE_INFINITY;
-      items.forEach((item) => {
-        const itemCenter = item.offsetLeft + item.offsetWidth / 2;
-        const distance = Math.abs(center - itemCenter);
-        if (distance < closestDistance) {
-          closestDistance = distance;
-          closestIndex = Number(item.dataset.mixIndex);
-        }
-      });
-      if (closestIndex === null || Number.isNaN(closestIndex)) return;
-      const option = quizMixOptions[closestIndex];
-      if (!option) return;
-      if (
-        option.multipleChoice !== quizMix?.multipleChoice ||
-        option.shortAnswer !== quizMix?.shortAnswer
-      ) {
-        setQuizMix(option);
-      }
-    });
-  }, [quizMix, quizMixOptions, setQuizMix]);
-
-  useEffect(() => {
-    const index = findQuizMixIndex(quizMix);
-    if (index < 0) return;
-    if (quizMixSkipCenterRef.current) return;
-    const behavior = quizMixHasCenteredRef.current ? "smooth" : "auto";
-    quizMixHasCenteredRef.current = true;
-    centerQuizMix(index, behavior);
-  }, [centerQuizMix, findQuizMixIndex, quizMix]);
-
-  useEffect(() => {
-    return () => {
-      if (quizMixScrollEndRef.current) clearTimeout(quizMixScrollEndRef.current);
-      if (quizMixScrollRafRef.current) cancelAnimationFrame(quizMixScrollRafRef.current);
-    };
-  }, []);
+  const { quizMixScrollRef, handleQuizMixScroll } = useQuizMixCarousel({
+    quizMix,
+    quizMixOptions,
+    setQuizMix,
+  });
 
 
   return (
     <section
       ref={detailContainerRef}
-      className="flex flex-col gap-4 lg:h-[clamp(70vh,calc(100vh-120px),90vh)] lg:flex-row lg:items-stretch lg:overflow-hidden"
+      className="flex flex-col gap-4 lg:h-[clamp(70vh,calc(100vh-120px),90vh)] lg:flex-row lg:items-stretch lg:gap-0 lg:overflow-hidden"
     >
       <div className="flex flex-col gap-3 lg:h-full lg:overflow-y-auto" style={splitStyle}>
-        <PdfPreview pdfUrl={pdfUrl} file={file} pageInfo={pageInfo} onPageChange={handlePageChange} />
+        <PdfPreview
+          pdfUrl={pdfUrl}
+          file={file}
+          pageInfo={pageInfo}
+          currentPage={currentPage}
+        />
       </div>
 
       <div className="hidden w-2 cursor-col-resize items-stretch justify-center lg:flex">
         <div
           className="h-full w-1 rounded-full bg-white/10 transition hover:bg-white/30"
-          onMouseDown={handleDragStart}
+          onPointerDown={handleDragStart}
           role="separator"
           aria-label="Resize panel"
         />
       </div>
 
         <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
-        <div className="grid grid-cols-7 items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
+        <div className="grid grid-cols-6 items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
           {[
             { id: "summary", label: "\uC694\uC57D", type: "tab" },
-            { id: "progress", label: "\uC9C4\uB3C4", type: "tab" },
             { id: "quiz", label: "\uD034\uC988", type: "tab" },
             { id: "ox", label: "O/X", type: "tab" },
             { id: "mockExam", label: "\uBAA8\uC758\uACE0\uC0AC", type: "tab" },
@@ -271,6 +209,17 @@ export default function DetailPage({
                     style={{ "--ghost-color": "148, 163, 184" }}
                   >
                     선택 페이지 요약
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsChapterRangeOpen((prev) => !prev);
+                      setChapterRangeError("");
+                    }}
+                    className="ghost-button text-xs text-slate-200"
+                    style={{ "--ghost-color": "148, 163, 184" }}
+                  >
+                    챕터 범위 설정
                   </button>
                   <button
                     type="button"
@@ -339,29 +288,78 @@ export default function DetailPage({
                   )}
                 </div>
               )}
+              {isChapterRangeOpen && (
+                <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-100">사용자 지정 챕터 범위</p>
+                      <p className="text-xs text-slate-400">
+                        형식: 챕터번호:시작-끝 (예: 1:1-12, 2:13-24)
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsChapterRangeOpen(false)}
+                      className="ghost-button text-[11px] text-slate-200"
+                      data-ghost-size="sm"
+                      style={{ "--ghost-color": "148, 163, 184" }}
+                    >
+                      닫기
+                    </button>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    <textarea
+                      value={chapterRangeInput}
+                      onChange={(event) => {
+                        setChapterRangeInput(event.target.value);
+                        setChapterRangeError("");
+                      }}
+                      placeholder={`1:1-12\n2:13-24\n3:25-38`}
+                      rows={4}
+                      className="w-full resize-y rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none ring-1 ring-transparent transition focus:border-emerald-300/50 focus:ring-emerald-300/40"
+                    />
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={handleAutoDetectChapterRanges}
+                        disabled={isLoadingSummary || isLoadingText || isDetectingChapterRanges}
+                        className="ghost-button text-xs text-slate-200"
+                        data-ghost-size="sm"
+                        style={{ "--ghost-color": "100, 116, 139" }}
+                      >
+                        {isDetectingChapterRanges ? "목차 추출 중..." : "목차 자동 추출"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleConfirmChapterRanges}
+                        disabled={isLoadingSummary || isLoadingText || isDetectingChapterRanges}
+                        className="ghost-button text-xs text-emerald-100"
+                        data-ghost-size="sm"
+                        style={{ "--ghost-color": "52, 211, 153" }}
+                      >
+                        확인
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-400">
+                      목차 자동 추출 또는 직접 입력한 범위는 요약 생성 시 챕터 분할 기준으로 적용됩니다.
+                    </p>
+                  </div>
+                  {chapterRangeError && (
+                    <p className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-200 ring-1 ring-red-400/30">
+                      {chapterRangeError}
+                    </p>
+                  )}
+                </div>
+              )}
               {isLoadingSummary && <p className="mt-2 text-sm text-slate-300">요약 생성 중...</p>}
               {!isLoadingSummary && summary && (
                 <div ref={summaryRef}>
-                  <SummaryCard summary={summary} />
+                  <SummaryCard summary={summary} renderExportPages={isExportingSummary} />
                 </div>
               )}
               {!isLoadingSummary && !summary && <p className="mt-2 text-sm text-slate-400">요약이 준비되면 표시됩니다.</p>}
             </div>
           )}
-          {panelTab === "progress" && (
-            <ProgressPanel
-              totalQuestions={questionProgress.total}
-              answeredQuestions={questionProgress.answered}
-              correctQuestions={questionProgress.correct}
-              quizProgress={quizProgress}
-              oxProgress={oxProgress}
-              flashcardProgress={flashcardExamStats}
-              pageTotal={pageProgress.totalPages}
-              pageVisited={pageProgress.visitedCount}
-              pageProgress={pageProgress.progress}
-            />
-          )}
-
           {panelTab === "mockExam" && (
             <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
               <div className="flex items-center justify-between gap-3">
@@ -744,7 +742,6 @@ export default function DetailPage({
               canGenerate={Boolean(file && selectedFileId && extractedText && !isLoadingText)}
               status={flashcardStatus}
               error={flashcardError}
-              onExamComplete={setFlashcardExamStats}
             />
           )}
           {panelTab === "tutor" && (

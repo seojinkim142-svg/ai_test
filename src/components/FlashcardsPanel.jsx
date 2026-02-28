@@ -1,5 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+const SCORE_HISTORY_STORAGE_KEY = "flashcardExamHistory";
+
+function loadScoreHistory() {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(SCORE_HISTORY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 function FlashcardsPanel({
   cards,
   onAdd,
@@ -10,7 +24,6 @@ function FlashcardsPanel({
   canGenerate = true,
   status,
   error,
-  onExamComplete,
 }) {
   const [front, setFront] = useState("");
   const [back, setBack] = useState("");
@@ -22,12 +35,11 @@ function FlashcardsPanel({
   const [knownCount, setKnownCount] = useState(0);
   const [unknownCount, setUnknownCount] = useState(0);
   const [showScoreHistory, setShowScoreHistory] = useState(false);
-  const [scoreHistory, setScoreHistory] = useState([]);
+  const [scoreHistory, setScoreHistory] = useState(() => loadScoreHistory());
   const [examSessionId, setExamSessionId] = useState(null);
   const [hasSavedScore, setHasSavedScore] = useState(false);
   const pointerStartRef = useRef(null);
   const suppressClickRef = useRef(false);
-  const storageKey = "flashcardExamHistory";
 
   const shuffleCards = useCallback((list) => {
     const shuffled = [...list];
@@ -66,18 +78,67 @@ function FlashcardsPanel({
   const totalQuestions = examCards.length;
   const accuracy = totalQuestions ? Math.round((knownCount / totalQuestions) * 100) : 0;
 
+  const persistScoreRecord = useCallback(
+    ({ known, unknown, total }) => {
+      const safeTotal = Math.max(0, Number(total) || 0);
+      const safeKnown = Math.max(0, Number(known) || 0);
+      const safeUnknown = Math.max(0, Number(unknown) || 0);
+      const record = {
+        id: examSessionId || `${Date.now()}`,
+        createdAt: new Date().toISOString(),
+        total: safeTotal,
+        known: safeKnown,
+        unknown: safeUnknown,
+        accuracy: safeTotal ? Math.round((safeKnown / safeTotal) * 100) : 0,
+      };
+      setScoreHistory((prev) => {
+        const next = [record, ...prev].slice(0, 50);
+        try {
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem(
+              SCORE_HISTORY_STORAGE_KEY,
+              JSON.stringify(next)
+            );
+          }
+        } catch {
+          // ignore storage errors
+        }
+        return next;
+      });
+      setHasSavedScore(true);
+    },
+    [examSessionId]
+  );
+
   const advanceCard = useCallback(
     (result) => {
       if (isExamComplete) return;
-      if (result === "known") {
-        setKnownCount((prev) => prev + 1);
-      } else {
-        setUnknownCount((prev) => prev + 1);
-      }
-      setExamIndex((prev) => prev + 1);
+      const nextKnown = result === "known" ? knownCount + 1 : knownCount;
+      const nextUnknown = result === "known" ? unknownCount : unknownCount + 1;
+      const nextIndex = examIndex + 1;
+
+      setKnownCount(nextKnown);
+      setUnknownCount(nextUnknown);
+      setExamIndex(nextIndex);
       setIsFlipped(false);
+
+      if (!hasSavedScore && nextIndex >= examCards.length) {
+        persistScoreRecord({
+          known: nextKnown,
+          unknown: nextUnknown,
+          total: examCards.length,
+        });
+      }
     },
-    [isExamComplete]
+    [
+      examCards.length,
+      examIndex,
+      hasSavedScore,
+      isExamComplete,
+      knownCount,
+      persistScoreRecord,
+      unknownCount,
+    ]
   );
 
   const handleCardClick = useCallback(() => {
@@ -136,52 +197,6 @@ function FlashcardsPanel({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [advanceCard, isExamComplete, isExamMode]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem(storageKey);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) {
-        setScoreHistory(parsed);
-      }
-    } catch (err) {
-      // ignore parse errors
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!isExamComplete || hasSavedScore) return;
-    if (typeof window === "undefined") return;
-    const record = {
-      id: examSessionId || `${Date.now()}`,
-      createdAt: new Date().toISOString(),
-      total: totalQuestions,
-      known: knownCount,
-      unknown: unknownCount,
-      accuracy,
-    };
-    const next = [record, ...scoreHistory].slice(0, 50);
-    onExamComplete?.(record);
-    try {
-      window.localStorage.setItem(storageKey, JSON.stringify(next));
-    } catch (err) {
-      // ignore storage errors
-    }
-    setScoreHistory(next);
-    setHasSavedScore(true);
-  }, [
-    accuracy,
-    examSessionId,
-    hasSavedScore,
-    isExamComplete,
-    knownCount,
-    onExamComplete,
-    scoreHistory,
-    totalQuestions,
-    unknownCount,
-  ]);
 
   const canStartExam = Boolean(cards?.length) && !isLoading && !isGenerating;
 

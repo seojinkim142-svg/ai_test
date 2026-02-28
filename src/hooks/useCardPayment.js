@@ -9,6 +9,11 @@ const cardPayPlans = {
     tier: "pro",
     orderName: "Zeusian Pro (Monthly)",
   },
+  Premium: {
+    amount: 16000,
+    tier: "premium",
+    orderName: "Zeusian Premium (Monthly)",
+  },
 };
 
 const NICEPAYMENTS_SCRIPT_ID = "nicepayments-js-sdk";
@@ -226,7 +231,7 @@ export function useCardPayment({
 
     if (!selectedCardPlan) {
       setPaymentNotice("");
-      setPaymentError("나이스페이먼츠는 Pro 플랜에서만 지원합니다.");
+      setPaymentError("카드 결제는 Pro/Premium 플랜에서만 지원됩니다.");
       return;
     }
 
@@ -269,7 +274,20 @@ export function useCardPayment({
     const orderId = `nice_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const amount = selectedCardPlan.amount;
     const fallbackReturnUrl = `${window.location.origin}/api/nicepayments/return`;
-    const returnUrl = import.meta.env.VITE_NICEPAYMENTS_RETURN_URL || fallbackReturnUrl;
+    const configuredReturnUrl = import.meta.env.VITE_NICEPAYMENTS_RETURN_URL;
+    let returnUrl = fallbackReturnUrl;
+
+    if (configuredReturnUrl) {
+      try {
+        const parsedReturnUrl = new URL(configuredReturnUrl, window.location.origin);
+        const isLocalhostReturn = ["localhost", "127.0.0.1"].includes(parsedReturnUrl.hostname);
+        if (!import.meta.env.PROD || !isLocalhostReturn) {
+          returnUrl = parsedReturnUrl.toString();
+        }
+      } catch {
+        returnUrl = fallbackReturnUrl;
+      }
+    }
 
     localStorage.setItem(
       CARD_PAYMENT_STORAGE_KEY,
@@ -314,3 +332,4 @@ export function useCardPayment({
     requestCardPayment,
   };
 }
+

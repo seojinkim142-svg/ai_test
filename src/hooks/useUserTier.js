@@ -4,6 +4,7 @@ import { DEFAULT_TIER, getUserTier } from "../services/supabase";
 export function useUserTier(user) {
   const [tier, setTier] = useState(DEFAULT_TIER);
   const [loadingTier, setLoadingTier] = useState(false);
+  const [resolvedUserId, setResolvedUserId] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const refreshTier = useCallback(() => {
@@ -15,8 +16,11 @@ export function useUserTier(user) {
     const loadTier = async () => {
       if (!user?.id) {
         setTier(DEFAULT_TIER);
+        setResolvedUserId(null);
+        setLoadingTier(false);
         return;
       }
+      const currentUserId = user.id;
       setLoadingTier(true);
       try {
         const fetched = await getUserTier({ userId: user.id });
@@ -24,7 +28,10 @@ export function useUserTier(user) {
       } catch {
         if (mounted) setTier(DEFAULT_TIER);
       } finally {
-        if (mounted) setLoadingTier(false);
+        if (mounted) {
+          setResolvedUserId(currentUserId);
+          setLoadingTier(false);
+        }
       }
     };
     loadTier();
@@ -33,5 +40,8 @@ export function useUserTier(user) {
     };
   }, [user?.id, refreshKey]);
 
-  return { tier, loadingTier, refreshTier };
+  const isTierLoading =
+    Boolean(user?.id) && (loadingTier || resolvedUserId !== user.id);
+
+  return { tier, loadingTier: isTierLoading, refreshTier };
 }

@@ -1,20 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import AuthPanel from "./components/AuthPanel";
-import Header from "./components/Header";
-import LoginBackground from "./components/LoginBackground";
-import PaymentPage from "./components/PaymentPage";
-import DetailPage from "./pages/DetailPage";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import StartPage from "./pages/StartPage";
-import {
-  generateQuiz,
-  generateSummary,
-  generateOxQuiz,
-  generateFlashcards,
-  generateHardQuiz,
-  generateTutorReply,
-} from "./services/openai";
 import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
 import { useUserTier } from "./hooks/useUserTier";
+import { usePageProgressCache } from "./hooks/usePageProgressCache";
 import {
   supabase,
   uploadPdfToStorage,
@@ -37,15 +25,48 @@ import {
   saveDocArtifacts,
   updateUploadFolder,
 } from "./services/supabase";
-import { extractPdfText, extractPdfTextFromPages, generatePdfThumbnail } from "./utils/pdf";
-import { exportElementToPdf, exportPagedElementToPdf } from "./utils/pdfExport";
+import {
+  extractPdfText,
+  extractPdfTextByRanges,
+  extractChapterRangesFromToc,
+  extractPdfTextFromPages,
+  generatePdfThumbnail,
+} from "./utils/pdf";
+import { exportPagedElementToPdf } from "./utils/pdfExport";
+import {
+  PDF_MAX_SIZE_BY_TIER,
+  DEFAULT_PREMIUM_PROFILE_PIN,
+  PREMIUM_PROFILE_PRESETS,
+  PREMIUM_PROFILE_LIMIT,
+  PREMIUM_SHARED_SCOPE_ID,
+  PREMIUM_SPACE_MODE_PROFILE,
+  PREMIUM_SPACE_MODE_SHARED,
+  createPremiumProfileId,
+  decodePremiumScopeValue,
+  encodePremiumScopeValue,
+  formatSizeMB,
+  getPremiumActiveProfileStorageKey,
+  getPremiumProfilesStorageKey,
+  getPremiumSpaceModeStorageKey,
+  getTierLabel,
+  normalizePremiumProfilePinInput,
+  normalizePremiumProfiles,
+  normalizeQuizPayload,
+  parseChapterRangeSelectionInput,
+  parsePageSelectionInput,
+  pickRandomItems,
+  sanitizePremiumProfileName,
+  sanitizePremiumProfilePin,
+  formatMockExamTitle,
+  chunkMockExamPages,
+} from "./utils/appStateHelpers";
 
-const normalizeQuizPayload = (payload) => {
-  const multipleChoice = Array.isArray(payload?.multipleChoice) ? payload.multipleChoice : [];
-  const rawShort = payload?.shortAnswer;
-  const shortAnswer = Array.isArray(rawShort) ? rawShort : rawShort ? [rawShort] : [];
-  return { multipleChoice, shortAnswer };
-};
+const AuthPanel = lazy(() => import("./components/AuthPanel"));
+const Header = lazy(() => import("./components/Header"));
+const LoginBackground = lazy(() => import("./components/LoginBackground"));
+const PaymentPage = lazy(() => import("./components/PaymentPage"));
+const DetailPage = lazy(() => import("./pages/DetailPage"));
+const PremiumProfilePicker = lazy(() => import("./components/PremiumProfilePicker"));
 
 function App() {
   const [file, setFile] = useState(null);
@@ -63,10 +84,6 @@ function App() {
   const [summary, setSummary] = useState("");
   const [quizSets, setQuizSets] = useState([]);
   const [quizMix, setQuizMix] = useState({ multipleChoice: 4, shortAnswer: 1 });
-  const [selectedChoices, setSelectedChoices] = useState({});
-  const [revealedChoices, setRevealedChoices] = useState({});
-  const [shortAnswerInput, setShortAnswerInput] = useState({});
-  const [shortAnswerResult, setShortAnswerResult] = useState({});
   const [oxItems, setOxItems] = useState(null);
   const [oxSelections, setOxSelections] = useState({});
   const [oxExplanationOpen, setOxExplanationOpen] = useState({});
@@ -76,6 +93,7 @@ function App() {
   const [selectedFileId, setSelectedFileId] = useState(null);
   const [panelTab, setPanelTab] = useState("summary");
   const [splitPercent, setSplitPercent] = useState(50);
+  const [isResizingSplit, setIsResizingSplit] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
@@ -94,7 +112,6 @@ function App() {
   const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false);
   const [flashcardStatus, setFlashcardStatus] = useState("");
   const [flashcardError, setFlashcardError] = useState("");
-  const [flashcardExamStats, setFlashcardExamStats] = useState(null);
   const [tutorMessages, setTutorMessages] = useState([]);
   const [isTutorLoading, setIsTutorLoading] = useState(false);
   const [tutorError, setTutorError] = useState("");
@@ -102,27 +119,49 @@ function App() {
   const [pageSummaryInput, setPageSummaryInput] = useState("");
   const [pageSummaryError, setPageSummaryError] = useState("");
   const [isPageSummaryLoading, setIsPageSummaryLoading] = useState(false);
+  const [isChapterRangeOpen, setIsChapterRangeOpen] = useState(false);
+  const [chapterRangeInput, setChapterRangeInput] = useState("");
+  const [chapterRangeError, setChapterRangeError] = useState("");
+  const [isDetectingChapterRanges, setIsDetectingChapterRanges] = useState(false);
   const [artifacts, setArtifacts] = useState(null);
   const downloadCacheRef = useRef(new Map()); // storagePath -> { file, thumbnail, remoteUrl, bucket }
   const backfillInProgressRef = useRef(false);
   const summaryRequestedRef = useRef(false);
+  const summaryContextCacheRef = useRef(new Map()); // fileId -> extended summary text
   const quizAutoRequestedRef = useRef(false);
   const oxAutoRequestedRef = useRef(false);
   const isDraggingRef = useRef(false);
+  const activeDragPointerIdRef = useRef(null);
+  const dragHandleElementRef = useRef(null);
   const loadUploadsRef = useRef(null);
+  const loadUploadsRequestSeqRef = useRef(0);
+  const loadFoldersRequestSeqRef = useRef(0);
   const detailContainerRef = useRef(null);
   const summaryRef = useRef(null);
   const mockExamPrintRef = useRef(null);
   const mockExamMenuRef = useRef(null);
   const mockExamMenuButtonRef = useRef(null);
-  const { user, authReady, refreshSession, handleSignOut: authSignOut } = useSupabaseAuth();
+  const openAiModulePromiseRef = useRef(null);
+  const { user, refreshSession, handleSignOut: authSignOut } = useSupabaseAuth();
   const { tier, loadingTier, refreshTier } = useUserTier(user);
   const isFreeTier = tier === "free";
+  const isPremiumTier = tier === "premium";
   const isFolderFeatureEnabled = !isFreeTier;
   const [usageCounts, setUsageCounts] = useState({ summary: 0, quiz: 0, ox: 0 });
   const [folders, setFolders] = useState([]);
   const [selectedFolderId, setSelectedFolderId] = useState("all");
   const [selectedUploadIds, setSelectedUploadIds] = useState([]);
+  const [premiumProfiles, setPremiumProfiles] = useState([]);
+  const [activePremiumProfileId, setActivePremiumProfileId] = useState(null);
+  const [showPremiumProfilePicker, setShowPremiumProfilePicker] = useState(false);
+  const [showProfilePinDialog, setShowProfilePinDialog] = useState(false);
+  const [profilePinInputs, setProfilePinInputs] = useState({
+    currentPin: "",
+    nextPin: "",
+    confirmPin: "",
+  });
+  const [profilePinError, setProfilePinError] = useState("");
+  const [premiumSpaceMode, setPremiumSpaceMode] = useState(PREMIUM_SPACE_MODE_PROFILE);
 
   const computeFileHash = useCallback(async (file) => {
     const buffer = await file.arrayBuffer();
@@ -130,15 +169,51 @@ function App() {
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
   }, []);
+  const normalizePdfFile = useCallback((inputFile) => {
+    if (!(inputFile instanceof File)) return inputFile;
+    const fileType = String(inputFile.type || "").toLowerCase();
+    const fileName = String(inputFile.name || "").toLowerCase();
+    const looksLikePdf = fileType.includes("pdf") || fileName.endsWith(".pdf");
+    if (!looksLikePdf) return inputFile;
+    if (fileType === "application/pdf") return inputFile;
+    return new File([inputFile], inputFile.name, {
+      type: "application/pdf",
+      lastModified: inputFile.lastModified || Date.now(),
+    });
+  }, []);
+  const getOpenAiService = useCallback(async () => {
+    if (!openAiModulePromiseRef.current) {
+      openAiModulePromiseRef.current = import("./services/openai");
+    }
+    return openAiModulePromiseRef.current;
+  }, []);
 
   const limits = useMemo(() => {
     if (tier === "free") {
-      return { maxUploads: 4, maxSummary: 1, maxQuiz: 1, maxOx: 1 };
+      return {
+        maxUploads: 4,
+        maxSummary: 1,
+        maxQuiz: 1,
+        maxOx: 1,
+        maxPdfSizeBytes: PDF_MAX_SIZE_BY_TIER.free,
+      };
     }
     if (tier === "pro") {
-      return { maxUploads: Infinity, maxSummary: Infinity, maxQuiz: Infinity, maxOx: Infinity };
+      return {
+        maxUploads: Infinity,
+        maxSummary: Infinity,
+        maxQuiz: Infinity,
+        maxOx: Infinity,
+        maxPdfSizeBytes: PDF_MAX_SIZE_BY_TIER.pro,
+      };
     }
-    return { maxUploads: Infinity, maxSummary: Infinity, maxQuiz: Infinity, maxOx: Infinity };
+    return {
+      maxUploads: Infinity,
+      maxSummary: Infinity,
+      maxQuiz: Infinity,
+      maxOx: Infinity,
+      maxPdfSizeBytes: PDF_MAX_SIZE_BY_TIER.premium,
+    };
   }, [tier]);
 
   const hasReached = useCallback(
@@ -162,58 +237,399 @@ function App() {
     setShowPayment(true);
   }, []);
 
+  const activePremiumProfile = useMemo(
+    () => premiumProfiles.find((profile) => profile.id === activePremiumProfileId) || null,
+    [premiumProfiles, activePremiumProfileId]
+  );
+  const premiumOwnerProfileId = useMemo(() => premiumProfiles[0]?.id || null, [premiumProfiles]);
+  const premiumScopeProfileId = useMemo(() => {
+    if (!isPremiumTier) return null;
+    if (premiumSpaceMode === PREMIUM_SPACE_MODE_SHARED) {
+      return PREMIUM_SHARED_SCOPE_ID;
+    }
+    return activePremiumProfileId || null;
+  }, [activePremiumProfileId, isPremiumTier, premiumSpaceMode]);
+  const { savePageProgressSnapshot, loadPageProgressSnapshot } = usePageProgressCache({
+    isPremiumTier,
+    activePremiumProfileId,
+  });
+
+  const resetActiveDocumentState = useCallback(() => {
+    if (pdfUrl) {
+      URL.revokeObjectURL(pdfUrl);
+    }
+    setSelectedFileId(null);
+    setFile(null);
+    setPdfUrl(null);
+    setExtractedText("");
+    setPreviewText("");
+    setPageInfo({ used: 0, total: 0 });
+    setSummary("");
+    setQuizSets([]);
+    setOxItems(null);
+    setOxSelections({});
+    setOxExplanationOpen({});
+    setThumbnailUrl(null);
+    setPanelTab("summary");
+    setMockExams([]);
+    setActiveMockExamId(null);
+    setShowMockExamAnswers(false);
+    setMockExamStatus("");
+    setMockExamError("");
+    setFlashcards([]);
+    setArtifacts(null);
+  }, [pdfUrl]);
+
+  const handleOpenProfilePicker = useCallback(() => {
+    if (!user || !isPremiumTier) return;
+    setShowPremiumProfilePicker(true);
+  }, [isPremiumTier, user]);
+
+  const handleOpenProfilePinDialog = useCallback(() => {
+    if (!user || !isPremiumTier || !activePremiumProfileId) return;
+    setProfilePinInputs({ currentPin: "", nextPin: "", confirmPin: "" });
+    setProfilePinError("");
+    setShowProfilePinDialog(true);
+  }, [activePremiumProfileId, isPremiumTier, user]);
+
+  const handleCloseProfilePinDialog = useCallback(() => {
+    setShowProfilePinDialog(false);
+    setProfilePinInputs({ currentPin: "", nextPin: "", confirmPin: "" });
+    setProfilePinError("");
+  }, []);
+
+  const handleChangeProfilePinInput = useCallback((field, value) => {
+    const sanitized = String(value || "").replace(/\D/g, "").slice(0, 4);
+    setProfilePinInputs((prev) => ({ ...prev, [field]: sanitized }));
+    setProfilePinError("");
+  }, []);
+
+  const handleCloseProfilePicker = useCallback(() => {
+    if (!activePremiumProfileId) return;
+    setShowPremiumProfilePicker(false);
+  }, [activePremiumProfileId]);
+
+  const handleTogglePremiumSpaceMode = useCallback(() => {
+    if (!user || !isPremiumTier || !activePremiumProfileId) return;
+    const nextMode =
+      premiumSpaceMode === PREMIUM_SPACE_MODE_SHARED
+        ? PREMIUM_SPACE_MODE_PROFILE
+        : PREMIUM_SPACE_MODE_SHARED;
+    resetActiveDocumentState();
+    setSelectedFolderId("all");
+    setSelectedUploadIds([]);
+    setPremiumSpaceMode(nextMode);
+    setStatus(
+      nextMode === PREMIUM_SPACE_MODE_SHARED
+        ? "Shared study mode enabled. Study data is now shared across premium members."
+        : "Personal study mode enabled. Study data is now private to your profile."
+    );
+  }, [activePremiumProfileId, isPremiumTier, premiumSpaceMode, resetActiveDocumentState, user]);
+
+  const handleSelectPremiumProfile = useCallback(
+    (profileId, pinInput) => {
+      const selected = premiumProfiles.find((profile) => profile.id === profileId);
+      if (!selected) {
+        return { ok: false, message: "Selected profile was not found." };
+      }
+      const inputPin = normalizePremiumProfilePinInput(pinInput);
+      if (!inputPin) {
+        return { ok: false, message: "Please enter a 4-digit PIN." };
+      }
+      const expectedPin = sanitizePremiumProfilePin(selected.pin);
+      if (inputPin !== expectedPin) {
+        return { ok: false, message: "Incorrect PIN." };
+      }
+      resetActiveDocumentState();
+      setSelectedFolderId("all");
+      setSelectedUploadIds([]);
+      setActivePremiumProfileId(selected.id);
+      setShowPremiumProfilePicker(false);
+      setStatus(`${selected.name} profile selected.`);
+      return { ok: true };
+    },
+    [premiumProfiles, resetActiveDocumentState]
+  );
+
+  const handleSubmitProfilePinChange = useCallback(
+    (event) => {
+      event.preventDefault();
+      if (!activePremiumProfileId) {
+        setProfilePinError("No active profile selected.");
+        return;
+      }
+      const currentProfile = premiumProfiles.find((profile) => profile.id === activePremiumProfileId);
+      if (!currentProfile) {
+        setProfilePinError("Selected profile was not found.");
+        return;
+      }
+      const currentPin = normalizePremiumProfilePinInput(profilePinInputs.currentPin);
+      const nextPin = normalizePremiumProfilePinInput(profilePinInputs.nextPin);
+      const confirmPin = normalizePremiumProfilePinInput(profilePinInputs.confirmPin);
+
+      if (!currentPin || !nextPin || !confirmPin) {
+        setProfilePinError("All PIN fields must be 4 digits.");
+        return;
+      }
+      if (currentPin !== sanitizePremiumProfilePin(currentProfile.pin)) {
+        setProfilePinError("Current PIN does not match.");
+        return;
+      }
+      if (nextPin !== confirmPin) {
+        setProfilePinError("New PIN and confirmation PIN do not match.");
+        return;
+      }
+      if (nextPin === currentPin) {
+        setProfilePinError("New PIN must be different from current PIN.");
+        return;
+      }
+
+      setPremiumProfiles((prev) =>
+        prev.map((profile) =>
+          profile.id === activePremiumProfileId ? { ...profile, pin: nextPin } : profile
+        )
+      );
+      setShowProfilePinDialog(false);
+      setProfilePinInputs({ currentPin: "", nextPin: "", confirmPin: "" });
+      setProfilePinError("");
+      setStatus("Profile PIN has been updated.");
+    },
+    [activePremiumProfileId, premiumProfiles, profilePinInputs]
+  );
+
+  const handleCreatePremiumProfile = useCallback(
+    (requestedName) => {
+      if (!isPremiumTier) return;
+      setPremiumProfiles((prev) => {
+        if (prev.length >= PREMIUM_PROFILE_LIMIT) return prev;
+        const index = prev.length;
+        const preset = PREMIUM_PROFILE_PRESETS[index % PREMIUM_PROFILE_PRESETS.length];
+        const created = {
+          id: createPremiumProfileId(),
+          name: sanitizePremiumProfileName(requestedName, `Member ${index + 1}`),
+          color: preset.color,
+          avatar: preset.avatar,
+          pin: DEFAULT_PREMIUM_PROFILE_PIN,
+        };
+        return [...prev, created];
+      });
+    },
+    [isPremiumTier]
+  );
+
+  useEffect(() => {
+    if (!user?.id || !isPremiumTier) {
+      setPremiumProfiles([]);
+      setActivePremiumProfileId(null);
+      setShowPremiumProfilePicker(false);
+      setPremiumSpaceMode(PREMIUM_SPACE_MODE_PROFILE);
+      return;
+    }
+    if (typeof window === "undefined") return;
+
+    const profilesKey = getPremiumProfilesStorageKey(user.id);
+
+    let loadedProfiles = [];
+    try {
+      const raw = window.localStorage.getItem(profilesKey);
+      loadedProfiles = normalizePremiumProfiles(raw ? JSON.parse(raw) : []);
+    } catch {
+      loadedProfiles = [];
+    }
+
+    if (loadedProfiles.length === 0) {
+      const ownerName = sanitizePremiumProfileName(
+        user?.user_metadata?.name || user?.email?.split("@")?.[0] || "Owner",
+        "Owner"
+      );
+      loadedProfiles = [
+        {
+          id: createPremiumProfileId(),
+          name: ownerName,
+          color: PREMIUM_PROFILE_PRESETS[0].color,
+          avatar: PREMIUM_PROFILE_PRESETS[0].avatar,
+          pin: DEFAULT_PREMIUM_PROFILE_PIN,
+        },
+      ];
+      window.localStorage.setItem(profilesKey, JSON.stringify(loadedProfiles));
+    }
+
+    const activeProfileKey = getPremiumActiveProfileStorageKey(user.id);
+    const storedActiveProfileId = String(window.localStorage.getItem(activeProfileKey) || "").trim();
+    const hasStoredActiveProfile = loadedProfiles.some((profile) => profile.id === storedActiveProfileId);
+    const spaceModeKey = getPremiumSpaceModeStorageKey(user.id);
+    const storedSpaceMode = String(window.localStorage.getItem(spaceModeKey) || "").trim();
+    const normalizedSpaceMode =
+      storedSpaceMode === PREMIUM_SPACE_MODE_SHARED
+        ? PREMIUM_SPACE_MODE_SHARED
+        : PREMIUM_SPACE_MODE_PROFILE;
+    if (storedSpaceMode && storedSpaceMode !== normalizedSpaceMode) {
+      window.localStorage.removeItem(spaceModeKey);
+    }
+
+    setPremiumProfiles(loadedProfiles);
+    setPremiumSpaceMode(normalizedSpaceMode);
+    if (hasStoredActiveProfile) {
+      setActivePremiumProfileId(storedActiveProfileId);
+      setShowPremiumProfilePicker(false);
+    } else {
+      if (storedActiveProfileId) {
+        window.localStorage.removeItem(activeProfileKey);
+      }
+      setActivePremiumProfileId(null);
+      setShowPremiumProfilePicker(true);
+    }
+  }, [isPremiumTier, user]);
+
+  useEffect(() => {
+    if (!user?.id || !isPremiumTier || typeof window === "undefined") return;
+    const normalized = normalizePremiumProfiles(premiumProfiles);
+    if (!normalized.length) return;
+    window.localStorage.setItem(getPremiumProfilesStorageKey(user.id), JSON.stringify(normalized));
+  }, [isPremiumTier, premiumProfiles, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || !isPremiumTier || typeof window === "undefined") return;
+    const key = getPremiumActiveProfileStorageKey(user.id);
+    if (activePremiumProfileId) {
+      window.localStorage.setItem(key, activePremiumProfileId);
+    } else {
+      window.localStorage.removeItem(key);
+    }
+  }, [activePremiumProfileId, isPremiumTier, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || !isPremiumTier || typeof window === "undefined") return;
+    const key = getPremiumSpaceModeStorageKey(user.id);
+    const normalizedMode =
+      premiumSpaceMode === PREMIUM_SPACE_MODE_SHARED
+        ? PREMIUM_SPACE_MODE_SHARED
+        : PREMIUM_SPACE_MODE_PROFILE;
+    window.localStorage.setItem(key, normalizedMode);
+  }, [isPremiumTier, premiumSpaceMode, user?.id]);
+
   useEffect(() => {
     if (user) {
       setShowAuth(false);
     }
   }, [user]);
 
+  useEffect(() => {
+    if (!showProfilePinDialog) return undefined;
+    const prevOverflow = document.body.style.overflow;
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        handleCloseProfilePinDialog();
+      }
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [handleCloseProfilePinDialog, showProfilePinDialog]);
+
   const loadFolders = useCallback(
     async () => {
+      const requestSeq = loadFoldersRequestSeqRef.current + 1;
+      loadFoldersRequestSeqRef.current = requestSeq;
+      const isLatestRequest = () => loadFoldersRequestSeqRef.current === requestSeq;
+
       if (!supabase || !user) {
+        if (!isLatestRequest()) return;
+        setFolders([]);
+        setSelectedFolderId("all");
+        return;
+      }
+      if (loadingTier) {
+        if (!isLatestRequest()) return;
         setFolders([]);
         setSelectedFolderId("all");
         return;
       }
       try {
         const list = await listFolders({ userId: user.id });
-        setFolders(list || []);
+        if (!isLatestRequest()) return;
+        const normalized = (list || []).map((folder) => {
+          const decoded = decodePremiumScopeValue(folder?.name || "");
+          const ownerProfileId = isPremiumTier ? decoded.ownerProfileId || premiumOwnerProfileId || null : null;
+          return {
+            ...folder,
+            name: decoded.value || folder?.name || "",
+            ownerProfileId,
+          };
+        });
+
+        const scoped =
+          isPremiumTier && premiumScopeProfileId
+            ? normalized.filter((folder) => folder.ownerProfileId === premiumScopeProfileId)
+            : isPremiumTier
+              ? []
+              : normalized;
+
+        setFolders(scoped);
+        setSelectedFolderId((prev) => {
+          if (prev === "all") return "all";
+          const hasFolder = scoped.some((folder) => folder.id?.toString() === prev?.toString());
+          return hasFolder ? prev : "all";
+        });
       } catch (err) {
-        setError(`폴더 불러오기 실패: ${err.message}`);
+        if (!isLatestRequest()) return;
+        setError(`Failed to load folders: ${err.message}`);
       }
     },
-    [user, supabase]
+    [user, supabase, loadingTier, isPremiumTier, premiumOwnerProfileId, premiumScopeProfileId]
   );
 
   const handleCreateFolder = useCallback(
     async (name) => {
       if (!isFolderFeatureEnabled) {
-        setError("폴더 기능은 Pro/Premium에서만 사용할 수 있습니다.");
+        setError("Folder feature is available only on Pro or Premium tier.");
         return;
       }
       if (!user) {
-        setError("로그인 후 이용해주세요.");
+        setError("Please sign in first.");
         return;
       }
       const trimmed = (name || "").trim();
       if (!trimmed) return;
+      if (isPremiumTier && !premiumScopeProfileId) {
+        setError("Select a premium profile before creating folders.");
+        return;
+      }
       if (folders.some((f) => f.name === trimmed)) {
-        setStatus("이미 같은 이름의 폴더가 있습니다.");
+        setStatus("A folder with the same name already exists.");
         return;
       }
       try {
-        const created = await createFolder({ userId: user.id, name: trimmed });
+        const storedName =
+          isPremiumTier && premiumScopeProfileId
+            ? encodePremiumScopeValue(trimmed, premiumScopeProfileId)
+            : trimmed;
+        const created = await createFolder({ userId: user.id, name: storedName });
         if (created) {
-          setFolders((prev) => [...prev, created]);
+          const decoded = decodePremiumScopeValue(created?.name || trimmed);
+          const ownerProfileId = isPremiumTier
+            ? decoded.ownerProfileId || premiumOwnerProfileId || premiumScopeProfileId
+            : null;
+          setFolders((prev) => [
+            ...prev,
+            {
+              ...created,
+              name: decoded.value || trimmed,
+              ownerProfileId,
+            },
+          ]);
         }
         setSelectedFolderId("all");
         setSelectedUploadIds([]);
-        setStatus("폴더를 만들었습니다.");
+        setStatus("Folder created.");
       } catch (err) {
-        setError(`폴더 생성 실패: ${err.message}`);
+        setError(`Failed to create folder: ${err.message}`);
       }
     },
-    [isFolderFeatureEnabled, user, folders]
+    [isFolderFeatureEnabled, user, folders, isPremiumTier, premiumScopeProfileId, premiumOwnerProfileId]
   );
 
   const handleDeleteFolder = useCallback(
@@ -221,12 +637,12 @@ function App() {
       if (!isFolderFeatureEnabled) return;
       if (!folderId || folderId === "all") return;
       if (!user) {
-        setError("로그인 후 이용해주세요.");
+        setError("Please sign in first.");
         return;
       }
       const hasFiles = uploadedFiles.some((u) => u.folderId === folderId);
       if (hasFiles) {
-        setError("폴더를 삭제하려면 먼저 파일을 이동하거나 삭제하세요.");
+        setError("Move or delete files in this folder before deleting it.");
         return;
       }
       try {
@@ -236,7 +652,7 @@ function App() {
           setSelectedFolderId("all");
         }
       } catch (err) {
-        setError(`폴더 삭제 실패: ${err.message}`);
+        setError(`Failed to delete folder: ${err.message}`);
       }
     },
     [isFolderFeatureEnabled, uploadedFiles, selectedFolderId, user]
@@ -264,13 +680,13 @@ function App() {
   const handleDeleteUpload = useCallback(
     async (upload) => {
       if (!user) {
-        setError("로그인 후 이용해주세요.");
+        setError("Please sign in first.");
         return;
       }
       const uploadId = upload?.id || null;
       const storagePath = upload?.path || upload?.remotePath || null;
       if (!uploadId && !storagePath) {
-        setError("삭제할 파일 정보를 찾을 수 없습니다.");
+        setError("Upload identifier is missing.");
         return;
       }
       const before = uploadedFiles;
@@ -282,11 +698,11 @@ function App() {
           bucket: upload.bucket,
           path: storagePath,
         });
-        setStatus("파일을 삭제했습니다.");
+        setStatus("Upload deleted.");
         await loadUploadsRef.current?.();
       } catch (err) {
         setUploadedFiles(before);
-        setError(`파일 삭제 실패: ${err.message}`);
+        setError(`Failed to delete upload: ${err.message}`);
       }
     },
     [user, uploadedFiles]
@@ -297,11 +713,15 @@ function App() {
       if (!isFolderFeatureEnabled) return;
       if (!uploadIds || uploadIds.length === 0) return;
       if (!user) {
-        setError("로그인 후 이용해주세요.");
+        setError("Please sign in first.");
         return;
       }
       const normalizedIds = uploadIds.map((id) => id?.toString()).filter(Boolean);
       const target = targetFolderId && targetFolderId !== "all" ? targetFolderId.toString() : null;
+      if (isPremiumTier && target && !folders.some((folder) => folder.id?.toString() === target)) {
+        setError("Target folder does not exist in the current premium profile scope.");
+        return;
+      }
       const before = uploadedFiles;
       const targetEntries = before.filter((item) => normalizedIds.includes(item.id?.toString()));
       const remoteIds = targetEntries.map((item) => item.id).filter(Boolean);
@@ -332,7 +752,7 @@ function App() {
             })
           );
         } else {
-          // 로컬 항목만 있는 경우 로컬 상태만 갱신
+          // Local-only items without remote IDs: update folder fields in memory.
           setUploadedFiles((prev) =>
             prev.map((item) =>
               normalizedIds.includes(item.id?.toString())
@@ -342,15 +762,15 @@ function App() {
           );
         }
         setSelectedUploadIds([]);
-        setStatus("폴더로 이동했습니다.");
-        // 서버 반영 상태를 다시 받아와 UI가 되돌아가지 않도록 동기화
+        setStatus("Selected uploads moved.");
+        // Sync with server to keep list and folder counts in sync with DB.
         await loadUploadsRef.current?.();
       } catch (err) {
         setUploadedFiles(before);
-        setError(`폴더 이동에 실패했습니다: ${err.message}`);
+        setError(`Failed to move uploads: ${err.message}`);
       }
     },
-    [isFolderFeatureEnabled, user, uploadedFiles]
+    [isFolderFeatureEnabled, user, uploadedFiles, isPremiumTier, folders]
   );
 
   const toggleTheme = useCallback(() => {
@@ -364,14 +784,14 @@ function App() {
 
   const tutorNotice = useMemo(() => {
     if (!file || !selectedFileId) {
-      return "먼저 PDF를 선택해주세요.";
+      return "Open a PDF to use tutor chat."
     }
     if (isLoadingText) {
-      return "PDF 추출 중입니다. 잠시만 기다려주세요.";
+      return "PDF text extraction is still running. Please wait."
     }
     const trimmed = (extractedText || "").trim();
     if (!trimmed) {
-      return "PDF에서 텍스트를 추출할 수 없습니다.";
+      return "No extracted text found from this PDF."
     }
     return "";
   }, [extractedText, file, isLoadingText, selectedFileId]);
@@ -388,6 +808,9 @@ function App() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
+    if (params.get("auth") === "1") {
+      setShowAuth(true);
+    }
     if (params.get("pg_token") || params.get("kakaoPay") || params.get("nicePay") || params.get("np_token")) {
       setShowPayment(true);
     }
@@ -416,20 +839,6 @@ function App() {
     };
   }, [isMockExamMenuOpen]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem("flashcardExamHistory");
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        setFlashcardExamStats(parsed[0]);
-      }
-    } catch (err) {
-      // ignore parse errors
-    }
-  }, []);
-
   const loadMockExams = useCallback(
     async (docId) => {
       if (!supabase || !user || !docId) {
@@ -441,7 +850,7 @@ function App() {
         const list = await fetchMockExams({ userId: user.id, docId });
         setMockExams(list);
       } catch (err) {
-        setMockExamError(`모의고사 불러오기 실패: ${err.message}`);
+        setMockExamError(`Failed to load mock exams: ${err.message}`);
       } finally {
         setIsLoadingMockExams(false);
       }
@@ -459,7 +868,7 @@ function App() {
         const list = await listFlashcards({ userId: user.id, deckId });
         setFlashcards(list);
       } catch (err) {
-        setError(`카드 불러오기 실패: ${err.message}`);
+        setError(`Failed to load flashcards: ${err.message}`);
       } finally {
         setIsLoadingFlashcards(false);
       }
@@ -468,33 +877,62 @@ function App() {
   );
   const loadUploads = useCallback(
     async () => {
+      const requestSeq = loadUploadsRequestSeqRef.current + 1;
+      loadUploadsRequestSeqRef.current = requestSeq;
+      const isLatestRequest = () => loadUploadsRequestSeqRef.current === requestSeq;
+
       if (!supabase || !user) {
+        if (!isLatestRequest()) return;
         setUploadedFiles([]);
         setFolders([]);
         setSelectedFolderId("all");
         return;
       }
+      if (loadingTier) {
+        if (!isLatestRequest()) return;
+        setUploadedFiles([]);
+        setSelectedUploadIds([]);
+        return;
+      }
       try {
         const list = await listUploads({ userId: user.id });
-        const mapped = list.map((u) => ({
-          id: u.id || `${u.storage_path}`,
-          file: null,
-          name: u.file_name,
-          size: u.file_size,
-          path: u.storage_path,
-          bucket: u.bucket,
-          thumbnail: u.thumbnail || null,
-          remote: true,
-          hash: u.file_hash || null,
-          folderId: u.folder_id || null,
-          infolder: Number(u.infolder ?? (u.folder_id ? 1 : 0)) || 0,
-        }));
-        setUploadedFiles(mapped);
+        if (!isLatestRequest()) return;
+        const normalized = (list || []).map((u) => {
+          const decoded = decodePremiumScopeValue(u.file_name || "");
+          const ownerProfileId = isPremiumTier ? decoded.ownerProfileId || premiumOwnerProfileId || null : null;
+          return {
+            id: u.id || `${u.storage_path}`,
+            file: null,
+            name: decoded.value || u.file_name,
+            size: u.file_size,
+            path: u.storage_path,
+            bucket: u.bucket,
+            thumbnail: u.thumbnail || null,
+            remote: true,
+            hash: u.file_hash || null,
+            folderId: u.folder_id || null,
+            infolder: Number(u.infolder ?? (u.folder_id ? 1 : 0)) || 0,
+            ownerProfileId,
+          };
+        });
+
+        const scoped =
+          isPremiumTier && premiumScopeProfileId
+            ? normalized.filter((item) => item.ownerProfileId === premiumScopeProfileId)
+            : isPremiumTier
+              ? []
+              : normalized;
+
+        setUploadedFiles(scoped);
+        setSelectedUploadIds((prev) =>
+          prev.filter((id) => scoped.some((item) => item.id?.toString() === id?.toString()))
+        );
       } catch (err) {
-        setError(`업로드 이력 불러오기 실패: ${err.message}`);
+        if (!isLatestRequest()) return;
+        setError(`Failed to load uploads: ${err.message}`);
       }
     },
-    [user, supabase]
+    [user, supabase, loadingTier, isPremiumTier, premiumOwnerProfileId, premiumScopeProfileId]
   );
   useEffect(() => {
     loadUploadsRef.current = loadUploads;
@@ -504,7 +942,7 @@ function App() {
     async (docId) => {
       if (!supabase || !user || !docId) {
         setArtifacts(null);
-        return;
+        return null;
       }
       try {
         const data = await fetchDocArtifacts({ userId: user.id, docId });
@@ -536,9 +974,11 @@ function App() {
           setOxItems(mapped.ox?.items || []);
           oxAutoRequestedRef.current = true;
         }
+        return mapped;
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn("Failed to load artifacts", err);
+        return null;
       }
     },
     [user, supabase]
@@ -550,22 +990,20 @@ function App() {
       if (!needs.length) return;
       backfillInProgressRef.current = true;
       try {
-        await Promise.all(
-          needs.map(async (item) => {
-            try {
-              const ensured = await ensureFileForItemRef.current(item);
-              const thumb = ensured.thumbnail || (await generatePdfThumbnail(ensured.file));
-              if (!thumb) return;
-              await updateUploadThumbnail({ id: item.id, thumbnail: thumb });
-              setUploadedFiles((prev) =>
-                prev.map((p) => (p.id === item.id ? { ...p, thumbnail: thumb } : p))
-              );
-            } catch (err) {
-              // skip failure
-              console.warn("thumbnail backfill failed", err);
-            }
-          })
-        );
+        for (const item of needs) {
+          try {
+            const ensured = await ensureFileForItemRef.current(item);
+            const thumb = ensured.thumbnail || (await generatePdfThumbnail(ensured.file));
+            if (!thumb) continue;
+            await updateUploadThumbnail({ id: item.id, thumbnail: thumb });
+            setUploadedFiles((prev) =>
+              prev.map((p) => (p.id === item.id ? { ...p, thumbnail: thumb } : p))
+            );
+          } catch (err) {
+            // skip failure
+            console.warn("thumbnail backfill failed", err);
+          }
+        }
       } finally {
         backfillInProgressRef.current = false;
       }
@@ -576,13 +1014,20 @@ function App() {
     if (!supabase) return;
     setIsSigningOut(true);
     setError("");
-    setStatus("로그아웃 중...");
+    setStatus("Signing out...");
     try {
+      setShowPremiumProfilePicker(false);
+      setShowProfilePinDialog(false);
+      setProfilePinInputs({ currentPin: "", nextPin: "", confirmPin: "" });
+      setProfilePinError("");
+      setActivePremiumProfileId(null);
+      setPremiumProfiles([]);
+      setPremiumSpaceMode(PREMIUM_SPACE_MODE_PROFILE);
       await authSignOut();
       await refreshSession();
-      setStatus("로그아웃 완료");
+      setStatus("signed out.");
     } catch (err) {
-      setError(`로그아웃 실패: ${err.message}`);
+      setError(`sign out failed: ${err.message}`);
       setStatus("");
     } finally {
       setIsSigningOut(false);
@@ -599,23 +1044,46 @@ function App() {
   }, [user, loadFolders]);
 
   useEffect(() => {
+    let cancelled = false;
+    let idleHandle = null;
+
     if (user) {
       loadUploads().then(() => {
+        if (cancelled) return;
         const current = uploadedFilesRef.current || [];
-        backfillThumbnails(current);
+        const runBackfill = () => {
+          if (cancelled) return;
+          backfillThumbnails(current);
+        };
+
+        if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
+          idleHandle = window.requestIdleCallback(runBackfill, { timeout: 1500 });
+        } else {
+          idleHandle = window.setTimeout(runBackfill, 250);
+        }
       });
     } else {
       setUploadedFiles([]);
     }
+
+    return () => {
+      cancelled = true;
+      if (idleHandle == null || typeof window === "undefined") return;
+      if (typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(idleHandle);
+      } else {
+        window.clearTimeout(idleHandle);
+      }
+    };
   }, [user, loadUploads, backfillThumbnails]);
 
   const ensureFileForItem = useCallback(
     async (item) => {
       if (item.file) return item;
-      if (!item.path && !item.remotePath) throw new Error("저장된 파일 경로가 없습니다.");
+      if (!item.path && !item.remotePath) throw new Error("Missing storage path for this PDF item.");
       const storagePath = item.path || item.remotePath;
 
-      // 캐시된 파일/썸네일 우선 사용
+      // Reuse downloaded file/blob from memory cache when possible
       const cached = downloadCacheRef.current.get(storagePath);
       if (cached) {
         const enriched = { ...item, ...cached };
@@ -626,10 +1094,19 @@ function App() {
       const bucket = item.bucket || import.meta.env.VITE_SUPABASE_BUCKET;
       const signed = await getSignedStorageUrl({ bucket, path: storagePath, expiresIn: 60 * 60 * 24 });
       const res = await fetch(signed);
-      if (!res.ok) throw new Error("저장된 파일을 불러오지 못했습니다.");
+      if (!res.ok) throw new Error("Failed to download PDF from storage.");
       const blob = await res.blob();
+      const headerType = String(res.headers.get("content-type") || "").toLowerCase();
+      if (headerType.includes("text/html")) {
+        throw new Error("Received HTML instead of PDF. The signed URL may be invalid or expired.");
+      }
       const name = item.name || item.file?.name || "document.pdf";
-      const fileObj = new File([blob], name, { type: blob.type || "application/pdf" });
+      const blobType = String(blob.type || "").toLowerCase();
+      const resolvedType =
+        blobType.includes("pdf") || name.toLowerCase().endsWith(".pdf")
+          ? "application/pdf"
+          : blob.type || "application/pdf";
+      const fileObj = new File([blob], name, { type: resolvedType });
       const thumb = await generatePdfThumbnail(fileObj);
       const enriched = { ...item, file: fileObj, thumbnail: item.thumbnail || thumb, remoteUrl: signed, path: storagePath, bucket };
       downloadCacheRef.current.set(storagePath, {
@@ -655,19 +1132,43 @@ function App() {
 
   const resetQuizState = () => {
     setQuizSets([]);
-    setSelectedChoices({});
-    setRevealedChoices({});
-    setShortAnswerInput({});
-    setShortAnswerResult({});
   };
 
   const processSelectedFile = useCallback(
     async (item, { pushState = true } = {}) => {
-      if (!item?.file) return;
-      const targetFile = item.file;
+      if (!item) return;
+      let resolvedItem = item;
+      if (!resolvedItem.file) {
+        try {
+          resolvedItem = await ensureFileForItem(resolvedItem);
+        } catch (err) {
+          setError(`Failed to load PDF file: ${err.message}`);
+          return;
+        }
+      }
+      if (!resolvedItem?.file) return;
 
-      if (pushState && selectedFileId !== item.id) {
-        window.history.pushState({ view: "detail", fileId: item.id }, "", window.location.pathname);
+      const targetFile = normalizePdfFile(resolvedItem.file);
+      if (!(targetFile instanceof File)) return;
+      const nextDocId = resolvedItem.id;
+
+      if (targetFile !== resolvedItem.file && nextDocId) {
+        setUploadedFiles((prev) =>
+          prev.map((entry) => (entry.id === nextDocId ? { ...entry, file: targetFile } : entry))
+        );
+      }
+
+      if (selectedFileId && selectedFileId !== nextDocId) {
+        savePageProgressSnapshot({
+          docId: selectedFileId,
+          visited: Array.from(visitedPages),
+          page: currentPage,
+        });
+      }
+      const restoredPageProgress = loadPageProgressSnapshot({ docId: nextDocId });
+
+      if (pushState && selectedFileId !== nextDocId) {
+        window.history.pushState({ view: "detail", fileId: nextDocId }, "", window.location.pathname);
       }
 
       if (pdfUrl) {
@@ -675,17 +1176,19 @@ function App() {
       }
       setPdfUrl(URL.createObjectURL(targetFile));
       setFile(targetFile);
-      setSelectedFileId(item.id);
+      setSelectedFileId(nextDocId);
+      setPanelTab("summary");
       resetQuizState();
       summaryRequestedRef.current = false;
       quizAutoRequestedRef.current = false;
       setError("");
       setSummary("");
+      setArtifacts(null);
       const extractStart =
         typeof performance !== "undefined" && typeof performance.now === "function"
           ? performance.now()
           : Date.now();
-      setStatus("PDF 텍스트 추출 중입니다...");
+      setStatus("Extracting PDF text and preview...");
       setIsLoadingText(true);
       setThumbnailUrl(null);
         setMockExams([]);
@@ -694,7 +1197,8 @@ function App() {
         setActiveMockExamId(null);
         setShowMockExamAnswers(false);
       setFlashcards([]);
-      setVisitedPages(new Set());
+      setCurrentPage(restoredPageProgress.currentPage);
+      setVisitedPages(new Set(restoredPageProgress.visitedPages));
       setFlashcardStatus("");
       setFlashcardError("");
       setIsGeneratingFlashcards(false);
@@ -705,6 +1209,9 @@ function App() {
       setPageSummaryInput("");
       setPageSummaryError("");
       setIsPageSummaryLoading(false);
+      setIsChapterRangeOpen(false);
+      setChapterRangeInput("");
+      setChapterRangeError("");
       oxAutoRequestedRef.current = false;
 
       try {
@@ -726,13 +1233,18 @@ function App() {
             ? performance.now()
             : Date.now();
         const elapsedSeconds = Math.max(0, (extractEnd - extractStart) / 1000);
-        setStatus(`추출 완료 (사용 페이지: ${pagesUsed}/${totalPages}) · ${elapsedSeconds.toFixed(1)}초`);
+        setStatus(`extraction complete: ${pagesUsed}/${totalPages} pages, ${elapsedSeconds.toFixed(1)}s`);
         setError("");
-          await loadMockExams(item.id);
-          await loadFlashcards(item.id);
-          await loadArtifacts(item.id);
+        const [, , loaded] = await Promise.all([
+          loadMockExams(nextDocId),
+          loadFlashcards(nextDocId),
+          loadArtifacts(nextDocId),
+        ]);
+        if (loaded?.summary) {
+          setStatus("Saved summary loaded.");
+        }
       } catch (err) {
-        setError(`PDF 추출에 실패했습니다: ${err.message}`);
+        setError(`Failed to process PDF: ${err.message}`);
         setExtractedText("");
         setPreviewText("");
         setPageInfo({ used: 0, total: 0 });
@@ -740,7 +1252,19 @@ function App() {
         setIsLoadingText(false);
       }
     },
-    [pdfUrl, selectedFileId, loadMockExams, loadFlashcards, loadArtifacts]
+    [
+      currentPage,
+      ensureFileForItem,
+      loadArtifacts,
+      loadFlashcards,
+      loadMockExams,
+      loadPageProgressSnapshot,
+      normalizePdfFile,
+      pdfUrl,
+      savePageProgressSnapshot,
+      selectedFileId,
+      visitedPages,
+    ]
   );
 
   const handleFileChange = useCallback(
@@ -749,12 +1273,40 @@ function App() {
         openAuth();
         return;
       }
-      const files = Array.from(event.target.files || []);
+      const fileInput = event.target;
+      const files = Array.from(fileInput.files || []);
       if (!files.length) return;
       const activeFolderId = targetFolderId && targetFolderId !== "all" ? targetFolderId.toString() : null;
+      const activeProfileScopeId = isPremiumTier ? premiumScopeProfileId : null;
+      if (isPremiumTier && !activeProfileScopeId) {
+        setError("Select a premium profile before uploading files.");
+        fileInput.value = "";
+        return;
+      }
+
+      const invalidTypeFile = files.find((f) => {
+        const fileType = String(f?.type || "").toLowerCase();
+        const fileName = String(f?.name || "").toLowerCase();
+        return fileType !== "application/pdf" && !fileName.endsWith(".pdf");
+      });
+      if (invalidTypeFile) {
+        setError(`Only PDF files are allowed. (${invalidTypeFile.name})`);
+        fileInput.value = "";
+        return;
+      }
+
+      const oversizedFile = files.find((f) => f.size > limits.maxPdfSizeBytes);
+      if (oversizedFile) {
+        setError(
+          `${getTierLabel(tier)} tier allows up to ${formatSizeMB(limits.maxPdfSizeBytes)} per PDF. (${oversizedFile.name}: ${formatSizeMB(oversizedFile.size)})`
+        );
+        fileInput.value = "";
+        return;
+      }
       const nextCount = uploadedFiles.length + files.length;
       if (limits.maxUploads !== Infinity && nextCount > limits.maxUploads) {
-        setError(`무료 티어에서는 업로드를 ${limits.maxUploads}개까지만 할 수 있습니다.`);
+        setError(`Upload limit exceeded. Maximum allowed files: ${limits.maxUploads}.`);
+        fileInput.value = "";
         return;
       }
 
@@ -766,7 +1318,8 @@ function App() {
       });
 
       const withThumbs = await Promise.all(
-        files.map(async (f) => {
+        files.map(async (rawFile) => {
+          const f = normalizePdfFile(rawFile);
           const [thumb, hash] = await Promise.all([generatePdfThumbnail(f), computeFileHash(f)]);
           return {
             id: `${f.name}-${f.lastModified}-${Math.random().toString(16).slice(2)}`,
@@ -777,6 +1330,7 @@ function App() {
             thumbnail: thumb,
             folderId: activeFolderId,
             infolder: activeFolderId ? 1 : 0,
+            ownerProfileId: activeProfileScopeId,
           };
         })
       );
@@ -785,7 +1339,7 @@ function App() {
         withThumbs.map(async (item) => {
           if (!supabase || !user) return item;
 
-          // 중복 해시가 이미 DB에 있으면 업로드 생략 (맵 조회로 O(1) 처리)
+          // Reuse existing remote upload by hash to avoid duplicate storage writes.
           const existing = item.hash ? existingByHash.get(item.hash) : null;
           try {
             if (existing) {
@@ -802,13 +1356,18 @@ function App() {
                   existing.infolder ??
                     (existing.folderId || existing.folder_id || item.folderId ? 1 : 0)
                 ),
+                ownerProfileId: existing.ownerProfileId || activeProfileScopeId || null,
               };
             }
 
             const uploaded = await uploadPdfToStorage(user.id, item.file);
+            const storedFileName =
+              isPremiumTier && activeProfileScopeId
+                ? encodePremiumScopeValue(item.name, activeProfileScopeId)
+                : item.name;
             const record = await saveUploadMetadata({
               userId: user.id,
-              fileName: item.name,
+              fileName: storedFileName,
               fileSize: item.size,
               storagePath: uploaded.path,
               bucket: uploaded.bucket,
@@ -816,19 +1375,25 @@ function App() {
               fileHash: item.hash,
               folderId: activeFolderId,
             });
+            const decodedRecordName = decodePremiumScopeValue(record.file_name || storedFileName);
+            const ownerProfileId = isPremiumTier
+              ? decodedRecordName.ownerProfileId || activeProfileScopeId || premiumOwnerProfileId || null
+              : null;
             return {
               ...item,
               id: record.id || item.id,
               remotePath: uploaded.path,
               remoteUrl: uploaded.signedUrl,
               bucket: uploaded.bucket,
+              name: decodedRecordName.value || item.name,
               thumbnail: record.thumbnail || item.thumbnail,
               hash: record.file_hash || item.hash,
               folderId: record.folder_id || activeFolderId || null,
               infolder: Number(record.infolder ?? (record.folder_id || activeFolderId ? 1 : 0)),
+              ownerProfileId,
             };
           } catch (err) {
-            setError(`클라우드 업로드 실패: ${err.message}`);
+            setError(`Failed to upload file: ${err.message}`);
             return { ...item, uploadError: err.message };
           }
         })
@@ -838,14 +1403,43 @@ function App() {
         const merged = [...prev, ...withUploads];
         return merged;
       });
-      setStatus("업로드 목록에서 썸네일을 선택해 요약/퀴즈를 시작하세요.");
+      fileInput.value = "";
+      const firstReadyUpload = withUploads.find((item) => item?.file && !item?.uploadError);
+      if (firstReadyUpload) {
+        await processSelectedFile(firstReadyUpload);
+      } else {
+        setStatus("Upload finished, but no selectable file was ready.");
+      }
     },
-    [user, openAuth, uploadedFiles, limits, supabase, computeFileHash]
+    [
+      user,
+      openAuth,
+      uploadedFiles,
+      limits,
+      supabase,
+      computeFileHash,
+      normalizePdfFile,
+      isPremiumTier,
+      premiumScopeProfileId,
+      premiumOwnerProfileId,
+      tier,
+      processSelectedFile,
+    ]
   );
 
   const showDetail = Boolean(file && selectedFileId);
+  const shouldShowPremiumProfilePicker = Boolean(
+    user && isPremiumTier && !loadingTier && showPremiumProfilePicker
+  );
 
   const goBackToList = useCallback(() => {
+    if (selectedFileId) {
+      savePageProgressSnapshot({
+        docId: selectedFileId,
+        visited: Array.from(visitedPages),
+        page: currentPage,
+      });
+    }
     if (pdfUrl) {
       URL.revokeObjectURL(pdfUrl);
     }
@@ -862,6 +1456,7 @@ function App() {
       setActiveMockExamId(null);
       setShowMockExamAnswers(false);
     setFlashcards([]);
+    setCurrentPage(1);
     setVisitedPages(new Set());
     setFlashcardStatus("");
     setFlashcardError("");
@@ -873,6 +1468,9 @@ function App() {
     setPageSummaryInput("");
     setPageSummaryError("");
     setIsPageSummaryLoading(false);
+    setIsChapterRangeOpen(false);
+    setChapterRangeInput("");
+    setChapterRangeError("");
     setOxItems(null);
     setOxSelections({});
     setPanelTab("summary");
@@ -881,9 +1479,10 @@ function App() {
     oxAutoRequestedRef.current = false;
     setArtifacts(null);
     resetQuizState();
-    setStatus("업로드 목록에서 썸네일을 선택해 요약/퀴즈를 시작하세요.");
+    setStatus("Back to upload list.");
     setSelectedUploadIds([]);
-  }, [pdfUrl]);
+  }, [currentPage, pdfUrl, savePageProgressSnapshot, selectedFileId, visitedPages]);
+
   const uploadedFilesRef = useRef(uploadedFiles);
   const goBackToListRef = useRef(goBackToList);
   const processSelectedFileRef = useRef(processSelectedFile);
@@ -895,7 +1494,7 @@ function App() {
         const ensured = await ensureFileForItemRef.current(item);
         await processSelectedFileRef.current(ensured);
       } catch (err) {
-        setError(`파일 불러오기 실패: ${err.message}`);
+        setError(`Failed to open selected file: ${err.message}`);
       }
     },
     [ensureFileForItemRef, processSelectedFileRef]
@@ -924,7 +1523,7 @@ function App() {
         console.warn("Failed to save artifacts", err);
       }
     },
-    [user, selectedFileId, artifacts]
+    [artifacts, selectedFileId, user]
   );
 
   useEffect(() => {
@@ -942,30 +1541,88 @@ function App() {
     ensureFileForItemRef.current = ensureFileForItem;
   }, [ensureFileForItem]);
 
+  const stopSplitDragging = useCallback(() => {
+    if (!isDraggingRef.current && !isResizingSplit) return;
+    const pointerId = activeDragPointerIdRef.current;
+    const dragHandle = dragHandleElementRef.current;
+    if (
+      dragHandle &&
+      typeof dragHandle.releasePointerCapture === "function" &&
+      typeof pointerId === "number"
+    ) {
+      try {
+        if (typeof dragHandle.hasPointerCapture !== "function" || dragHandle.hasPointerCapture(pointerId)) {
+          dragHandle.releasePointerCapture(pointerId);
+        }
+      } catch {
+        // Ignore capture release failures.
+      }
+    }
+    activeDragPointerIdRef.current = null;
+    dragHandleElementRef.current = null;
+    isDraggingRef.current = false;
+    document.body.style.userSelect = "";
+    document.body.style.cursor = "";
+    setIsResizingSplit(false);
+  }, [isResizingSplit]);
+
   useEffect(() => {
-    const handleMouseMove = (event) => {
-      if (!isDraggingRef.current) return;
+    const applySplitPercent = (clientX) => {
       const container = detailContainerRef.current;
       if (!container) return;
       const rect = container.getBoundingClientRect();
-      const percent = ((event.clientX - rect.left) / rect.width) * 100;
+      if (!rect.width) return;
+      const percent = ((clientX - rect.left) / rect.width) * 100;
       const clamped = Math.min(75, Math.max(25, percent));
       setSplitPercent(clamped);
     };
 
-    const handleMouseUp = () => {
+    const handlePointerMove = (event) => {
       if (!isDraggingRef.current) return;
-      isDraggingRef.current = false;
-      document.body.style.userSelect = "";
+      if (typeof event.buttons === "number" && event.buttons === 0) {
+        stopSplitDragging();
+        return;
+      }
+      applySplitPercent(event.clientX);
     };
 
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
+    const handleMouseMove = (event) => {
+      if (!isDraggingRef.current) return;
+      if (typeof event.buttons === "number" && event.buttons === 0) {
+        stopSplitDragging();
+        return;
+      }
+      applySplitPercent(event.clientX);
     };
-  }, []);
+
+    const handleDragEnd = () => {
+      if (!isDraggingRef.current && !isResizingSplit) return;
+      stopSplitDragging();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        handleDragEnd();
+      }
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handleDragEnd);
+    window.addEventListener("pointercancel", handleDragEnd);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleDragEnd);
+    window.addEventListener("blur", handleDragEnd);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handleDragEnd);
+      window.removeEventListener("pointercancel", handleDragEnd);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleDragEnd);
+      window.removeEventListener("blur", handleDragEnd);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [isResizingSplit, stopSplitDragging]);
 
   useEffect(() => {
     window.history.replaceState({ view: "list" }, "", window.location.pathname);
@@ -986,21 +1643,38 @@ function App() {
     return () => window.removeEventListener("popstate", handlePopState);
   }, []);
 
-  const handleDragStart = () => {
+  const handleDragStart = useCallback((event) => {
+    if (typeof event?.button === "number" && event.button !== 0) return;
+    event?.preventDefault?.();
     isDraggingRef.current = true;
+    if (typeof event?.pointerId === "number") {
+      activeDragPointerIdRef.current = event.pointerId;
+      dragHandleElementRef.current = event.currentTarget || null;
+      const handleElement = dragHandleElementRef.current;
+      if (handleElement && typeof handleElement.setPointerCapture === "function") {
+        try {
+          handleElement.setPointerCapture(event.pointerId);
+        } catch {
+          // Ignore capture setup failures.
+        }
+      }
+    } else {
+      activeDragPointerIdRef.current = null;
+      dragHandleElementRef.current = null;
+    }
     document.body.style.userSelect = "none";
-  };
-
-  const handlePageChange = useCallback((page) => {
-    setCurrentPage(page);
-    if (!page) return;
-    setVisitedPages((prev) => {
-      if (prev.has(page)) return prev;
-      const next = new Set(prev);
-      next.add(page);
-      return next;
-    });
+    document.body.style.cursor = "col-resize";
+    setIsResizingSplit(true);
   }, []);
+
+  useEffect(() => {
+    if (!selectedFileId) return;
+    savePageProgressSnapshot({
+      docId: selectedFileId,
+      visited: Array.from(visitedPages),
+      page: currentPage,
+    });
+  }, [currentPage, savePageProgressSnapshot, selectedFileId, visitedPages]);
 
   const splitStyle = {
     flexBasis: `${splitPercent}%`,
@@ -1012,28 +1686,29 @@ function App() {
   const requestQuestions = async ({ force = false } = {}) => {
     if (isLoadingQuiz && !force) return;
     if (!file) {
-      setError("먼저 PDF를 업로드해주세요.");
+      setError("Open a PDF first.");
       return;
     }
     if (isFreeTier && quizSets.length > 0) {
-      setError("무료 티어에서는 퀴즈를 재생성할 수 없습니다.");
+      setError("Free tier can generate only one quiz set.");
       return;
     }
     if (!force && hasReached("maxQuiz")) {
-      setError("무료 티어에서는 퀴즈를 1회까지만 생성할 수 있습니다.");
+      setError("Quiz generation limit reached for your tier.");
       return;
     }
 
     if (!extractedText) {
-      setError("PDF 텍스트가 아직 준비되지 않았습니다. 잠시 후에 시도해주세요.");
+      setError("No extracted text found. Please run PDF extraction first.");
       return;
     }
 
     setIsLoadingQuiz(true);
     setError("");
-    setStatus("문제 세트를 생성하는 중입니다...");
+    setStatus("Generating quiz set...");
 
     try {
+      const { generateQuiz } = await getOpenAiService();
       const quiz = normalizeQuizPayload(
         await generateQuiz(extractedText, {
           multipleChoiceCount: quizMix.multipleChoice,
@@ -1053,11 +1728,11 @@ function App() {
         shortAnswerResult: {},
       };
       setQuizSets((prev) => [...prev, newSet]);
-      setStatus("문제 세트 생성 완료!");
+      setStatus("Quiz set generated.");
       setUsageCounts((prev) => ({ ...prev, quiz: prev.quiz + 1 }));
       persistArtifacts({ quiz: trimmedQuiz });
     } catch (err) {
-      setError(`문제 생성에 실패했습니다: ${err.message}`);
+      setError(`Failed to generate quiz set: ${err.message}`);
     } finally {
       setIsLoadingQuiz(false);
     }
@@ -1066,24 +1741,24 @@ function App() {
   const regenerateQuiz = async () => {
     if (isLoadingQuiz) return;
     if (!file) {
-      setError("먼저 PDF를 업로드해주세요.");
+      setError("Open a PDF first.");
       return;
     }
     if (isFreeTier) {
-      setError("무료 티어에서는 퀴즈를 재생성할 수 없습니다.");
+      setError("Free tier cannot regenerate quiz sets.");
       return;
     }
     if (hasReached("maxQuiz")) {
-      setError("무료 티어에서는 퀴즈를 1회까지만 생성할 수 있습니다.");
+      setError("Quiz generation limit reached for your tier.");
       return;
     }
     if (!extractedText) {
-      setError("PDF 텍스트가 아직 준비되지 않았습니다. 잠시 후에 시도해주세요.");
+      setError("No extracted text found. Please run PDF extraction first.");
       return;
     }
     quizAutoRequestedRef.current = true;
     resetQuizState();
-    setStatus("퀴즈를 새로 생성하는 중입니다...");
+    setStatus("Resetting quiz set and regenerating...");
     setError("");
     await persistArtifacts({ quiz: null });
     await requestQuestions({ force: true });
@@ -1135,38 +1810,152 @@ function App() {
     );
   };
 
+  const buildAdaptiveChapterSummaryRanges = (chapters) => {
+    const list = Array.isArray(chapters) ? chapters : [];
+    const expanded = [];
+
+    for (const chapter of list) {
+      const chapterNumber = Number.parseInt(chapter?.chapterNumber, 10);
+      const normalizedChapterNumber =
+        Number.isFinite(chapterNumber) && chapterNumber > 0 ? chapterNumber : expanded.length + 1;
+      const start = Number.parseInt(chapter?.pageStart, 10);
+      const end = Number.parseInt(chapter?.pageEnd, 10);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0 || start > end) {
+        continue;
+      }
+
+      // Interpret the user formula as chunk-count first, then derive pages-per-chunk.
+      // This keeps short ranges like 5-9 as a single chunk instead of 1-page chunks.
+      const totalPages = end - start + 1;
+      const chunkCount = Math.max(1, Math.round(Math.abs(end - start) / 10));
+      const pagesPerChunk = Math.max(1, Math.ceil(totalPages / chunkCount));
+      const rangeIdBase = String(chapter?.id || `chapter-${normalizedChapterNumber}`);
+      let sectionIndex = 1;
+
+      for (let pageStart = start; pageStart <= end; pageStart += pagesPerChunk) {
+        const pageEnd = Math.min(end, pageStart + pagesPerChunk - 1);
+        expanded.push({
+          id: `${rangeIdBase}-part-${sectionIndex}`,
+          chapterNumber: normalizedChapterNumber,
+          chapterTitle: `Chapter ${normalizedChapterNumber} (${pageStart}-${pageEnd}p)`,
+          pagesPerChunk,
+          pageStart,
+          pageEnd,
+        });
+        sectionIndex += 1;
+      }
+    }
+
+    return expanded;
+  };
+
   const requestSummary = async ({ force = false } = {}) => {
     if (isLoadingSummary || (!force && summaryRequestedRef.current)) return;
+    const hasManualChapterConfig = Boolean(String(chapterRangeInput || "").trim());
     if (!file) {
-      setError("먼저 PDF를 업로드해주세요.");
+      setError("Open a PDF first.");
       return;
     }
     if (isFreeTier && summary) {
-      setError("무료 티어에서는 요약을 재생성할 수 없습니다.");
+      setError("Free tier can generate only one summary.");
       return;
     }
     if (hasReached("maxSummary")) {
-      setError("무료 티어에서는 요약을 1회까지만 생성할 수 있습니다.");
+      setError("Summary generation limit reached for your tier.");
       return;
     }
-    if (!extractedText) {
-      setError("PDF 텍스트가 아직 준비되지 않았습니다. 잠시 후에 시도해주세요.");
+    if (!extractedText && !hasManualChapterConfig) {
+      setError("No extracted text found. Enter chapter ranges or run PDF extraction first.");
       return;
     }
 
     summaryRequestedRef.current = true;
     setIsLoadingSummary(true);
     setError("");
-    setStatus("요약을 생성하는 중입니다...");
+    setChapterRangeError("");
+    setStatus("Generating summary...");
     try {
-      const summarized = await generateSummary(extractedText);
+      const chapterConfigRaw = String(chapterRangeInput || "").trim();
+      let customChapterSections = null;
+      if (chapterConfigRaw) {
+        const totalPages = pageInfo.total || pageInfo.used || 0;
+        const parsedChapters = parseChapterRangeSelectionInput(chapterConfigRaw, totalPages);
+        if (parsedChapters.error) {
+          setChapterRangeError(parsedChapters.error);
+          throw new Error(parsedChapters.error);
+        }
+        const adaptiveChapterRanges = buildAdaptiveChapterSummaryRanges(parsedChapters.chapters);
+        if (!adaptiveChapterRanges.length) {
+          throw new Error("No valid chapter ranges remain after adaptive splitting.");
+        }
+        const pagesPerChunkById = new Map(
+          adaptiveChapterRanges.map((range) => [String(range.id), Number(range.pagesPerChunk) || 1])
+        );
+        setStatus("Extracting text for configured chapter ranges...");
+        const chapterExtraction = await extractPdfTextByRanges(file, adaptiveChapterRanges, {
+          maxLengthPerRange: 14000,
+          useOcr: true,
+          ocrLang: "kor+eng",
+          onOcrProgress: (message) => setStatus(message),
+        });
+        customChapterSections = (chapterExtraction?.chapters || [])
+          .map((chapter) => ({
+            id: chapter.id,
+            chapterNumber: chapter.chapterNumber,
+            chapterTitle: chapter.chapterTitle,
+            pageStart: chapter.pageStart,
+            pageEnd: chapter.pageEnd,
+            pagePerChunk:
+              pagesPerChunkById.get(String(chapter.id)) ||
+              Math.max(1, (Number(chapter.pageEnd) || 0) - (Number(chapter.pageStart) || 0) + 1),
+            text: chapter.text || "",
+          }))
+          .filter((chapter) => String(chapter.text || "").trim().length > 0);
+        if (!customChapterSections.length) {
+          throw new Error("No text extracted from configured chapter ranges.");
+        }
+      }
+
+      let summarySourceText = extractedText;
+      if (!customChapterSections) {
+        const summaryCacheKey = selectedFileId || file?.name || null;
+        const cachedSummaryText = summaryCacheKey
+          ? summaryContextCacheRef.current.get(summaryCacheKey)
+          : null;
+
+        if (typeof cachedSummaryText === "string" && cachedSummaryText.length > summarySourceText.length) {
+          summarySourceText = cachedSummaryText;
+        } else if (file && summaryCacheKey) {
+          try {
+            setStatus("Extending extraction scope for better summary quality...");
+            const extended = await extractPdfText(file, 80, 50000, { useOcr: false });
+            const extendedText = String(extended?.text || "").trim();
+            if (extendedText.length > summarySourceText.length) {
+              summarySourceText = extendedText;
+              summaryContextCacheRef.current.set(summaryCacheKey, extendedText);
+            }
+          } catch {
+            // fallback to already extracted text
+          }
+        }
+      }
+
+      setStatus("Summarizing content with AI...");
+      const { generateSummary } = await getOpenAiService();
+      const summarized = customChapterSections
+        ? await generateSummary("", {
+            scope: "custom chapter range",
+            chapterized: true,
+            chapterSections: customChapterSections,
+          })
+        : await generateSummary(summarySourceText);
       setSummary(summarized);
       setUsageCounts((prev) => ({ ...prev, summary: prev.summary + 1 }));
-      setStatus("요약 생성 완료!");
+      setStatus("selected page summary created.");
       persistArtifacts({ summary: summarized });
     } catch (err) {
-      setError(`요약 생성에 실패했습니다: ${err.message}`);
-      // 실패 시 다시 시도할 수 있도록 플래그 해제
+      setError(`selected page summary failed: ${err.message}`);
+      setStatus("");
       summaryRequestedRef.current = false;
       setStatus("");
     } finally {
@@ -1177,86 +1966,133 @@ function App() {
   const regenerateSummary = async () => {
     if (isLoadingSummary) return;
     if (!file) {
-      setError("먼저 PDF를 업로드해주세요.");
+      setError("Open a PDF first.");
       return;
     }
     if (isFreeTier) {
-      setError("무료 티어에서는 요약을 재생성할 수 없습니다.");
+      setError("Free tier cannot regenerate summaries.");
       return;
     }
     if (hasReached("maxSummary")) {
-      setError("무료 티어에서는 요약을 1회까지만 생성할 수 있습니다.");
+      setError("Summary generation limit reached for your tier.");
       return;
     }
     if (!extractedText) {
-      setError("PDF 텍스트가 아직 준비되지 않았습니다. 잠시 후에 시도해주세요.");
+      setError("No extracted text found. Please run PDF extraction first.");
       return;
     }
     summaryRequestedRef.current = false;
     setSummary("");
-    setStatus("요약을 새로 생성하는 중입니다...");
+    setStatus("Resetting summary and regenerating...");
     setError("");
     await persistArtifacts({ summary: null, highlights: null });
     await requestSummary({ force: true });
   };
 
-  const parsePageSelection = useCallback((raw, totalPages) => {
-    const cleaned = String(raw || "").replace(/\s+/g, "");
-    if (!cleaned) {
-      return { pages: [], error: "페이지를 입력해주세요." };
+  const handleAutoDetectChapterRanges = useCallback(async () => {
+    if (isDetectingChapterRanges || isLoadingSummary || isLoadingText) return;
+    if (!file) {
+      setChapterRangeError("Open a PDF first.");
+      return;
     }
-    const pages = new Set();
-    const parts = cleaned.split(",").filter(Boolean);
-    for (const part of parts) {
-      if (part.includes("-")) {
-        const range = part.split("-");
-        if (range.length !== 2) {
-          return { pages: [], error: "페이지 범위 형식이 올바르지 않습니다." };
-        }
-        const start = Number.parseInt(range[0], 10);
-        const end = Number.parseInt(range[1], 10);
-        if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0 || start > end) {
-          return { pages: [], error: "페이지 범위 형식이 올바르지 않습니다." };
-        }
-        for (let i = start; i <= end; i += 1) {
-          pages.add(i);
-        }
-      } else {
-        const page = Number.parseInt(part, 10);
-        if (!Number.isFinite(page) || page <= 0) {
-          return { pages: [], error: "페이지 번호 형식이 올바르지 않습니다." };
-        }
-        pages.add(page);
+
+    setIsDetectingChapterRanges(true);
+    setChapterRangeError("");
+    setError("");
+    setStatus("목차에서 챕터 범위를 자동 추출 중...");
+    try {
+      const totalPages = Number(pageInfo.total || pageInfo.used || 0);
+      const detected = await extractChapterRangesFromToc(file, {
+        maxScanPages: totalPages ? Math.min(totalPages, 30) : 24,
+      });
+      const chapters = Array.isArray(detected?.chapters) ? detected.chapters : [];
+      if (chapters.length < 2) {
+        throw new Error(
+          detected?.error ||
+            "목차에서 챕터 범위를 찾지 못했습니다. 수동 입력(예: 1:1-12)으로 설정해주세요."
+        );
       }
+
+      const chapterInput = chapters
+        .map((chapter, index) => {
+          const start = Number.parseInt(chapter?.pageStart, 10);
+          const end = Number.parseInt(chapter?.pageEnd, 10);
+          if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end < start) return "";
+          return `${index + 1}:${start}-${end}`;
+        })
+        .filter(Boolean)
+        .join("\n");
+
+      if (!chapterInput) {
+        throw new Error("목차 추출 결과가 비어 있습니다.");
+      }
+
+      const limit = totalPages || Number(detected?.totalPages) || 0;
+      const parsed = parseChapterRangeSelectionInput(chapterInput, limit);
+      if (parsed.error) throw new Error(parsed.error);
+
+      setChapterRangeInput(chapterInput);
+      setChapterRangeError("");
+      const sourceLabel =
+        detected?.source === "outline" ? "PDF 개요(북마크)" : "앞쪽 목차 페이지";
+      setStatus(`${sourceLabel}에서 챕터 범위 ${parsed.chapters.length}개를 자동 설정했습니다.`);
+      setIsChapterRangeOpen(true);
+    } catch (err) {
+      setChapterRangeError(err?.message || "목차 자동 추출에 실패했습니다.");
+      setStatus("");
+    } finally {
+      setIsDetectingChapterRanges(false);
     }
-    const total = Number.isFinite(totalPages) ? totalPages : 0;
-    const filtered = [...pages].filter((p) => (total ? p <= total : true)).sort((a, b) => a - b);
-    if (filtered.length === 0) {
-      return { pages: [], error: "유효한 페이지가 없습니다." };
+  }, [
+    file,
+    isDetectingChapterRanges,
+    isLoadingSummary,
+    isLoadingText,
+    pageInfo.total,
+    pageInfo.used,
+  ]);
+
+  const handleConfirmChapterRanges = useCallback(() => {
+    const raw = String(chapterRangeInput || "").trim();
+    if (!raw) {
+      setChapterRangeError("Enter chapter ranges first.");
+      return;
     }
-    return { pages: filtered, error: "" };
-  }, []);
+    const totalPages = pageInfo.total || pageInfo.used || 0;
+    const parsed = parseChapterRangeSelectionInput(raw, totalPages);
+    if (parsed.error) {
+      setChapterRangeError(parsed.error);
+      return;
+    }
+    setChapterRangeError("");
+    setStatus(`Chapter ranges saved (${parsed.chapters.length} sections).`);
+    setIsChapterRangeOpen(false);
+  }, [
+    chapterRangeInput,
+    pageInfo.total,
+    pageInfo.used,
+  ]);
 
   const handleSummaryByPages = useCallback(async () => {
     if (isPageSummaryLoading || isLoadingSummary) return;
     if (!file || !selectedFileId) {
-      setPageSummaryError("먼저 PDF를 선택해주세요.");
+      setPageSummaryError("Open a PDF first.");
       return;
     }
     if (isFreeTier && summary) {
-      setPageSummaryError("무료 티어에서는 요약을 재생성할 수 없습니다.");
+      setPageSummaryError("Free tier can generate only one summary.");
       return;
     }
     if (hasReached("maxSummary")) {
-      setPageSummaryError("무료 티어에서는 요약을 1회만 생성할 수 있습니다.");
+      setPageSummaryError("Summary generation limit reached for your tier.");
       return;
     }
     const totalPages = pageInfo.total || pageInfo.used || 0;
     if (!totalPages) {
-      setPageSummaryError("페이지 정보를 불러오지 못했습니다.");
+      setPageSummaryError("Total page count is unavailable. Please reload the PDF.");
       return;
     }
-    const parsed = parsePageSelection(pageSummaryInput, totalPages);
+    const parsed = parsePageSelectionInput(pageSummaryInput, totalPages);
     if (parsed.error) {
       setPageSummaryError(parsed.error);
       return;
@@ -1264,7 +2100,7 @@ function App() {
 
     setPageSummaryError("");
     setError("");
-    setStatus("선택 페이지 요약을 생성 중입니다...");
+    setStatus("Generating summary for selected pages...");
     setIsPageSummaryLoading(true);
     summaryRequestedRef.current = true;
     try {
@@ -1274,27 +2110,32 @@ function App() {
         onOcrProgress: (message) => setStatus(message),
       });
       if (!extracted?.text) {
-        const suffix = extracted?.ocrUsed ? " OCR로도 텍스트를 찾지 못했습니다." : "";
-        throw new Error(`선택한 페이지에서 텍스트를 찾지 못했습니다.${suffix}`);
+        const suffix = extracted?.ocrUsed ? " OCR was attempted but no readable text was found." : "";
+        throw new Error(`No text extracted from selected pages.${suffix}`);
       }
       if (extracted?.ocrUsed) {
-        setStatus("OCR 완료. 요약을 생성하는 중입니다...");
+        setStatus("OCR complete. Generating summary...");
       }
-      const summarized = await generateSummary(extracted.text, { scope: "사용자가 지정한 페이지" });
+      setStatus("Generating selected-page summary...");
+      const { generateSummary } = await getOpenAiService();
+      const summarized = await generateSummary(extracted.text, {
+            scope: "selected pages",
+        chapterized: false,
+      });
       setSummary(summarized);
       setUsageCounts((prev) => ({ ...prev, summary: prev.summary + 1 }));
-      setStatus("선택 페이지 요약 생성 완료!");
+      setStatus("selected page summary created.");
       persistArtifacts({ summary: summarized });
     } catch (err) {
-      setError(`선택 페이지 요약 실패: ${err.message}`);
+      setError(`selected page summary failed: ${err.message}`);
       setStatus("");
       summaryRequestedRef.current = false;
     } finally {
       setIsPageSummaryLoading(false);
     }
   }, [
-    extractPdfTextFromPages,
     file,
+    getOpenAiService,
     hasReached,
     isFreeTier,
     isLoadingSummary,
@@ -1302,7 +2143,6 @@ function App() {
     pageInfo.total,
     pageInfo.used,
     pageSummaryInput,
-    parsePageSelection,
     persistArtifacts,
     selectedFileId,
     summary,
@@ -1311,11 +2151,11 @@ function App() {
   const handleExportSummaryPdf = useCallback(async () => {
     if (isExportingSummary) return;
     if (!summary) {
-      setError("요약이 없습니다. 먼저 요약을 생성해주세요.");
+      setError("No summary to export. Generate a summary first.");
       return;
     }
     if (!summaryRef.current) {
-      setError("요약 뷰를 찾지 못했습니다. 새로고침 후 다시 시도해주세요.");
+      setError("Summary container is missing, cannot export PDF.");
       return;
     }
     setIsExportingSummary(true);
@@ -1323,10 +2163,18 @@ function App() {
     const baseName = (file?.name || "summary").replace(/\.[^/.]+$/, "");
     try {
       const target = summaryRef.current;
-      await exportElementToPdf(target, { filename: `${baseName}-summary.pdf` });
-      setStatus("요약 PDF 저장 완료");
+      await new Promise((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(resolve));
+      });
+      await exportPagedElementToPdf(target, {
+        filename: `${baseName}-summary.pdf`,
+        margin: 0,
+        pageSelector: ".summary-export-page",
+        background: "#0f172a",
+      });
+      setStatus("summary PDF export complete.");
     } catch (err) {
-      setError(`요약 PDF 내보내기에 실패했습니다: ${err.message}`);
+      setError(`summary PDF export failed: ${err.message}`);
       setStatus("");
     } finally {
       setIsExportingSummary(false);
@@ -1336,31 +2184,32 @@ function App() {
   const requestOxQuiz = async ({ auto = false, force = false } = {}) => {
     if (isLoadingOx && !force) return;
     if (!file) {
-      setError("먼저 PDF를 업로드해주세요.");
+      setError("Open a PDF first.");
       return;
     }
     if (!force && hasReached("maxOx")) {
-      setError("무료 티어에서는 O/X 퀴즈를 1회까지만 생성할 수 있습니다.");
+      setError("O/X generation limit reached for your tier.");
       return;
     }
     if (!extractedText) {
-      setError("PDF 텍스트가 아직 준비되지 않았습니다. 잠시 후에 시도해주세요.");
+      setError("No extracted text found. Please run PDF extraction first.");
       return;
     }
     if (auto) oxAutoRequestedRef.current = true;
     setIsLoadingOx(true);
     setError("");
-    setStatus("O/X 퀴즈를 생성하는 중입니다...");
+    setStatus("Generating O/X questions...");
     try {
+      const { generateOxQuiz } = await getOpenAiService();
       const ox = await generateOxQuiz(extractedText);
       const items = Array.isArray(ox?.items) ? ox.items : [];
 
       if (ox?.debug || items.length === 0) {
         setOxItems([]);
         setStatus("");
-        setError("O/X 퀴즈를 생성할 수 있는 내용이 부족합니다.");
+        setError("O/X generation returned no valid items.");
         if (ox?.fallback && import.meta.env.DEV) {
-          // 개발 시에만 fallback을 로그로 확인
+          // Keep fallback payload visible in dev tools for debugging.
           // eslint-disable-next-line no-console
           console.debug("O/X fallback", ox.fallback);
         }
@@ -1370,11 +2219,11 @@ function App() {
       setOxItems(items);
       setOxSelections({});
       setOxExplanationOpen({});
-      setStatus("O/X 퀴즈 생성 완료!");
+      setStatus("O/X questions generated.");
       setUsageCounts((prev) => ({ ...prev, ox: prev.ox + 1 }));
       persistArtifacts({ ox });
     } catch (err) {
-      setError(`O/X 퀴즈 생성에 실패했습니다: ${err.message}`);
+      setError(`Failed to generate O/X questions: ${err.message}`);
     } finally {
       setIsLoadingOx(false);
     }
@@ -1383,21 +2232,21 @@ function App() {
   const regenerateOxQuiz = async () => {
     if (isLoadingOx) return;
     if (!file) {
-      setError("먼저 PDF를 업로드해주세요.");
+      setError("Open a PDF first.");
       return;
     }
     if (hasReached("maxOx")) {
-      setError("무료 티어에서는 O/X 퀴즈를 1회까지만 생성할 수 있습니다.");
+      setError("O/X generation limit reached for your tier.");
       return;
     }
     if (!extractedText) {
-      setError("PDF 텍스트가 아직 준비되지 않았습니다. 잠시 후에 시도해주세요.");
+      setError("No extracted text found. Please run PDF extraction first.");
       return;
     }
     oxAutoRequestedRef.current = true;
     setOxItems(null);
       setOxSelections({});
-    setStatus("O/X 퀴즈를 새로 생성하는 중입니다...");
+    setStatus("Resetting O/X and regenerating...");
     setError("");
     await persistArtifacts({ ox: null });
     await requestOxQuiz({ auto: false, force: true });
@@ -1406,12 +2255,12 @@ function App() {
   const handleAddFlashcard = useCallback(
     async (front, back, hint) => {
       if (!user) {
-        setFlashcardError("로그인이 필요합니다.");
+        setFlashcardError("Please sign in first.");
         return;
       }
       const deckId = selectedFileId || "default";
       setFlashcardError("");
-      setFlashcardStatus("카드 저장 중..");
+      setFlashcardStatus("Saving flashcard...");
       try {
         const saved = await addFlashcard({
           userId: user.id,
@@ -1421,9 +2270,9 @@ function App() {
           hint,
         });
         setFlashcards((prev) => [saved, ...prev]);
-        setFlashcardStatus("카드 저장 완료");
+        setFlashcardStatus("flashcard saved.");
       } catch (err) {
-        setFlashcardError(`카드 저장 실패: ${err.message}`);
+        setFlashcardError(`flashcard save failed: ${err.message}`);
         setFlashcardStatus("");
       }
     },
@@ -1433,16 +2282,16 @@ function App() {
   const handleDeleteFlashcard = useCallback(
     async (cardId) => {
       if (!user) {
-        setFlashcardError("로그인이 필요합니다.");
+        setFlashcardError("Please sign in first.");
         return;
       }
       setFlashcardError("");
       try {
         await deleteFlashcard({ userId: user.id, cardId });
         setFlashcards((prev) => prev.filter((c) => c.id !== cardId));
-        setFlashcardStatus("카드 삭제 완료");
+        setFlashcardStatus("flashcard deleted.");
       } catch (err) {
-        setFlashcardError(`카드 삭제 실패: ${err.message}`);
+        setFlashcardError(`flashcard delete failed: ${err.message}`);
       }
     },
     [user]
@@ -1451,27 +2300,28 @@ function App() {
   const handleGenerateFlashcards = useCallback(async () => {
     if (isGeneratingFlashcards) return;
     if (!user) {
-      setFlashcardError("로그인이 필요합니다.");
+      setFlashcardError("Please sign in first.");
       return;
     }
     if (!file || !selectedFileId) {
-      setFlashcardError("먼저 PDF를 선택해주세요.");
+      setFlashcardError("Open a PDF first.");
       return;
     }
     if (isLoadingText) {
-      setFlashcardError("PDF 추출 중입니다. 잠시만 기다려주세요.");
+      setFlashcardError("PDF text extraction is still running. Please wait.");
       return;
     }
     const trimmedText = (extractedText || "").trim();
     if (trimmedText.length < 80) {
-      setFlashcardError("PDF에서 텍스트를 추출할 수 없습니다.");
+      setFlashcardError("Not enough extracted text to generate flashcards.");
       return;
     }
 
     setFlashcardError("");
-    setFlashcardStatus("AI 플래시카드 생성 중..");
+    setFlashcardStatus("Generating AI flashcards...");
     setIsGeneratingFlashcards(true);
     try {
+      const { generateFlashcards } = await getOpenAiService();
       const result = await generateFlashcards(trimmedText, { count: 8 });
       const rawCards = Array.isArray(result?.cards)
         ? result.cards
@@ -1486,22 +2336,22 @@ function App() {
         }))
         .filter((card) => card.front && card.back);
       if (cleaned.length === 0) {
-        throw new Error("생성된 카드가 없습니다.");
+        throw new Error("No valid flashcards could be generated from the content.");
       }
       const deckId = selectedFileId || "default";
       const saved = await addFlashcards({ userId: user.id, deckId, cards: cleaned });
       if (!saved.length) {
-        throw new Error("카드 저장에 실패했습니다.");
+        throw new Error("Failed to save generated flashcards.");
       }
       setFlashcards((prev) => [...saved, ...prev]);
-      setFlashcardStatus(`AI 플래시카드 ${saved.length}장 생성 완료`);
+      setFlashcardStatus(`Generated ${saved.length} AI flashcards.`);
     } catch (err) {
-      setFlashcardError(`AI 플래시카드 생성 실패: ${err.message}`);
+      setFlashcardError(`Failed to generate AI flashcards: ${err.message}`);
       setFlashcardStatus("");
     } finally {
       setIsGeneratingFlashcards(false);
     }
-    }, [isGeneratingFlashcards, user, file, selectedFileId, isLoadingText, extractedText]);
+    }, [isGeneratingFlashcards, user, file, selectedFileId, isLoadingText, extractedText, getOpenAiService]);
 
   const handleResetTutor = useCallback(() => {
     setTutorMessages([]);
@@ -1514,16 +2364,16 @@ function App() {
       const trimmed = String(prompt || "").trim();
       if (!trimmed || isTutorLoading) return;
       if (!file || !selectedFileId) {
-        setTutorError("먼저 PDF를 선택해주세요.");
+        setTutorError("Open a PDF first.");
         return;
       }
       if (isLoadingText) {
-        setTutorError("PDF 추출 중입니다. 잠시만 기다려주세요.");
+        setTutorError("PDF text extraction is still running. Please wait.");
         return;
       }
       const docText = (extractedText || "").trim();
       if (!docText) {
-        setTutorError("PDF에서 텍스트를 추출할 수 없습니다.");
+        setTutorError("No extracted text found from this PDF.");
         return;
       }
 
@@ -1533,6 +2383,7 @@ function App() {
       setTutorMessages((prev) => [...prev, userMessage]);
       setIsTutorLoading(true);
       try {
+        const { generateTutorReply } = await getOpenAiService();
         const reply = await generateTutorReply({
           question: trimmed,
           extractedText: docText,
@@ -1540,42 +2391,32 @@ function App() {
         });
         setTutorMessages((prev) => [...prev, { role: "assistant", content: reply }]);
       } catch (err) {
-        setTutorError(`AI 튜터 답변 생성 실패: ${err.message}`);
+        setTutorError(`Failed to generate AI tutor reply: ${err.message}`);
       } finally {
         setIsTutorLoading(false);
       }
     },
-    [extractedText, file, isLoadingText, isTutorLoading, selectedFileId, tutorMessages]
+    [extractedText, file, getOpenAiService, isLoadingText, isTutorLoading, selectedFileId, tutorMessages]
   );
-
-  const pickRandomItems = useCallback((items, count) => {
-    if (!Array.isArray(items) || count <= 0) return [];
-    const copy = [...items];
-    for (let i = copy.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [copy[i], copy[j]] = [copy[j], copy[i]];
-    }
-    return copy.slice(0, count);
-  }, []);
 
   const handleCreateMockExam = useCallback(async () => {
     if (isGeneratingMockExam) return;
     if (!user) {
-      setMockExamError("로그인이 필요합니다.");
+      setMockExamError("Please sign in first.");
       return;
     }
     if (!file || !selectedFileId) {
-      setMockExamError("먼저 PDF를 선택해주세요.");
+      setMockExamError("Open a PDF first.");
       return;
     }
     if (isLoadingText) {
-      setMockExamError("PDF 추출 중입니다. 잠시만 기다려주세요.");
+      setMockExamError("PDF text extraction is still running. Please wait.");
       return;
     }
 
     const oxPool = Array.isArray(oxItems) ? oxItems : [];
     if (oxPool.length < 3) {
-      setMockExamError("O/X 퀴즈가 3문항 이상 필요합니다.");
+      setMockExamError("At least 3 O/X items are required to build a mock exam.");
       return;
     }
 
@@ -1607,17 +2448,17 @@ function App() {
     });
 
     if (quizPool.length < 4) {
-      setMockExamError("퀴즈 문항이 4문항 이상 필요합니다.");
+      setMockExamError("At least 4 quiz items are required to build a mock exam.");
       return;
     }
 
     const trimmedText = (extractedText || "").trim();
     if (trimmedText.length < 80) {
-      setMockExamError("PDF에서 텍스트를 추출할 수 없습니다.");
+      setMockExamError("Not enough extracted text to generate a mock exam.");
       return;
     }
 
-    setMockExamStatus("모의고사 생성 중...");
+    setMockExamStatus("Generating mock exam...");
     setMockExamError("");
     setIsGeneratingMockExam(true);
 
@@ -1625,11 +2466,12 @@ function App() {
       const pickedOx = pickRandomItems(oxPool, 3);
       const pickedQuiz = pickRandomItems(quizPool, 4);
       const hardCount = Math.max(3, 10 - (pickedOx.length + pickedQuiz.length));
+      const { generateHardQuiz } = await getOpenAiService();
       const hardResult = await generateHardQuiz(trimmedText, { count: hardCount });
       const hardItems = Array.isArray(hardResult?.items) ? hardResult.items.slice(0, hardCount) : [];
 
       if (hardItems.length < hardCount) {
-        throw new Error("고난도 문항 생성에 실패했습니다.");
+        throw new Error("Failed to generate enough hard questions.");
       }
 
       const mappedOx = pickedOx.map((item) => ({
@@ -1656,13 +2498,13 @@ function App() {
       }));
 
       if (examItems.length !== 10) {
-        throw new Error("모의고사 10문항을 구성하지 못했습니다.");
+        throw new Error("Mock exam generation requires exactly 10 questions.");
       }
 
       const now = new Date();
       const dateStamp = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
       const nextIndex = mockExams.length + 1;
-      const title = `${dateStamp} ${nextIndex}번째 모의고사`;
+      const title = `${dateStamp} mock exam ${nextIndex}`;
       const payload = {
         title,
         items: examItems,
@@ -1686,9 +2528,9 @@ function App() {
       setMockExams((prev) => [saved, ...prev]);
       setActiveMockExamId(saved.id);
       setShowMockExamAnswers(false);
-      setMockExamStatus("모의고사 저장 완료");
+      setMockExamStatus("mock exam saved.");
     } catch (err) {
-      setMockExamError(`모의고사 생성 실패: ${err.message}`);
+      setMockExamError(`mock exam generation failed: ${err.message}`);
       setMockExamStatus("");
     } finally {
       setIsGeneratingMockExam(false);
@@ -1699,17 +2541,17 @@ function App() {
     isGeneratingMockExam,
     isLoadingText,
     oxItems,
-    pickRandomItems,
     mockExams.length,
     quizSets,
     selectedFileId,
+    getOpenAiService,
     user,
   ]);
 
   const handleDeleteMockExam = useCallback(
     async (examId) => {
       if (!user) {
-        setMockExamError("로그인이 필요합니다.");
+        setMockExamError("Please sign in first.");
         return;
       }
       try {
@@ -1718,9 +2560,9 @@ function App() {
         if (activeMockExamId === examId) {
           setActiveMockExamId(null);
         }
-        setMockExamStatus("모의고사를 삭제했습니다.");
+        setMockExamStatus("Mock exam deleted.");
       } catch (err) {
-        setMockExamError(`모의고사 삭제 실패: ${err.message}`);
+        setMockExamError(`Failed to delete mock exam: ${err.message}`);
       }
     },
     [activeMockExamId, user]
@@ -1729,93 +2571,27 @@ function App() {
   const handleExportMockExam = useCallback(
     async (exam) => {
       if (!exam) {
-        setMockExamError("내보낼 모의고사가 없습니다.");
+        setMockExamError("No mock exam selected for export.");
         return;
       }
       if (!mockExamPrintRef.current) {
-        setMockExamError("내보낼 영역을 찾지 못했습니다.");
+        setMockExamError("Mock exam print container is missing.");
         return;
       }
       setMockExamError("");
       try {
-        const safeTitle = (exam.title || "mock-exam").replace(/[^\w\-]+/g, "-");
+        const safeTitle = (exam.title || "mock-exam").replace(/[^\w-]+/g, "-");
         await exportPagedElementToPdf(mockExamPrintRef.current, {
           filename: `${safeTitle}.pdf`,
           margin: 0,
           pageSelector: ".mock-exam-page",
         });
       } catch (err) {
-        setMockExamError(`PDF 저장 실패: ${err.message}`);
+        setMockExamError(`PDF export failed: ${err.message}`);
       }
     },
     [mockExamPrintRef]
   );
-
-  const quizProgress = useMemo(() => {
-    let total = 0;
-    let answered = 0;
-    let correct = 0;
-
-    quizSets.forEach((set) => {
-      const multipleChoice = set.questions?.multipleChoice || [];
-      const shortAnswers = Array.isArray(set.questions?.shortAnswer) ? set.questions.shortAnswer : [];
-      multipleChoice.forEach((question, idx) => {
-        total += 1;
-        const selection = set.selectedChoices?.[idx];
-        const hasAnswer = selection !== undefined || set.revealedChoices?.[idx];
-        if (!hasAnswer) return;
-        answered += 1;
-        if (selection === question.answerIndex) {
-          correct += 1;
-        }
-      });
-
-      shortAnswers.forEach((_, idx) => {
-        total += 1;
-        const result = set.shortAnswerResult?.[idx];
-        if (!result) return;
-        answered += 1;
-        if (result.isCorrect) correct += 1;
-      });
-    });
-
-    return { total, answered, correct };
-  }, [quizSets]);
-
-  const oxProgress = useMemo(() => {
-    let total = 0;
-    let answered = 0;
-    let correct = 0;
-
-    const oxList = Array.isArray(oxItems) ? oxItems : [];
-    oxList.forEach((item, idx) => {
-      total += 1;
-      const selection = oxSelections?.[idx];
-      if (!selection) return;
-      answered += 1;
-      if ((selection === "o" && item.answer === true) || (selection === "x" && item.answer === false)) {
-        correct += 1;
-      }
-    });
-
-    return { total, answered, correct };
-  }, [oxItems, oxSelections]);
-
-  const questionProgress = useMemo(
-    () => ({
-      total: quizProgress.total + oxProgress.total,
-      answered: quizProgress.answered + oxProgress.answered,
-      correct: quizProgress.correct + oxProgress.correct,
-    }),
-    [quizProgress, oxProgress]
-  );
-
-  const pageProgress = useMemo(() => {
-    const totalPages = pageInfo.total || 0;
-    const visitedCount = visitedPages.size || 0;
-    const progress = totalPages ? visitedCount / totalPages : 0;
-    return { totalPages, visitedCount, progress };
-  }, [pageInfo.total, visitedPages]);
 
   const activeMockExam = useMemo(() => {
     if (!mockExams.length) return null;
@@ -1824,24 +2600,17 @@ function App() {
     }
     return mockExams[0];
   }, [activeMockExamId, mockExams]);
-  const formatMockExamTitle = useCallback((exam, index) => {
-    if (!exam) return "모의고사";
-    const rawTitle = String(exam.title || "").trim();
-    if (/^\d{4}\.\d{1,2}\.\d{1,2}\s+\d+번째\s+모의고사$/.test(rawTitle)) {
-      return rawTitle;
-    }
-    const date = exam.created_at ? new Date(exam.created_at) : new Date();
-    const dateStamp = `${date.getFullYear()}.${date.getMonth() + 1}.${date.getDate()}`;
-    const seq = Math.max(1, (index ?? 0) + 1);
-    return `${dateStamp} ${seq}번째 모의고사`;
-  }, []);
   const activeMockExamIndex = useMemo(
     () => (activeMockExam ? mockExams.findIndex((exam) => exam.id === activeMockExam.id) : -1),
     [activeMockExam, mockExams]
   );
+  const getMockExamTitle = useCallback(
+    (exam, index) => formatMockExamTitle(exam, index),
+    []
+  );
   const activeMockExamTitle = useMemo(
-    () => formatMockExamTitle(activeMockExam, activeMockExamIndex),
-    [activeMockExam, activeMockExamIndex, formatMockExamTitle]
+    () => getMockExamTitle(activeMockExam, activeMockExamIndex),
+    [activeMockExam, activeMockExamIndex, getMockExamTitle]
   );
 
   const mockExamOrderedItems = useMemo(() => {
@@ -1850,14 +2619,10 @@ function App() {
     return [...items].sort((a, b) => (a.order || 0) - (b.order || 0));
   }, [activeMockExam]);
 
-  const mockExamPages = useMemo(() => {
-    if (!mockExamOrderedItems.length) return [];
-    return [
-      mockExamOrderedItems.slice(0, 4),
-      mockExamOrderedItems.slice(4, 8),
-      mockExamOrderedItems.slice(8, 10),
-    ];
-  }, [mockExamOrderedItems]);
+  const mockExamPages = useMemo(
+    () => chunkMockExamPages(mockExamOrderedItems),
+    [mockExamOrderedItems]
+  );
 
   const renderMockExamItem = (item, number) => {
     const choices = Array.isArray(item?.choices) ? item.choices : [];
@@ -1871,7 +2636,7 @@ function App() {
           {number}. {item?.prompt}
         </p>
         {isOx && <p className="text-[12px] text-black/80">1) O  2) X</p>}
-        {isShort && <p className="text-[12px] text-black/80">답: ____________________</p>}
+        {isShort && <p className="text-[12px] text-black/80">?? ____________________</p>}
         {isMultiple && choices.length > 0 && (
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[12px] text-black/85">
             {choices.slice(0, 4).map((choice, idx) => (
@@ -1908,6 +2673,8 @@ function App() {
     onDeleteUpload: handleDeleteUpload,
     isGuest: !user,
     onRequireAuth: openAuth,
+    currentTier: tier,
+    maxPdfSizeBytes: limits.maxPdfSizeBytes,
   };
   const detailPageProps = {
     detailContainerRef,
@@ -1915,7 +2682,7 @@ function App() {
     pdfUrl,
     file,
     pageInfo,
-    handlePageChange,
+    currentPage,
     handleDragStart,
     panelTab,
     setPanelTab,
@@ -1933,16 +2700,20 @@ function App() {
     pageSummaryError,
     handleSummaryByPages,
     isPageSummaryLoading,
+    isChapterRangeOpen,
+    setIsChapterRangeOpen,
+    chapterRangeInput,
+    setChapterRangeInput,
+    chapterRangeError,
+    setChapterRangeError,
+    handleAutoDetectChapterRanges,
+    isDetectingChapterRanges,
+    handleConfirmChapterRanges,
     handleExportSummaryPdf,
     isExportingSummary,
     status,
     error,
     summaryRef,
-    questionProgress,
-    quizProgress,
-    oxProgress,
-    flashcardExamStats,
-    pageProgress,
     mockExams,
     mockExamMenuRef,
     mockExamMenuButtonRef,
@@ -1951,7 +2722,7 @@ function App() {
     isLoadingMockExams,
     activeMockExam,
     activeMockExamTitle,
-    formatMockExamTitle,
+    formatMockExamTitle: getMockExamTitle,
     handleDeleteMockExam,
     handleCreateMockExam,
     isGeneratingMockExam,
@@ -1993,7 +2764,6 @@ function App() {
     extractedText,
     flashcardStatus,
     flashcardError,
-    setFlashcardExamStats,
     tutorMessages,
     isTutorLoading,
     tutorError,
@@ -2002,22 +2772,10 @@ function App() {
     handleResetTutor,
   };
 
-
-  if (!authReady) {
-    return (
-      <LoginBackground theme={theme}>
-        <div className="relative z-10 flex min-h-screen items-center justify-center px-4">
-          <div className="rounded-2xl border border-white/10 bg-slate-900/70 px-4 py-3 text-sm text-slate-200 shadow-lg">
-            Loading...
-          </div>
-        </div>
-      </LoginBackground>
-    );
-  }
-
   if (!user && showAuth) {
     return (
-      <LoginBackground theme={theme}>
+      <Suspense fallback={<div className="min-h-screen bg-black" />}>
+        <LoginBackground theme={theme}>
         <div className="relative z-10 flex min-h-screen flex-col items-center justify-center gap-4 px-4 py-8">
           <div className="flex w-full max-w-md justify-end">
             <button
@@ -2027,45 +2785,174 @@ function App() {
               data-ghost-size="sm"
               style={{ "--ghost-color": "148, 163, 184" }}
             >
-              돌아가기
+              Back to Home
             </button>
           </div>
           <AuthPanel user={user} onAuth={refreshSession} />
         </div>
-      </LoginBackground>
+        </LoginBackground>
+      </Suspense>
     );
   }
 
+  const showHeader = Boolean(user || showDetail);
+  const showAmbient = showHeader;
+
   return (
-    <div className={`relative min-h-screen overflow-hidden ${theme === "light" ? "text-slate-900" : "text-slate-100"}`}>
+    <div
+      className={`relative min-h-screen overflow-hidden ${
+        theme === "light" ? "text-slate-900" : "text-slate-100"
+      } ${showAmbient ? "" : "bg-black"}`}
+    >
       {showPayment && (
-        <PaymentPage
-          onClose={() => setShowPayment(false)}
-          currentTier={tier}
-          theme={theme}
-          user={user}
-          onTierUpdated={refreshTier}
-        />
+        <Suspense fallback={null}>
+          <PaymentPage
+            onClose={() => setShowPayment(false)}
+            currentTier={tier}
+            theme={theme}
+            user={user}
+            onTierUpdated={refreshTier}
+          />
+        </Suspense>
       )}
-      <div className="pointer-events-none absolute inset-0">
-        <div className="absolute -left-32 top-10 h-72 w-72 rounded-full bg-emerald-500/20 blur-3xl" />
-        <div className="absolute right-[-80px] top-32 h-80 w-80 rounded-full bg-cyan-500/10 blur-3xl" />
-        <div className="absolute bottom-[-120px] left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-indigo-500/10 blur-3xl" />
-      </div>
+      {shouldShowPremiumProfilePicker && (
+        <Suspense fallback={null}>
+          <PremiumProfilePicker
+            profiles={premiumProfiles}
+            activeProfileId={activePremiumProfileId}
+            maxProfiles={PREMIUM_PROFILE_LIMIT}
+            theme={theme}
+            onSelectProfile={handleSelectPremiumProfile}
+            onCreateProfile={handleCreatePremiumProfile}
+            onClose={handleCloseProfilePicker}
+            canClose={Boolean(activePremiumProfileId)}
+          />
+        </Suspense>
+      )}
+      {showProfilePinDialog && activePremiumProfile && (
+        <div className="fixed inset-0 z-[155] flex items-center justify-center px-4">
+          <button
+            type="button"
+            aria-label="Close PIN dialog"
+            onClick={handleCloseProfilePinDialog}
+            className={`absolute inset-0 ${theme === "light" ? "bg-slate-900/25" : "bg-black/75"} backdrop-blur-[2px]`}
+          />
+          <form
+            onSubmit={handleSubmitProfilePinChange}
+            className={`relative z-[156] w-full max-w-md rounded-2xl border p-5 ${
+              theme === "light"
+                ? "border-slate-200 bg-white text-slate-900 shadow-[0_20px_80px_rgba(15,23,42,0.2)]"
+                : "border-white/10 bg-slate-950/[0.97] text-slate-100 shadow-[0_20px_80px_rgba(0,0,0,0.72)]"
+            }`}
+          >
+            <p className="text-sm font-semibold">{activePremiumProfile.name} PIN Change</p>
+            <p className={`mt-1 text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
+              Enter your current PIN and set a new 4-digit PIN.
+            </p>
+            <div className="mt-4 space-y-2">
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={4}
+                value={profilePinInputs.currentPin}
+                onChange={(event) => handleChangeProfilePinInput("currentPin", event.target.value)}
+                placeholder="Current PIN"
+                className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
+                  theme === "light" ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
+                }`}
+              />
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={4}
+                value={profilePinInputs.nextPin}
+                onChange={(event) => handleChangeProfilePinInput("nextPin", event.target.value)}
+                placeholder="New PIN"
+                className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
+                  theme === "light" ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
+                }`}
+              />
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={4}
+                value={profilePinInputs.confirmPin}
+                onChange={(event) => handleChangeProfilePinInput("confirmPin", event.target.value)}
+                placeholder="Confirm new PIN"
+                className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
+                  theme === "light" ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
+                }`}
+              />
+            </div>
+            {profilePinError && <p className="mt-2 text-xs text-rose-300">{profilePinError}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleCloseProfilePinDialog}
+                className={`ghost-button text-xs ${theme === "light" ? "text-slate-700" : "text-slate-200"}`}
+                data-ghost-size="sm"
+                style={{ "--ghost-color": "148, 163, 184" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="ghost-button text-xs text-emerald-100"
+                data-ghost-size="sm"
+                style={{ "--ghost-color": "52, 211, 153" }}
+              >
+                Save
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+      {isResizingSplit && showDetail && (
+        <div className="pointer-events-none fixed inset-0 z-[160] cursor-col-resize" aria-hidden="true" />
+      )}
+      {showAmbient && (
+        <div className="pointer-events-none absolute inset-0">
+          <div className="absolute -left-32 top-10 h-72 w-72 rounded-full bg-emerald-500/20 blur-3xl" />
+          <div className="absolute right-[-80px] top-32 h-80 w-80 rounded-full bg-cyan-500/10 blur-3xl" />
+          <div className="absolute bottom-[-120px] left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-indigo-500/10 blur-3xl" />
+        </div>
+      )}
 
       <main className="relative z-10 mx-auto flex w-full max-w-none flex-col gap-4 py-4">
-        <Header
-          user={user}
-          onSignOut={handleSignOut}
-          signingOut={isSigningOut}
-          theme={theme}
-          onOpenBilling={openBilling}
-          onToggleTheme={toggleTheme}
-          onOpenLogin={openAuth}
-        />
+        {showHeader && (
+          <Suspense fallback={null}>
+            <Header
+              user={user}
+              onSignOut={handleSignOut}
+              signingOut={isSigningOut}
+              theme={theme}
+              onGoHome={showDetail ? goBackToList : null}
+              onOpenBilling={openBilling}
+              onToggleTheme={toggleTheme}
+              onOpenLogin={openAuth}
+              isPremiumTier={isPremiumTier}
+              loadingTier={loadingTier}
+              activeProfile={activePremiumProfile}
+              onOpenProfilePicker={handleOpenProfilePicker}
+              onOpenProfilePinDialog={handleOpenProfilePinDialog}
+              premiumSpaceMode={premiumSpaceMode}
+              onTogglePremiumSpaceMode={handleTogglePremiumSpaceMode}
+            />
+          </Suspense>
+        )}
         <div className="px-0">
           {!showDetail && <StartPage {...startPageProps} />}
-          {showDetail && <DetailPage {...detailPageProps} />}
+          {showDetail && (
+            <Suspense
+              fallback={
+                <div className="flex min-h-[50vh] items-center justify-center text-sm text-slate-300">
+                  Loading...
+                </div>
+              }
+            >
+              <DetailPage {...detailPageProps} />
+            </Suspense>
+          )}
         </div>
       </main>
     </div>
@@ -2073,3 +2960,4 @@ function App() {
 }
 
 export default App;
+

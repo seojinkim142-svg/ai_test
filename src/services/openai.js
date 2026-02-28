@@ -260,6 +260,540 @@ function sanitizeMarkdown(content) {
   return stripSummaryPreface(cleaned);
 }
 
+const CHAPTER_MIN_DISTANCE = 350;
+const CHAPTER_MIN_CHARS = 500;
+const MAX_CHAPTER_COUNT = 10;
+const MAX_CHAPTER_MODEL_CHARS = 2800;
+const MAX_TOTAL_CHAPTER_MODEL_CHARS = 22000;
+const VISUAL_HINT_RE =
+  /(?:figure|fig\.?|table|chart|graph|plot|diagram|illustration|그림\s*\d|도표\s*\d|표\s*\d|그래프|도식)/i;
+const CHAPTER_PATTERNS = [
+  /\bchapter\s*(\d{1,2}|[ivxlcdm]+)\b[^.!?\n]{0,90}/gi,
+  /\bchap\.\s*(\d{1,2}|[ivxlcdm]+)\b[^.!?\n]{0,90}/gi,
+  /\bch\.\s*(\d{1,2}|[ivxlcdm]+)\b[^.!?\n]{0,90}/gi,
+  /제\s*\d{1,2}\s*장[^.!?\n]{0,90}/g,
+  /\b\d{1,2}\s*장[^.!?\n]{0,90}/g,
+];
+
+function normalizeSummarySource(text) {
+  return String(text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\u00A0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanChapterTitle(raw, fallback = "Chapter") {
+  const cleaned = String(raw || "")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s\-:|]+/, "")
+    .replace(/[\s\-:|]+$/, "")
+    .trim();
+  if (!cleaned) return fallback;
+  if (cleaned.length <= 90) return cleaned;
+  return `${cleaned.slice(0, 90).trim()}...`;
+}
+
+function isLikelyDenseTocEntry(anchors, index) {
+  const anchor = anchors[index];
+  if (!anchor || anchor.index > 4500) return false;
+  const prev = anchors[index - 1];
+  const next = anchors[index + 1];
+  const densePrev = prev ? anchor.index - prev.index < 180 : false;
+  const denseNext = next ? next.index - anchor.index < 180 : false;
+  return (densePrev || denseNext) && anchor.title.length <= 70;
+}
+
+function collectChapterAnchors(text) {
+  const anchors = [];
+  for (const pattern of CHAPTER_PATTERNS) {
+    pattern.lastIndex = 0;
+    let match = pattern.exec(text);
+    while (match) {
+      const title = cleanChapterTitle(match[0]);
+      if (title.length >= 4) {
+        anchors.push({
+          index: match.index,
+          title,
+        });
+      }
+      match = pattern.exec(text);
+    }
+  }
+
+  anchors.sort((left, right) => left.index - right.index);
+  const deduped = [];
+  for (const anchor of anchors) {
+    const prev = deduped[deduped.length - 1];
+    if (prev && Math.abs(anchor.index - prev.index) < 100) {
+      if (anchor.title.length > prev.title.length) {
+        deduped[deduped.length - 1] = anchor;
+      }
+      continue;
+    }
+    deduped.push(anchor);
+  }
+
+  const withoutDenseToc = deduped.filter((_, index) => !isLikelyDenseTocEntry(deduped, index));
+  const spaced = [];
+  for (const anchor of withoutDenseToc) {
+    const prev = spaced[spaced.length - 1];
+    if (prev && anchor.index - prev.index < CHAPTER_MIN_DISTANCE) continue;
+    spaced.push(anchor);
+  }
+  return spaced;
+}
+
+function shrinkWithTail(text, maxChars) {
+  const normalized = normalizeSummarySource(text);
+  if (normalized.length <= maxChars) return normalized;
+  const head = Math.max(0, Math.floor(maxChars * 0.75));
+  const tail = Math.max(0, maxChars - head - 5);
+  return `${normalized.slice(0, head)} ... ${normalized.slice(-tail)}`.trim();
+}
+
+function extractVisualHints(sectionText, maxHints = 4) {
+  const normalized = normalizeSummarySource(sectionText);
+  if (!normalized) return [];
+
+  const hints = [];
+  const seen = new Set();
+  const sentences = normalized.split(/(?<=[.!?])\s+/).filter(Boolean);
+  for (const sentence of sentences) {
+    if (!VISUAL_HINT_RE.test(sentence)) continue;
+    const hint = cleanChapterTitle(sentence, "").slice(0, 180);
+    if (!hint) continue;
+    const key = hint.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hints.push(hint);
+    if (hints.length >= maxHints) return hints;
+  }
+
+  const fallbackMatches = normalized.match(
+    /(figure|fig\.?|table|chart|graph|plot|diagram|illustration|그림\s*\d+|도표\s*\d+|표\s*\d+|그래프|도식)[^.!?\n]{0,90}/gi
+  );
+  for (const raw of fallbackMatches || []) {
+    const hint = cleanChapterTitle(raw, "").slice(0, 140);
+    if (!hint) continue;
+    const key = hint.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hints.push(hint);
+    if (hints.length >= maxHints) break;
+  }
+  return hints;
+}
+
+function splitByChapterAnchors(normalizedText) {
+  const anchors = collectChapterAnchors(normalizedText);
+  if (anchors.length < 2) return [];
+
+  const sections = [];
+  if (anchors[0].index > CHAPTER_MIN_CHARS) {
+    const preface = normalizedText.slice(0, anchors[0].index).trim();
+    if (preface.length >= CHAPTER_MIN_CHARS) {
+      sections.push({ title: "도입", text: preface });
+    }
+  }
+
+  for (let idx = 0; idx < anchors.length; idx += 1) {
+    const start = anchors[idx].index;
+    const end = idx + 1 < anchors.length ? anchors[idx + 1].index : normalizedText.length;
+    const chapterText = normalizedText.slice(start, end).trim();
+    if (chapterText.length < CHAPTER_MIN_CHARS) continue;
+    sections.push({ title: anchors[idx].title, text: chapterText });
+  }
+  return sections;
+}
+
+function splitIntoVirtualChapters(normalizedText) {
+  const targetCount = Math.max(2, Math.min(6, Math.ceil(normalizedText.length / 4500)));
+  const chunkSize = Math.ceil(normalizedText.length / targetCount);
+  const sections = [];
+  let start = 0;
+
+  while (start < normalizedText.length) {
+    let end = Math.min(normalizedText.length, start + chunkSize);
+    if (end < normalizedText.length) {
+      const punctuationBreak = normalizedText.lastIndexOf(". ", end);
+      if (punctuationBreak > start + Math.floor(chunkSize * 0.55)) {
+        end = punctuationBreak + 1;
+      }
+    }
+    const chunk = normalizedText.slice(start, end).trim();
+    if (chunk.length >= 300) {
+      sections.push({
+        title: `구간 ${sections.length + 1}`,
+        text: chunk,
+      });
+    }
+    start = end;
+  }
+
+  if (!sections.length && normalizedText) {
+    sections.push({ title: "전체", text: normalizedText });
+  }
+  return sections;
+}
+
+function normalizeManualChapterSections(chapterSections) {
+  const list = Array.isArray(chapterSections) ? chapterSections : [];
+  return list
+    .map((section, index) => {
+      const chapterNumber = Number.parseInt(section?.chapterNumber, 10);
+      const normalizedChapterNumber = Number.isFinite(chapterNumber) ? chapterNumber : index + 1;
+      const parsedPagePerChunk = Number.parseInt(
+        section?.pagePerChunk ?? section?.pagesPerChunk ?? null,
+        10
+      );
+      const parsedPageStart = Number.parseInt(section?.pageStart, 10);
+      const parsedPageEnd = Number.parseInt(section?.pageEnd, 10);
+      const derivedPagePerChunk =
+        Number.isFinite(parsedPageStart) &&
+        Number.isFinite(parsedPageEnd) &&
+        parsedPageStart > 0 &&
+        parsedPageEnd >= parsedPageStart
+          ? parsedPageEnd - parsedPageStart + 1
+          : 1;
+      const pagePerChunk =
+        Number.isFinite(parsedPagePerChunk) && parsedPagePerChunk > 0
+          ? parsedPagePerChunk
+          : derivedPagePerChunk;
+      const defaultChapterTitle = `Chapter ${normalizedChapterNumber}`;
+      const chapterTitle = cleanChapterTitle(
+        section?.chapterTitle || section?.title || defaultChapterTitle,
+        defaultChapterTitle
+      );
+      const text = normalizeSummarySource(section?.text || "");
+      const visualHints = Array.isArray(section?.visualHints)
+        ? section.visualHints
+            .map((hint) => cleanChapterTitle(hint, ""))
+            .filter(Boolean)
+            .slice(0, 5)
+        : extractVisualHints(text, 5);
+      if (!text) return null;
+      return {
+        id: String(section?.id || `manual_${normalizedChapterNumber}`),
+        chapterNumber: normalizedChapterNumber,
+        chapterTitle,
+        pagePerChunk,
+        text,
+        visualHints,
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => left.chapterNumber - right.chapterNumber);
+}
+
+function buildChapterSummaryInput(extractedText, { scope, chapterSections } = {}) {
+  const manualSections = normalizeManualChapterSections(chapterSections);
+  if (manualSections.length > 0) {
+    return {
+      scope: scope || "사용자 지정 챕터",
+      mode: "manual",
+      chapters: manualSections.map((section, index) => ({
+        ...section,
+        id: section.id || `ch_${index + 1}`,
+        text: shrinkWithTail(section.text, Math.max(800, Number(section.pagePerChunk || 1) * 800)),
+      })),
+    };
+  }
+
+  const normalizedText = normalizeSummarySource(extractedText);
+  if (!normalizedText) {
+    return { scope: scope || "전체 문서", mode: "empty", chapters: [] };
+  }
+
+  const anchoredSections = splitByChapterAnchors(normalizedText);
+  const mode = anchoredSections.length >= 2 ? "detected" : "virtual";
+  const sections = mode === "detected" ? anchoredSections : splitIntoVirtualChapters(normalizedText);
+
+  let limited = sections;
+  if (sections.length > MAX_CHAPTER_COUNT) {
+    const kept = sections.slice(0, MAX_CHAPTER_COUNT - 1);
+    const remained = sections.slice(MAX_CHAPTER_COUNT - 1);
+    kept.push({
+      title: `${remained[0]?.title || "후반부"} 외 ${remained.length}개 챕터`,
+      text: remained.map((section) => `${section.title} ${section.text}`).join(" "),
+    });
+    limited = kept;
+  }
+
+  const perChapterBudget = Math.max(
+    900,
+    Math.floor(MAX_TOTAL_CHAPTER_MODEL_CHARS / Math.max(1, limited.length))
+  );
+  const chapterTextLimit = Math.min(MAX_CHAPTER_MODEL_CHARS, perChapterBudget);
+
+  const chapters = limited.map((section, index) => ({
+    id: `ch_${index + 1}`,
+    chapterNumber: index + 1,
+    chapterTitle: cleanChapterTitle(section.title, `Chapter ${index + 1}`),
+    text: shrinkWithTail(section.text, chapterTextLimit),
+    visualHints: extractVisualHints(section.text, 5),
+  }));
+
+  return {
+    scope: scope || "전체 문서",
+    mode,
+    chapters,
+  };
+}
+
+function sanitizeSummaryLine(value, maxChars = 220) {
+  const cleaned = String(value || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+  if (cleaned.length <= maxChars) return cleaned;
+  return `${cleaned.slice(0, maxChars).trim()}...`;
+}
+
+const SUMMARY_META_LINE_PATTERNS = [
+  /챕터\s*제목.*(?:찾지\s*못|탐지\s*못|인식\s*못)/i,
+  /문서를\s*길이\s*기준.*(?:나눠|분할|쪼개)/i,
+  /길이\s*기준.*(?:요약|분할)/i,
+  /(?:chapter\s*title|chapter\s*heading).*(?:not|couldn'?t|unable).*(?:find|detect)/i,
+  /length[-\s]based.*(?:split|segment|chunk|summar)/i,
+  /(?:virtual|auto(?:matically)?)\s*(?:chapter|segment|split)/i,
+];
+
+function isMetaSummaryLine(value) {
+  const cleaned = String(value || "").replace(/\s+/g, " ").trim();
+  if (!cleaned) return false;
+  return SUMMARY_META_LINE_PATTERNS.some((pattern) => pattern.test(cleaned));
+}
+
+function normalizeImportance(level) {
+  const normalized = String(level || "").toLowerCase();
+  if (normalized === "high") return "높음";
+  if (normalized === "low") return "낮음";
+  return "중간";
+}
+
+function formatChapterSummaryMarkdown(parsed, summaryInput) {
+  const parsedChapters = Array.isArray(parsed?.chapters) ? parsed.chapters : [];
+  const chapterById = new Map(
+    parsedChapters
+      .map((chapter) => [String(chapter?.id || "").trim(), chapter])
+      .filter(([id]) => Boolean(id))
+  );
+  const markdown = [];
+
+  const overviewFromModel = Array.isArray(parsed?.overview)
+    ? parsed.overview.map((line) => sanitizeSummaryLine(line, 220)).filter(Boolean).slice(0, 4)
+    : [];
+  const overview = overviewFromModel.filter((line) => !isMetaSummaryLine(line));
+  if (!overview.length) {
+    const fallbackOverview = parsedChapters
+      .flatMap((chapter) => (Array.isArray(chapter?.summaryPoints) ? chapter.summaryPoints : []))
+      .map((line) => sanitizeSummaryLine(line, 220))
+      .filter((line) => line && !isMetaSummaryLine(line))
+      .slice(0, 2);
+    if (fallbackOverview.length) {
+      overview.push(...fallbackOverview);
+    } else if (summaryInput.chapters[0]?.text) {
+      const sourceLine = sanitizeSummaryLine(summaryInput.chapters[0].text, 180);
+      if (sourceLine) overview.push(sourceLine);
+    }
+  }
+
+  markdown.push("## 전체 개요");
+  if (overview.length) {
+    for (const point of overview) markdown.push("- " + point);
+  } else {
+    markdown.push("- 핵심 개요를 생성할 근거가 충분하지 않았습니다.");
+  }
+  markdown.push("");
+
+  for (let idx = 0; idx < summaryInput.chapters.length; idx += 1) {
+    const sourceChapter = summaryInput.chapters[idx];
+    const candidate =
+      chapterById.get(sourceChapter.id) ||
+      parsedChapters.find((chapter) => Number(chapter?.chapterNumber) === sourceChapter.chapterNumber) ||
+      parsedChapters[idx] ||
+      {};
+
+    const chapterTitle = sanitizeSummaryLine(
+      candidate?.chapterTitle || candidate?.title || sourceChapter.chapterTitle,
+      100
+    );
+    const cleanedChapterTitle = String(chapterTitle || "")
+      .replace(/^\s*\d+\s*[^:]{0,20}:\s*/i, "")
+      .trim();
+    const headingTitle = cleanedChapterTitle || ("Chapter " + sourceChapter.chapterNumber);
+
+    markdown.push("## " + headingTitle);
+    markdown.push("### Key Summary");
+
+    const summaryPoints = Array.isArray(candidate?.summaryPoints)
+      ? candidate.summaryPoints
+          .map((line) => sanitizeSummaryLine(line, 220))
+          .filter((line) => line && !isMetaSummaryLine(line))
+          .slice(0, 6)
+      : [];
+    if (summaryPoints.length) {
+      for (const point of summaryPoints) markdown.push("- " + point);
+    } else {
+      markdown.push("- " + sanitizeSummaryLine(sourceChapter.text, 220));
+    }
+
+    const keyTerms = Array.isArray(candidate?.keyTerms) ? candidate.keyTerms.slice(0, 6) : [];
+    markdown.push("### Key Terms");
+    if (keyTerms.length) {
+      for (const term of keyTerms) {
+        if (typeof term === "string") {
+          const simpleTerm = sanitizeSummaryLine(term, 180);
+          if (simpleTerm) markdown.push("- " + simpleTerm);
+          continue;
+        }
+        const termName = sanitizeSummaryLine(term?.term || term?.name || "", 70);
+        const definition = sanitizeSummaryLine(term?.definition || term?.description || "", 180);
+        if (!termName && !definition) continue;
+        markdown.push(
+          definition ? "- **" + (termName || "term") + "**: " + definition : "- **" + termName + "**"
+        );
+      }
+    } else {
+      markdown.push("- No key terms were confidently identified for this chapter.");
+    }
+
+    markdown.push("### Visual Priority");
+    const visuals = Array.isArray(candidate?.visuals) ? candidate.visuals.slice(0, 5) : [];
+    const renderedVisuals = [];
+    for (const visual of visuals) {
+      const item = sanitizeSummaryLine(visual?.item || visual?.name || visual?.title || "", 110);
+      const reason = sanitizeSummaryLine(visual?.reason || "", 170);
+      const insight = sanitizeSummaryLine(visual?.insight || visual?.takeaway || "", 150);
+      if (!item && !reason && !insight) continue;
+      const details = [];
+      if (reason) details.push(reason);
+      if (insight) details.push("insight: " + insight);
+      renderedVisuals.push(
+        "- **" + normalizeImportance(visual?.importance) + "** " + (item || "visual asset") +
+          (details.length ? " - " + details.join(" | ") : "")
+      );
+    }
+
+    if (renderedVisuals.length) {
+      markdown.push(...renderedVisuals);
+    } else if (sourceChapter.visualHints.length) {
+      for (const hint of sourceChapter.visualHints.slice(0, 3)) {
+        markdown.push("- **review needed** " + sanitizeSummaryLine(hint, 170));
+      }
+    } else {
+      markdown.push("- No strong evidence for critical visuals was found.");
+    }
+
+    markdown.push("### Sample Question Solving");
+    const sampleQuestionSolving = Array.isArray(candidate?.sampleQuestionSolving)
+      ? candidate.sampleQuestionSolving.slice(0, 2)
+      : [];
+    if (sampleQuestionSolving.length) {
+      for (const sample of sampleQuestionSolving) {
+        const question = sanitizeSummaryLine(
+          sample?.question || sample?.problem || sample?.prompt || "",
+          170
+        );
+        const steps = Array.isArray(sample?.steps)
+          ? sample.steps.map((step) => sanitizeSummaryLine(step, 140)).filter(Boolean).slice(0, 4)
+          : Array.isArray(sample?.approach)
+            ? sample.approach.map((step) => sanitizeSummaryLine(step, 140)).filter(Boolean).slice(0, 4)
+            : [];
+        const answer = sanitizeSummaryLine(sample?.answer || sample?.result || "", 130);
+        const insight = sanitizeSummaryLine(sample?.insight || sample?.checkpoint || "", 160);
+
+        markdown.push("- **Question**: " + (question || "Representative chapter question"));
+        if (steps.length) markdown.push("- **Solving**: " + steps.join(" -> "));
+        if (answer) markdown.push("- **Answer**: " + answer);
+        if (insight) markdown.push("- **Insight**: " + insight);
+      }
+    } else {
+      markdown.push("- No reliable sample solving flow was generated from this chapter.");
+    }
+
+    markdown.push("");
+  }
+
+  return markdown.join("\n").trim();
+}
+
+async function generateChapterSummary(extractedText, { scope, chapterSections } = {}) {
+  const summaryInput = buildChapterSummaryInput(extractedText, { scope, chapterSections });
+  if (!summaryInput.chapters.length) return "";
+
+  const payload = {
+    scope: summaryInput.scope,
+    mode: summaryInput.mode,
+    chapters: summaryInput.chapters,
+  };
+
+  const data = await postChatRequest(
+    {
+      model: MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You summarize academic PDFs in Korean. Return JSON only. Use only provided chapter data. For visuals, estimate importance as high|medium|low only when supported by chapter text or visual hints.",
+        },
+        {
+          role: "user",
+          content: `
+Analyze the chapter input and return Korean JSON with this schema:
+{
+  "overview": ["..."],
+  "chapters": [
+    {
+      "id": "ch_1",
+      "chapterNumber": 1,
+      "chapterTitle": "...",
+      "summaryPoints": ["..."],
+      "keyTerms": [{ "term": "...", "definition": "..." }],
+      "visuals": [
+        { "item": "...", "importance": "high|medium|low", "reason": "...", "insight": "..." }
+      ],
+      "sampleQuestionSolving": [
+        {
+          "question": "...",
+          "steps": ["...", "..."],
+          "answer": "...",
+          "insight": "..."
+        }
+      ]
+    }
+  ]
+}
+
+Rules:
+- Output language: Korean.
+- Keep each summary point concise and concrete.
+- Include 3-6 summary points per chapter.
+- Provide keyTerms, visuals, and sampleQuestionSolving for each chapter when evidence exists.
+- sampleQuestionSolving should include 1-2 representative problems with short step-by-step solving.
+- If no reliable visual evidence, return "visuals": [].
+- If no reliable sample solving evidence, return "sampleQuestionSolving": [].
+- Do not mention chapter detection/splitting logic or model processing notes (e.g., missing chapter titles, length-based split, virtual chapters).
+- Keep overview focused on lecture topic and learning goals only.
+- Preserve chapter ids exactly as input.
+- Return strict JSON only.
+
+Input:
+${JSON.stringify(payload)}
+          `.trim(),
+        },
+      ],
+      temperature: 1,
+      response_format: { type: "json_object" },
+    },
+    { retries: 0 }
+  );
+
+  const content = data.choices?.[0]?.message?.content?.trim() || "";
+  const sanitized = sanitizeJson(content);
+  const parsed = parseJsonSafe(sanitized, "chapter summary JSON");
+  return formatChapterSummaryMarkdown(parsed, summaryInput);
+}
+
 function parseJsonSafe(content, context = "response") {
   const trimmed = content?.trim() || "";
   if (!trimmed) throw new Error(`Empty ${context} from OpenAI`);
@@ -496,7 +1030,7 @@ export async function generateOxQuiz(extractedText) {
   const chunked = chunkText(extractedText, { maxChunks: 5, maxChunkLength: 1400 });
   let summaryForOx = "";
   try {
-    summaryForOx = await generateSummary(extractedText);
+    summaryForOx = await generateSummary(extractedText, { chapterized: false });
   } catch {
     // 요약 실패 시 chunked로 진행
   }
@@ -560,7 +1094,32 @@ export async function generateOxQuiz(extractedText) {
   };
 }
 
-export async function generateSummary(extractedText, { scope } = {}) {
+export async function generateSummary(
+  extractedText,
+  { scope, chapterized = true, chapterSections = null } = {}
+) {
+  const normalized = String(extractedText || "").trim();
+  const hasManualChapters = Array.isArray(chapterSections) && chapterSections.length > 0;
+  if (!normalized && !hasManualChapters) {
+    throw new Error("먼저 PDF 텍스트를 준비해주세요.");
+  }
+
+  if (chapterized) {
+    try {
+      const chapterSummary = await generateChapterSummary(normalized, {
+        scope,
+        chapterSections,
+      });
+      if (chapterSummary) return chapterSummary;
+    } catch {
+      // fallback to legacy summary
+    }
+  }
+
+  if (!normalized) {
+    throw new Error("사용자 지정 챕터 텍스트를 요약할 수 없습니다.");
+  }
+
   const prompt = buildSummaryPrompt(extractedText);
   const scopeGuard = scope
     ? {

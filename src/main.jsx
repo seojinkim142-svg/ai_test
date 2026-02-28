@@ -1,12 +1,12 @@
-import React from 'react'
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
-import './theme/light.css'
-import App from './App.jsx'
+import { createRoot } from "react-dom/client";
+import "./index.css";
+import "./theme/light.css";
+import App from "./App.jsx";
+import PromoPage from "./pages/PromoPage.jsx";
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+const path = typeof window !== "undefined" ? window.location.pathname.toLowerCase() : "/";
+const normalizedPath = path.replace(/\/+$/, "") || "/";
+const promoOnlyPaths = new Set(["/start", "/intro", "/landing"]);
+const RootPage = promoOnlyPaths.has(normalizedPath) ? PromoPage : App;
+
+createRoot(document.getElementById("root")).render(<RootPage />);
