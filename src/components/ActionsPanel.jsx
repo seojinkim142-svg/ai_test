@@ -52,12 +52,6 @@ function ActionsPanel({
         </p>
       )}
 
-      {shortPreview && (
-        <div className="mt-4 rounded-2xl bg-white/5 p-4 text-sm text-slate-200 ring-1 ring-white/10">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">본문 미리보기</p>
-          <p className="mt-2 leading-relaxed">{shortPreview}</p>
-        </div>
-      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-﻿import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 
 function SummaryIcon({ className = "h-10 w-10" }) {
   return (

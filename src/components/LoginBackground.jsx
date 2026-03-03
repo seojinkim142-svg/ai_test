@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
  * 로그인 화면 배경용: 커서를 따라 몽우리 블롭이 부드럽게 움직입니다.

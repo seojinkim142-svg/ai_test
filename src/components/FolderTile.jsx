@@ -47,7 +47,7 @@ function FolderTile({
               dragHighlight ? "bg-emerald-500/30 ring-2 ring-emerald-300/70" : "bg-emerald-500/15"
             }`}
           >
-            Folder
+            폴더
           </div>
           {onDelete && (
             <button

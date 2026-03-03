@@ -270,7 +270,7 @@ export const composeHighlightsWithSharedMeta = (
 export const parsePageSelectionInput = (raw, totalPages) => {
   const cleaned = String(raw || "").replace(/\s+/g, "");
   if (!cleaned) {
-    return { pages: [], error: "Enter page numbers (example: 1,3,5-8)." };
+    return { pages: [], error: "페이지 번호를 입력해 주세요. (예: 1,3,5-8)" };
   }
   const pages = new Set();
   const parts = cleaned.split(",").filter(Boolean);
@@ -278,12 +278,12 @@ export const parsePageSelectionInput = (raw, totalPages) => {
     if (part.includes("-")) {
       const range = part.split("-");
       if (range.length !== 2) {
-        return { pages: [], error: "Invalid page range format." };
+        return { pages: [], error: "페이지 범위 형식이 올바르지 않습니다." };
       }
       const start = Number.parseInt(range[0], 10);
       const end = Number.parseInt(range[1], 10);
       if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0 || start > end) {
-        return { pages: [], error: "Invalid page range values." };
+        return { pages: [], error: "페이지 범위 값이 올바르지 않습니다." };
       }
       for (let i = start; i <= end; i += 1) {
         pages.add(i);
@@ -291,7 +291,7 @@ export const parsePageSelectionInput = (raw, totalPages) => {
     } else {
       const page = Number.parseInt(part, 10);
       if (!Number.isFinite(page) || page <= 0) {
-        return { pages: [], error: "Invalid page number." };
+        return { pages: [], error: "페이지 번호가 올바르지 않습니다." };
       }
       pages.add(page);
     }
@@ -299,7 +299,7 @@ export const parsePageSelectionInput = (raw, totalPages) => {
   const total = Number.isFinite(totalPages) ? totalPages : 0;
   const filtered = [...pages].filter((page) => (total ? page <= total : true)).sort((a, b) => a - b);
   if (filtered.length === 0) {
-    return { pages: [], error: "No valid pages remain after filtering by total pages." };
+    return { pages: [], error: "전체 페이지 수를 기준으로 유효한 페이지가 없습니다." };
   }
   return { pages: filtered, error: "" };
 };

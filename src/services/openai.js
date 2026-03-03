@@ -5,24 +5,33 @@ const OPENAI_BASE_URL = import.meta.env.DEV
   ? "/api/openai"
   : import.meta.env.VITE_OPENAI_BASE_URL || "https://api.openai.com";
 const CHAT_URL = `${OPENAI_BASE_URL}/v1/chat/completions`;
-const RESPONSES_URL = `${OPENAI_BASE_URL}/v1/responses`;
+const TUTOR_FALLBACK_MODELS = [
+  MODEL,
+  import.meta.env.VITE_OPENAI_TUTOR_MODEL || "",
+  "gpt-4.1-mini",
+  "gpt-4o-mini",
+]
+  .map((name) => String(name || "").trim())
+  .filter(Boolean)
+  .filter((name, index, arr) => arr.indexOf(name) === index);
 
 function buildQuizPrompt(extractedText, { multipleChoiceCount, shortAnswerCount }) {
   return `
-당신은 대학 강의 자료를 기반으로 퀴즈를 출제하는 교수입니다.
+You are a professor creating quiz questions from lecture material.
 
-[출제 원칙]
-- 문서에 나온 사실은 문제의 '전제'로만 사용하고, 사실 자체를 그대로 묻지 않는다.
-- 정답이 한 문장/단어 그대로 나오지 않게 이해/구분/적용/오해 판별/의미 해석을 요구한다.
-- URL/숫자/이름 같은 암기형 문제는 금지.
+[Rules]
+- Use document facts only as context; do not ask verbatim recall questions.
+- Questions must test understanding, comparison, application, misconception checks, or interpretation.
+- Avoid pure memorization prompts (raw URLs, names, single numbers).
 
-[출력 형식]
-- 객관식 ${multipleChoiceCount}문항(각 4지선다) + 주관식 ${shortAnswerCount}문항(계산/서술형)
-- 객관식: answerIndex, explanation 포함
-- 주관식: answer(단답/수식/값)와 explanation 포함
-- 모든 내용은 한국어, JSON만 출력
+[Output format]
+- Multiple-choice: ${multipleChoiceCount} questions, 4 options each.
+- Short-answer: ${shortAnswerCount} questions (calculation/explanation style).
+- Include answerIndex and explanation for multiple-choice.
+- Include answer and explanation for short-answer.
+- Return JSON only.
 
-[반환 포맷(JSON)]
+[JSON schema]
 {
   "multipleChoice": [
     { "question": "...", "choices": ["...","...","...","..."], "answerIndex": 1, "explanation": "..." }
@@ -32,134 +41,110 @@ function buildQuizPrompt(extractedText, { multipleChoiceCount, shortAnswerCount 
   ]
 }
 
-[문서 본문]
+[Language]
+- Write all question/explanation text in Korean.
+
+[Document]
 ${extractedText}
   `.trim();
 }
-
 function buildHardQuizPrompt(extractedText, count) {
   return `
-당신은 대학원 수준의 고난도 모의고사를 출제하는 교수입니다.
+You are creating high-difficulty mock exam items from the document.
 
-[출제 원칙]
-- 단순 암기형/사실 회상형 문제 금지
-- 개념 간 비교/적용/추론/오해 판별을 요구
-- 정답은 한 줄 베껴쓰기 형태가 아니어야 함
-- 헷갈리기 쉬운 선택지를 포함하되, 정답은 명확하게
+[Rules]
+- Ban rote-memory/direct-recall items.
+- Require reasoning, application, and concept-level discrimination.
+- Include plausible distractors but keep one clear correct answer.
 
-[출력 형식]
-- ${count}문항, 4지선다
-- 각 문항에 answerIndex와 explanation 포함
-- 모든 내용은 한국어, JSON만 출력
+[Output format]
+- ${count} multiple-choice questions, 4 options each.
+- Include answerIndex and explanation.
+- Return JSON only.
 
-[반환 포맷(JSON)]
+[JSON schema]
 {
   "items": [
     { "question": "...", "choices": ["...","...","...","..."], "answerIndex": 1, "explanation": "..." }
   ]
 }
 
-[문서 본문]
+[Language]
+- Write all question/explanation text in Korean.
+
+[Document]
 ${extractedText}
   `.trim();
 }
-
 function buildOxPrompt(contextText, highlightText = "") {
   return `
-당신은 업로드된 PDF를 검토하고 이해하는 보조 AI입니다.
-아래 규칙에 따라 O/X 퀴즈를 생성하세요. 모든 문장/설명/근거는 한국어로 작성하고, JSON 형식으로만 출력합니다.
+You create O/X (true/false) quiz items from PDF content.
+Follow all rules and return JSON only.
 
-[입력]
-- PDF 요약 혹은 본문 일부 (instruction 문구 제외)
-${highlightText ? `- 강조 문장:\n${highlightText}` : ""}
+[Input]
+- PDF summary/body excerpt
+${highlightText ? `- Highlight sentences:\n${highlightText}` : ""}
 
-[목표]
-- PDF의 핵심 개념/정의/원리/공식/조건/결과 기반으로 O/X 퀴즈 작성
+[Rules]
+1. Maximum 10 items.
+2. Format: true/false.
+3. Base every item on explicit or strongly implied document content.
+4. Keep each statement under 80 chars when possible.
+5. Include at least 4 false items when feasible.
+6. Use concrete details (numbers/conditions/directions) to improve discrimination.
+7. Avoid duplicates.
+8. evidence should briefly cite source clue/location when available.
 
-[문제 생성 규칙]
-1. 문제 수: 최대 10문항
-2. 형태: O/X (참/거짓)
-3. 모든 문제는 PDF에서 명시/함축된 내용을 근거로 하며, 과도한 추측/창작 금지
-4. 문장 길이: 80자 이하
-5. 최소 4개는 거짓(false) 포함 (가능한 경우)
-6. 숫자/조건/방향 등 구체적 근거를 포함해 혼동을 유도
-7. 중복 내용 없이 다채롭게
-8. evidence는 가능하면 출처/위치나 문장 일부를 간단히 기재 (없으면 빈 문자열 허용)
-
-[출력 형식(JSON)]
+[JSON schema]
 {
   "items": [
     { "statement": "...", "answer": true, "explanation": "...", "evidence": "..." }
   ]
 }
 
-[본문/요약]
+[Language]
+- Write statement/explanation/evidence in Korean.
+
+[Document]
 ${contextText}
   `.trim();
 }
-
 function buildSummaryPrompt(extractedText) {
   return `
-당신은 대학 강의 자료를 한국어로 상세 요약하는 조교입니다. 아래 지침에 따라 길고 구조적인 마크다운 요약을 작성하세요.
+You are a teaching assistant who writes a detailed Korean markdown summary.
 
-[사전 판단]
-아래 본문이 실제 강의의 학습 내용을 포함하는지 먼저 판단하세요.
+[Pre-check]
+- First decide whether the text actually contains learning content.
+- If it is mostly cover/TOC/meta/instructions/questions with little explanatory prose, do not summarize.
+- In that case, return a short notice (1-2 sentences) saying this is not a learning-content page.
+- Do not mention this pre-check process inside normal summaries.
 
-- 다음에 해당하면 요약하지 마세요:
-  · 표지, 목차, 안내 페이지
-  · 질문, 의견, 메타 설명
-  · 그래프/표/이미지 중심으로 설명 문장이 거의 없는 경우
+[Summary requirements]
+1. Overall overview (2-3 sentences): main topic and learning goals.
+2. Section-by-section concept summary with clear explanations.
+3. Math formatting (strict):
+   - Inline math: $...$
+   - Block math: $$...$$ on separate lines
+   - Explain variables/symbols right after formulas when useful.
+4. Include a separate "Key formulas" section when formulas are important.
+5. Compare related concepts when relevant.
+6. Add glossary-style term notes (Korean with English term if needed).
+7. Use lists/tables where they improve readability.
+8. Emphasize key ideas with markdown.
+9. Keep it sufficiently detailed for study (long-form when source is long).
 
-- 이 경우:
-  → 요약을 수행하지 말고,
-    “학습 내용을 포함하지 않은 페이지임”을 한두 문장으로만 설명하세요.
+[Math style]
+- Use LaTeX commands for operators/symbols.
+- Avoid malformed delimiters and placeholder tokens.
 
-- 설명 문단이 명확히 존재하는 경우에만 요약을 진행하세요.
--이 내용을 요약문에 명시하지 마세요.
-[요약 지침]
-1. 전체 개요 (2~3문장)
-   - 강의 주제와 학습 목표를 명확히 설명
+[Output]
+- Markdown only.
+- Language: Korean.
 
-2. 주요 섹션/개념 정리
-   - 섹션 제목과 핵심 내용
-   - 핵심 개념 설명(2~3문장)
-   - 예시/적용/주의사항이 있으면 포함
-
-3. **수식 표기 규칙 (필수 준수):**
-   - 인라인 수식: $...$ 형식 (예: $n^2$, $O(n \\log n)$)
-   - 독립 수식: $$...$$ 형식으로 별도 줄에 배치
-   - 독립 수식 앞뒤로 반드시 빈 줄 추가
-   - 변수/기호 설명은 수식 바로 다음에 bullet point로 명시
-   - "수식/공식 (모든 수식 LaTeX 표기)" 같은 안내 문구는 출력하지 말고 수식만 LaTeX로 표기
-
-4. **주요 수식 모음 섹션** (별도로 분리):
-   모든 중요 수식을 한 곳에 정리하고 각 기호의 의미를 명시
-
-5. 개념 간 관계/비교/차이도 함께 요약
-   - 알고리즘 성능 비교는 표나 번호 목록으로 정리
-
-6. 용어 정리:
-   - 새 용어 등장 시 영어 원어 병기
-   - 간단한 한 줄 정의 추가
-
-7. 목록/표 활용해 가독성 향상
-   - 복잡한 비교는 표 형식 권장
-   - 단계별 설명은 번호 목록 사용
-
-8. 강조 표시:
-   - 핵심 개념: **굵게**
-   - 코드: \`\`\`언어명 형식
-   - 주의사항: > 인용구 형식
-
-9. 분량: 본문이 길다면 2000~4000자 정도의 충분한 요약
-
-출력은 마크다운 형식으로 작성하세요.
-
-본문:
+[Document]
 ${extractedText}
   `.trim();
 }
-
 function buildFlashcardsContext(extractedText, count) {
   const trimmed = (extractedText || "").trim();
   if (!trimmed) return "";
@@ -196,25 +181,264 @@ ${contextText}
 
 function buildTutorSystemPrompt() {
   return `
-You are an AI tutor that teaches from the user's PDF content.
+You are an AI tutor helping the user study with their PDF.
 - Answer in Korean using polite speech by default.
 - If the user explicitly asks for a different tone (e.g., casual, formal, concise), follow that tone.
 - Be friendly and concise.
-- Base answers strictly on the provided document content.
+- Treat provided document excerpts as the primary source.
+- If the input contains page-tagged raw text like [p.123], prioritize those passages and reason from them directly.
+- Do not rely on pre-made summaries unless the raw evidence itself is missing.
 - If the user greets or sends a short social message, respond warmly and ask what topic they want to learn.
-- Do not mention the document, file name, or whether something is in/out of the document unless the user explicitly asks about coverage.
-- If key info is missing, say you need more details and ask a brief follow-up question.
+- If the exact requested page/section is missing, do NOT refuse outright. Give a best-effort explanation using:
+  1) related content found in the document context, and
+  2) clearly labeled general/domain explanation.
+- Never pretend to quote exact page/section text if it is not visible in the provided context.
+- If uncertainty exists, state uncertainty briefly and then continue with a useful explanation.
+- For page/section-specific questions, end with one short follow-up request for the exact text or screenshot to verify details.
+- Always return a non-empty answer. If evidence is weak, still provide a best-effort explanation.
+- When using formulas, always format math with LaTeX delimiters:
+  - inline math: $...$
+  - display math: $$...$$
+- Prefer canonical LaTeX symbols (\sum, \frac, \sqrt, \le, \ge) instead of plain ASCII where possible.
   `.trim();
 }
 
-function buildTutorContext(extractedText) {
-  const trimmed = (extractedText || "").trim();
+const TUTOR_SEARCH_STOPWORDS = new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "from",
+  "this",
+  "that",
+  "what",
+  "how",
+  "why",
+  "when",
+  "where",
+  "which",
+  "about",
+  "please",
+  "could",
+  "would",
+  "should",
+  "there",
+  "their",
+  "these",
+  "those",
+  "into",
+  "onto",
+  "have",
+  "has",
+  "had",
+  "are",
+  "is",
+  "was",
+  "were",
+  "you",
+  "your",
+  "explain",
+  "question",
+  "problem",
+  "page",
+]);
+
+function normalizeTutorSearchText(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[^0-9a-z\uAC00-\uD7A3.]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function collectTutorQuery(question, messages = []) {
+  const current = String(question || "").trim();
+  const recentUsers = (messages || [])
+    .filter((msg) => msg && msg.role === "user" && msg.content)
+    .slice(-3)
+    .map((msg) => String(msg.content).trim())
+    .filter(Boolean)
+    .join(" ");
+  return `${recentUsers} ${current}`.trim();
+}
+
+function extractTutorSearchTerms(query) {
+  const source = String(query || "");
+  if (!source) return [];
+
+  const sectionTokens = source.match(/\b\d+(?:\.\d+){1,4}\b/g) || [];
+  const pageTokens = [];
+  const pageRe = /(\d{1,4})\s*(?:p|page|\uD398\uC774\uC9C0|\uCABD)/gi;
+  for (const match of source.matchAll(pageRe)) {
+    const pageNo = String(match?.[1] || "").trim();
+    if (!pageNo) continue;
+    pageTokens.push(pageNo, `p${pageNo}`, `page${pageNo}`, `${pageNo}p`);
+  }
+
+  const normalized = normalizeTutorSearchText(source);
+  const wordTokens = normalized
+    .split(" ")
+    .map((token) => token.trim())
+    .filter(Boolean)
+    .filter((token) => token.length >= 2 || /^\d+$/.test(token))
+    .filter((token) => !TUTOR_SEARCH_STOPWORDS.has(token));
+
+  const deduped = [];
+  const seen = new Set();
+  for (const token of [...sectionTokens, ...pageTokens, ...wordTokens]) {
+    const key = normalizeTutorSearchText(token);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(token);
+    if (deduped.length >= 24) break;
+  }
+  return deduped;
+}
+
+function splitTutorParagraphs(text) {
+  const normalized = String(text || "").replace(/\r\n/g, "\n").trim();
+  if (!normalized) return [];
+
+  const blockParts = normalized
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 30);
+
+  // Most extracted PDF text is already flattened into one long line.
+  // In that case, split into sentence-based windows so keyword matching can
+  // isolate the relevant region instead of always truncating from the start.
+  if (blockParts.length >= 2) return blockParts;
+
+  const flat = normalized.replace(/\n+/g, " ").replace(/\s+/g, " ").trim();
+  const sentences = flat
+    .split(/(?<=[.!?])\s+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (sentences.length >= 4) {
+    const chunks = [];
+    let current = "";
+    for (const sentence of sentences) {
+      if (!current) {
+        current = sentence;
+        continue;
+      }
+      const merged = `${current} ${sentence}`.trim();
+      if (merged.length <= 950) {
+        current = merged;
+        continue;
+      }
+      if (current.length >= 30) chunks.push(current);
+      current = sentence;
+    }
+    if (current.length >= 30) chunks.push(current);
+    if (chunks.length) return chunks;
+  }
+
+  const chunks = [];
+  const chunkSize = 950;
+  const overlap = 180;
+  let cursor = 0;
+  while (cursor < flat.length) {
+    const chunk = flat.slice(cursor, cursor + chunkSize).trim();
+    if (chunk.length >= 30) chunks.push(chunk);
+    if (cursor + chunkSize >= flat.length) break;
+    cursor += Math.max(120, chunkSize - overlap);
+  }
+  return chunks;
+}
+
+function scoreTutorParagraph(paragraph, terms) {
+  const raw = String(paragraph || "");
+  if (!raw || !Array.isArray(terms) || !terms.length) return 0;
+
+  const rawLower = raw.toLowerCase();
+  const normalized = normalizeTutorSearchText(raw);
+  let score = 0;
+  let hits = 0;
+
+  for (const term of terms) {
+    const normalizedTerm = normalizeTutorSearchText(term);
+    if (!normalizedTerm) continue;
+
+    let matched = false;
+    if (term.includes(".")) {
+      matched = rawLower.includes(String(term).toLowerCase());
+    } else if (/^\d{1,4}$/.test(normalizedTerm)) {
+      matched = rawLower.includes(normalizedTerm);
+    } else {
+      matched = normalized.includes(normalizedTerm);
+    }
+
+    if (!matched) continue;
+
+    hits += 1;
+    if (term.includes(".")) {
+      score += 8;
+    } else if (/^\d{1,4}$/.test(normalizedTerm)) {
+      score += 3;
+    } else if (normalizedTerm.length >= 7) {
+      score += 4;
+    } else if (normalizedTerm.length >= 4) {
+      score += 3;
+    } else {
+      score += 2;
+    }
+  }
+
+  if (hits >= 2) score += 2;
+  if (hits >= 4) score += 2;
+
+  return score;
+}
+
+function buildTutorContext(extractedText, { question = "", messages = [] } = {}) {
+  const trimmed = String(extractedText || "").trim();
   if (!trimmed) return "";
+
   const maxChars = 16000;
   if (trimmed.length <= maxChars) return trimmed;
-  const head = trimmed.slice(0, 8000);
-  const tail = trimmed.slice(-8000);
-  return `${head}\n\n[...]\n\n${tail}`;
+
+  const query = collectTutorQuery(question, messages);
+  const terms = extractTutorSearchTerms(query);
+  const paragraphs = splitTutorParagraphs(trimmed);
+
+  let relatedContext = "";
+  if (terms.length && paragraphs.length) {
+    const scored = paragraphs
+      .map((text, index) => ({ text, index, score: scoreTutorParagraph(text, terms) }))
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .slice(0, 8);
+
+    if (scored.length) {
+      const indices = new Set();
+      for (const item of scored) {
+        indices.add(item.index);
+        if (item.index > 0) indices.add(item.index - 1);
+        if (item.index < paragraphs.length - 1) indices.add(item.index + 1);
+      }
+      const ordered = [...indices].sort((a, b) => a - b);
+      relatedContext = ordered.map((idx) => paragraphs[idx]).join("\n\n");
+    }
+  }
+
+  if (!relatedContext) {
+    const head = trimmed.slice(0, 8000);
+    const tail = trimmed.slice(-8000);
+    return `${head}\n\n[...]\n\n${tail}`;
+  }
+
+  const related = limitText(relatedContext, 9800);
+  const head = trimmed.slice(0, 2600);
+  const tail = trimmed.slice(-2600);
+  const merged = [
+    `[Relevant excerpts matched to the question]\n${related}`,
+    `[Document beginning]\n${head}`,
+    `[Document ending]\n${tail}`,
+  ].join("\n\n[...]\n\n");
+
+  return merged.length <= maxChars ? merged : merged.slice(0, maxChars);
 }
 
 function sanitizeJson(content) {
@@ -236,7 +460,7 @@ function stripSummaryPreface(content) {
   let idx = 0;
   while (idx < lines.length && lines[idx].trim() === "") idx += 1;
   if (idx >= lines.length) return text;
-  const prefaceRe = /^\s*\[?\s*\uC0AC\uC804\s*\uD310\uB2E8\s*\]?\s*/; // "사전 판단"
+  const prefaceRe = /^\s*\[?\s*\uC0AC\uC804\s*\uD310\uB2E8\s*\]?\s*/; // "?????????
   if (!prefaceRe.test(lines[idx])) return text;
 
   lines.splice(idx, 1);
@@ -265,14 +489,13 @@ const CHAPTER_MIN_CHARS = 500;
 const MAX_CHAPTER_COUNT = 10;
 const MAX_CHAPTER_MODEL_CHARS = 2800;
 const MAX_TOTAL_CHAPTER_MODEL_CHARS = 22000;
-const VISUAL_HINT_RE =
-  /(?:figure|fig\.?|table|chart|graph|plot|diagram|illustration|그림\s*\d|도표\s*\d|표\s*\d|그래프|도식)/i;
+const VISUAL_HINT_RE = /(?:figure|fig\.?|table|chart|graph|plot|diagram|illustration)/i;
 const CHAPTER_PATTERNS = [
   /\bchapter\s*(\d{1,2}|[ivxlcdm]+)\b[^.!?\n]{0,90}/gi,
   /\bchap\.\s*(\d{1,2}|[ivxlcdm]+)\b[^.!?\n]{0,90}/gi,
   /\bch\.\s*(\d{1,2}|[ivxlcdm]+)\b[^.!?\n]{0,90}/gi,
-  /제\s*\d{1,2}\s*장[^.!?\n]{0,90}/g,
-  /\b\d{1,2}\s*장[^.!?\n]{0,90}/g,
+  /\uC81C\s*\d{1,2}\s*\uC7A5[^.!?\n]{0,90}/g,
+  /\b\d{1,2}\s*\uC7A5[^.!?\n]{0,90}/g,
 ];
 
 function normalizeSummarySource(text) {
@@ -371,7 +594,7 @@ function extractVisualHints(sectionText, maxHints = 4) {
   }
 
   const fallbackMatches = normalized.match(
-    /(figure|fig\.?|table|chart|graph|plot|diagram|illustration|그림\s*\d+|도표\s*\d+|표\s*\d+|그래프|도식)[^.!?\n]{0,90}/gi
+    /(figure|fig\.?|table|chart|graph|plot|diagram|illustration|\uADF8\uB9BC\s*\d+|\uD45C\s*\d+|\uB3C4\uD45C\s*\d+|\uADF8\uB798\uD504|\uB3C4\uC2DD)[^.!?\n]{0,90}/gi
   );
   for (const raw of fallbackMatches || []) {
     const hint = cleanChapterTitle(raw, "").slice(0, 140);
@@ -393,7 +616,7 @@ function splitByChapterAnchors(normalizedText) {
   if (anchors[0].index > CHAPTER_MIN_CHARS) {
     const preface = normalizedText.slice(0, anchors[0].index).trim();
     if (preface.length >= CHAPTER_MIN_CHARS) {
-      sections.push({ title: "도입", text: preface });
+      sections.push({ title: "Introduction", text: preface });
     }
   }
 
@@ -424,7 +647,7 @@ function splitIntoVirtualChapters(normalizedText) {
     const chunk = normalizedText.slice(start, end).trim();
     if (chunk.length >= 300) {
       sections.push({
-        title: `구간 ${sections.length + 1}`,
+        title: `Section ${sections.length + 1}`,
         text: chunk,
       });
     }
@@ -432,7 +655,7 @@ function splitIntoVirtualChapters(normalizedText) {
   }
 
   if (!sections.length && normalizedText) {
-    sections.push({ title: "전체", text: normalizedText });
+    sections.push({ title: "Document", text: normalizedText });
   }
   return sections;
 }
@@ -490,7 +713,7 @@ function buildChapterSummaryInput(extractedText, { scope, chapterSections } = {}
   const manualSections = normalizeManualChapterSections(chapterSections);
   if (manualSections.length > 0) {
     return {
-      scope: scope || "사용자 지정 챕터",
+      scope: scope || "Custom chapter ranges",
       mode: "manual",
       chapters: manualSections.map((section, index) => ({
         ...section,
@@ -502,7 +725,7 @@ function buildChapterSummaryInput(extractedText, { scope, chapterSections } = {}
 
   const normalizedText = normalizeSummarySource(extractedText);
   if (!normalizedText) {
-    return { scope: scope || "전체 문서", mode: "empty", chapters: [] };
+    return { scope: scope || "Full document", mode: "empty", chapters: [] };
   }
 
   const anchoredSections = splitByChapterAnchors(normalizedText);
@@ -514,7 +737,7 @@ function buildChapterSummaryInput(extractedText, { scope, chapterSections } = {}
     const kept = sections.slice(0, MAX_CHAPTER_COUNT - 1);
     const remained = sections.slice(MAX_CHAPTER_COUNT - 1);
     kept.push({
-      title: `${remained[0]?.title || "후반부"} 외 ${remained.length}개 챕터`,
+      title: `Merged sections (${remained.length} chapters)`,
       text: remained.map((section) => `${section.title} ${section.text}`).join(" "),
     });
     limited = kept;
@@ -535,7 +758,7 @@ function buildChapterSummaryInput(extractedText, { scope, chapterSections } = {}
   }));
 
   return {
-    scope: scope || "전체 문서",
+    scope: scope || "Full document",
     mode,
     chapters,
   };
@@ -548,13 +771,87 @@ function sanitizeSummaryLine(value, maxChars = 220) {
   return `${cleaned.slice(0, maxChars).trim()}...`;
 }
 
+function looksLikeMojibake(value) {
+  const text = String(value || "");
+  if (!text) return false;
+  if (text.includes("\uFFFD")) return true;
+  if (/[?][\u3131-\uD79D]|[\u3131-\uD79D][?]/.test(text)) return true;
+  if (/[\u3131-\uD79D]/.test(text) && /[\u3400-\u9FFF]/.test(text)) return true;
+  return false;
+}
+
+function sanitizeChapterHeading(value, fallback, maxChars = 100) {
+  const cleaned = sanitizeSummaryLine(value, maxChars)
+    .replace(/^\s*\d+\s*[^:]{0,20}:\s*/i, "")
+    .trim();
+  if (!cleaned || looksLikeMojibake(cleaned)) return fallback;
+  return cleaned;
+}
+
+function normalizeSummaryPointEntry(entry) {
+  if (!entry) return null;
+
+  if (typeof entry === "string") {
+    const cleaned = sanitizeSummaryLine(entry, 220);
+    if (!cleaned || isMetaSummaryLine(cleaned) || looksLikeMojibake(cleaned)) return null;
+
+    const colonMatch = cleaned.match(/^(.{2,100}?)[\s]*:\s*(.+)$/);
+    if (colonMatch) {
+      return {
+        point: sanitizeSummaryLine(colonMatch[1], 110),
+        explanation: sanitizeSummaryLine(colonMatch[2], 220),
+        example: "",
+      };
+    }
+
+    const dashMatch = cleaned.match(/^(.{2,100}?)\s+-\s+(.+)$/);
+    if (dashMatch) {
+      return {
+        point: sanitizeSummaryLine(dashMatch[1], 110),
+        explanation: sanitizeSummaryLine(dashMatch[2], 220),
+        example: "",
+      };
+    }
+
+    return {
+      point: cleaned,
+      explanation: "Review the definition, conditions, and implications of this point.",
+      example: "",
+    };
+  }
+
+  if (typeof entry !== "object") return null;
+  let point = sanitizeSummaryLine(
+    entry?.point || entry?.topic || entry?.title || entry?.term || "",
+    110
+  );
+  let explanation = sanitizeSummaryLine(
+    entry?.explanation || entry?.detail || entry?.why || entry?.meaning || entry?.context || "",
+    220
+  );
+  let example = sanitizeSummaryLine(entry?.example || entry?.case || entry?.note || "", 140);
+
+  if (looksLikeMojibake(point)) point = "";
+  if (looksLikeMojibake(explanation)) explanation = "";
+  if (looksLikeMojibake(example)) example = "";
+
+  if (!point && !explanation) return null;
+  if (isMetaSummaryLine(point) || isMetaSummaryLine(explanation)) return null;
+
+  return {
+    point: point || explanation,
+    explanation:
+      explanation || "Review the definition, conditions, and implications of this point.",
+    example,
+  };
+}
+
 const SUMMARY_META_LINE_PATTERNS = [
-  /챕터\s*제목.*(?:찾지\s*못|탐지\s*못|인식\s*못)/i,
-  /문서를\s*길이\s*기준.*(?:나눠|분할|쪼개)/i,
-  /길이\s*기준.*(?:요약|분할)/i,
   /(?:chapter\s*title|chapter\s*heading).*(?:not|couldn'?t|unable).*(?:find|detect)/i,
   /length[-\s]based.*(?:split|segment|chunk|summar)/i,
   /(?:virtual|auto(?:matically)?)\s*(?:chapter|segment|split)/i,
+  /\uCC55\uD130\s*\uC81C\uBAA9.*(?:\uCC3E\uC9C0|\uD0D0\uC9C0|\uC778\uC2DD).*(?:\uBABB|\uC2E4\uD328)/i,
+  /\uAE38\uC774\s*\uAE30\uC900.*(?:\uB098\uB204|\uBD84\uD560|\uCABC)/i,
 ];
 
 function isMetaSummaryLine(value) {
@@ -565,9 +862,9 @@ function isMetaSummaryLine(value) {
 
 function normalizeImportance(level) {
   const normalized = String(level || "").toLowerCase();
-  if (normalized === "high") return "높음";
-  if (normalized === "low") return "낮음";
-  return "중간";
+  if (normalized === "high") return "high";
+  if (normalized === "low") return "low";
+  return "medium";
 }
 
 function formatChapterSummaryMarkdown(parsed, summaryInput) {
@@ -586,7 +883,9 @@ function formatChapterSummaryMarkdown(parsed, summaryInput) {
   if (!overview.length) {
     const fallbackOverview = parsedChapters
       .flatMap((chapter) => (Array.isArray(chapter?.summaryPoints) ? chapter.summaryPoints : []))
-      .map((line) => sanitizeSummaryLine(line, 220))
+      .map((entry) => normalizeSummaryPointEntry(entry))
+      .filter(Boolean)
+      .map((item) => sanitizeSummaryLine(`${item.point}: ${item.explanation}`, 220))
       .filter((line) => line && !isMetaSummaryLine(line))
       .slice(0, 2);
     if (fallbackOverview.length) {
@@ -597,11 +896,11 @@ function formatChapterSummaryMarkdown(parsed, summaryInput) {
     }
   }
 
-  markdown.push("## 전체 개요");
+  markdown.push("## Overall Overview");
   if (overview.length) {
     for (const point of overview) markdown.push("- " + point);
   } else {
-    markdown.push("- 핵심 개요를 생성할 근거가 충분하지 않았습니다.");
+    markdown.push("- There was not enough reliable evidence to create an overview.");
   }
   markdown.push("");
 
@@ -613,28 +912,39 @@ function formatChapterSummaryMarkdown(parsed, summaryInput) {
       parsedChapters[idx] ||
       {};
 
-    const chapterTitle = sanitizeSummaryLine(
+    const headingTitle = sanitizeChapterHeading(
       candidate?.chapterTitle || candidate?.title || sourceChapter.chapterTitle,
+      "Chapter " + sourceChapter.chapterNumber,
       100
     );
-    const cleanedChapterTitle = String(chapterTitle || "")
-      .replace(/^\s*\d+\s*[^:]{0,20}:\s*/i, "")
-      .trim();
-    const headingTitle = cleanedChapterTitle || ("Chapter " + sourceChapter.chapterNumber);
 
     markdown.push("## " + headingTitle);
     markdown.push("### Key Summary");
 
     const summaryPoints = Array.isArray(candidate?.summaryPoints)
-      ? candidate.summaryPoints
-          .map((line) => sanitizeSummaryLine(line, 220))
-          .filter((line) => line && !isMetaSummaryLine(line))
-          .slice(0, 6)
+      ? candidate.summaryPoints.map((entry) => normalizeSummaryPointEntry(entry)).filter(Boolean).slice(0, 6)
       : [];
     if (summaryPoints.length) {
-      for (const point of summaryPoints) markdown.push("- " + point);
+      for (const point of summaryPoints) {
+        const pointTitle = looksLikeMojibake(point?.point)
+          ? "Key point"
+          : sanitizeSummaryLine(point?.point, 110) || "Key point";
+        const explanation = looksLikeMojibake(point?.explanation)
+          ? "Review the definition, conditions, and implications of this point."
+          : sanitizeSummaryLine(point?.explanation, 220) ||
+            "Review the definition, conditions, and implications of this point.";
+        const example = looksLikeMojibake(point?.example)
+          ? ""
+          : sanitizeSummaryLine(point?.example, 140);
+        markdown.push(
+          "- **" + pointTitle + "**: " + explanation + (example ? " (e.g., " + example + ")" : "")
+        );
+      }
     } else {
-      markdown.push("- " + sanitizeSummaryLine(sourceChapter.text, 220));
+      const fallbackPoint = sanitizeSummaryLine(sourceChapter.text, 110);
+      markdown.push(
+        "- **" + (fallbackPoint || "Key point") + "**: Review the definition, conditions, and implications of this point."
+      );
     }
 
     const keyTerms = Array.isArray(candidate?.keyTerms) ? candidate.keyTerms.slice(0, 6) : [];
@@ -643,11 +953,12 @@ function formatChapterSummaryMarkdown(parsed, summaryInput) {
       for (const term of keyTerms) {
         if (typeof term === "string") {
           const simpleTerm = sanitizeSummaryLine(term, 180);
-          if (simpleTerm) markdown.push("- " + simpleTerm);
+          if (simpleTerm && !looksLikeMojibake(simpleTerm)) markdown.push("- " + simpleTerm);
           continue;
         }
         const termName = sanitizeSummaryLine(term?.term || term?.name || "", 70);
         const definition = sanitizeSummaryLine(term?.definition || term?.description || "", 180);
+        if (looksLikeMojibake(termName) || looksLikeMojibake(definition)) continue;
         if (!termName && !definition) continue;
         markdown.push(
           definition ? "- **" + (termName || "term") + "**: " + definition : "- **" + termName + "**"
@@ -664,6 +975,7 @@ function formatChapterSummaryMarkdown(parsed, summaryInput) {
       const item = sanitizeSummaryLine(visual?.item || visual?.name || visual?.title || "", 110);
       const reason = sanitizeSummaryLine(visual?.reason || "", 170);
       const insight = sanitizeSummaryLine(visual?.insight || visual?.takeaway || "", 150);
+      if (looksLikeMojibake(item) || looksLikeMojibake(reason) || looksLikeMojibake(insight)) continue;
       if (!item && !reason && !insight) continue;
       const details = [];
       if (reason) details.push(reason);
@@ -677,8 +989,15 @@ function formatChapterSummaryMarkdown(parsed, summaryInput) {
     if (renderedVisuals.length) {
       markdown.push(...renderedVisuals);
     } else if (sourceChapter.visualHints.length) {
+      let renderedHintCount = 0;
       for (const hint of sourceChapter.visualHints.slice(0, 3)) {
-        markdown.push("- **review needed** " + sanitizeSummaryLine(hint, 170));
+        const hintLine = sanitizeSummaryLine(hint, 170);
+        if (!hintLine || looksLikeMojibake(hintLine)) continue;
+        markdown.push("- **review needed** " + hintLine);
+        renderedHintCount += 1;
+      }
+      if (!renderedHintCount) {
+        markdown.push("- No strong evidence for critical visuals was found.");
       }
     } else {
       markdown.push("- No strong evidence for critical visuals was found.");
@@ -747,7 +1066,9 @@ Analyze the chapter input and return Korean JSON with this schema:
       "id": "ch_1",
       "chapterNumber": 1,
       "chapterTitle": "...",
-      "summaryPoints": ["..."],
+      "summaryPoints": [
+        { "point": "...", "explanation": "...", "example": "..." }
+      ],
       "keyTerms": [{ "term": "...", "definition": "..." }],
       "visuals": [
         { "item": "...", "importance": "high|medium|low", "reason": "...", "insight": "..." }
@@ -766,10 +1087,19 @@ Analyze the chapter input and return Korean JSON with this schema:
 
 Rules:
 - Output language: Korean.
-- Keep each summary point concise and concrete.
 - Include 3-6 summary points per chapter.
+- Every summary point must include BOTH:
+  - "point": concise concept/topic line
+  - "explanation": why it matters, definition/condition/result in 1-2 sentences
+- Optionally add "example" when useful.
+- Do not return summaryPoints as plain strings.
 - Provide keyTerms, visuals, and sampleQuestionSolving for each chapter when evidence exists.
 - sampleQuestionSolving should include 1-2 representative problems with short step-by-step solving.
+- Render mathematical expressions using LaTeX delimiters: inline $...$, block $$...$$.
+- Never place $$...$$ inside a sentence. Use $...$ for inline formulas only.
+- Do not output escaped dollars (\\$) or placeholder tokens like @@MATH0@@.
+- Use \\cdot for multiplication when needed.
+- Use LaTeX commands for symbols/operators (e.g., \\sqrt{n}, \\to, \\infty, \\frac{a}{b}).
 - If no reliable visual evidence, return "visuals": [].
 - If no reliable sample solving evidence, return "sampleQuestionSolving": [].
 - Do not mention chapter detection/splitting logic or model processing notes (e.g., missing chapter titles, length-based split, virtual chapters).
@@ -845,17 +1175,16 @@ function fallbackOxItems(extractedText) {
   const sentences = clean.split(/(?<=[.!?])\s+/).filter(Boolean).slice(0, 5);
   if (!sentences.length) {
     return [
-      { statement: "본문에서 문장을 찾지 못했습니다.", answer: true, explanation: "PDF 텍스트가 비어 있습니다." },
+      { statement: "????????산뭐???饔낅떽??????????????????????????????됰Ŧ????????? ?????됰Ŧ????????????????????", answer: true, explanation: "PDF ?????耀붾굝?????????? ?????????????????????????쇨덫櫻?" },
     ];
   }
 
   return sentences.map((s, idx) => ({
-    statement: `임의 문장: ${s}`,
-    answer: idx % 2 === 0, // true/false 번갈아
-    explanation: "임의로 선택한 문장입니다. 실제 정답 여부는 보장되지 않습니다.",
+    statement: `???????ш끽維뽳쭩?뱀땡???얩맪??????????????? ${s}`,
+    answer: idx % 2 === 0, // true/false alternation
+    explanation: "???????ш끽維뽳쭩?뱀땡???얩맪????????????????????????????????????????癲?? ???????嚥???癲??關?쒎첎??????????釉먮폁??????????????????????????산뭐??????? ????????????????쇨덫櫻?",
   }));
 }
-
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -879,7 +1208,7 @@ function parseRetryAfterSeconds(response) {
 async function postChatRequest(body, { retries = 1 } = {}) {
   const apiKey = (import.meta.env.VITE_OPENAI_API_KEY || "").trim();
   if (!apiKey) {
-    throw new Error("환경 변수 VITE_OPENAI_API_KEY가 .env에 설정되어야 합니다.");
+    throw new Error("????????????????산뭐?????VITE_OPENAI_API_KEY??????????? .env?????????嚥???癲????????븐뼐????????????????븐뼐?????????");
   }
 
   let response;
@@ -893,11 +1222,11 @@ async function postChatRequest(body, { retries = 1 } = {}) {
       body: JSON.stringify(body),
     });
   } catch (err) {
-    throw new Error(`OpenAI 요청 실패: ${err.message || err}`);
+    throw new Error(`OpenAI ??????????????????⑤벡由?? ${err.message || err}`);
   }
 
   if (response.status === 429) {
-    let hint = "요청 횟수가 초과되었습니다. 잠시 후 다시 시도해 주세요.";
+    let hint = "???????????????????멥렍癲??????????? ?????????????? ???????????????????????ш끽紐?????????븐뼐????????????????袁⑸즴筌??????????";
     let waitSeconds = parseRetryAfterSeconds(response);
 
     try {
@@ -913,7 +1242,7 @@ async function postChatRequest(body, { retries = 1 } = {}) {
       return postChatRequest(body, { retries: retries - 1 });
     }
 
-    throw new Error(waitSeconds ? `${hint} (대기 ${waitSeconds}초)` : hint);
+    throw new Error(waitSeconds ? `${hint} (????${waitSeconds}??` : hint);
   }
 
   if (!response.ok) {
@@ -932,42 +1261,6 @@ async function postChatRequest(body, { retries = 1 } = {}) {
 
   return response.json();
 }
-
-async function postResponseRequest(body) {
-  const apiKey = (import.meta.env.VITE_OPENAI_API_KEY || "").trim();
-  if (!apiKey) {
-    throw new Error("환경 변수 VITE_OPENAI_API_KEY가 .env에 설정되어야 합니다.");
-  }
-
-  let response;
-  try {
-    response = await fetch(RESPONSES_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(body),
-    });
-  } catch (err) {
-    throw new Error(`OpenAI 요청 실패: ${err.message || err}`);
-  }
-
-  if (!response.ok) {
-    const rawBody = await response.text();
-    let message = rawBody;
-    try {
-      const json = JSON.parse(rawBody);
-      message = json?.error?.message || JSON.stringify(json);
-    } catch {
-      // keep raw text
-    }
-    throw new Error(`OpenAI Responses API error: ${response.status} ${message}`);
-  }
-
-  return response.json();
-}
-
 export async function generateQuiz(
   extractedText,
   { multipleChoiceCount = 4, shortAnswerCount = 1 } = {}
@@ -1032,7 +1325,7 @@ export async function generateOxQuiz(extractedText) {
   try {
     summaryForOx = await generateSummary(extractedText, { chapterized: false });
   } catch {
-    // 요약 실패 시 chunked로 진행
+    // Fallback to chunked context when summary generation fails.
   }
 
   let highlightText = "";
@@ -1041,11 +1334,11 @@ export async function generateOxQuiz(extractedText) {
     const hs = Array.isArray(hl?.highlights) ? hl.highlights : [];
     if (hs.length > 0) {
       highlightText = hs
-        .map((h, idx) => `${idx + 1}. ${h.sentence}${h.reason ? ` (근거: ${h.reason})` : ""}`)
+        .map((h, idx) => `${idx + 1}. ${h.sentence}${h.reason ? ` (???????? ${h.reason})` : ""}`)
         .join("\n");
     }
   } catch {
-    // 하이라이트 생성 실패 시 스킵
+    // Skip highlight enrichment when highlight generation fails.
   }
 
   const contextForOx = summaryForOx && summaryForOx.length >= 60 ? summaryForOx : chunked;
@@ -1053,7 +1346,7 @@ export async function generateOxQuiz(extractedText) {
     return {
       items: [],
       debug: true,
-      reason: "퀴즈를 생성하기에 텍스트가 부족합니다.",
+      reason: "????????嫄???쳥??????????獄쏅챶留덌┼???????????????꾩룆梨띰쭕?????????????耀붾굝?????????? ???????繹먮끍???????????????????嫄????????????????쇨덫櫻?",
     };
   }
 
@@ -1066,7 +1359,7 @@ export async function generateOxQuiz(extractedText) {
         {
           role: "system",
           content:
-            "Generate 10 Korean true/false (O/X) quiz statements strictly from the user's text. All statements, explanations, and evidence must be in Korean (translate/rephrase even if the source is English). Ensure at least 4 are false; if not possible, generate as many as possible but prefer false items. Each statement <=80 chars, explanation/evidence <=150 chars, no duplication, and every explanation cites the PDF as evidence where possible (e.g., p.3 정의 문단, 2.1절 두 번째 문장; if unavailable, evidence may be empty). Exclude metadata like titles/authors/credits/emails/references.",
+            "Generate 10 Korean true/false (O/X) quiz statements strictly from the user's text. All statements, explanations, and evidence must be in Korean (translate/rephrase even if the source is English). Ensure at least 4 are false; if not possible, generate as many as possible but prefer false items. Each statement <=80 chars, explanation/evidence <=150 chars, no duplication, and every explanation cites the PDF as evidence where possible (e.g., p.3 definition paragraph, section 2.1 second sentence; if unavailable, evidence may be empty). Exclude metadata like titles/authors/credits/emails/references.",
         },
         { role: "user", content: prompt },
       ],
@@ -1101,7 +1394,7 @@ export async function generateSummary(
   const normalized = String(extractedText || "").trim();
   const hasManualChapters = Array.isArray(chapterSections) && chapterSections.length > 0;
   if (!normalized && !hasManualChapters) {
-    throw new Error("먼저 PDF 텍스트를 준비해주세요.");
+    throw new Error("???????곗뿨????癲ル슢???? PDF ?????耀붾굝?????????? ?????????쇰┛?癲??饔낅떽?????????????????????????釉랁닑?????ㅼ뒭???源녿룷?????????????????");
   }
 
   if (chapterized) {
@@ -1117,14 +1410,14 @@ export async function generateSummary(
   }
 
   if (!normalized) {
-    throw new Error("사용자 지정 챕터 텍스트를 요약할 수 없습니다.");
+    throw new Error("??????????됰Ŧ???????????????????????耀붾굝?????????? ??????????????????μ떜媛?걫??????????????쇨덫櫻?");
   }
 
   const prompt = buildSummaryPrompt(extractedText);
   const scopeGuard = scope
     ? {
         role: "system",
-        content: `요약 범위는 ${scope}에 포함된 본문만입니다. 다른 페이지/문서 내용이나 일반 지식은 사용하지 말고, 본문에 없는 내용은 추측하지 말고 생략하세요.`,
+        content: `????????????????${scope}???????????????산뭐???饔낅떽???????????????癲ル슢??遺룻맪????????????????쇨덫櫻? ??????????됱삩???????????쇰뮛????????????????/???????????????????筌?????????????????????됰Ŧ?????????? ?????? ?????됰Ŧ?????????? ????????산뭐???饔낅떽??????????????????耀붾굝??????????????????筌??? ?????????쏙쭗?????? ?????됰Ŧ????????????????븐뼐?????????????븐뼐??????????????ㅼ굣????`,
       }
     : null;
 
@@ -1140,7 +1433,7 @@ export async function generateSummary(
         ...(scopeGuard ? [scopeGuard] : []),
         { role: "user", content: prompt },
       ],
-      temperature: 1, // gpt-5-mini default temperature
+      temperature: 1,
     },
     { retries: 0 }
   );
@@ -1148,11 +1441,10 @@ export async function generateSummary(
   const content = data.choices?.[0]?.message?.content?.trim() || "";
   return sanitizeMarkdown(content);
 }
-
 export async function generateFlashcards(extractedText, { count = 8 } = {}) {
   const contextText = buildFlashcardsContext(extractedText, count);
   if (!contextText) {
-    throw new Error("먼저 PDF 텍스트를 준비해주세요.");
+    throw new Error("???????곗뿨????癲ル슢???? PDF ?????耀붾굝?????????? ?????????쇰┛?癲??饔낅떽?????????????????????????釉랁닑?????ㅼ뒭???源녿룷?????????????????");
   }
   const prompt = buildFlashcardsPrompt(contextText, count);
 
@@ -1178,54 +1470,322 @@ export async function generateFlashcards(extractedText, { count = 8 } = {}) {
   return parseJsonSafe(sanitized, "flashcards JSON");
 }
 
+function looksLikeTutorCoverageRefusal(content) {
+  const text = String(content || "").trim();
+  if (!text) return false;
+  const patterns = [
+    /missing.*(?:section|page|text)/i,
+    /not.*included/i,
+    /cannot.*explain/i,
+    /paste.*(?:text|section)/i,
+    /choose.*option/i,
+    /need.*(?:text|excerpt|section)/i,
+  ];
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+function extractTutorMessageText(message) {
+  if (!message) return "";
+
+  if (typeof message.content === "string") {
+    const trimmed = message.content.trim();
+    if (trimmed) return trimmed;
+  }
+
+  if (message.content != null) {
+    const parts = collectTutorTextParts(message.content, []);
+    const joined = parts.join("\n").trim();
+    if (joined) return joined;
+  }
+
+  if (typeof message.refusal === "string" && message.refusal.trim()) {
+    return message.refusal.trim();
+  }
+
+  return "";
+}
+
+function extractTutorCompletionText(data) {
+  const direct = extractTutorMessageText(data?.choices?.[0]?.message);
+  if (direct) return direct;
+
+  if (typeof data?.output_text === "string" && data.output_text.trim()) {
+    return data.output_text.trim();
+  }
+
+  const output = Array.isArray(data?.output) ? data.output : [];
+  const parts = collectTutorTextParts(output, []);
+  return parts.join("\n").trim();
+}
+
+function buildTutorRetrySnippet(contextText, question) {
+  const terms = extractTutorSearchTerms(question).slice(0, 10);
+  const paragraphs = splitTutorParagraphs(contextText);
+  if (!terms.length || !paragraphs.length) return limitText(contextText, 3500);
+
+  const scored = paragraphs
+    .map((text, index) => ({ text, index, score: scoreTutorParagraph(text, terms) }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, 5)
+    .map((item) => item.text);
+  if (!scored.length) return limitText(contextText, 3500);
+  return limitText(scored.join("\n\n"), 4500);
+}
+
+function collectTutorTextParts(value, parts = []) {
+  if (value == null) return parts;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed) parts.push(trimmed);
+    return parts;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectTutorTextParts(item, parts);
+    return parts;
+  }
+  if (typeof value === "object") {
+    if ("text" in value) collectTutorTextParts(value.text, parts);
+    if ("output_text" in value) collectTutorTextParts(value.output_text, parts);
+    if ("content" in value) collectTutorTextParts(value.content, parts);
+    if ("value" in value) collectTutorTextParts(value.value, parts);
+    if ("refusal" in value) collectTutorTextParts(value.refusal, parts);
+  }
+  return parts;
+}
+
+function extractTutorEvidenceBlocks(contextText) {
+  const source = String(contextText || "");
+  if (!source) return [];
+  const blocks = [];
+  const re = /\[p\.(\d+)\]\s*\n([\s\S]*?)(?=\n\s*\[p\.\d+\]\s*\n|$)/gi;
+  for (const match of source.matchAll(re)) {
+    const pageNumber = Number.parseInt(match?.[1], 10);
+    const text = String(match?.[2] || "").trim();
+    if (!Number.isFinite(pageNumber) || !text) continue;
+    blocks.push({ pageNumber, text });
+  }
+  return blocks;
+}
+
+function pickTutorEvidenceSnippet(text, terms, maxChars = 320) {
+  const compact = String(text || "").replace(/\s+/g, " ").trim();
+  if (!compact) return "";
+  if (compact.length <= maxChars) return compact;
+
+  const queryTerms = Array.isArray(terms) ? terms : [];
+  const lower = compact.toLowerCase();
+  let bestIndex = -1;
+  let bestTermLength = 0;
+
+  for (const term of queryTerms) {
+    const normalizedTerm = String(term || "").trim().toLowerCase();
+    if (!normalizedTerm) continue;
+    const idx = lower.indexOf(normalizedTerm);
+    if (idx < 0) continue;
+    if (bestIndex < 0 || idx < bestIndex || (idx === bestIndex && normalizedTerm.length > bestTermLength)) {
+      bestIndex = idx;
+      bestTermLength = normalizedTerm.length;
+    }
+  }
+
+  if (bestIndex < 0) {
+    return `${compact.slice(0, maxChars).trim()}...`;
+  }
+
+  const radius = Math.floor(maxChars / 2);
+  let start = Math.max(0, bestIndex - radius);
+  let end = Math.min(compact.length, start + maxChars);
+  start = Math.max(0, end - maxChars);
+  const prefix = start > 0 ? "..." : "";
+  const suffix = end < compact.length ? "..." : "";
+  return `${prefix}${compact.slice(start, end).trim()}${suffix}`;
+}
+
+function buildTutorEvidenceFallback({ question, contextText, reason = "" }) {
+  const source = String(contextText || "").trim();
+  if (!source) {
+    return "?듬? ?앹꽦???ㅽ뙣?덉뒿?덈떎. 臾몄꽌 蹂몃Ц ?띿뒪?몃? ?ㅼ떆 遺덈윭????媛숈? 吏덈Ц?쇰줈 ?ъ떆?꾪빐 二쇱꽭??";
+  }
+
+  const terms = extractTutorSearchTerms(question).slice(0, 10);
+  const evidenceBlocks = extractTutorEvidenceBlocks(source);
+  const scoredBlocks =
+    evidenceBlocks.length > 0
+      ? evidenceBlocks.map((block, index) => ({
+          ...block,
+          index,
+          score: scoreTutorParagraph(block.text, terms),
+        }))
+      : splitTutorParagraphs(source).map((text, index) => ({
+          pageNumber: null,
+          text,
+          index,
+          score: scoreTutorParagraph(text, terms),
+        }));
+
+  const matched = scoredBlocks
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, 3);
+  const selected = matched.length > 0 ? matched : scoredBlocks.slice(0, 2);
+
+  if (!selected.length) {
+    return "?듬? ?앹꽦???ㅽ뙣?덉뒿?덈떎. 臾몄꽌 蹂몃Ц??鍮꾩뼱 ?덇굅???몄떇?섏? ?딆븘, PDF瑜??ㅼ떆 ?닿퀬 ?ъ떆?꾪빐 二쇱꽭??";
+  }
+
+  const lines = ["紐⑤뜽 ?묐떟??鍮꾩뼱 臾몄꽌 蹂몃Ц 洹쇨굅瑜?湲곗??쇰줈 ?듭떖 ?댁슜??癒쇱? ?뺣━?⑸땲??"];
+  for (const item of selected) {
+    const label = Number.isFinite(item.pageNumber) ? `p.${item.pageNumber}` : "蹂몃Ц 洹쇨굅";
+    const snippet = pickTutorEvidenceSnippet(item.text, terms, 320);
+    lines.push(`- ${label}: ${snippet}`);
+  }
+  lines.push(
+    "??洹쇨굅瑜?諛뷀깢?쇰줈 吏덈Ц?섏떊 ??ぉ??臾몄옣/?섏떇 ?먮쫫???댁뼱???④퀎蹂꾨줈 諛붾줈 ?댁꽕?????덉뒿?덈떎."
+  );
+  if (reason) {
+    lines.push(`(李멸퀬: 紐⑤뜽 ?묐떟 ?앹꽦 ?ㅽ뙣 ?ъ쑀: ${String(reason).slice(0, 140)})`);
+  }
+  return lines.join("\n");
+}
+
+function isTutorTokenLimitParamError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  if (!message) return false;
+  return (
+    message.includes("max_completion_tokens") ||
+    message.includes("max_tokens") ||
+    (message.includes("unknown parameter") && message.includes("token"))
+  );
+}
+
+async function requestTutorCompletion({
+  model,
+  context,
+  question,
+  history = [],
+  extraSystem = "",
+  maxTokens = 900,
+}) {
+  const messages = [{ role: "system", content: buildTutorSystemPrompt() }];
+  const guard = String(extraSystem || "").trim();
+  if (guard) {
+    messages.push({ role: "system", content: guard });
+  }
+  messages.push({ role: "system", content: `Document content:\n${context}` });
+  messages.push(...(Array.isArray(history) ? history : []));
+  messages.push({ role: "user", content: question });
+
+  const basePayload = {
+    model,
+    messages,
+    temperature: 0.2,
+  };
+  let data = null;
+  let lastError = null;
+
+  try {
+    data = await postChatRequest(
+      {
+        ...basePayload,
+        max_completion_tokens: maxTokens,
+      },
+      { retries: 0 }
+    );
+  } catch (err) {
+    lastError = err;
+    if (isTutorTokenLimitParamError(err)) {
+      try {
+        data = await postChatRequest(
+          {
+            ...basePayload,
+            max_tokens: maxTokens,
+          },
+          { retries: 0 }
+        );
+      } catch (fallbackErr) {
+        lastError = fallbackErr;
+      }
+    }
+  }
+
+  if (!data && lastError) {
+    throw lastError;
+  }
+  if (!data) {
+    throw new Error("Tutor completion failed: empty API response");
+  }
+
+  return {
+    content: extractTutorCompletionText(data),
+    finishReason: data?.choices?.[0]?.finish_reason || "",
+    raw: data,
+  };
+}
+
 export async function generateTutorReply({ question, extractedText, messages = [] }) {
-  const contextText = buildTutorContext(extractedText);
+  const contextText = buildTutorContext(extractedText, { question, messages });
   if (!contextText) {
-    throw new Error("먼저 PDF 텍스트를 준비해주세요.");
+    throw new Error("??????됰엨????嶺뚮ㅎ??? PDF ?????饔낅떽????????? ????????썼린?濾??轅붽틓???????????????????????????꾩룆梨??????????");
   }
 
   const history = (messages || [])
     .filter((msg) => msg && (msg.role === "user" || msg.role === "assistant") && msg.content)
     .map((msg) => ({ role: msg.role, content: String(msg.content) }));
 
-  const data = await postChatRequest(
+  const strategies = [
     {
-      model: MODEL,
-      messages: [
-        { role: "system", content: buildTutorSystemPrompt() },
-        { role: "system", content: `Document content:\n${contextText}` },
-        ...history,
-        { role: "user", content: question },
-      ],
-      max_completion_tokens: 800,
+      context: contextText,
+      history,
+      extraSystem: "",
+      maxTokens: 1000,
+      rejectCoverageRefusal: true,
     },
-    { retries: 0 }
-  );
+    {
+      context: limitText(contextText, 12000),
+      history,
+      extraSystem:
+        "Do not ask the user to paste text, choose an option, or say the section is missing. Answer now using available evidence plus clearly-labeled supplemental explanation.",
+      maxTokens: 1000,
+      rejectCoverageRefusal: false,
+    },
+    {
+      context: buildTutorRetrySnippet(contextText, question),
+      history: [],
+      extraSystem:
+        "Answer immediately in Korean with 4-7 concise bullet points and one short concluding sentence. Do not output empty text.",
+      maxTokens: 1000,
+      rejectCoverageRefusal: false,
+    },
+  ];
 
-  let content = data.choices?.[0]?.message?.content?.trim() || "";
-  if (!content) {
-    const retryContext = contextText.length > 8000 ? contextText.slice(0, 8000) : contextText;
-    const retry = await postChatRequest(
-      {
-        model: MODEL,
-        messages: [
-          { role: "system", content: buildTutorSystemPrompt() },
-          { role: "system", content: `Document content:\n${retryContext}` },
-          ...history,
-          { role: "user", content: question },
-        ],
-        max_completion_tokens: 800,
-      },
-      { retries: 0 }
-    );
-    content = retry.choices?.[0]?.message?.content?.trim() || "";
+  let lastFinishReason = "";
+  let lastErrorMessage = "";
+  for (const strategy of strategies) {
+    for (const model of TUTOR_FALLBACK_MODELS) {
+      try {
+        const result = await requestTutorCompletion({
+          model,
+          context: strategy.context,
+          question,
+          history: strategy.history,
+          extraSystem: strategy.extraSystem,
+          maxTokens: strategy.maxTokens,
+        });
+        const content = String(result?.content || "").trim();
+        lastFinishReason = String(result?.finishReason || lastFinishReason || "");
+        if (!content) continue;
+        if (strategy.rejectCoverageRefusal && looksLikeTutorCoverageRefusal(content)) continue;
+        return content;
+      } catch (err) {
+        lastErrorMessage = String(err?.message || lastErrorMessage || "");
+      }
+    }
   }
-  if (!content) {
-    return "죄송합니다. 지금은 답변을 생성하지 못했습니다. 질문을 조금 더 구체적으로 다시 알려주실 수 있을까요?";
-  }
-  return content;
+
+  const reason = lastErrorMessage || (lastFinishReason ? `finish_reason: ${lastFinishReason}` : "");
+  return buildTutorEvidenceFallback({ question, contextText, reason });
 }
-
 export async function generateHighlights(extractedText) {
   const data = await postChatRequest(
     {
@@ -1239,16 +1799,16 @@ export async function generateHighlights(extractedText) {
         {
           role: "user",
           content: `
-아래 본문에서 요약에 근거가 되는 중요한 문장(최대 5개)을 뽑아 JSON으로만 답해주세요.
-- 문장은 반드시 본문에 있는 그대로 사용 (의역/번역 금지)
-- 포맷: { "highlights": [ { "sentence": "...", "reason": "..." } ] }
+???????ш끽維뽳쭩?뱀땡???얩맪??????????산뭐???饔낅떽?????????????????????????????????????? ??????筌띯뫔????????룸챷援??????????????쇰┛?癲??????ш낄????????????????????됰Ŧ?????????? 5?????????됰Ŧ??????????븐뼐??????????JSON????????????????遺얘턁????????????
+- ????????? ??????袁⑸즴筌?씛彛???돗????????????????????산뭐???饔낅떽?????????????????????????????????무?????????(??????븐뼐?????????????????????袁④뎬?????????怨룐솲?????)
+- ???? { "highlights": [ { "sentence": "...", "reason": "..." } ] }
 
-본문:
+????????산뭐???饔낅떽????????????
 ${extractedText}
         `.trim(),
         },
       ],
-      temperature: 1, // gpt-5-mini default temperature
+      temperature: 1,
     },
     { retries: 0 }
   );
@@ -1257,3 +1817,5 @@ ${extractedText}
   const sanitized = sanitizeJson(content);
   return parseJsonSafe(sanitized, "highlights JSON");
 }
+
+

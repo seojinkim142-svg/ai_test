@@ -14,3 +14,57 @@ The React Compiler is not enabled on this template because of its impact on dev 
 ## Expanding the ESLint configuration
 
 If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+
+## Mobile App (Capacitor)
+
+This project is configured to run as an Android app using Capacitor while keeping the existing React/Vite codebase.
+
+1. Build web assets:
+
+```bash
+npm run build:mobile
+```
+
+2. Sync web assets to Android:
+
+```bash
+npm run cap:sync
+```
+
+3. Open Android Studio:
+
+```bash
+npm run cap:open:android
+```
+
+Useful shortcuts:
+
+```bash
+# build + sync + open Android Studio
+npm run android:open
+
+# build + sync + run on connected device/emulator
+npm run android:run
+```
+
+### Android Live Reload (instant updates on device)
+
+Use this during UI/logic development so changes are reflected immediately without rebuilding `dist`.
+
+1. Start Vite dev server (Terminal 1):
+
+```bash
+npm run dev:mobile
+```
+
+2. Run Capacitor app in live-reload mode (Terminal 2):
+
+```bash
+# generic connected device/emulator
+npm run android:live
+
+# your current tablet target
+npm run android:live:target
+```
+
+After this, saving code in `src/` should update the app on the tablet right away.

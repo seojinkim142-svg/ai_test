@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+﻿import { memo, useEffect, useMemo, useRef, useState } from "react";
 import FolderDialog from "./FolderDialog";
 import UploadTile from "./UploadTile";
 import PdfTile from "./PdfTile";
@@ -142,7 +142,7 @@ const FileUpload = memo(function FileUpload({
 
   useEffect(() => {
     const handleClickOutside = (e) => {
-      // 오른쪽 클릭으로 띄운 컨텍스트 메뉴가 즉시 닫히지 않도록 우클릭은 무시
+      // 오른쪽 클릭으로 열린 컨텍스트 메뉴가 즉시 닫히지 않도록 우클릭은 무시
       if (e.button === 2) return;
       if (addMenuRef.current && !addMenuRef.current.contains(e.target)) {
         setShowAddMenu(false);
@@ -295,7 +295,7 @@ const FileUpload = memo(function FileUpload({
           <div className="relative flex w-full max-w-6xl flex-col rounded-3xl border border-white/10 bg-slate-900/95 p-6 text-slate-100 shadow-2xl shadow-black/40 max-h-[80vh] min-h-[320px]">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-wide text-emerald-300/80">Folder</p>
+                <p className="text-xs uppercase tracking-wide text-emerald-300/80">폴더</p>
                 <h3 className="text-xl font-semibold">{folderModalName}</h3>
               </div>
               <div className="flex items-center gap-2">
@@ -309,7 +309,7 @@ const FileUpload = memo(function FileUpload({
                   data-ghost-size="sm"
                   style={{ "--ghost-color": "52, 211, 153" }}
                 >
-                  이 폴더에 PDF 추가
+                  폴더에 PDF 추가
                 </button>
                 <button
                   type="button"

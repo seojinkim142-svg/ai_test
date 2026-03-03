@@ -1,4 +1,5 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Capacitor } from "@capacitor/core";
 import StartPage from "./pages/StartPage";
 import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
 import { useUserTier } from "./hooks/useUserTier";
@@ -24,12 +25,16 @@ import {
   fetchDocArtifacts,
   saveDocArtifacts,
   updateUploadFolder,
+  saveUserFeedback,
+  getPremiumProfileStateFromUser,
+  savePremiumProfileState,
 } from "./services/supabase";
 import {
   extractPdfText,
   extractPdfTextByRanges,
   extractChapterRangesFromToc,
   extractPdfTextFromPages,
+  extractPdfPageTexts,
   generatePdfThumbnail,
 } from "./utils/pdf";
 import { exportPagedElementToPdf } from "./utils/pdfExport";
@@ -68,6 +73,464 @@ const PaymentPage = lazy(() => import("./components/PaymentPage"));
 const DetailPage = lazy(() => import("./pages/DetailPage"));
 const PremiumProfilePicker = lazy(() => import("./components/PremiumProfilePicker"));
 
+function buildStoragePathCandidates(rawPath) {
+  const source = String(rawPath || "").trim();
+  if (!source) return [];
+
+  const seen = new Set();
+  const candidates = [];
+  const addCandidate = (value) => {
+    const normalized = String(value || "")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "");
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    candidates.push(normalized);
+  };
+
+  addCandidate(source);
+
+  if (/%[0-9A-Fa-f]{2}/.test(source)) {
+    try {
+      addCandidate(decodeURIComponent(source));
+    } catch {
+      // Ignore malformed escape sequences.
+    }
+  }
+
+  try {
+    const decoded = decodeURI(source);
+    addCandidate(decoded);
+    addCandidate(encodeURI(decoded));
+  } catch {
+    // Ignore malformed URI sequences.
+  }
+
+  addCandidate(encodeURI(source));
+  return candidates;
+}
+
+function isSafeStoragePathForReuse(rawPath) {
+  const value = String(rawPath || "").trim();
+  if (!value) return false;
+  if (value.includes("%")) return false;
+  return /^[\x20-\x7E]+$/.test(value);
+}
+
+const CHAPTER_RANGE_STORAGE_PREFIX = "zeusian:chapter-ranges:v1";
+const PARTIAL_SUMMARY_ARTIFACT_KEY = "__partial_summary_state_v1";
+const PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY = "__partial_summary_library_v1";
+const LEGACY_HIGHLIGHTS_WRAP_KEY = "__legacy_highlights_payload_v1";
+
+function shouldOpenAuthOnInitialLoad() {
+  if (typeof window === "undefined") return false;
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("auth") === "1") return true;
+  return Capacitor.isNativePlatform();
+}
+
+function buildChapterRangeStorageKey({ userId, scopeId, docId }) {
+  const normalizedDocId = String(docId || "").trim();
+  if (!normalizedDocId) return "";
+  const normalizedUserId = String(userId || "guest").trim() || "guest";
+  const normalizedScopeId = String(scopeId || "default").trim() || "default";
+  return `${CHAPTER_RANGE_STORAGE_PREFIX}:${normalizedUserId}:${normalizedScopeId}:${normalizedDocId}`;
+}
+
+function formatPartialSummaryDefaultName(dateInput) {
+  const date = dateInput ? new Date(dateInput) : new Date();
+  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 16).replace("T", " ");
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+}
+
+function normalizeSavedPartialSummaryEntries(input) {
+  const list = Array.isArray(input) ? input : [];
+  const normalized = [];
+  for (const entry of list) {
+    const summaryText = String(entry?.summary || "").trim();
+    if (!summaryText) continue;
+
+    const createdAtSource = String(entry?.createdAt || "").trim();
+    const updatedAtSource = String(entry?.updatedAt || "").trim();
+    const createdAtDate = new Date(createdAtSource || Date.now());
+    const updatedAtDate = new Date(updatedAtSource || createdAtDate.getTime());
+    const createdAt = Number.isNaN(createdAtDate.getTime())
+      ? new Date().toISOString()
+      : createdAtDate.toISOString();
+    const updatedAt = Number.isNaN(updatedAtDate.getTime())
+      ? createdAt
+      : updatedAtDate.toISOString();
+    const id =
+      typeof entry?.id === "string" && entry.id.trim() ? entry.id.trim() : createPremiumProfileId();
+    const nameRaw = String(entry?.name || "");
+    const name = nameRaw.trim() || formatPartialSummaryDefaultName(createdAt);
+    const range = String(entry?.range || "").trim();
+
+    normalized.push({
+      id,
+      name,
+      summary: summaryText,
+      range,
+      createdAt,
+      updatedAt,
+    });
+  }
+
+  normalized.sort((left, right) => {
+    const l = new Date(left.updatedAt).getTime() || 0;
+    const r = new Date(right.updatedAt).getTime() || 0;
+    return r - l;
+  });
+  return normalized;
+}
+
+function buildTutorPageCandidates(prompt, totalPages) {
+  const text = String(prompt || "");
+  const maxPages = Number.parseInt(totalPages, 10);
+  if (!text || !Number.isFinite(maxPages) || maxPages <= 0) return [];
+
+  const pages = new Set();
+  const addPage = (page) => {
+    const parsed = Number.parseInt(page, 10);
+    if (!Number.isFinite(parsed)) return;
+    if (parsed < 1 || parsed > maxPages) return;
+    pages.add(parsed);
+  };
+  const addRange = (start, end, cap = 18) => {
+    const parsedStart = Number.parseInt(start, 10);
+    const parsedEnd = Number.parseInt(end, 10);
+    if (!Number.isFinite(parsedStart) || !Number.isFinite(parsedEnd)) return;
+    const lo = Math.max(1, Math.min(parsedStart, parsedEnd));
+    const hi = Math.min(maxPages, Math.max(parsedStart, parsedEnd));
+    let count = 0;
+    for (let page = lo; page <= hi; page += 1) {
+      addPage(page);
+      count += 1;
+      if (count >= cap) break;
+    }
+  };
+  const addWindow = (center, before = 1, after = 2) => {
+    const parsed = Number.parseInt(center, 10);
+    if (!Number.isFinite(parsed)) return;
+    for (let page = parsed - before; page <= parsed + after; page += 1) {
+      addPage(page);
+    }
+  };
+
+  const pageRangeRe = /(\d{1,4})\s*(?:-|~|to|부터)\s*(\d{1,4})\s*(?:p|page|페이지|쪽)?/gi;
+  for (const match of text.matchAll(pageRangeRe)) {
+    addRange(match[1], match[2]);
+  }
+
+  const pageFromRe = /(\d{1,4})\s*(?:p|page|페이지|쪽)\s*(?:부터|이후)?/gi;
+  for (const match of text.matchAll(pageFromRe)) {
+    const base = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(base)) continue;
+    addRange(base, Math.min(maxPages, base + 10), 12);
+  }
+
+  const pageSuffixRe = /(\d{1,4})\s*(?:p|page|페이지|쪽)/gi;
+  for (const match of text.matchAll(pageSuffixRe)) {
+    addWindow(match[1], 1, 2);
+  }
+
+  const pagePrefixRe = /(?:p|page|페이지|쪽)\s*(\d{1,4})/gi;
+  for (const match of text.matchAll(pagePrefixRe)) {
+    addWindow(match[1], 1, 2);
+  }
+
+  return [...pages].sort((a, b) => a - b).slice(0, 24);
+}
+
+function escapeRegex(source) {
+  return String(source || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function extractTutorSectionCandidates(prompt) {
+  const text = String(prompt || "");
+  if (!text) return [];
+  const found = text.match(/\b\d+(?:\.\d+){1,3}\b/g) || [];
+  const unique = [];
+  const seen = new Set();
+  for (const token of found) {
+    const normalized = String(token || "").trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    unique.push(normalized);
+    if (unique.length >= 4) break;
+  }
+  return unique;
+}
+
+function extractTutorProblemTokenCandidates(prompt) {
+  const text = String(prompt || "");
+  if (!text) return [];
+
+  const found = [];
+  const add = (value) => {
+    const token = String(value || "").trim();
+    if (!token) return;
+    if (!found.includes(token)) found.push(token);
+  };
+
+  const patterns = [
+    /(?:문제|question|q\.?)\s*(\d{1,3}(?:\.\d{1,3})?)/gi,
+    /(\d{1,3}(?:\.\d{1,3})?)\s*번\s*(?:문제|question)?/gi,
+  ];
+  for (const re of patterns) {
+    for (const match of text.matchAll(re)) {
+      add(match?.[1]);
+      if (found.length >= 4) return found;
+    }
+  }
+  return found;
+}
+
+function incrementSectionToken(sectionToken) {
+  const parts = String(sectionToken || "")
+    .split(".")
+    .map((part) => Number.parseInt(part, 10));
+  if (!parts.length || parts.some((value) => !Number.isFinite(value) || value < 0)) return "";
+  parts[parts.length - 1] += 1;
+  return parts.join(".");
+}
+
+function buildTutorSectionBoundaryPatterns(sectionToken) {
+  const token = String(sectionToken || "").trim();
+  if (!token) return [];
+  const patterns = [];
+
+  const nextSibling = incrementSectionToken(token);
+  if (nextSibling) {
+    patterns.push(new RegExp(`(?:^|[^0-9])${escapeRegex(nextSibling)}(?:[^0-9]|$)`, "i"));
+  }
+
+  const parts = token.split(".").map((part) => Number.parseInt(part, 10));
+  if (parts.length >= 2 && Number.isFinite(parts[0])) {
+    const nextMajor = parts[0] + 1;
+    patterns.push(
+      new RegExp(
+        [
+          `\\b${nextMajor}\\.\\d+\\b`,
+          `\\bchapter\\s*${nextMajor}\\b`,
+          `\\bchap\\.?\\s*${nextMajor}\\b`,
+          `\\bch\\.?\\s*${nextMajor}\\b`,
+          `\\bsection\\s*${nextMajor}\\b`,
+          `\\bsec\\.?\\s*${nextMajor}\\b`,
+          `제\\s*${nextMajor}\\s*장`,
+          `${nextMajor}\\s*장`,
+        ].join("|"),
+        "i"
+      )
+    );
+  }
+
+  return patterns;
+}
+
+function detectTutorSectionPageRange(pageEntries, sectionToken) {
+  const pages = Array.isArray(pageEntries) ? pageEntries : [];
+  const token = String(sectionToken || "").trim();
+  if (!pages.length || !token) return null;
+
+  const targetRe = new RegExp(`(?:^|[^0-9])${escapeRegex(token)}(?:[^0-9]|$)`, "i");
+  const startIndex = pages.findIndex((entry) => targetRe.test(String(entry?.text || "")));
+  if (startIndex < 0) return null;
+
+  const boundaryPatterns = buildTutorSectionBoundaryPatterns(token);
+  let endIndex = pages.length - 1;
+  for (let idx = startIndex + 1; idx < pages.length; idx += 1) {
+    const text = String(pages[idx]?.text || "");
+    if (!text) continue;
+    if (boundaryPatterns.some((pattern) => pattern.test(text))) {
+      endIndex = Math.max(startIndex, idx - 1);
+      break;
+    }
+  }
+
+  const startPage = Number.parseInt(pages[startIndex]?.pageNumber, 10);
+  const endPage = Number.parseInt(pages[endIndex]?.pageNumber, 10);
+  if (!Number.isFinite(startPage) || !Number.isFinite(endPage)) return null;
+  return {
+    section: token,
+    startPage,
+    endPage: Math.max(startPage, endPage),
+  };
+}
+
+function extractTutorEvidenceEntries(rawEvidenceText) {
+  const source = String(rawEvidenceText || "");
+  if (!source) return [];
+  const entries = [];
+  const re = /\[p\.(\d+)\]\s*\n([\s\S]*?)(?=\n\s*\[p\.\d+\]\s*\n|$)/gi;
+  for (const match of source.matchAll(re)) {
+    const pageNumber = Number.parseInt(match?.[1], 10);
+    const text = String(match?.[2] || "").replace(/\s+/g, " ").trim();
+    if (!Number.isFinite(pageNumber) || !text) continue;
+    entries.push({ pageNumber, text });
+  }
+  return entries;
+}
+
+function buildTutorForcedFallbackAnswer(question, rawEvidenceText) {
+  const entries = extractTutorEvidenceEntries(rawEvidenceText);
+  if (!entries.length) {
+    return "\uB2F5\uBCC0 \uC0DD\uC131\uC774 \uBD88\uC548\uC815\uD574 \uBB38\uC11C \uBCF8\uBB38 \uADFC\uAC70\uB97C \uBC14\uB85C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uAC19\uC740 \uC9C8\uBB38\uC744 \uB2E4\uC2DC \uBCF4\uB0B4\uC8FC\uC2DC\uBA74 \uC989\uC2DC \uC7AC\uC2DC\uB3C4\uD558\uACA0\uC2B5\uB2C8\uB2E4.";
+  }
+
+  const terms = String(question || "")
+    .toLowerCase()
+    .match(/[0-9a-z\uAC00-\uD7A3.]+/g);
+  const keywords = (terms || []).filter((token) => token.length >= 2).slice(0, 12);
+
+  const scored = entries
+    .map((entry, index) => {
+      const lower = entry.text.toLowerCase();
+      let score = 0;
+      for (const token of keywords) {
+        if (lower.includes(token)) score += token.includes(".") ? 3 : 1;
+      }
+      return { ...entry, index, score };
+    })
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  const selected = scored.slice(0, Math.min(3, scored.length));
+  const lines = [
+    "\uBAA8\uB378 \uC751\uB2F5\uC774 \uBE44\uC5B4 \uBB38\uC11C \uBCF8\uBB38 \uADFC\uAC70 \uAE30\uC900\uC73C\uB85C \uD575\uC2EC \uB0B4\uC6A9\uC744 \uBA3C\uC800 \uC815\uB9AC\uD569\uB2C8\uB2E4.",
+  ];
+  for (const item of selected) {
+    const snippet = item.text.length > 280 ? `${item.text.slice(0, 280)}...` : item.text;
+    lines.push(`- p.${item.pageNumber}: ${snippet}`);
+  }
+  lines.push(
+    "\uC6D0\uD558\uC2DC\uBA74 \uC704 \uADFC\uAC70 \uD398\uC774\uC9C0\uB97C \uAE30\uC900\uC73C\uB85C \uC9C8\uBB38\uD558\uC2E0 \uD56D\uBAA9\uC744 \uB2E8\uACC4\uBCC4\uB85C \uC774\uC5B4\uC11C \uC790\uC138\uD788 \uC124\uBA85\uD558\uACA0\uC2B5\uB2C8\uB2E4."
+  );
+  return lines.join("\n");
+}
+
+function resolveTutorReplyText(rawReply, { question, rawEvidenceText }) {
+  const reply = String(rawReply || "").trim();
+  const invalidPatterns = [
+    /\uBAA8\uB378(?:\uC774)?\s*\uBE48\s*\uC751\uB2F5/iu,
+    /\uAC19\uC740\s*\uC9C8\uBB38\uC744\s*\uD55C\s*\uBC88\s*\uB354/iu,
+    /\uC9C8\uBB38\uC744\s*\uC870\uAE08\s*\uB354\s*\uAD6C\uCCB4/iu,
+    /\uC9C0\uAE08\uC740\s*\uB2F5\uBCC0\uC744\s*\uC0DD\uC131\uD558\uC9C0\s*\uBABB/iu,
+    /\uC694\uCCAD\s*\uAD6C\uAC04.*\uB2E4\uC2DC\s*\uC77D/iu,
+  ];
+  if (!reply || invalidPatterns.some((pattern) => pattern.test(reply))) {
+    return buildTutorForcedFallbackAnswer(question, rawEvidenceText);
+  }
+  return reply;
+}
+
+function parseChapterNumberSelectionInput(rawInput, chapters) {
+  const available = Array.isArray(chapters) ? chapters : [];
+  const chapterNumbers = available
+    .map((chapter) => Number.parseInt(chapter?.chapterNumber, 10))
+    .filter((num) => Number.isFinite(num) && num > 0);
+  const chapterNumberSet = new Set(chapterNumbers);
+  if (!chapterNumbers.length) {
+    return { chapterNumbers: [], error: "?ㅼ젙??踰붿쐞?먯꽌 ?ъ슜?????덈뒗 梨뺥꽣媛 ?놁뒿?덈떎." };
+  }
+
+  const cleaned = String(rawInput || "").replace(/\s+/g, "");
+  if (!cleaned) {
+    return { chapterNumbers, error: "" };
+  }
+
+  const selected = new Set();
+  const tokens = cleaned.split(",").filter(Boolean);
+  for (const token of tokens) {
+    if (token.includes("-")) {
+      const [startRaw, endRaw] = token.split("-");
+      const start = Number.parseInt(startRaw, 10);
+      const end = Number.parseInt(endRaw, 10);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0 || start > end) {
+        return { chapterNumbers: [], error: `?섎せ??梨뺥꽣 踰붿쐞?낅땲?? "${token}"` };
+      }
+      for (let chapterNumber = start; chapterNumber <= end; chapterNumber += 1) {
+        selected.add(chapterNumber);
+      }
+    } else {
+      const chapterNumber = Number.parseInt(token, 10);
+      if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) {
+        return { chapterNumbers: [], error: `?섎せ??梨뺥꽣 踰덊샇?낅땲?? "${token}"` };
+      }
+      selected.add(chapterNumber);
+    }
+  }
+
+  const filtered = [...selected]
+    .filter((num) => chapterNumberSet.has(num))
+    .sort((left, right) => left - right);
+
+  if (!filtered.length) {
+    return {
+      chapterNumbers: [],
+      error: `No matching chapters found in configured range. Available: ${chapterNumbers.join(", ")}`,
+    };
+  }
+  return { chapterNumbers: filtered, error: "" };
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readPartialSummaryBundleFromHighlights(highlightsValue) {
+  const base = isPlainObject(highlightsValue) ? highlightsValue : null;
+  const rawState = isPlainObject(base?.[PARTIAL_SUMMARY_ARTIFACT_KEY])
+    ? base[PARTIAL_SUMMARY_ARTIFACT_KEY]
+    : null;
+  const summary = String(rawState?.summary || "").trim();
+  const range = String(rawState?.range || "").trim();
+  const libraryRaw = base?.[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY];
+  const library = normalizeSavedPartialSummaryEntries(libraryRaw);
+  return {
+    summary,
+    range,
+    library,
+  };
+}
+
+function writePartialSummaryBundleToHighlights(
+  highlightsValue,
+  { summary = "", range = "", library = [] } = {}
+) {
+  const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
+  if (!isPlainObject(highlightsValue) && highlightsValue != null) {
+    base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
+  }
+
+  const normalizedSummary = String(summary || "").trim();
+  const normalizedRange = String(range || "").trim();
+  const normalizedLibrary = normalizeSavedPartialSummaryEntries(library);
+
+  if (normalizedSummary) {
+    base[PARTIAL_SUMMARY_ARTIFACT_KEY] = {
+      summary: normalizedSummary,
+      range: normalizedRange,
+      updatedAt: new Date().toISOString(),
+    };
+  } else {
+    delete base[PARTIAL_SUMMARY_ARTIFACT_KEY];
+  }
+
+  if (normalizedLibrary.length > 0) {
+    base[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY] = normalizedLibrary;
+  } else {
+    delete base[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY];
+  }
+
+  return Object.keys(base).length > 0 ? base : null;
+}
+
 function App() {
   const [file, setFile] = useState(null);
   const [extractedText, setExtractedText] = useState("");
@@ -96,7 +559,7 @@ function App() {
   const [isResizingSplit, setIsResizingSplit] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
-  const [showAuth, setShowAuth] = useState(false);
+  const [showAuth, setShowAuth] = useState(shouldOpenAuthOnInitialLoad);
   const [currentPage, setCurrentPage] = useState(1);
   const [visitedPages, setVisitedPages] = useState(() => new Set());
   const [mockExams, setMockExams] = useState([]);
@@ -115,10 +578,24 @@ function App() {
   const [tutorMessages, setTutorMessages] = useState([]);
   const [isTutorLoading, setIsTutorLoading] = useState(false);
   const [tutorError, setTutorError] = useState("");
+  const [isFeedbackDialogOpen, setIsFeedbackDialogOpen] = useState(false);
+  const [feedbackCategory, setFeedbackCategory] = useState("general");
+  const [feedbackInput, setFeedbackInput] = useState("");
+  const [feedbackError, setFeedbackError] = useState("");
+  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
+  const [isManualSyncing, setIsManualSyncing] = useState(false);
   const [isPageSummaryOpen, setIsPageSummaryOpen] = useState(false);
   const [pageSummaryInput, setPageSummaryInput] = useState("");
   const [pageSummaryError, setPageSummaryError] = useState("");
   const [isPageSummaryLoading, setIsPageSummaryLoading] = useState(false);
+  const [partialSummary, setPartialSummary] = useState("");
+  const [partialSummaryRange, setPartialSummaryRange] = useState("");
+  const [savedPartialSummaries, setSavedPartialSummaries] = useState([]);
+  const [isSavedPartialSummaryOpen, setIsSavedPartialSummaryOpen] = useState(false);
+  const [quizChapterSelectionInput, setQuizChapterSelectionInput] = useState("");
+  const [oxChapterSelectionInput, setOxChapterSelectionInput] = useState("");
+  const [flashcardChapterSelectionInput, setFlashcardChapterSelectionInput] = useState("");
+  const [mockExamChapterSelectionInput, setMockExamChapterSelectionInput] = useState("");
   const [isChapterRangeOpen, setIsChapterRangeOpen] = useState(false);
   const [chapterRangeInput, setChapterRangeInput] = useState("");
   const [chapterRangeError, setChapterRangeError] = useState("");
@@ -128,6 +605,9 @@ function App() {
   const backfillInProgressRef = useRef(false);
   const summaryRequestedRef = useRef(false);
   const summaryContextCacheRef = useRef(new Map()); // fileId -> extended summary text
+  const tutorPageTextCacheRef = useRef(new Map()); // docId:page -> { text, ocrUsed }
+  const tutorSectionRangeCacheRef = useRef(new Map()); // docId:section:anchor -> range
+  const chapterScopeTextCacheRef = useRef(new Map()); // scoped key -> text
   const quizAutoRequestedRef = useRef(false);
   const oxAutoRequestedRef = useRef(false);
   const isDraggingRef = useRef(false);
@@ -162,6 +642,9 @@ function App() {
   });
   const [profilePinError, setProfilePinError] = useState("");
   const [premiumSpaceMode, setPremiumSpaceMode] = useState(PREMIUM_SPACE_MODE_PROFILE);
+  const premiumProfileHydratedRef = useRef(false);
+  const premiumProfileSyncSignatureRef = useRef("");
+  const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
 
   const computeFileHash = useCallback(async (file) => {
     const buffer = await file.arrayBuffer();
@@ -230,12 +713,31 @@ function App() {
   }, []);
 
   const closeAuth = useCallback(() => {
+    if (isNativePlatform && !user) return;
     setShowAuth(false);
-  }, []);
+  }, [isNativePlatform, user]);
 
   const openBilling = useCallback(() => {
     setShowPayment(true);
   }, []);
+
+  const handleOpenFeedbackDialog = useCallback(() => {
+    if (!user) {
+      setStatus("\uD53C\uB4DC\uBC31\uC744 \uBCF4\uB0B4\uB824\uBA74 \uB85C\uADF8\uC778\uD574 \uC8FC\uC138\uC694.");
+      openAuth();
+      return;
+    }
+    setFeedbackError("");
+    setIsFeedbackDialogOpen(true);
+  }, [openAuth, user]);
+
+  const handleCloseFeedbackDialog = useCallback(() => {
+    if (isSubmittingFeedback) return;
+    setIsFeedbackDialogOpen(false);
+    setFeedbackCategory("general");
+    setFeedbackInput("");
+    setFeedbackError("");
+  }, [isSubmittingFeedback]);
 
   const activePremiumProfile = useMemo(
     () => premiumProfiles.find((profile) => profile.id === activePremiumProfileId) || null,
@@ -253,6 +755,46 @@ function App() {
     isPremiumTier,
     activePremiumProfileId,
   });
+  const getChapterRangeStorageKey = useCallback(
+    (docId) =>
+      buildChapterRangeStorageKey({
+        userId: user?.id,
+        scopeId: isPremiumTier ? premiumScopeProfileId : "default",
+        docId,
+      }),
+    [isPremiumTier, premiumScopeProfileId, user?.id]
+  );
+  const loadSavedChapterRangeInput = useCallback(
+    (docId) => {
+      if (typeof window === "undefined") return "";
+      const key = getChapterRangeStorageKey(docId);
+      if (!key) return "";
+      try {
+        return String(window.localStorage.getItem(key) || "");
+      } catch {
+        return "";
+      }
+    },
+    [getChapterRangeStorageKey]
+  );
+  const persistChapterRangeInput = useCallback(
+    (docId, value) => {
+      if (typeof window === "undefined") return;
+      const key = getChapterRangeStorageKey(docId);
+      if (!key) return;
+      const normalized = String(value || "").trim();
+      try {
+        if (normalized) {
+          window.localStorage.setItem(key, normalized);
+        } else {
+          window.localStorage.removeItem(key);
+        }
+      } catch {
+        // Ignore storage write errors.
+      }
+    },
+    [getChapterRangeStorageKey]
+  );
 
   const resetActiveDocumentState = useCallback(() => {
     if (pdfUrl) {
@@ -265,6 +807,18 @@ function App() {
     setPreviewText("");
     setPageInfo({ used: 0, total: 0 });
     setSummary("");
+    setPartialSummary("");
+    setPartialSummaryRange("");
+    setSavedPartialSummaries([]);
+    setIsSavedPartialSummaryOpen(false);
+    setQuizChapterSelectionInput("");
+    setOxChapterSelectionInput("");
+    setFlashcardChapterSelectionInput("");
+    setMockExamChapterSelectionInput("");
+    tutorPageTextCacheRef.current.clear();
+    tutorSectionRangeCacheRef.current.clear();
+    chapterScopeTextCacheRef.current.clear();
+    summaryContextCacheRef.current.clear();
     setQuizSets([]);
     setOxItems(null);
     setOxSelections({});
@@ -278,6 +832,10 @@ function App() {
     setMockExamError("");
     setFlashcards([]);
     setArtifacts(null);
+    setIsFeedbackDialogOpen(false);
+    setFeedbackCategory("general");
+    setFeedbackInput("");
+    setFeedbackError("");
   }, [pdfUrl]);
 
   const handleOpenProfilePicker = useCallback(() => {
@@ -319,33 +877,33 @@ function App() {
     setSelectedFolderId("all");
     setSelectedUploadIds([]);
     setPremiumSpaceMode(nextMode);
-    setStatus(
-      nextMode === PREMIUM_SPACE_MODE_SHARED
-        ? "Shared study mode enabled. Study data is now shared across premium members."
-        : "Personal study mode enabled. Study data is now private to your profile."
-    );
+      setStatus(
+        nextMode === PREMIUM_SPACE_MODE_SHARED
+          ? "怨듭쑀 ?숈뒿 紐⑤뱶媛 耳쒖죱?듬땲?? ?숈뒿 ?곗씠?곌? ?꾨━誘몄뾼 硫ㅻ쾭? 怨듭쑀?⑸땲??"
+          : "媛쒖씤 ?숈뒿 紐⑤뱶媛 耳쒖죱?듬땲?? ?숈뒿 ?곗씠?곌? ?꾩옱 ?꾨줈?꾩뿉留???λ맗?덈떎."
+      );
   }, [activePremiumProfileId, isPremiumTier, premiumSpaceMode, resetActiveDocumentState, user]);
 
   const handleSelectPremiumProfile = useCallback(
     (profileId, pinInput) => {
       const selected = premiumProfiles.find((profile) => profile.id === profileId);
       if (!selected) {
-        return { ok: false, message: "Selected profile was not found." };
+        return { ok: false, message: "?좏깮???꾨줈?꾩쓣 李얠쓣 ???놁뒿?덈떎." };
       }
       const inputPin = normalizePremiumProfilePinInput(pinInput);
       if (!inputPin) {
-        return { ok: false, message: "Please enter a 4-digit PIN." };
+        return { ok: false, message: "4?먮━ PIN???낅젰?댁＜?몄슂." };
       }
       const expectedPin = sanitizePremiumProfilePin(selected.pin);
       if (inputPin !== expectedPin) {
-        return { ok: false, message: "Incorrect PIN." };
+        return { ok: false, message: "PIN???щ컮瑜댁? ?딆뒿?덈떎." };
       }
       resetActiveDocumentState();
       setSelectedFolderId("all");
       setSelectedUploadIds([]);
       setActivePremiumProfileId(selected.id);
       setShowPremiumProfilePicker(false);
-      setStatus(`${selected.name} profile selected.`);
+      setStatus(`${selected.name} ?꾨줈?꾩씠 ?좏깮?섏뿀?듬땲??`);
       return { ok: true };
     },
     [premiumProfiles, resetActiveDocumentState]
@@ -355,12 +913,12 @@ function App() {
     (event) => {
       event.preventDefault();
       if (!activePremiumProfileId) {
-        setProfilePinError("No active profile selected.");
+        setProfilePinError("?좏깮???꾨줈?꾩씠 ?놁뒿?덈떎.");
         return;
       }
       const currentProfile = premiumProfiles.find((profile) => profile.id === activePremiumProfileId);
       if (!currentProfile) {
-        setProfilePinError("Selected profile was not found.");
+        setProfilePinError("?좏깮???꾨줈?꾩쓣 李얠쓣 ???놁뒿?덈떎.");
         return;
       }
       const currentPin = normalizePremiumProfilePinInput(profilePinInputs.currentPin);
@@ -368,19 +926,19 @@ function App() {
       const confirmPin = normalizePremiumProfilePinInput(profilePinInputs.confirmPin);
 
       if (!currentPin || !nextPin || !confirmPin) {
-        setProfilePinError("All PIN fields must be 4 digits.");
+        setProfilePinError("紐⑤뱺 PIN? 4?먮━ ?レ옄?ъ빞 ?⑸땲??");
         return;
       }
       if (currentPin !== sanitizePremiumProfilePin(currentProfile.pin)) {
-        setProfilePinError("Current PIN does not match.");
+        setProfilePinError("?꾩옱 PIN???쇱튂?섏? ?딆뒿?덈떎.");
         return;
       }
       if (nextPin !== confirmPin) {
-        setProfilePinError("New PIN and confirmation PIN do not match.");
+        setProfilePinError("??PIN怨??뺤씤 PIN???쇱튂?섏? ?딆뒿?덈떎.");
         return;
       }
       if (nextPin === currentPin) {
-        setProfilePinError("New PIN must be different from current PIN.");
+        setProfilePinError("??PIN? ?꾩옱 PIN怨??щ씪???⑸땲??");
         return;
       }
 
@@ -392,7 +950,7 @@ function App() {
       setShowProfilePinDialog(false);
       setProfilePinInputs({ currentPin: "", nextPin: "", confirmPin: "" });
       setProfilePinError("");
-      setStatus("Profile PIN has been updated.");
+      setStatus("?꾨줈??PIN??蹂寃쎈릺?덉뒿?덈떎.");
     },
     [activePremiumProfileId, premiumProfiles, profilePinInputs]
   );
@@ -418,29 +976,70 @@ function App() {
   );
 
   useEffect(() => {
+    premiumProfileHydratedRef.current = false;
     if (!user?.id || !isPremiumTier) {
       setPremiumProfiles([]);
       setActivePremiumProfileId(null);
       setShowPremiumProfilePicker(false);
       setPremiumSpaceMode(PREMIUM_SPACE_MODE_PROFILE);
+      premiumProfileSyncSignatureRef.current = "";
       return;
     }
-    if (typeof window === "undefined") return;
+    const remoteState = getPremiumProfileStateFromUser(user);
+    const remoteProfiles = normalizePremiumProfiles(remoteState?.profiles);
+    const hasRemoteProfiles = remoteProfiles.length > 0;
+    const remoteActiveProfileId = String(remoteState?.activeProfileId || "").trim();
+    const remoteSpaceModeRaw = String(remoteState?.spaceMode || "").trim();
+    const remoteSpaceMode =
+      remoteSpaceModeRaw === PREMIUM_SPACE_MODE_SHARED
+        ? PREMIUM_SPACE_MODE_SHARED
+        : remoteSpaceModeRaw === PREMIUM_SPACE_MODE_PROFILE
+          ? PREMIUM_SPACE_MODE_PROFILE
+          : "";
 
-    const profilesKey = getPremiumProfilesStorageKey(user.id);
+    let loadedProfiles = hasRemoteProfiles ? remoteProfiles : [];
+    let storedActiveProfileId = "";
+    let normalizedSpaceMode = remoteSpaceMode || PREMIUM_SPACE_MODE_PROFILE;
 
-    let loadedProfiles = [];
-    try {
-      const raw = window.localStorage.getItem(profilesKey);
-      loadedProfiles = normalizePremiumProfiles(raw ? JSON.parse(raw) : []);
-    } catch {
-      loadedProfiles = [];
+    if (typeof window !== "undefined") {
+      const profilesKey = getPremiumProfilesStorageKey(user.id);
+      const activeProfileKey = getPremiumActiveProfileStorageKey(user.id);
+      const spaceModeKey = getPremiumSpaceModeStorageKey(user.id);
+
+      let localProfiles = [];
+      try {
+        const raw = window.localStorage.getItem(profilesKey);
+        localProfiles = normalizePremiumProfiles(raw ? JSON.parse(raw) : []);
+      } catch {
+        localProfiles = [];
+      }
+      const shouldPreferLocalProfiles =
+        localProfiles.length > loadedProfiles.length &&
+        localProfiles.some((localProfile) => !loadedProfiles.some((remote) => remote.id === localProfile.id));
+
+      if ((!loadedProfiles.length && localProfiles.length) || shouldPreferLocalProfiles) {
+        loadedProfiles = localProfiles;
+      }
+
+      storedActiveProfileId = String(window.localStorage.getItem(activeProfileKey) || "").trim();
+
+      const storedSpaceMode = String(window.localStorage.getItem(spaceModeKey) || "").trim();
+      const localSpaceMode =
+        storedSpaceMode === PREMIUM_SPACE_MODE_SHARED
+          ? PREMIUM_SPACE_MODE_SHARED
+          : PREMIUM_SPACE_MODE_PROFILE;
+      if (!remoteSpaceMode) {
+        normalizedSpaceMode = localSpaceMode;
+      }
+      if (storedSpaceMode && storedSpaceMode !== localSpaceMode) {
+        window.localStorage.removeItem(spaceModeKey);
+      }
     }
 
     if (loadedProfiles.length === 0) {
       const ownerName = sanitizePremiumProfileName(
-        user?.user_metadata?.name || user?.email?.split("@")?.[0] || "Owner",
-        "Owner"
+        user?.user_metadata?.name || user?.email?.split("@")?.[0] || "공유 공간",
+        "공유 공간"
       );
       loadedProfiles = [
         {
@@ -451,34 +1050,58 @@ function App() {
           pin: DEFAULT_PREMIUM_PROFILE_PIN,
         },
       ];
-      window.localStorage.setItem(profilesKey, JSON.stringify(loadedProfiles));
     }
 
-    const activeProfileKey = getPremiumActiveProfileStorageKey(user.id);
-    const storedActiveProfileId = String(window.localStorage.getItem(activeProfileKey) || "").trim();
-    const hasStoredActiveProfile = loadedProfiles.some((profile) => profile.id === storedActiveProfileId);
-    const spaceModeKey = getPremiumSpaceModeStorageKey(user.id);
-    const storedSpaceMode = String(window.localStorage.getItem(spaceModeKey) || "").trim();
-    const normalizedSpaceMode =
-      storedSpaceMode === PREMIUM_SPACE_MODE_SHARED
-        ? PREMIUM_SPACE_MODE_SHARED
-        : PREMIUM_SPACE_MODE_PROFILE;
-    if (storedSpaceMode && storedSpaceMode !== normalizedSpaceMode) {
-      window.localStorage.removeItem(spaceModeKey);
-    }
+    const preferredActiveProfileId = remoteActiveProfileId || storedActiveProfileId;
+    const hasPreferredActiveProfile = loadedProfiles.some(
+      (profile) => profile.id === preferredActiveProfileId
+    );
+    const resolvedActiveProfileId = hasPreferredActiveProfile ? preferredActiveProfileId : "";
 
     setPremiumProfiles(loadedProfiles);
     setPremiumSpaceMode(normalizedSpaceMode);
-    if (hasStoredActiveProfile) {
-      setActivePremiumProfileId(storedActiveProfileId);
+    if (resolvedActiveProfileId) {
+      setActivePremiumProfileId(resolvedActiveProfileId);
       setShowPremiumProfilePicker(false);
     } else {
-      if (storedActiveProfileId) {
-        window.localStorage.removeItem(activeProfileKey);
-      }
       setActivePremiumProfileId(null);
       setShowPremiumProfilePicker(true);
     }
+
+    if (typeof window !== "undefined") {
+      const profilesKey = getPremiumProfilesStorageKey(user.id);
+      const activeProfileKey = getPremiumActiveProfileStorageKey(user.id);
+      const spaceModeKey = getPremiumSpaceModeStorageKey(user.id);
+      try {
+        window.localStorage.setItem(profilesKey, JSON.stringify(loadedProfiles));
+        if (resolvedActiveProfileId) {
+          window.localStorage.setItem(activeProfileKey, resolvedActiveProfileId);
+        } else {
+          window.localStorage.removeItem(activeProfileKey);
+        }
+        window.localStorage.setItem(spaceModeKey, normalizedSpaceMode);
+      } catch {
+        // Ignore local cache write errors.
+      }
+    }
+
+    const syncSignature = JSON.stringify({
+      profiles: loadedProfiles,
+      activeProfileId: resolvedActiveProfileId || null,
+      spaceMode: normalizedSpaceMode,
+    });
+    const remoteResolvedActiveProfileId = remoteProfiles.some(
+      (profile) => profile.id === remoteActiveProfileId
+    )
+      ? remoteActiveProfileId
+      : null;
+    const remoteSignature = JSON.stringify({
+      profiles: remoteProfiles,
+      activeProfileId: remoteResolvedActiveProfileId,
+      spaceMode: remoteSpaceMode || PREMIUM_SPACE_MODE_PROFILE,
+    });
+    premiumProfileSyncSignatureRef.current = syncSignature === remoteSignature ? syncSignature : "";
+    premiumProfileHydratedRef.current = true;
   }, [isPremiumTier, user]);
 
   useEffect(() => {
@@ -507,6 +1130,54 @@ function App() {
         : PREMIUM_SPACE_MODE_PROFILE;
     window.localStorage.setItem(key, normalizedMode);
   }, [isPremiumTier, premiumSpaceMode, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id || !isPremiumTier || !premiumProfileHydratedRef.current) return;
+    const normalizedProfiles = normalizePremiumProfiles(premiumProfiles);
+    if (!normalizedProfiles.length) return;
+    const normalizedMode =
+      premiumSpaceMode === PREMIUM_SPACE_MODE_SHARED
+        ? PREMIUM_SPACE_MODE_SHARED
+        : PREMIUM_SPACE_MODE_PROFILE;
+    const resolvedActiveProfileId = normalizedProfiles.some(
+      (profile) => profile.id === activePremiumProfileId
+    )
+      ? activePremiumProfileId
+      : null;
+    const syncSignature = JSON.stringify({
+      profiles: normalizedProfiles,
+      activeProfileId: resolvedActiveProfileId,
+      spaceMode: normalizedMode,
+    });
+    if (syncSignature === premiumProfileSyncSignatureRef.current) return;
+
+    premiumProfileSyncSignatureRef.current = syncSignature;
+    let cancelled = false;
+    (async () => {
+      try {
+        await savePremiumProfileState({
+          profiles: normalizedProfiles,
+          activeProfileId: resolvedActiveProfileId,
+          spaceMode: normalizedMode,
+        });
+      } catch (err) {
+        if (!cancelled) {
+          premiumProfileSyncSignatureRef.current = "";
+          // eslint-disable-next-line no-console
+          console.warn("Failed to sync premium profile state", err);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activePremiumProfileId,
+    isPremiumTier,
+    premiumProfiles,
+    premiumSpaceMode,
+    user?.id,
+  ]);
 
   useEffect(() => {
     if (user) {
@@ -576,7 +1247,7 @@ function App() {
         });
       } catch (err) {
         if (!isLatestRequest()) return;
-        setError(`Failed to load folders: ${err.message}`);
+        setError(`?대뜑瑜?遺덈윭?ㅼ? 紐삵뻽?듬땲?? ${err.message}`);
       }
     },
     [user, supabase, loadingTier, isPremiumTier, premiumOwnerProfileId, premiumScopeProfileId]
@@ -585,21 +1256,21 @@ function App() {
   const handleCreateFolder = useCallback(
     async (name) => {
       if (!isFolderFeatureEnabled) {
-        setError("Folder feature is available only on Pro or Premium tier.");
+        setError("?대뜑 湲곕뒫? Pro ?먮뒗 Premium ?붽툑?쒖뿉?쒕쭔 ?ъ슜?????덉뒿?덈떎.");
         return;
       }
       if (!user) {
-        setError("Please sign in first.");
+        setError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
         return;
       }
       const trimmed = (name || "").trim();
       if (!trimmed) return;
       if (isPremiumTier && !premiumScopeProfileId) {
-        setError("Select a premium profile before creating folders.");
+        setError("?대뜑瑜?留뚮뱾湲??꾩뿉 ?꾨━誘몄뾼 ?꾨줈?꾩쓣 ?좏깮?댁＜?몄슂.");
         return;
       }
       if (folders.some((f) => f.name === trimmed)) {
-        setStatus("A folder with the same name already exists.");
+        setStatus("媛숈? ?대쫫???대뜑媛 ?대? ?덉뒿?덈떎.");
         return;
       }
       try {
@@ -624,9 +1295,9 @@ function App() {
         }
         setSelectedFolderId("all");
         setSelectedUploadIds([]);
-        setStatus("Folder created.");
+        setStatus("?대뜑瑜??앹꽦?덉뒿?덈떎.");
       } catch (err) {
-        setError(`Failed to create folder: ${err.message}`);
+        setError(`?대뜑 ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       }
     },
     [isFolderFeatureEnabled, user, folders, isPremiumTier, premiumScopeProfileId, premiumOwnerProfileId]
@@ -637,12 +1308,12 @@ function App() {
       if (!isFolderFeatureEnabled) return;
       if (!folderId || folderId === "all") return;
       if (!user) {
-        setError("Please sign in first.");
+        setError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
         return;
       }
       const hasFiles = uploadedFiles.some((u) => u.folderId === folderId);
       if (hasFiles) {
-        setError("Move or delete files in this folder before deleting it.");
+        setError("???대뜑瑜???젣?섍린 ?꾩뿉 ?뚯씪???대룞?섍굅????젣?댁＜?몄슂.");
         return;
       }
       try {
@@ -652,7 +1323,7 @@ function App() {
           setSelectedFolderId("all");
         }
       } catch (err) {
-        setError(`Failed to delete folder: ${err.message}`);
+        setError(`?대뜑 ??젣???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       }
     },
     [isFolderFeatureEnabled, uploadedFiles, selectedFolderId, user]
@@ -680,13 +1351,13 @@ function App() {
   const handleDeleteUpload = useCallback(
     async (upload) => {
       if (!user) {
-        setError("Please sign in first.");
+        setError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
         return;
       }
       const uploadId = upload?.id || null;
       const storagePath = upload?.path || upload?.remotePath || null;
       if (!uploadId && !storagePath) {
-        setError("Upload identifier is missing.");
+        setError("?낅줈???앸퀎?먭? ?놁뒿?덈떎.");
         return;
       }
       const before = uploadedFiles;
@@ -698,14 +1369,17 @@ function App() {
           bucket: upload.bucket,
           path: storagePath,
         });
-        setStatus("Upload deleted.");
+        if (uploadId) {
+          persistChapterRangeInput(uploadId, "");
+        }
+        setStatus("?낅줈?쒕? ??젣?덉뒿?덈떎.");
         await loadUploadsRef.current?.();
       } catch (err) {
         setUploadedFiles(before);
-        setError(`Failed to delete upload: ${err.message}`);
+        setError(`?낅줈????젣???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       }
     },
-    [user, uploadedFiles]
+    [persistChapterRangeInput, uploadedFiles, user]
   );
 
   const handleMoveUploadsToFolder = useCallback(
@@ -713,13 +1387,13 @@ function App() {
       if (!isFolderFeatureEnabled) return;
       if (!uploadIds || uploadIds.length === 0) return;
       if (!user) {
-        setError("Please sign in first.");
+        setError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
         return;
       }
       const normalizedIds = uploadIds.map((id) => id?.toString()).filter(Boolean);
       const target = targetFolderId && targetFolderId !== "all" ? targetFolderId.toString() : null;
       if (isPremiumTier && target && !folders.some((folder) => folder.id?.toString() === target)) {
-        setError("Target folder does not exist in the current premium profile scope.");
+        setError("?꾩옱 ?꾨━誘몄뾼 ?꾨줈??踰붿쐞??????대뜑媛 ?놁뒿?덈떎.");
         return;
       }
       const before = uploadedFiles;
@@ -762,12 +1436,12 @@ function App() {
           );
         }
         setSelectedUploadIds([]);
-        setStatus("Selected uploads moved.");
+        setStatus("?좏깮???낅줈?쒕? ?대룞?덉뒿?덈떎.");
         // Sync with server to keep list and folder counts in sync with DB.
         await loadUploadsRef.current?.();
       } catch (err) {
         setUploadedFiles(before);
-        setError(`Failed to move uploads: ${err.message}`);
+        setError(`?낅줈???대룞???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       }
     },
     [isFolderFeatureEnabled, user, uploadedFiles, isPremiumTier, folders]
@@ -784,14 +1458,14 @@ function App() {
 
   const tutorNotice = useMemo(() => {
     if (!file || !selectedFileId) {
-      return "Open a PDF to use tutor chat."
+      return "?쒗꽣 梨꾪똿???ъ슜?섎젮硫?PDF瑜?癒쇱? ?댁뼱二쇱꽭??"
     }
     if (isLoadingText) {
-      return "PDF text extraction is still running. Please wait."
+      return "PDF ?띿뒪??異붿텧???꾩쭅 吏꾪뻾 以묒엯?덈떎. ?좎떆留?湲곕떎?ㅼ＜?몄슂."
     }
     const trimmed = (extractedText || "").trim();
     if (!trimmed) {
-      return "No extracted text found from this PDF."
+      return "??PDF?먯꽌 異붿텧???띿뒪?멸? ?놁뒿?덈떎."
     }
     return "";
   }, [extractedText, file, isLoadingText, selectedFileId]);
@@ -808,13 +1482,16 @@ function App() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    if (params.get("auth") === "1") {
-      setShowAuth(true);
-    }
     if (params.get("pg_token") || params.get("kakaoPay") || params.get("nicePay") || params.get("np_token")) {
       setShowPayment(true);
     }
   }, []);
+
+  useEffect(() => {
+    if (!user && isNativePlatform) {
+      setShowAuth(true);
+    }
+  }, [isNativePlatform, user]);
 
   useEffect(() => {
     if (!isMockExamMenuOpen) return;
@@ -850,7 +1527,7 @@ function App() {
         const list = await fetchMockExams({ userId: user.id, docId });
         setMockExams(list);
       } catch (err) {
-        setMockExamError(`Failed to load mock exams: ${err.message}`);
+        setMockExamError(`紐⑥쓽怨좎궗 紐⑸줉??遺덈윭?ㅼ? 紐삵뻽?듬땲?? ${err.message}`);
       } finally {
         setIsLoadingMockExams(false);
       }
@@ -868,7 +1545,7 @@ function App() {
         const list = await listFlashcards({ userId: user.id, deckId });
         setFlashcards(list);
       } catch (err) {
-        setError(`Failed to load flashcards: ${err.message}`);
+        setError(`?뚮옒?쒖뭅?쒕? 遺덈윭?ㅼ? 紐삵뻽?듬땲?? ${err.message}`);
       } finally {
         setIsLoadingFlashcards(false);
       }
@@ -929,7 +1606,7 @@ function App() {
         );
       } catch (err) {
         if (!isLatestRequest()) return;
-        setError(`Failed to load uploads: ${err.message}`);
+        setError(`?낅줈??紐⑸줉??遺덈윭?ㅼ? 紐삵뻽?듬땲?? ${err.message}`);
       }
     },
     [user, supabase, loadingTier, isPremiumTier, premiumOwnerProfileId, premiumScopeProfileId]
@@ -937,6 +1614,45 @@ function App() {
   useEffect(() => {
     loadUploadsRef.current = loadUploads;
   }, [loadUploads]);
+
+  const handleManualSync = useCallback(async () => {
+    if (isManualSyncing) return;
+    if (!user) {
+      setStatus("濡쒓렇?????덈줈怨좎묠???ъ슜?????덉뒿?덈떎.");
+      openAuth();
+      return;
+    }
+    if (loadingTier) {
+      setStatus("怨꾩젙 ?뺣낫瑜?遺덈윭?ㅻ뒗 以묒엯?덈떎. ?좎떆 ???ㅼ떆 ?쒕룄?댁＜?몄슂.");
+      return;
+    }
+
+    setIsManualSyncing(true);
+    setError("");
+    setStatus("?쒕쾭? ?숆린??以?..");
+    try {
+      await Promise.all([loadFolders(), loadUploads()]);
+      if (selectedFileId) {
+        await Promise.all([loadMockExams(selectedFileId), loadFlashcards(selectedFileId)]);
+      }
+      setStatus("?덈줈怨좎묠 ?꾨즺. 理쒖떊 ?곹깭濡??숆린?뷀뻽?듬땲??");
+    } catch (err) {
+      setError(`?덈줈怨좎묠???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+      setStatus("");
+    } finally {
+      setIsManualSyncing(false);
+    }
+  }, [
+    isManualSyncing,
+    loadFlashcards,
+    loadFolders,
+    loadMockExams,
+    loadUploads,
+    loadingTier,
+    openAuth,
+    selectedFileId,
+    user,
+  ]);
 
   const loadArtifacts = useCallback(
     async (docId) => {
@@ -952,7 +1668,12 @@ function App() {
           ox: data?.ox_json || null,
           highlights: data?.highlights_json || null,
         };
+        const partialBundle = readPartialSummaryBundleFromHighlights(mapped.highlights);
         setArtifacts(mapped);
+        setPartialSummary(partialBundle.summary);
+        setPartialSummaryRange(partialBundle.range);
+        setSavedPartialSummaries(partialBundle.library);
+        setIsSavedPartialSummaryOpen(false);
         if (mapped.summary) {
           setSummary(mapped.summary);
           summaryRequestedRef.current = true;
@@ -1014,10 +1735,13 @@ function App() {
     if (!supabase) return;
     setIsSigningOut(true);
     setError("");
-    setStatus("Signing out...");
+    setStatus("濡쒓렇?꾩썐 以?..");
     try {
       setShowPremiumProfilePicker(false);
       setShowProfilePinDialog(false);
+      setIsFeedbackDialogOpen(false);
+      setFeedbackInput("");
+      setFeedbackError("");
       setProfilePinInputs({ currentPin: "", nextPin: "", confirmPin: "" });
       setProfilePinError("");
       setActivePremiumProfileId(null);
@@ -1025,9 +1749,9 @@ function App() {
       setPremiumSpaceMode(PREMIUM_SPACE_MODE_PROFILE);
       await authSignOut();
       await refreshSession();
-      setStatus("signed out.");
+      setStatus("濡쒓렇?꾩썐?섏뿀?듬땲??");
     } catch (err) {
-      setError(`sign out failed: ${err.message}`);
+      setError(`濡쒓렇?꾩썐???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       setStatus("");
     } finally {
       setIsSigningOut(false);
@@ -1080,7 +1804,7 @@ function App() {
   const ensureFileForItem = useCallback(
     async (item) => {
       if (item.file) return item;
-      if (!item.path && !item.remotePath) throw new Error("Missing storage path for this PDF item.");
+      if (!item.path && !item.remotePath) throw new Error("??PDF ??ぉ???ㅽ넗由ъ? 寃쎈줈媛 ?놁뒿?덈떎.");
       const storagePath = item.path || item.remotePath;
 
       // Reuse downloaded file/blob from memory cache when possible
@@ -1092,13 +1816,65 @@ function App() {
       }
 
       const bucket = item.bucket || import.meta.env.VITE_SUPABASE_BUCKET;
-      const signed = await getSignedStorageUrl({ bucket, path: storagePath, expiresIn: 60 * 60 * 24 });
-      const res = await fetch(signed);
-      if (!res.ok) throw new Error("Failed to download PDF from storage.");
-      const blob = await res.blob();
-      const headerType = String(res.headers.get("content-type") || "").toLowerCase();
+      const pathCandidates = buildStoragePathCandidates(storagePath);
+      let signed = "";
+      let resolvedStoragePath = storagePath;
+      let lastFetchStatus = null;
+      let lastErr = null;
+      let blob = null;
+      let headerType = "";
+
+      for (const candidatePath of pathCandidates) {
+        try {
+          const signedUrl = await getSignedStorageUrl({
+            bucket,
+            path: candidatePath,
+            expiresIn: 60 * 60 * 24,
+          });
+          const response = await fetch(signedUrl);
+          if (!response.ok) {
+            lastFetchStatus = response.status;
+            continue;
+          }
+          signed = signedUrl;
+          blob = await response.blob();
+          headerType = String(response.headers.get("content-type") || "").toLowerCase();
+          resolvedStoragePath = candidatePath;
+          break;
+        } catch (err) {
+          lastErr = err;
+        }
+      }
+
+      // Fallback to authenticated storage download when signed URL fetch fails.
+      if (!blob && supabase) {
+        for (const candidatePath of pathCandidates) {
+          try {
+            const { data, error } = await supabase.storage.from(bucket).download(candidatePath);
+            if (error || !data) {
+              if (error) lastErr = error;
+              continue;
+            }
+            blob = data;
+            headerType = String(data.type || "").toLowerCase();
+            signed = "";
+            resolvedStoragePath = candidatePath;
+            break;
+          } catch (err) {
+            lastErr = err;
+          }
+        }
+      }
+
+      if (!blob) {
+        if (lastFetchStatus) {
+          throw new Error(`?ㅽ넗由ъ??먯꽌 PDF瑜??대젮諛쏆? 紐삵뻽?듬땲??(?곹깭: ${lastFetchStatus}).`);
+        }
+        throw new Error(lastErr?.message || "?ㅽ넗由ъ??먯꽌 PDF瑜??대젮諛쏆? 紐삵뻽?듬땲??");
+      }
+
       if (headerType.includes("text/html")) {
-        throw new Error("Received HTML instead of PDF. The signed URL may be invalid or expired.");
+        throw new Error("PDF ???HTML???묐떟?섏뿀?듬땲?? ?쒕챸 URL???섎せ?섏뿀嫄곕굹 留뚮즺?섏뿀?????덉뒿?덈떎.");
       }
       const name = item.name || item.file?.name || "document.pdf";
       const blobType = String(blob.type || "").toLowerCase();
@@ -1108,14 +1884,23 @@ function App() {
           : blob.type || "application/pdf";
       const fileObj = new File([blob], name, { type: resolvedType });
       const thumb = await generatePdfThumbnail(fileObj);
-      const enriched = { ...item, file: fileObj, thumbnail: item.thumbnail || thumb, remoteUrl: signed, path: storagePath, bucket };
-      downloadCacheRef.current.set(storagePath, {
+      const enriched = {
+        ...item,
         file: fileObj,
         thumbnail: item.thumbnail || thumb,
-        remoteUrl: signed,
-        path: storagePath,
+        remoteUrl: signed || null,
+        path: resolvedStoragePath,
         bucket,
-      });
+      };
+      const cachePayload = {
+        file: fileObj,
+        thumbnail: item.thumbnail || thumb,
+        remoteUrl: signed || null,
+        path: resolvedStoragePath,
+        bucket,
+      };
+      downloadCacheRef.current.set(storagePath, cachePayload);
+      downloadCacheRef.current.set(resolvedStoragePath, cachePayload);
       setUploadedFiles((prev) => prev.map((p) => (p.id === item.id ? enriched : p)));
       return enriched;
     },
@@ -1142,7 +1927,7 @@ function App() {
         try {
           resolvedItem = await ensureFileForItem(resolvedItem);
         } catch (err) {
-          setError(`Failed to load PDF file: ${err.message}`);
+          setError(`PDF ?뚯씪??遺덈윭?ㅼ? 紐삵뻽?듬땲?? ${err.message}`);
           return;
         }
       }
@@ -1151,6 +1936,7 @@ function App() {
       const targetFile = normalizePdfFile(resolvedItem.file);
       if (!(targetFile instanceof File)) return;
       const nextDocId = resolvedItem.id;
+      const savedChapterRangeInput = loadSavedChapterRangeInput(nextDocId);
 
       if (targetFile !== resolvedItem.file && nextDocId) {
         setUploadedFiles((prev) =>
@@ -1183,12 +1969,23 @@ function App() {
       quizAutoRequestedRef.current = false;
       setError("");
       setSummary("");
+      setPartialSummary("");
+      setPartialSummaryRange("");
+      setSavedPartialSummaries([]);
+      setIsSavedPartialSummaryOpen(false);
+      setQuizChapterSelectionInput("");
+      setOxChapterSelectionInput("");
+      setFlashcardChapterSelectionInput("");
+      setMockExamChapterSelectionInput("");
+      tutorPageTextCacheRef.current.clear();
+      tutorSectionRangeCacheRef.current.clear();
+      chapterScopeTextCacheRef.current.clear();
       setArtifacts(null);
       const extractStart =
         typeof performance !== "undefined" && typeof performance.now === "function"
           ? performance.now()
           : Date.now();
-      setStatus("Extracting PDF text and preview...");
+      setStatus("PDF ?띿뒪?몄? 誘몃━蹂닿린瑜?異붿텧?섎뒗 以?..");
       setIsLoadingText(true);
       setThumbnailUrl(null);
         setMockExams([]);
@@ -1210,7 +2007,7 @@ function App() {
       setPageSummaryError("");
       setIsPageSummaryLoading(false);
       setIsChapterRangeOpen(false);
-      setChapterRangeInput("");
+      setChapterRangeInput(savedChapterRangeInput);
       setChapterRangeError("");
       oxAutoRequestedRef.current = false;
 
@@ -1233,7 +2030,7 @@ function App() {
             ? performance.now()
             : Date.now();
         const elapsedSeconds = Math.max(0, (extractEnd - extractStart) / 1000);
-        setStatus(`extraction complete: ${pagesUsed}/${totalPages} pages, ${elapsedSeconds.toFixed(1)}s`);
+        setStatus(`異붿텧 ?꾨즺: ${pagesUsed}/${totalPages}?섏씠吏, ${elapsedSeconds.toFixed(1)}s`);
         setError("");
         const [, , loaded] = await Promise.all([
           loadMockExams(nextDocId),
@@ -1241,10 +2038,10 @@ function App() {
           loadArtifacts(nextDocId),
         ]);
         if (loaded?.summary) {
-          setStatus("Saved summary loaded.");
+          setStatus("??λ맂 ?붿빟??遺덈윭?붿뒿?덈떎.");
         }
       } catch (err) {
-        setError(`Failed to process PDF: ${err.message}`);
+        setError(`PDF 泥섎━???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
         setExtractedText("");
         setPreviewText("");
         setPageInfo({ used: 0, total: 0 });
@@ -1255,6 +2052,7 @@ function App() {
     [
       currentPage,
       ensureFileForItem,
+      loadSavedChapterRangeInput,
       loadArtifacts,
       loadFlashcards,
       loadMockExams,
@@ -1279,7 +2077,7 @@ function App() {
       const activeFolderId = targetFolderId && targetFolderId !== "all" ? targetFolderId.toString() : null;
       const activeProfileScopeId = isPremiumTier ? premiumScopeProfileId : null;
       if (isPremiumTier && !activeProfileScopeId) {
-        setError("Select a premium profile before uploading files.");
+        setError("?뚯씪 ?낅줈???꾩뿉 ?꾨━誘몄뾼 ?꾨줈?꾩쓣 ?좏깮?댁＜?몄슂.");
         fileInput.value = "";
         return;
       }
@@ -1290,7 +2088,7 @@ function App() {
         return fileType !== "application/pdf" && !fileName.endsWith(".pdf");
       });
       if (invalidTypeFile) {
-        setError(`Only PDF files are allowed. (${invalidTypeFile.name})`);
+        setError(`PDF ?뚯씪留??낅줈?쒗븷 ???덉뒿?덈떎. (${invalidTypeFile.name})`);
         fileInput.value = "";
         return;
       }
@@ -1305,7 +2103,7 @@ function App() {
       }
       const nextCount = uploadedFiles.length + files.length;
       if (limits.maxUploads !== Infinity && nextCount > limits.maxUploads) {
-        setError(`Upload limit exceeded. Maximum allowed files: ${limits.maxUploads}.`);
+        setError(`?낅줈???쒕룄瑜?珥덇낵?덉뒿?덈떎. ?낅줈??媛??理쒕? 媛쒖닔: ${limits.maxUploads}.`);
         fileInput.value = "";
         return;
       }
@@ -1313,7 +2111,10 @@ function App() {
       const existingByHash = new Map();
       uploadedFiles.forEach((item) => {
         if (!item?.hash) return;
-        if (!item.remotePath && !item.path) return;
+        const storagePath = item.remotePath || item.path;
+        if (!storagePath) return;
+        // Avoid reusing legacy encoded/non-ASCII paths that can fail signed URL fetch.
+        if (!isSafeStoragePathForReuse(storagePath)) return;
         existingByHash.set(item.hash, item);
       });
 
@@ -1337,10 +2138,13 @@ function App() {
 
       const withUploads = await Promise.all(
         withThumbs.map(async (item) => {
-          if (!supabase || !user) return item;
+          if (!supabase || !user) {
+            return { ...item, uploadError: "?대씪?곕뱶 ?낅줈?쒕? ?ъ슜?????놁뒿?덈떎. ?ㅼ떆 濡쒓렇?명빐二쇱꽭??" };
+          }
 
           // Reuse existing remote upload by hash to avoid duplicate storage writes.
           const existing = item.hash ? existingByHash.get(item.hash) : null;
+          let uploaded = null;
           try {
             if (existing) {
               return {
@@ -1360,7 +2164,7 @@ function App() {
               };
             }
 
-            const uploaded = await uploadPdfToStorage(user.id, item.file);
+            uploaded = await uploadPdfToStorage(user.id, item.file);
             const storedFileName =
               isPremiumTier && activeProfileScopeId
                 ? encodePremiumScopeValue(item.name, activeProfileScopeId)
@@ -1393,22 +2197,53 @@ function App() {
               ownerProfileId,
             };
           } catch (err) {
-            setError(`Failed to upload file: ${err.message}`);
-            return { ...item, uploadError: err.message };
+            // Roll back orphaned storage files when metadata insert fails.
+            if (uploaded?.bucket && uploaded?.path) {
+              try {
+                await supabase.storage.from(uploaded.bucket).remove([uploaded.path]);
+              } catch {
+                // Ignore rollback failures.
+              }
+            }
+            return { ...item, uploadError: err?.message || "?낅줈?쒖뿉 ?ㅽ뙣?덉뒿?덈떎." };
           }
         })
       );
 
-      setUploadedFiles((prev) => {
-        const merged = [...prev, ...withUploads];
-        return merged;
-      });
+      const successfulUploads = withUploads.filter((item) => !item?.uploadError);
+      const failedUploads = withUploads.filter((item) => item?.uploadError);
+
+      if (failedUploads.length > 0) {
+        const failedNames = failedUploads
+          .slice(0, 2)
+          .map((item) => item?.name)
+          .filter(Boolean)
+          .join(", ");
+        const suffix = failedUploads.length > 2 ? "..." : "";
+        setError(
+          `업로드에 실패했습니다: ${failedUploads.length}개 파일${failedNames ? ` (${failedNames}${suffix})` : ""}.`
+        );
+      }
+
+      if (successfulUploads.length > 0) {
+        setUploadedFiles((prev) => {
+          const nextById = new Map(prev.map((entry) => [entry.id?.toString(), entry]));
+          successfulUploads.forEach((entry) => {
+            const key = entry.id?.toString();
+            if (!key) return;
+            nextById.set(key, { ...(nextById.get(key) || {}), ...entry });
+          });
+          return Array.from(nextById.values());
+        });
+      }
+
       fileInput.value = "";
-      const firstReadyUpload = withUploads.find((item) => item?.file && !item?.uploadError);
+      const firstReadyUpload = successfulUploads.find((item) => item?.file);
       if (firstReadyUpload) {
         await processSelectedFile(firstReadyUpload);
+        await loadUploadsRef.current?.();
       } else {
-        setStatus("Upload finished, but no selectable file was ready.");
+        setStatus("??λ맂 ?뚯씪???놁뒿?덈떎. ?낅줈???ㅻ쪟 硫붿떆吏瑜??뺤씤?댁＜?몄슂.");
       }
     },
     [
@@ -1450,6 +2285,17 @@ function App() {
     setPreviewText("");
     setPageInfo({ used: 0, total: 0 });
     setSummary("");
+    setPartialSummary("");
+    setPartialSummaryRange("");
+    setSavedPartialSummaries([]);
+    setIsSavedPartialSummaryOpen(false);
+    setQuizChapterSelectionInput("");
+    setOxChapterSelectionInput("");
+    setFlashcardChapterSelectionInput("");
+    setMockExamChapterSelectionInput("");
+    tutorPageTextCacheRef.current.clear();
+    tutorSectionRangeCacheRef.current.clear();
+    chapterScopeTextCacheRef.current.clear();
       setMockExams([]);
       setMockExamStatus("");
       setMockExamError("");
@@ -1464,6 +2310,10 @@ function App() {
     setTutorMessages([]);
     setTutorError("");
     setIsTutorLoading(false);
+    setIsFeedbackDialogOpen(false);
+    setFeedbackCategory("general");
+    setFeedbackInput("");
+    setFeedbackError("");
     setIsPageSummaryOpen(false);
     setPageSummaryInput("");
     setPageSummaryError("");
@@ -1479,7 +2329,7 @@ function App() {
     oxAutoRequestedRef.current = false;
     setArtifacts(null);
     resetQuizState();
-    setStatus("Back to upload list.");
+    setStatus("?낅줈??紐⑸줉?쇰줈 ?뚯븘?붿뒿?덈떎.");
     setSelectedUploadIds([]);
   }, [currentPage, pdfUrl, savePageProgressSnapshot, selectedFileId, visitedPages]);
 
@@ -1494,7 +2344,7 @@ function App() {
         const ensured = await ensureFileForItemRef.current(item);
         await processSelectedFileRef.current(ensured);
       } catch (err) {
-        setError(`Failed to open selected file: ${err.message}`);
+        setError(`?좏깮???뚯씪???щ뒗 ???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       }
     },
     [ensureFileForItemRef, processSelectedFileRef]
@@ -1520,10 +2370,22 @@ function App() {
         });
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.warn("Failed to save artifacts", err);
+        console.warn("??μ뿉 ?ㅽ뙣?덉뒿?덈떎: artifacts", err);
       }
     },
     [artifacts, selectedFileId, user]
+  );
+
+  const persistPartialSummaryBundle = useCallback(
+    ({ summary = "", range = "", library = savedPartialSummaries } = {}) => {
+      const nextHighlights = writePartialSummaryBundleToHighlights(artifacts?.highlights, {
+        summary,
+        range,
+        library,
+      });
+      persistArtifacts({ highlights: nextHighlights });
+    },
+    [artifacts?.highlights, persistArtifacts, savedPartialSummaries]
   );
 
   useEffect(() => {
@@ -1667,6 +2529,29 @@ function App() {
     setIsResizingSplit(true);
   }, []);
 
+  const handlePageChange = useCallback(
+    (nextPage) => {
+      const parsed = Number.parseInt(nextPage, 10);
+      if (!Number.isFinite(parsed)) return;
+      const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
+      const bounded = totalPages > 0 ? Math.min(Math.max(parsed, 1), totalPages) : Math.max(parsed, 1);
+      setCurrentPage((prev) => (prev === bounded ? prev : bounded));
+    },
+    [pageInfo?.total, pageInfo?.used]
+  );
+
+  useEffect(() => {
+    if (!selectedFileId) return;
+    const normalizedPage = Number.parseInt(currentPage, 10);
+    if (!Number.isFinite(normalizedPage) || normalizedPage <= 0) return;
+    setVisitedPages((prev) => {
+      if (prev.has(normalizedPage)) return prev;
+      const next = new Set(prev);
+      next.add(normalizedPage);
+      return next;
+    });
+  }, [currentPage, selectedFileId]);
+
   useEffect(() => {
     if (!selectedFileId) return;
     savePageProgressSnapshot({
@@ -1677,40 +2562,50 @@ function App() {
   }, [currentPage, savePageProgressSnapshot, selectedFileId, visitedPages]);
 
   const splitStyle = {
-    flexBasis: `${splitPercent}%`,
-    flexShrink: 0,
-    minWidth: "25%",
-    maxWidth: "75%",
+    "--split-basis": `${splitPercent}%`,
   };
 
   const requestQuestions = async ({ force = false } = {}) => {
     if (isLoadingQuiz && !force) return;
     if (!file) {
-      setError("Open a PDF first.");
+      setError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
       return;
     }
     if (isFreeTier && quizSets.length > 0) {
-      setError("Free tier can generate only one quiz set.");
+      setError("臾대즺 ?뚮옖?먯꽌???댁쫰 ?명듃瑜?1媛쒕쭔 ?앹꽦?????덉뒿?덈떎.");
       return;
     }
     if (!force && hasReached("maxQuiz")) {
-      setError("Quiz generation limit reached for your tier.");
+      setError("?꾩옱 ?붽툑?쒖쓽 ?댁쫰 ?앹꽦 ?쒕룄???꾨떖?덉뒿?덈떎.");
       return;
     }
+    const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
 
-    if (!extractedText) {
-      setError("No extracted text found. Please run PDF extraction first.");
+    if (!extractedText && !chapterSelectionRaw) {
+      setError("異붿텧???띿뒪?멸? ?놁뒿?덈떎. 癒쇱? PDF ?띿뒪??異붿텧???ㅽ뻾?댁＜?몄슂.");
       return;
     }
 
     setIsLoadingQuiz(true);
     setError("");
-    setStatus("Generating quiz set...");
+    setStatus("?댁쫰 ?명듃 ?앹꽦 以?..");
 
     try {
+      let quizSourceText = extractedText;
+      let scopeLabel = "";
+      if (chapterSelectionRaw) {
+        const scoped = await extractTextForChapterSelection({
+          featureLabel: "?댁쫰",
+          chapterSelectionInput: chapterSelectionRaw,
+        });
+        quizSourceText = scoped.text;
+        scopeLabel = scoped.scopeLabel;
+        setStatus(`?댁쫰 ?명듃 ?앹꽦 以?(${scopeLabel})...`);
+      }
+
       const { generateQuiz } = await getOpenAiService();
       const quiz = normalizeQuizPayload(
-        await generateQuiz(extractedText, {
+        await generateQuiz(quizSourceText, {
           multipleChoiceCount: quizMix.multipleChoice,
           shortAnswerCount: quizMix.shortAnswer,
         })
@@ -1728,11 +2623,11 @@ function App() {
         shortAnswerResult: {},
       };
       setQuizSets((prev) => [...prev, newSet]);
-      setStatus("Quiz set generated.");
+      setStatus(scopeLabel ? `?댁쫰 ?명듃媛 ?앹꽦?섏뿀?듬땲??(${scopeLabel}).` : "?댁쫰 ?명듃媛 ?앹꽦?섏뿀?듬땲??");
       setUsageCounts((prev) => ({ ...prev, quiz: prev.quiz + 1 }));
       persistArtifacts({ quiz: trimmedQuiz });
     } catch (err) {
-      setError(`Failed to generate quiz set: ${err.message}`);
+      setError(`?댁쫰 ?명듃 ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
     } finally {
       setIsLoadingQuiz(false);
     }
@@ -1741,24 +2636,25 @@ function App() {
   const regenerateQuiz = async () => {
     if (isLoadingQuiz) return;
     if (!file) {
-      setError("Open a PDF first.");
+      setError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
       return;
     }
     if (isFreeTier) {
-      setError("Free tier cannot regenerate quiz sets.");
+      setError("臾대즺 ?뚮옖?먯꽌???댁쫰 ?명듃瑜??ㅼ떆 ?앹꽦?????놁뒿?덈떎.");
       return;
     }
     if (hasReached("maxQuiz")) {
-      setError("Quiz generation limit reached for your tier.");
+      setError("?꾩옱 ?붽툑?쒖쓽 ?댁쫰 ?앹꽦 ?쒕룄???꾨떖?덉뒿?덈떎.");
       return;
     }
-    if (!extractedText) {
-      setError("No extracted text found. Please run PDF extraction first.");
+    const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
+    if (!extractedText && !chapterSelectionRaw) {
+      setError("異붿텧???띿뒪?멸? ?놁뒿?덈떎. 癒쇱? PDF ?띿뒪??異붿텧???ㅽ뻾?댁＜?몄슂.");
       return;
     }
     quizAutoRequestedRef.current = true;
     resetQuizState();
-    setStatus("Resetting quiz set and regenerating...");
+    setStatus("?댁쫰 ?명듃瑜?珥덇린?뷀븯怨??ㅼ떆 ?앹꽦?섎뒗 以?..");
     setError("");
     await persistArtifacts({ quiz: null });
     await requestQuestions({ force: true });
@@ -1837,7 +2733,7 @@ function App() {
         expanded.push({
           id: `${rangeIdBase}-part-${sectionIndex}`,
           chapterNumber: normalizedChapterNumber,
-          chapterTitle: `Chapter ${normalizedChapterNumber} (${pageStart}-${pageEnd}p)`,
+          chapterTitle: `梨뺥꽣 ${normalizedChapterNumber} (${pageStart}-${pageEnd}p)`,
           pagesPerChunk,
           pageStart,
           pageEnd,
@@ -1849,23 +2745,142 @@ function App() {
     return expanded;
   };
 
+  const extractTextForChapterSelection = useCallback(
+    async ({ featureLabel, chapterSelectionInput }) => {
+      if (!file) {
+        throw new Error("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+      }
+
+      let chapterConfigRaw = String(chapterRangeInput || "").trim();
+      if (!chapterConfigRaw) {
+        const totalPages = pageInfo.total || pageInfo.used || 0;
+        let autoChapterInput = "";
+        try {
+          setStatus(`${featureLabel}: 梨뺥꽣 踰붿쐞瑜??먮룞?쇰줈 李얜뒗 以?..`);
+          const detected = await extractChapterRangesFromToc(file, {
+            maxScanPages: totalPages ? Math.min(totalPages, 30) : 24,
+          });
+          const chapters = Array.isArray(detected?.chapters) ? detected.chapters : [];
+          autoChapterInput = chapters
+            .map((chapter, index) => {
+              const start = Number.parseInt(chapter?.pageStart, 10);
+              const end = Number.parseInt(chapter?.pageEnd, 10);
+              if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end < start) return "";
+              return `${index + 1}:${start}-${end}`;
+            })
+            .filter(Boolean)
+            .join("\n");
+
+          if (autoChapterInput) {
+            const limit = totalPages || Number(detected?.totalPages) || 0;
+            const parsedAuto = parseChapterRangeSelectionInput(autoChapterInput, limit);
+            if (!parsedAuto.error && parsedAuto.chapters.length > 0) {
+              setChapterRangeInput(autoChapterInput);
+              setChapterRangeError("");
+              const targetDocId = selectedFileId || file?.name || "";
+              if (targetDocId) {
+                persistChapterRangeInput(targetDocId, autoChapterInput);
+              }
+            } else {
+              autoChapterInput = "";
+            }
+          }
+        } catch {
+          autoChapterInput = "";
+        }
+
+        if (!autoChapterInput) {
+          throw new Error("癒쇱? 梨뺥꽣 踰붿쐞瑜??ㅼ젙?댁＜?몄슂. ?붿빟 ??뿉??梨뺥꽣 踰붿쐞 ?ㅼ젙 ???ㅼ떆 ?쒕룄?댁＜?몄슂.");
+        }
+        chapterConfigRaw = autoChapterInput;
+      }
+
+      if (!chapterConfigRaw) {
+        throw new Error("癒쇱? 梨뺥꽣 踰붿쐞瑜??ㅼ젙?댁＜?몄슂.");
+      }
+
+      const totalPages = pageInfo.total || pageInfo.used || 0;
+      const parsedChapters = parseChapterRangeSelectionInput(chapterConfigRaw, totalPages);
+      if (parsedChapters.error) {
+        setChapterRangeError(parsedChapters.error);
+        throw new Error(parsedChapters.error);
+      }
+      if (!parsedChapters.chapters.length) {
+        throw new Error("?ㅼ젙??梨뺥꽣 踰붿쐞瑜?李얠? 紐삵뻽?듬땲??");
+      }
+
+      const selected = parseChapterNumberSelectionInput(chapterSelectionInput, parsedChapters.chapters);
+      if (selected.error) {
+        throw new Error(selected.error);
+      }
+      const selectedNumbers = selected.chapterNumbers;
+      const selectedNumberSet = new Set(selectedNumbers);
+      const targetChapters = parsedChapters.chapters.filter((chapter) =>
+        selectedNumberSet.has(Number.parseInt(chapter?.chapterNumber, 10))
+      );
+      if (!targetChapters.length) {
+        throw new Error("?좏깮??梨뺥꽣???대떦?섎뒗 踰붿쐞媛 ?놁뒿?덈떎.");
+      }
+
+      const normalizedSelection = selectedNumbers.join(",");
+      const scopeLabel = `chapter ${normalizedSelection}`;
+      const cacheKey = `${selectedFileId || file?.name || "doc"}::${chapterConfigRaw}::${normalizedSelection}`;
+      const cached = chapterScopeTextCacheRef.current.get(cacheKey);
+      if (cached) {
+        return { text: cached, scopeLabel };
+      }
+
+      setStatus(`${featureLabel}: 梨뺥꽣 踰붿쐞 ?띿뒪??異붿텧 以?..`);
+      const chapterExtraction = await extractPdfTextByRanges(file, targetChapters, {
+        maxLengthPerRange: 14000,
+        useOcr: true,
+        ocrLang: "kor+eng",
+        onOcrProgress: (message) => setStatus(message),
+      });
+      const scopedText = (chapterExtraction?.chapters || [])
+        .map((chapter) => {
+          const chapterNumber = Number.parseInt(chapter?.chapterNumber, 10);
+          const title = chapterNumber > 0 ? `梨뺥꽣 ${chapterNumber}` : "梨뺥꽣";
+          const text = String(chapter?.text || "").trim();
+          if (!text) return "";
+          return `## ${title}\n${text}`;
+        })
+        .filter(Boolean)
+        .join("\n\n");
+      if (!scopedText.trim()) {
+        throw new Error("?좏깮??梨뺥꽣 踰붿쐞?먯꽌 ?띿뒪?몃? 異붿텧?섏? 紐삵뻽?듬땲??");
+      }
+
+      chapterScopeTextCacheRef.current.set(cacheKey, scopedText);
+      return { text: scopedText, scopeLabel };
+    },
+    [
+      chapterRangeInput,
+      file,
+      pageInfo.total,
+      pageInfo.used,
+      persistChapterRangeInput,
+      selectedFileId,
+    ]
+  );
+
   const requestSummary = async ({ force = false } = {}) => {
     if (isLoadingSummary || (!force && summaryRequestedRef.current)) return;
     const hasManualChapterConfig = Boolean(String(chapterRangeInput || "").trim());
     if (!file) {
-      setError("Open a PDF first.");
+      setError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
       return;
     }
     if (isFreeTier && summary) {
-      setError("Free tier can generate only one summary.");
+      setError("臾대즺 ?뚮옖?먯꽌???붿빟??1?뚮쭔 ?앹꽦?????덉뒿?덈떎.");
       return;
     }
     if (hasReached("maxSummary")) {
-      setError("Summary generation limit reached for your tier.");
+      setError("?꾩옱 ?붽툑?쒖쓽 ?붿빟 ?앹꽦 ?쒕룄???꾨떖?덉뒿?덈떎.");
       return;
     }
     if (!extractedText && !hasManualChapterConfig) {
-      setError("No extracted text found. Enter chapter ranges or run PDF extraction first.");
+      setError("異붿텧???띿뒪?멸? ?놁뒿?덈떎. 梨뺥꽣 踰붿쐞瑜??낅젰?섍굅??PDF ?띿뒪??異붿텧??癒쇱? ?ㅽ뻾?댁＜?몄슂.");
       return;
     }
 
@@ -1873,7 +2888,7 @@ function App() {
     setIsLoadingSummary(true);
     setError("");
     setChapterRangeError("");
-    setStatus("Generating summary...");
+    setStatus("?붿빟 ?앹꽦 以?..");
     try {
       const chapterConfigRaw = String(chapterRangeInput || "").trim();
       let customChapterSections = null;
@@ -1886,12 +2901,12 @@ function App() {
         }
         const adaptiveChapterRanges = buildAdaptiveChapterSummaryRanges(parsedChapters.chapters);
         if (!adaptiveChapterRanges.length) {
-          throw new Error("No valid chapter ranges remain after adaptive splitting.");
+          throw new Error("?곸쓳??遺꾪븷 ???좏슚??梨뺥꽣 踰붿쐞媛 ?⑥? ?딆븯?듬땲??");
         }
         const pagesPerChunkById = new Map(
           adaptiveChapterRanges.map((range) => [String(range.id), Number(range.pagesPerChunk) || 1])
         );
-        setStatus("Extracting text for configured chapter ranges...");
+        setStatus("?ㅼ젙??梨뺥꽣 踰붿쐞???띿뒪?몃? 異붿텧?섎뒗 以?..");
         const chapterExtraction = await extractPdfTextByRanges(file, adaptiveChapterRanges, {
           maxLengthPerRange: 14000,
           useOcr: true,
@@ -1912,7 +2927,7 @@ function App() {
           }))
           .filter((chapter) => String(chapter.text || "").trim().length > 0);
         if (!customChapterSections.length) {
-          throw new Error("No text extracted from configured chapter ranges.");
+          throw new Error("?ㅼ젙??梨뺥꽣 踰붿쐞?먯꽌 ?띿뒪?몃? 異붿텧?섏? 紐삵뻽?듬땲??");
         }
       }
 
@@ -1927,7 +2942,7 @@ function App() {
           summarySourceText = cachedSummaryText;
         } else if (file && summaryCacheKey) {
           try {
-            setStatus("Extending extraction scope for better summary quality...");
+            setStatus("?붿빟 ?덉쭏 ?μ긽???꾪빐 異붿텧 踰붿쐞瑜??뺤옣?섎뒗 以?..");
             const extended = await extractPdfText(file, 80, 50000, { useOcr: false });
             const extendedText = String(extended?.text || "").trim();
             if (extendedText.length > summarySourceText.length) {
@@ -1940,21 +2955,21 @@ function App() {
         }
       }
 
-      setStatus("Summarizing content with AI...");
+      setStatus("AI濡??댁슜???붿빟?섎뒗 以?..");
       const { generateSummary } = await getOpenAiService();
       const summarized = customChapterSections
         ? await generateSummary("", {
-            scope: "custom chapter range",
+            scope: "?ъ슜??吏??梨뺥꽣 踰붿쐞",
             chapterized: true,
             chapterSections: customChapterSections,
           })
         : await generateSummary(summarySourceText);
       setSummary(summarized);
       setUsageCounts((prev) => ({ ...prev, summary: prev.summary + 1 }));
-      setStatus("selected page summary created.");
+      setStatus("?붿빟???앹꽦?섏뿀?듬땲??");
       persistArtifacts({ summary: summarized });
     } catch (err) {
-      setError(`selected page summary failed: ${err.message}`);
+      setError(`?붿빟 ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       setStatus("");
       summaryRequestedRef.current = false;
       setStatus("");
@@ -1966,40 +2981,39 @@ function App() {
   const regenerateSummary = async () => {
     if (isLoadingSummary) return;
     if (!file) {
-      setError("Open a PDF first.");
-      return;
-    }
-    if (isFreeTier) {
-      setError("Free tier cannot regenerate summaries.");
-      return;
-    }
-    if (hasReached("maxSummary")) {
-      setError("Summary generation limit reached for your tier.");
-      return;
-    }
-    if (!extractedText) {
-      setError("No extracted text found. Please run PDF extraction first.");
+      setError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
       return;
     }
     summaryRequestedRef.current = false;
     setSummary("");
-    setStatus("Resetting summary and regenerating...");
+    setPartialSummary("");
+    setPartialSummaryRange("");
     setError("");
-    await persistArtifacts({ summary: null, highlights: null });
+    setStatus("?붿빟??珥덇린?뷀븯怨??ㅼ떆 ?앹꽦?섎뒗 以?..");
+    try {
+      const nextHighlights = writePartialSummaryBundleToHighlights(artifacts?.highlights, {
+        summary: "",
+        range: "",
+        library: savedPartialSummaries,
+      });
+      await persistArtifacts({ summary: null, highlights: nextHighlights });
+    } catch {
+      // Keep generation flow even if artifact cleanup fails.
+    }
     await requestSummary({ force: true });
   };
 
   const handleAutoDetectChapterRanges = useCallback(async () => {
     if (isDetectingChapterRanges || isLoadingSummary || isLoadingText) return;
     if (!file) {
-      setChapterRangeError("Open a PDF first.");
+      setChapterRangeError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
       return;
     }
 
     setIsDetectingChapterRanges(true);
     setChapterRangeError("");
     setError("");
-    setStatus("목차에서 챕터 범위를 자동 추출 중...");
+    setStatus("紐⑹감?먯꽌 梨뺥꽣 踰붿쐞瑜??먮룞 異붿텧 以?..");
     try {
       const totalPages = Number(pageInfo.total || pageInfo.used || 0);
       const detected = await extractChapterRangesFromToc(file, {
@@ -2009,7 +3023,7 @@ function App() {
       if (chapters.length < 2) {
         throw new Error(
           detected?.error ||
-            "목차에서 챕터 범위를 찾지 못했습니다. 수동 입력(예: 1:1-12)으로 설정해주세요."
+            "紐⑹감?먯꽌 梨뺥꽣 踰붿쐞瑜?李얠? 紐삵뻽?듬땲?? ?섎룞 ?낅젰(?? 1:1-12)?쇰줈 ?ㅼ젙?댁＜?몄슂."
         );
       }
 
@@ -2024,7 +3038,7 @@ function App() {
         .join("\n");
 
       if (!chapterInput) {
-        throw new Error("목차 추출 결과가 비어 있습니다.");
+        throw new Error("紐⑹감 異붿텧 寃곌낵媛 鍮꾩뼱 ?덉뒿?덈떎.");
       }
 
       const limit = totalPages || Number(detected?.totalPages) || 0;
@@ -2034,11 +3048,11 @@ function App() {
       setChapterRangeInput(chapterInput);
       setChapterRangeError("");
       const sourceLabel =
-        detected?.source === "outline" ? "PDF 개요(북마크)" : "앞쪽 목차 페이지";
-      setStatus(`${sourceLabel}에서 챕터 범위 ${parsed.chapters.length}개를 자동 설정했습니다.`);
+        detected?.source === "outline" ? "PDF 媛쒖슂(遺곷쭏??" : "?욎そ 紐⑹감 ?섏씠吏";
+      setStatus(`${sourceLabel}?먯꽌 梨뺥꽣 踰붿쐞 ${parsed.chapters.length}媛쒕? ?먮룞 ?ㅼ젙?덉뒿?덈떎.`);
       setIsChapterRangeOpen(true);
     } catch (err) {
-      setChapterRangeError(err?.message || "목차 자동 추출에 실패했습니다.");
+      setChapterRangeError(err?.message || "紐⑹감 ?먮룞 異붿텧???ㅽ뙣?덉뒿?덈떎.");
       setStatus("");
     } finally {
       setIsDetectingChapterRanges(false);
@@ -2055,7 +3069,7 @@ function App() {
   const handleConfirmChapterRanges = useCallback(() => {
     const raw = String(chapterRangeInput || "").trim();
     if (!raw) {
-      setChapterRangeError("Enter chapter ranges first.");
+      setChapterRangeError("癒쇱? 梨뺥꽣 踰붿쐞瑜??낅젰?섏꽭??");
       return;
     }
     const totalPages = pageInfo.total || pageInfo.used || 0;
@@ -2064,32 +3078,33 @@ function App() {
       setChapterRangeError(parsed.error);
       return;
     }
+    const targetDocId = selectedFileId || file?.name || "";
+    if (!targetDocId) {
+      setChapterRangeError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+      return;
+    }
+    persistChapterRangeInput(targetDocId, raw);
     setChapterRangeError("");
-    setStatus(`Chapter ranges saved (${parsed.chapters.length} sections).`);
+    setStatus(`梨뺥꽣 踰붿쐞瑜???ν뻽?듬땲??(${parsed.chapters.length} sections).`);
     setIsChapterRangeOpen(false);
   }, [
     chapterRangeInput,
+    file?.name,
     pageInfo.total,
     pageInfo.used,
+    persistChapterRangeInput,
+    selectedFileId,
   ]);
 
   const handleSummaryByPages = useCallback(async () => {
     if (isPageSummaryLoading || isLoadingSummary) return;
     if (!file || !selectedFileId) {
-      setPageSummaryError("Open a PDF first.");
-      return;
-    }
-    if (isFreeTier && summary) {
-      setPageSummaryError("Free tier can generate only one summary.");
-      return;
-    }
-    if (hasReached("maxSummary")) {
-      setPageSummaryError("Summary generation limit reached for your tier.");
+      setPageSummaryError("PDF瑜?癒쇱? ?댁뼱二쇱꽭??");
       return;
     }
     const totalPages = pageInfo.total || pageInfo.used || 0;
     if (!totalPages) {
-      setPageSummaryError("Total page count is unavailable. Please reload the PDF.");
+      setPageSummaryError("珥??섏씠吏 ?섎? ?뺤씤?????놁뒿?덈떎. PDF瑜??ㅼ떆 ?댁뼱二쇱꽭??");
       return;
     }
     const parsed = parsePageSelectionInput(pageSummaryInput, totalPages);
@@ -2098,64 +3113,186 @@ function App() {
       return;
     }
 
+    const selectionLabel = String(pageSummaryInput || "").replace(/\s+/g, "");
+    setIsPageSummaryOpen(false);
     setPageSummaryError("");
     setError("");
-    setStatus("Generating summary for selected pages...");
+    setStatus("遺遺꾩슂?쎌쓣 ?앹꽦?섍퀬 ?덉뒿?덈떎...");
     setIsPageSummaryLoading(true);
-    summaryRequestedRef.current = true;
     try {
-      const extracted = await extractPdfTextFromPages(file, parsed.pages, 12000, {
+      const extracted = await extractPdfTextFromPages(file, parsed.pages, 18000, {
         useOcr: true,
         ocrLang: "kor+eng",
         onOcrProgress: (message) => setStatus(message),
       });
       if (!extracted?.text) {
-        const suffix = extracted?.ocrUsed ? " OCR was attempted but no readable text was found." : "";
-        throw new Error(`No text extracted from selected pages.${suffix}`);
+        const suffix = extracted?.ocrUsed ? " OCR源뚯? ?쒕룄?덉?留??쎌쓣 ???덈뒗 ?띿뒪?멸? ?놁뒿?덈떎." : "";
+        throw new Error(`?좏깮???섏씠吏?먯꽌 ?띿뒪?몃? 異붿텧?섏? 紐삵뻽?듬땲??${suffix}`);
       }
       if (extracted?.ocrUsed) {
-        setStatus("OCR complete. Generating summary...");
+        setStatus("OCR???꾨즺?섏뿀?듬땲?? 遺遺꾩슂?쎌쓣 ?앹꽦?섍퀬 ?덉뒿?덈떎...");
       }
-      setStatus("Generating selected-page summary...");
+      setStatus("?좏깮 踰붿쐞 遺遺꾩슂???앹꽦 以?..");
       const { generateSummary } = await getOpenAiService();
       const summarized = await generateSummary(extracted.text, {
-            scope: "selected pages",
+        scope: "선택 범위에서 추출한 텍스트",
         chapterized: false,
       });
-      setSummary(summarized);
-      setUsageCounts((prev) => ({ ...prev, summary: prev.summary + 1 }));
-      setStatus("selected page summary created.");
-      persistArtifacts({ summary: summarized });
+      setPartialSummary(summarized);
+      setPartialSummaryRange(selectionLabel);
+      persistPartialSummaryBundle({
+        summary: summarized,
+        range: selectionLabel,
+        library: savedPartialSummaries,
+      });
+      setStatus("遺遺꾩슂?쎌씠 ?앹꽦?섏뿀?듬땲??");
     } catch (err) {
-      setError(`selected page summary failed: ${err.message}`);
+      setPageSummaryError(`遺遺꾩슂???앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+      setError(`遺遺꾩슂???앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       setStatus("");
-      summaryRequestedRef.current = false;
     } finally {
       setIsPageSummaryLoading(false);
     }
   }, [
     file,
     getOpenAiService,
-    hasReached,
-    isFreeTier,
     isLoadingSummary,
     isPageSummaryLoading,
     pageInfo.total,
     pageInfo.used,
     pageSummaryInput,
-    persistArtifacts,
+    persistPartialSummaryBundle,
+    savedPartialSummaries,
     selectedFileId,
-    summary,
   ]);
+
+  const handleSaveCurrentPartialSummary = useCallback(() => {
+    const docId = selectedFileId;
+    const summaryText = String(partialSummary || "").trim();
+    if (!docId) {
+      setError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+      return;
+    }
+    if (!summaryText) {
+      setError("??ν븷 遺遺꾩슂?쎌씠 ?놁뒿?덈떎.");
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    const newItem = {
+      id: createPremiumProfileId(),
+      name: formatPartialSummaryDefaultName(nowIso),
+      summary: summaryText,
+      range: String(partialSummaryRange || "").trim(),
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+    const next = normalizeSavedPartialSummaryEntries([
+      newItem,
+      ...(Array.isArray(savedPartialSummaries) ? savedPartialSummaries : []),
+    ]);
+    setSavedPartialSummaries(next);
+    persistPartialSummaryBundle({
+      summary: summaryText,
+      range: String(partialSummaryRange || "").trim(),
+      library: next,
+    });
+    setStatus("遺遺꾩슂?쎌씠 ??λ릺?덉뒿?덈떎.");
+  }, [
+    partialSummary,
+    partialSummaryRange,
+    persistPartialSummaryBundle,
+    savedPartialSummaries,
+    selectedFileId,
+  ]);
+
+  const handleLoadSavedPartialSummary = useCallback(
+    (itemId) => {
+      const found = (savedPartialSummaries || []).find((item) => item.id === itemId);
+      if (!found) {
+        setError("??λ맂 遺遺꾩슂?쎌쓣 李얠쓣 ???놁뒿?덈떎.");
+        return;
+      }
+      setPartialSummary(String(found.summary || "").trim());
+      setPartialSummaryRange(String(found.range || "").trim());
+      persistPartialSummaryBundle({
+        summary: String(found.summary || "").trim(),
+        range: String(found.range || "").trim(),
+        library: savedPartialSummaries,
+      });
+      setIsSavedPartialSummaryOpen(false);
+      setStatus(`??λ맂 遺遺꾩슂?쎌쓣 遺덈윭?붿뒿?덈떎. (${found.name})`);
+    },
+    [persistPartialSummaryBundle, savedPartialSummaries]
+  );
+
+  const handleRenameSavedPartialSummary = useCallback(
+    (itemId, nextName) => {
+      const nowIso = new Date().toISOString();
+      const next = (Array.isArray(savedPartialSummaries) ? savedPartialSummaries : []).map((item) =>
+        item.id === itemId
+          ? {
+              ...item,
+              name: String(nextName || ""),
+              updatedAt: nowIso,
+            }
+          : item
+      );
+      setSavedPartialSummaries(next);
+      persistPartialSummaryBundle({
+        summary: partialSummary,
+        range: partialSummaryRange,
+        library: next,
+      });
+    },
+    [partialSummary, partialSummaryRange, persistPartialSummaryBundle, savedPartialSummaries]
+  );
+
+  const handleNormalizeSavedPartialSummaryName = useCallback(
+    (itemId) => {
+      const next = (Array.isArray(savedPartialSummaries) ? savedPartialSummaries : []).map((item) => {
+        if (item.id !== itemId) return item;
+        const fallback = formatPartialSummaryDefaultName(item.createdAt || new Date().toISOString());
+        const normalizedName = String(item.name || "").trim() || fallback;
+        return {
+          ...item,
+          name: normalizedName,
+        };
+      });
+      setSavedPartialSummaries(next);
+      persistPartialSummaryBundle({
+        summary: partialSummary,
+        range: partialSummaryRange,
+        library: next,
+      });
+    },
+    [partialSummary, partialSummaryRange, persistPartialSummaryBundle, savedPartialSummaries]
+  );
+
+  const handleDeleteSavedPartialSummary = useCallback(
+    (itemId) => {
+      const next = (Array.isArray(savedPartialSummaries) ? savedPartialSummaries : []).filter(
+        (item) => item.id !== itemId
+      );
+      setSavedPartialSummaries(next);
+      persistPartialSummaryBundle({
+        summary: partialSummary,
+        range: partialSummaryRange,
+        library: next,
+      });
+      setStatus("??λ맂 遺遺꾩슂?쎌쓣 ??젣?덉뒿?덈떎.");
+    },
+    [partialSummary, partialSummaryRange, persistPartialSummaryBundle, savedPartialSummaries]
+  );
 
   const handleExportSummaryPdf = useCallback(async () => {
     if (isExportingSummary) return;
     if (!summary) {
-      setError("No summary to export. Generate a summary first.");
+      setError("?대낫???붿빟???놁뒿?덈떎. 癒쇱? ?붿빟???앹꽦?댁＜?몄슂.");
       return;
     }
     if (!summaryRef.current) {
-      setError("Summary container is missing, cannot export PDF.");
+      setError("?붿빟 ?곸뿭??李얠쓣 ???놁뼱 PDF濡??대낫?????놁뒿?덈떎.");
       return;
     }
     setIsExportingSummary(true);
@@ -2170,11 +3307,11 @@ function App() {
         filename: `${baseName}-summary.pdf`,
         margin: 0,
         pageSelector: ".summary-export-page",
-        background: "#0f172a",
+        background: "#ffffff",
       });
-      setStatus("summary PDF export complete.");
+      setStatus("?붿빟 PDF ?대낫?닿린媛 ?꾨즺?섏뿀?듬땲??");
     } catch (err) {
-      setError(`summary PDF export failed: ${err.message}`);
+      setError(`?붿빟 PDF ?대낫?닿린???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       setStatus("");
     } finally {
       setIsExportingSummary(false);
@@ -2184,30 +3321,43 @@ function App() {
   const requestOxQuiz = async ({ auto = false, force = false } = {}) => {
     if (isLoadingOx && !force) return;
     if (!file) {
-      setError("Open a PDF first.");
+      setError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
       return;
     }
     if (!force && hasReached("maxOx")) {
-      setError("O/X generation limit reached for your tier.");
+      setError("?꾩옱 ?붽툑?쒖쓽 O/X ?앹꽦 ?쒕룄???꾨떖?덉뒿?덈떎.");
       return;
     }
-    if (!extractedText) {
-      setError("No extracted text found. Please run PDF extraction first.");
+    const chapterSelectionRaw = String(oxChapterSelectionInput || "").trim();
+    if (!extractedText && !chapterSelectionRaw) {
+      setError("異붿텧???띿뒪?멸? ?놁뒿?덈떎. 癒쇱? PDF ?띿뒪??異붿텧???ㅽ뻾?댁＜?몄슂.");
       return;
     }
     if (auto) oxAutoRequestedRef.current = true;
     setIsLoadingOx(true);
     setError("");
-    setStatus("Generating O/X questions...");
+    setStatus("O/X 臾몄젣 ?앹꽦 以?..");
     try {
+      let oxSourceText = extractedText;
+      let scopeLabel = "";
+      if (chapterSelectionRaw) {
+        const scoped = await extractTextForChapterSelection({
+          featureLabel: "O/X",
+          chapterSelectionInput: chapterSelectionRaw,
+        });
+        oxSourceText = scoped.text;
+        scopeLabel = scoped.scopeLabel;
+        setStatus(`O/X 臾몄젣 ?앹꽦 以?(${scopeLabel})...`);
+      }
+
       const { generateOxQuiz } = await getOpenAiService();
-      const ox = await generateOxQuiz(extractedText);
+      const ox = await generateOxQuiz(oxSourceText);
       const items = Array.isArray(ox?.items) ? ox.items : [];
 
       if (ox?.debug || items.length === 0) {
         setOxItems([]);
         setStatus("");
-        setError("O/X generation returned no valid items.");
+        setError("?좏슚??O/X 臾몄젣媛 ?앹꽦?섏? ?딆븯?듬땲??");
         if (ox?.fallback && import.meta.env.DEV) {
           // Keep fallback payload visible in dev tools for debugging.
           // eslint-disable-next-line no-console
@@ -2219,11 +3369,11 @@ function App() {
       setOxItems(items);
       setOxSelections({});
       setOxExplanationOpen({});
-      setStatus("O/X questions generated.");
+      setStatus(scopeLabel ? `O/X 臾몄젣媛 ?앹꽦?섏뿀?듬땲??(${scopeLabel}).` : "O/X 臾몄젣媛 ?앹꽦?섏뿀?듬땲??");
       setUsageCounts((prev) => ({ ...prev, ox: prev.ox + 1 }));
       persistArtifacts({ ox });
     } catch (err) {
-      setError(`Failed to generate O/X questions: ${err.message}`);
+      setError(`O/X 臾몄젣 ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
     } finally {
       setIsLoadingOx(false);
     }
@@ -2232,21 +3382,22 @@ function App() {
   const regenerateOxQuiz = async () => {
     if (isLoadingOx) return;
     if (!file) {
-      setError("Open a PDF first.");
+      setError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
       return;
     }
     if (hasReached("maxOx")) {
-      setError("O/X generation limit reached for your tier.");
+      setError("?꾩옱 ?붽툑?쒖쓽 O/X ?앹꽦 ?쒕룄???꾨떖?덉뒿?덈떎.");
       return;
     }
-    if (!extractedText) {
-      setError("No extracted text found. Please run PDF extraction first.");
+    const chapterSelectionRaw = String(oxChapterSelectionInput || "").trim();
+    if (!extractedText && !chapterSelectionRaw) {
+      setError("異붿텧???띿뒪?멸? ?놁뒿?덈떎. 癒쇱? PDF ?띿뒪??異붿텧???ㅽ뻾?댁＜?몄슂.");
       return;
     }
     oxAutoRequestedRef.current = true;
     setOxItems(null);
       setOxSelections({});
-    setStatus("Resetting O/X and regenerating...");
+    setStatus("O/X瑜?珥덇린?뷀븯怨??ㅼ떆 ?앹꽦?섎뒗 以?..");
     setError("");
     await persistArtifacts({ ox: null });
     await requestOxQuiz({ auto: false, force: true });
@@ -2255,12 +3406,12 @@ function App() {
   const handleAddFlashcard = useCallback(
     async (front, back, hint) => {
       if (!user) {
-        setFlashcardError("Please sign in first.");
+        setFlashcardError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
         return;
       }
       const deckId = selectedFileId || "default";
       setFlashcardError("");
-      setFlashcardStatus("Saving flashcard...");
+      setFlashcardStatus("?뚮옒?쒖뭅?????以?..");
       try {
         const saved = await addFlashcard({
           userId: user.id,
@@ -2270,9 +3421,9 @@ function App() {
           hint,
         });
         setFlashcards((prev) => [saved, ...prev]);
-        setFlashcardStatus("flashcard saved.");
+        setFlashcardStatus("?뚮옒?쒖뭅?쒓? ??λ릺?덉뒿?덈떎.");
       } catch (err) {
-        setFlashcardError(`flashcard save failed: ${err.message}`);
+        setFlashcardError(`?뚮옒?쒖뭅????μ뿉 ?ㅽ뙣?덉뒿?덈떎: ${err.message}`);
         setFlashcardStatus("");
       }
     },
@@ -2282,16 +3433,16 @@ function App() {
   const handleDeleteFlashcard = useCallback(
     async (cardId) => {
       if (!user) {
-        setFlashcardError("Please sign in first.");
+        setFlashcardError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
         return;
       }
       setFlashcardError("");
       try {
         await deleteFlashcard({ userId: user.id, cardId });
         setFlashcards((prev) => prev.filter((c) => c.id !== cardId));
-        setFlashcardStatus("flashcard deleted.");
+        setFlashcardStatus("?뚮옒?쒖뭅?쒕? ??젣?덉뒿?덈떎.");
       } catch (err) {
-        setFlashcardError(`flashcard delete failed: ${err.message}`);
+        setFlashcardError(`?뚮옒?쒖뭅????젣???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       }
     },
     [user]
@@ -2300,29 +3451,45 @@ function App() {
   const handleGenerateFlashcards = useCallback(async () => {
     if (isGeneratingFlashcards) return;
     if (!user) {
-      setFlashcardError("Please sign in first.");
+      setFlashcardError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
       return;
     }
     if (!file || !selectedFileId) {
-      setFlashcardError("Open a PDF first.");
+      setFlashcardError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
       return;
     }
     if (isLoadingText) {
-      setFlashcardError("PDF text extraction is still running. Please wait.");
+      setFlashcardError("PDF ?띿뒪??異붿텧???꾩쭅 吏꾪뻾 以묒엯?덈떎. ?좎떆留?湲곕떎?ㅼ＜?몄슂.");
       return;
     }
-    const trimmedText = (extractedText || "").trim();
-    if (trimmedText.length < 80) {
-      setFlashcardError("Not enough extracted text to generate flashcards.");
+    const chapterSelectionRaw = String(flashcardChapterSelectionInput || "").trim();
+    let sourceText = (extractedText || "").trim();
+    if (!sourceText && !chapterSelectionRaw) {
+      setFlashcardError("?뚮옒?쒖뭅?쒕? ?앹꽦?섍린??異붿텧???띿뒪?멸? 遺議깊빀?덈떎.");
       return;
     }
 
     setFlashcardError("");
-    setFlashcardStatus("Generating AI flashcards...");
     setIsGeneratingFlashcards(true);
     try {
+      let scopeLabel = "";
+      if (chapterSelectionRaw) {
+        const scoped = await extractTextForChapterSelection({
+          featureLabel: "移대뱶",
+          chapterSelectionInput: chapterSelectionRaw,
+        });
+        sourceText = String(scoped.text || "").trim();
+        scopeLabel = scoped.scopeLabel;
+      }
+      if (sourceText.length < 80) {
+        throw new Error("?뚮옒?쒖뭅?쒕? ?앹꽦?섍린??異붿텧???띿뒪?멸? 遺議깊빀?덈떎.");
+      }
+
+      setFlashcardStatus(
+        scopeLabel ? `AI ?뚮옒?쒖뭅???앹꽦 以?(${scopeLabel})...` : "AI ?뚮옒?쒖뭅???앹꽦 以?.."
+      );
       const { generateFlashcards } = await getOpenAiService();
-      const result = await generateFlashcards(trimmedText, { count: 8 });
+      const result = await generateFlashcards(sourceText, { count: 8 });
       const rawCards = Array.isArray(result?.cards)
         ? result.cards
         : Array.isArray(result)
@@ -2336,22 +3503,34 @@ function App() {
         }))
         .filter((card) => card.front && card.back);
       if (cleaned.length === 0) {
-        throw new Error("No valid flashcards could be generated from the content.");
+        throw new Error("蹂몃Ц?먯꽌 ?좏슚???뚮옒?쒖뭅?쒕? ?앹꽦?섏? 紐삵뻽?듬땲??");
       }
       const deckId = selectedFileId || "default";
       const saved = await addFlashcards({ userId: user.id, deckId, cards: cleaned });
       if (!saved.length) {
-        throw new Error("Failed to save generated flashcards.");
+        throw new Error("?앹꽦???뚮옒?쒖뭅????μ뿉 ?ㅽ뙣?덉뒿?덈떎.");
       }
       setFlashcards((prev) => [...saved, ...prev]);
-      setFlashcardStatus(`Generated ${saved.length} AI flashcards.`);
+      setFlashcardStatus(
+        scopeLabel ? `${saved.length}媛쒖쓽 AI ?뚮옒?쒖뭅?쒕? ?앹꽦?덉뒿?덈떎 (${scopeLabel}).` : `${saved.length}媛쒖쓽 AI ?뚮옒?쒖뭅?쒕? ?앹꽦?덉뒿?덈떎.`
+      );
     } catch (err) {
-      setFlashcardError(`Failed to generate AI flashcards: ${err.message}`);
+      setFlashcardError(`AI ?뚮옒?쒖뭅???앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       setFlashcardStatus("");
     } finally {
       setIsGeneratingFlashcards(false);
     }
-    }, [isGeneratingFlashcards, user, file, selectedFileId, isLoadingText, extractedText, getOpenAiService]);
+  }, [
+    isGeneratingFlashcards,
+    user,
+    file,
+    selectedFileId,
+    isLoadingText,
+    extractedText,
+    flashcardChapterSelectionInput,
+    extractTextForChapterSelection,
+    getOpenAiService,
+  ]);
 
   const handleResetTutor = useCallback(() => {
     setTutorMessages([]);
@@ -2364,21 +3543,198 @@ function App() {
       const trimmed = String(prompt || "").trim();
       if (!trimmed || isTutorLoading) return;
       if (!file || !selectedFileId) {
-        setTutorError("Open a PDF first.");
+        setTutorError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
         return;
       }
       if (isLoadingText) {
-        setTutorError("PDF text extraction is still running. Please wait.");
+        setTutorError("PDF ?띿뒪??異붿텧???꾩쭅 吏꾪뻾 以묒엯?덈떎. ?좎떆留?湲곕떎?ㅼ＜?몄슂.");
         return;
       }
-      const docText = (extractedText || "").trim();
-      if (!docText) {
-        setTutorError("No extracted text found from this PDF.");
+      const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
+      if (!totalPages) {
+        setTutorError("?섏씠吏 ?뺣낫瑜??쎌? 紐삵뻽?듬땲?? PDF瑜??ㅼ떆 ?댁뼱二쇱꽭??");
         return;
       }
 
+      const requestedPages = buildTutorPageCandidates(trimmed, totalPages);
+      const sectionHints = extractTutorSectionCandidates(trimmed);
+      const problemHints = extractTutorProblemTokenCandidates(trimmed);
+      const targetTokens = [...new Set([...sectionHints, ...problemHints])];
+      const primaryToken = targetTokens[0] || "";
+      const tutorDocKey = String(selectedFileId || file?.name || "").trim();
+      const currentKnownPage = Math.max(1, Number(currentPage || 1));
+      const anchorPage = requestedPages.length
+        ? requestedPages[0]
+        : Math.max(1, Math.min(totalPages, currentKnownPage));
+
+      const buildPageRange = (start, end, cap = 120) => {
+        const lo = Math.max(1, Math.min(totalPages, Number.parseInt(start, 10) || 1));
+        const hi = Math.max(lo, Math.min(totalPages, Number.parseInt(end, 10) || lo));
+        const pages = [];
+        for (let page = lo; page <= hi; page += 1) {
+          pages.push(page);
+          if (pages.length >= cap) break;
+        }
+        return pages;
+      };
+      const mergePages = (...lists) =>
+        Array.from(
+          new Set(
+            lists
+              .flat()
+              .map((page) => Number.parseInt(page, 10))
+              .filter((page) => Number.isFinite(page) && page > 0 && page <= totalPages)
+          )
+        ).sort((a, b) => a - b);
+      const pageCacheKey = (pageNumber) => `${tutorDocKey}:${pageNumber}`;
+      const loadPageEntries = async (pages, { useOcr = false, maxCharsPerPage = 5000 } = {}) => {
+        const normalizedPages = mergePages(pages);
+        if (!normalizedPages.length) return [];
+
+        const missing = [];
+        const entriesByPage = new Map();
+        for (const pageNumber of normalizedPages) {
+          const cached = tutorPageTextCacheRef.current.get(pageCacheKey(pageNumber));
+          const shouldReloadForOcr =
+            useOcr &&
+            (!cached ||
+              !cached.ocrUsed ||
+              String(cached.text || "").trim().length < 220);
+          if (!cached || !String(cached.text || "").trim() || shouldReloadForOcr) {
+            missing.push(pageNumber);
+            continue;
+          }
+          entriesByPage.set(pageNumber, {
+            pageNumber,
+            text: String(cached.text || "").trim(),
+            ocrUsed: Boolean(cached.ocrUsed),
+          });
+        }
+
+        if (missing.length) {
+          const fetched = await extractPdfPageTexts(file, missing, {
+            useOcr,
+            ocrLang: "kor+eng",
+            maxCharsPerPage,
+          });
+          for (const pageEntry of fetched?.pages || []) {
+            const pageNumber = Number.parseInt(pageEntry?.pageNumber, 10);
+            if (!Number.isFinite(pageNumber)) continue;
+            const text = String(pageEntry?.text || "").trim();
+            const payload = {
+              pageNumber,
+              text,
+              ocrUsed: Boolean(pageEntry?.ocrUsed),
+            };
+            if (text) {
+              tutorPageTextCacheRef.current.set(pageCacheKey(pageNumber), {
+                text,
+                ocrUsed: payload.ocrUsed,
+              });
+              entriesByPage.set(pageNumber, payload);
+            }
+          }
+        }
+
+        return mergePages(normalizedPages)
+          .map((pageNumber) => entriesByPage.get(pageNumber))
+          .filter((entry) => entry && entry.text);
+      };
+
+      setStatus("吏덈Ц 愿??蹂몃Ц ?섏씠吏瑜?寃?됲븯??以?..");
+      const narrowScanPages = buildPageRange(anchorPage - 20, anchorPage + 90, 130);
+      const broadScanPages = buildPageRange(anchorPage - 70, anchorPage + 220, 260);
+
+      let scannedEntries = await loadPageEntries(narrowScanPages, {
+        useOcr: false,
+        maxCharsPerPage: 4200,
+      });
+
+      let detectedRange =
+        primaryToken && tutorDocKey
+          ? tutorSectionRangeCacheRef.current.get(`${tutorDocKey}:${primaryToken}:${anchorPage}`) || null
+          : null;
+
+      if (!detectedRange && primaryToken) {
+        detectedRange = detectTutorSectionPageRange(scannedEntries, primaryToken);
+      }
+
+      if (!detectedRange && primaryToken) {
+        const broadEntries = await loadPageEntries(broadScanPages, {
+          useOcr: false,
+          maxCharsPerPage: 4200,
+        });
+        if (broadEntries.length > scannedEntries.length) scannedEntries = broadEntries;
+        detectedRange = detectTutorSectionPageRange(scannedEntries, primaryToken);
+      }
+
+      if (!detectedRange && primaryToken) {
+        const ocrProbePages = requestedPages.length
+          ? mergePages(requestedPages, buildPageRange(anchorPage - 10, anchorPage + 30, 60))
+          : buildPageRange(anchorPage - 12, anchorPage + 45, 70);
+        const ocrEntries = await loadPageEntries(ocrProbePages, {
+          useOcr: true,
+          maxCharsPerPage: 4200,
+        });
+        detectedRange = detectTutorSectionPageRange(ocrEntries, primaryToken);
+      }
+
+      if (detectedRange && tutorDocKey && primaryToken) {
+        tutorSectionRangeCacheRef.current.set(
+          `${tutorDocKey}:${primaryToken}:${anchorPage}`,
+          detectedRange
+        );
+      }
+
+      let finalPages = [];
+      if (detectedRange?.startPage && detectedRange?.endPage) {
+        finalPages = buildPageRange(detectedRange.startPage - 1, detectedRange.endPage + 1, 120);
+      } else if (requestedPages.length) {
+        const firstRequested = requestedPages[0];
+        const lastRequested = requestedPages[requestedPages.length - 1];
+        finalPages = buildPageRange(firstRequested - 1, Math.max(lastRequested + 18, firstRequested + 12), 120);
+      } else {
+        finalPages = buildPageRange(anchorPage - 3, anchorPage + 15, 40);
+      }
+      finalPages = mergePages(finalPages, requestedPages);
+
+      const finalEntries = await loadPageEntries(finalPages, {
+        useOcr: true,
+        maxCharsPerPage: 5200,
+      });
+      if (!finalEntries.length) {
+        setTutorError("吏덈Ц 愿??蹂몃Ц ?섏씠吏?먯꽌 ?띿뒪?몃? 李얠? 紐삵뻽?듬땲?? PDF瑜??ㅼ떆 ?댁뼱二쇱꽭??");
+        setStatus("");
+        return;
+      }
+
+      const loadedPages = finalEntries.map((entry) => entry.pageNumber);
+      const tutorEvidence = finalEntries
+        .map((entry) => `[p.${entry.pageNumber}]\n${entry.text}`)
+        .join("\n\n")
+        .slice(0, 180000);
+
+      const tutorSourceText = [
+        "[RAW PDF EVIDENCE]",
+        `- query: ${trimmed}`,
+        `- requested_pages: ${requestedPages.length ? requestedPages.join(", ") : "none"}`,
+        `- requested_problem_or_section: ${primaryToken || "none"}`,
+        detectedRange
+          ? `- detected_range: p.${detectedRange.startPage}-${detectedRange.endPage}`
+          : "- detected_range: not_found",
+        `- loaded_pages: ${loadedPages.join(", ")}`,
+        "",
+        tutorEvidence,
+      ].join("\n");
+
       setTutorError("");
-      const history = tutorMessages.slice(-12);
+      const history = tutorMessages
+        .slice(-8)
+        .map((msg) => ({
+          ...msg,
+          content: String(msg?.content || "").slice(0, 1200),
+        }))
+        .filter((msg) => msg.content.trim());
       const userMessage = { role: "user", content: trimmed };
       setTutorMessages((prev) => [...prev, userMessage]);
       setIsTutorLoading(true);
@@ -2386,92 +3742,162 @@ function App() {
         const { generateTutorReply } = await getOpenAiService();
         const reply = await generateTutorReply({
           question: trimmed,
-          extractedText: docText,
+          extractedText: tutorSourceText,
           messages: history,
         });
-        setTutorMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+        const safeReply = resolveTutorReplyText(reply, {
+          question: trimmed,
+          rawEvidenceText: tutorSourceText,
+        });
+        setTutorMessages((prev) => [...prev, { role: "assistant", content: safeReply }]);
       } catch (err) {
-        setTutorError(`Failed to generate AI tutor reply: ${err.message}`);
+        setTutorError(`AI ?쒗꽣 ?듬? ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       } finally {
         setIsTutorLoading(false);
+        setStatus("");
       }
     },
-    [extractedText, file, getOpenAiService, isLoadingText, isTutorLoading, selectedFileId, tutorMessages]
+    [
+      currentPage,
+      file,
+      getOpenAiService,
+      isLoadingText,
+      isTutorLoading,
+      pageInfo?.total,
+      selectedFileId,
+      tutorMessages,
+    ]
   );
 
   const handleCreateMockExam = useCallback(async () => {
     if (isGeneratingMockExam) return;
     if (!user) {
-      setMockExamError("Please sign in first.");
+      setMockExamError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
       return;
     }
     if (!file || !selectedFileId) {
-      setMockExamError("Open a PDF first.");
+      setMockExamError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
       return;
     }
     if (isLoadingText) {
-      setMockExamError("PDF text extraction is still running. Please wait.");
+      setMockExamError("PDF ?띿뒪??異붿텧???꾩쭅 吏꾪뻾 以묒엯?덈떎. ?좎떆留?湲곕떎?ㅼ＜?몄슂.");
       return;
     }
 
-    const oxPool = Array.isArray(oxItems) ? oxItems : [];
-    if (oxPool.length < 3) {
-      setMockExamError("At least 3 O/X items are required to build a mock exam.");
+    const chapterSelectionRaw = String(mockExamChapterSelectionInput || "").trim();
+    const hasChapterScope = Boolean(chapterSelectionRaw);
+    let sourceText = (extractedText || "").trim();
+    let scopeLabel = "";
+    if (!sourceText && !hasChapterScope) {
+      setMockExamError("紐⑥쓽怨좎궗瑜??앹꽦?섍린??異붿텧???띿뒪?멸? 遺議깊빀?덈떎.");
       return;
     }
-
-    const quizPool = [];
-    quizSets.forEach((set) => {
-      const multipleChoice = set.questions?.multipleChoice || [];
-      const shortAnswers = Array.isArray(set.questions?.shortAnswer) ? set.questions.shortAnswer : [];
-      multipleChoice.forEach((question) => {
-        const prompt = String(question?.question || "").trim();
-        if (!prompt) return;
-        quizPool.push({
-          type: "quiz-mc",
-          prompt,
-          choices: Array.isArray(question?.choices) ? question.choices : [],
-          answerIndex: Number.isFinite(question?.answerIndex) ? question.answerIndex : null,
-          explanation: String(question?.explanation || "").trim(),
+    if (hasChapterScope) {
+      try {
+        const scoped = await extractTextForChapterSelection({
+          featureLabel: "紐⑥쓽怨좎궗",
+          chapterSelectionInput: chapterSelectionRaw,
         });
-      });
-      shortAnswers.forEach((item) => {
-        const prompt = String(item?.question || "").trim();
-        if (!prompt) return;
-        quizPool.push({
-          type: "quiz-short",
-          prompt,
-          answer: String(item?.answer || "").trim(),
-          explanation: String(item?.explanation || "").trim(),
-        });
-      });
-    });
-
-    if (quizPool.length < 4) {
-      setMockExamError("At least 4 quiz items are required to build a mock exam.");
+        sourceText = String(scoped.text || "").trim();
+        scopeLabel = scoped.scopeLabel;
+      } catch (err) {
+        setMockExamError(String(err?.message || "紐⑥쓽怨좎궗??梨뺥꽣 ?띿뒪??異붿텧???ㅽ뙣?덉뒿?덈떎."));
+        return;
+      }
+    }
+    if (sourceText.length < 80) {
+      setMockExamError("紐⑥쓽怨좎궗瑜??앹꽦?섍린??異붿텧???띿뒪?멸? 遺議깊빀?덈떎.");
       return;
     }
 
-    const trimmedText = (extractedText || "").trim();
-    if (trimmedText.length < 80) {
-      setMockExamError("Not enough extracted text to generate a mock exam.");
-      return;
-    }
-
-    setMockExamStatus("Generating mock exam...");
+    setMockExamStatus("紐⑥쓽怨좎궗 ?앹꽦 以?..");
     setMockExamError("");
     setIsGeneratingMockExam(true);
 
     try {
+      const ai = await getOpenAiService();
+      let oxPool = Array.isArray(oxItems) ? oxItems : [];
+      let quizPool = [];
+
+      if (hasChapterScope) {
+        setMockExamStatus(`紐⑥쓽怨좎궗 ?앹꽦 以?(${scopeLabel})...`);
+
+        const [oxResult, quizResult] = await Promise.all([
+          ai.generateOxQuiz(sourceText),
+          ai.generateQuiz(sourceText, { multipleChoiceCount: 4, shortAnswerCount: 1 }),
+        ]);
+
+        oxPool = Array.isArray(oxResult?.items) ? oxResult.items : [];
+        const normalizedQuiz = normalizeQuizPayload(quizResult);
+        const scopedMultipleChoice = Array.isArray(normalizedQuiz?.multipleChoice)
+          ? normalizedQuiz.multipleChoice
+          : [];
+        const scopedShortAnswers = Array.isArray(normalizedQuiz?.shortAnswer) ? normalizedQuiz.shortAnswer : [];
+
+        scopedMultipleChoice.forEach((question) => {
+          const prompt = String(question?.question || "").trim();
+          if (!prompt) return;
+          quizPool.push({
+            type: "quiz-mc",
+            prompt,
+            choices: Array.isArray(question?.choices) ? question.choices : [],
+            answerIndex: Number.isFinite(question?.answerIndex) ? question.answerIndex : null,
+            explanation: String(question?.explanation || "").trim(),
+          });
+        });
+        scopedShortAnswers.forEach((item) => {
+          const prompt = String(item?.question || "").trim();
+          if (!prompt) return;
+          quizPool.push({
+            type: "quiz-short",
+            prompt,
+            answer: String(item?.answer || "").trim(),
+            explanation: String(item?.explanation || "").trim(),
+          });
+        });
+      } else {
+        quizSets.forEach((set) => {
+          const multipleChoice = set.questions?.multipleChoice || [];
+          const shortAnswers = Array.isArray(set.questions?.shortAnswer) ? set.questions.shortAnswer : [];
+          multipleChoice.forEach((question) => {
+            const prompt = String(question?.question || "").trim();
+            if (!prompt) return;
+            quizPool.push({
+              type: "quiz-mc",
+              prompt,
+              choices: Array.isArray(question?.choices) ? question.choices : [],
+              answerIndex: Number.isFinite(question?.answerIndex) ? question.answerIndex : null,
+              explanation: String(question?.explanation || "").trim(),
+            });
+          });
+          shortAnswers.forEach((item) => {
+            const prompt = String(item?.question || "").trim();
+            if (!prompt) return;
+            quizPool.push({
+              type: "quiz-short",
+              prompt,
+              answer: String(item?.answer || "").trim(),
+              explanation: String(item?.explanation || "").trim(),
+            });
+          });
+        });
+      }
+
+      if (oxPool.length < 3) {
+        throw new Error("紐⑥쓽怨좎궗瑜?留뚮뱾?ㅻ㈃ O/X 臾명빆??理쒖냼 3媛??꾩슂?⑸땲??");
+      }
+      if (quizPool.length < 4) {
+        throw new Error("紐⑥쓽怨좎궗瑜?留뚮뱾?ㅻ㈃ ?댁쫰 臾명빆??理쒖냼 4媛??꾩슂?⑸땲??");
+      }
+
       const pickedOx = pickRandomItems(oxPool, 3);
       const pickedQuiz = pickRandomItems(quizPool, 4);
       const hardCount = Math.max(3, 10 - (pickedOx.length + pickedQuiz.length));
-      const { generateHardQuiz } = await getOpenAiService();
-      const hardResult = await generateHardQuiz(trimmedText, { count: hardCount });
+      const hardResult = await ai.generateHardQuiz(sourceText, { count: hardCount });
       const hardItems = Array.isArray(hardResult?.items) ? hardResult.items.slice(0, hardCount) : [];
 
       if (hardItems.length < hardCount) {
-        throw new Error("Failed to generate enough hard questions.");
+        throw new Error("怨좊궃??臾명빆??異⑸텇???앹꽦?섏? 紐삵뻽?듬땲??");
       }
 
       const mappedOx = pickedOx.map((item) => ({
@@ -2498,16 +3924,35 @@ function App() {
       }));
 
       if (examItems.length !== 10) {
-        throw new Error("Mock exam generation requires exactly 10 questions.");
+        throw new Error("紐⑥쓽怨좎궗???뺥솗??10臾명빆?댁뼱???⑸땲??");
       }
+
+      const answerSheet = examItems.map((item, idx) => {
+        const answerText =
+          item.type === "ox"
+            ? item.answer || "-"
+            : item.type === "quiz-short"
+              ? item.answer || "-"
+              : Number.isFinite(item.answerIndex)
+                ? LETTERS[item.answerIndex] || "-"
+                : "-";
+        return {
+          number: idx + 1,
+          type: item.type,
+          answer: answerText,
+          explanation: String(item?.explanation || "").trim(),
+          evidence: String(item?.evidence || "").trim(),
+        };
+      });
 
       const now = new Date();
       const dateStamp = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
       const nextIndex = mockExams.length + 1;
-      const title = `${dateStamp} mock exam ${nextIndex}`;
+      const title = `${dateStamp} 紐⑥쓽怨좎궗 ${nextIndex}`;
       const payload = {
         title,
         items: examItems,
+        answerSheet,
         source: {
           oxCount: mappedOx.length,
           quizCount: mappedQuiz.length,
@@ -2527,10 +3972,14 @@ function App() {
 
       setMockExams((prev) => [saved, ...prev]);
       setActiveMockExamId(saved.id);
-      setShowMockExamAnswers(false);
-      setMockExamStatus("mock exam saved.");
+      setShowMockExamAnswers(true);
+      setMockExamStatus(
+        scopeLabel
+          ? `紐⑥쓽怨좎궗? ?듭?媛 ??λ릺?덉뒿?덈떎 (${scopeLabel}).`
+          : "紐⑥쓽怨좎궗? ?듭?媛 ??λ릺?덉뒿?덈떎."
+      );
     } catch (err) {
-      setMockExamError(`mock exam generation failed: ${err.message}`);
+      setMockExamError(`紐⑥쓽怨좎궗 ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       setMockExamStatus("");
     } finally {
       setIsGeneratingMockExam(false);
@@ -2543,7 +3992,9 @@ function App() {
     oxItems,
     mockExams.length,
     quizSets,
+    mockExamChapterSelectionInput,
     selectedFileId,
+    extractTextForChapterSelection,
     getOpenAiService,
     user,
   ]);
@@ -2551,7 +4002,7 @@ function App() {
   const handleDeleteMockExam = useCallback(
     async (examId) => {
       if (!user) {
-        setMockExamError("Please sign in first.");
+        setMockExamError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
         return;
       }
       try {
@@ -2560,9 +4011,9 @@ function App() {
         if (activeMockExamId === examId) {
           setActiveMockExamId(null);
         }
-        setMockExamStatus("Mock exam deleted.");
+        setMockExamStatus("紐⑥쓽怨좎궗瑜???젣?덉뒿?덈떎.");
       } catch (err) {
-        setMockExamError(`Failed to delete mock exam: ${err.message}`);
+        setMockExamError(`紐⑥쓽怨좎궗 ??젣???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       }
     },
     [activeMockExamId, user]
@@ -2571,11 +4022,11 @@ function App() {
   const handleExportMockExam = useCallback(
     async (exam) => {
       if (!exam) {
-        setMockExamError("No mock exam selected for export.");
+        setMockExamError("?대낫??紐⑥쓽怨좎궗媛 ?좏깮?섏? ?딆븯?듬땲??");
         return;
       }
       if (!mockExamPrintRef.current) {
-        setMockExamError("Mock exam print container is missing.");
+        setMockExamError("紐⑥쓽怨좎궗 異쒕젰 ?곸뿭??李얠쓣 ???놁뒿?덈떎.");
         return;
       }
       setMockExamError("");
@@ -2587,10 +4038,66 @@ function App() {
           pageSelector: ".mock-exam-page",
         });
       } catch (err) {
-        setMockExamError(`PDF export failed: ${err.message}`);
+        setMockExamError(`PDF ?대낫?닿린???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       }
     },
     [mockExamPrintRef]
+  );
+
+  const handleSubmitFeedback = useCallback(
+    async (event) => {
+      event.preventDefault();
+      if (isSubmittingFeedback) return;
+      const trimmedFeedback = String(feedbackInput || "").trim();
+      if (!trimmedFeedback) {
+        setFeedbackError("\uD53C\uB4DC\uBC31 \uB0B4\uC6A9\uC744 \uC785\uB825\uD574 \uC8FC\uC138\uC694.");
+        return;
+      }
+      if (!user?.id) {
+        setFeedbackError("\uB85C\uADF8\uC778 \uD6C4 \uD53C\uB4DC\uBC31\uC744 \uBCF4\uB0BC \uC218 \uC788\uC2B5\uB2C8\uB2E4.");
+        return;
+      }
+
+      setIsSubmittingFeedback(true);
+      setFeedbackError("");
+      try {
+        await saveUserFeedback({
+          userId: user.id,
+          category: feedbackCategory,
+          content: trimmedFeedback,
+          docId: selectedFileId || null,
+          docName: file?.name || "",
+          panel: panelTab || "",
+          metadata: {
+            currentPage,
+            totalPages: pageInfo?.total || pageInfo?.used || null,
+            tier,
+          },
+        });
+        setIsFeedbackDialogOpen(false);
+        setFeedbackCategory("general");
+        setFeedbackInput("");
+        setStatus("\uD53C\uB4DC\uBC31\uC774 \uC804\uC1A1\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uAC10\uC0AC\uD569\uB2C8\uB2E4.");
+      } catch (err) {
+        setFeedbackError(`\uD53C\uB4DC\uBC31 \uC804\uC1A1\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: ${err.message}`);
+      } finally {
+        setIsSubmittingFeedback(false);
+      }
+    },
+    [
+      feedbackCategory,
+      feedbackInput,
+      file?.name,
+      isSubmittingFeedback,
+      pageInfo?.total,
+      pageInfo?.used,
+      panelTab,
+      currentPage,
+      selectedFileId,
+      saveUserFeedback,
+      tier,
+      user?.id,
+    ]
   );
 
   const activeMockExam = useMemo(() => {
@@ -2683,6 +4190,7 @@ function App() {
     file,
     pageInfo,
     currentPage,
+    handlePageChange,
     handleDragStart,
     panelTab,
     setPanelTab,
@@ -2691,14 +4199,24 @@ function App() {
     isLoadingText,
     isFreeTier,
     summary,
+    partialSummary,
+    partialSummaryRange,
+    savedPartialSummaries,
+    isSavedPartialSummaryOpen,
     regenerateSummary,
     setIsPageSummaryOpen,
+    setIsSavedPartialSummaryOpen,
     setPageSummaryError,
     isPageSummaryOpen,
     pageSummaryInput,
     setPageSummaryInput,
     pageSummaryError,
     handleSummaryByPages,
+    handleSaveCurrentPartialSummary,
+    handleLoadSavedPartialSummary,
+    handleRenameSavedPartialSummary,
+    handleNormalizeSavedPartialSummaryName,
+    handleDeleteSavedPartialSummary,
     isPageSummaryLoading,
     isChapterRangeOpen,
     setIsChapterRangeOpen,
@@ -2725,6 +4243,8 @@ function App() {
     formatMockExamTitle: getMockExamTitle,
     handleDeleteMockExam,
     handleCreateMockExam,
+    mockExamChapterSelectionInput,
+    setMockExamChapterSelectionInput,
     isGeneratingMockExam,
     selectedFileId,
     handleExportMockExam,
@@ -2740,6 +4260,8 @@ function App() {
     isLoadingQuiz,
     shortPreview,
     requestQuestions,
+    quizChapterSelectionInput,
+    setQuizChapterSelectionInput,
     quizMix,
     setQuizMix,
     quizSets,
@@ -2749,6 +4271,8 @@ function App() {
     regenerateQuiz,
     isLoadingOx,
     requestOxQuiz,
+    oxChapterSelectionInput,
+    setOxChapterSelectionInput,
     regenerateOxQuiz,
     oxItems,
     oxSelections,
@@ -2760,6 +4284,8 @@ function App() {
     handleAddFlashcard,
     handleDeleteFlashcard,
     handleGenerateFlashcards,
+    flashcardChapterSelectionInput,
+    setFlashcardChapterSelectionInput,
     isGeneratingFlashcards,
     extractedText,
     flashcardStatus,
@@ -2773,21 +4299,24 @@ function App() {
   };
 
   if (!user && showAuth) {
+    const canCloseAuth = !(isNativePlatform && !user);
     return (
       <Suspense fallback={<div className="min-h-screen bg-black" />}>
         <LoginBackground theme={theme}>
         <div className="relative z-10 flex min-h-screen flex-col items-center justify-center gap-4 px-4 py-8">
-          <div className="flex w-full max-w-md justify-end">
-            <button
-              type="button"
-              onClick={closeAuth}
-              className="ghost-button text-xs text-slate-200"
-              data-ghost-size="sm"
-              style={{ "--ghost-color": "148, 163, 184" }}
-            >
-              Back to Home
-            </button>
-          </div>
+          {canCloseAuth && (
+            <div className="flex w-full max-w-md justify-end">
+              <button
+                type="button"
+                onClick={closeAuth}
+                className="ghost-button text-xs text-slate-200"
+                data-ghost-size="sm"
+                style={{ "--ghost-color": "148, 163, 184" }}
+              >
+                Back to Home
+              </button>
+            </div>
+          )}
           <AuthPanel user={user} onAuth={refreshSession} />
         </div>
         </LoginBackground>
@@ -2833,7 +4362,7 @@ function App() {
         <div className="fixed inset-0 z-[155] flex items-center justify-center px-4">
           <button
             type="button"
-            aria-label="Close PIN dialog"
+            aria-label="PIN 蹂寃?李??リ린"
             onClick={handleCloseProfilePinDialog}
             className={`absolute inset-0 ${theme === "light" ? "bg-slate-900/25" : "bg-black/75"} backdrop-blur-[2px]`}
           />
@@ -2845,40 +4374,43 @@ function App() {
                 : "border-white/10 bg-slate-950/[0.97] text-slate-100 shadow-[0_20px_80px_rgba(0,0,0,0.72)]"
             }`}
           >
-            <p className="text-sm font-semibold">{activePremiumProfile.name} PIN Change</p>
+            <p className="text-sm font-semibold">{activePremiumProfile.name} PIN 변경</p>
             <p className={`mt-1 text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
-              Enter your current PIN and set a new 4-digit PIN.
+              ?꾩옱 PIN???낅젰?섍퀬 ??4?먮━ PIN???ㅼ젙?댁＜?몄슂.
             </p>
             <div className="mt-4 space-y-2">
               <input
+                name="current-pin"
                 type="password"
                 inputMode="numeric"
                 maxLength={4}
                 value={profilePinInputs.currentPin}
                 onChange={(event) => handleChangeProfilePinInput("currentPin", event.target.value)}
-                placeholder="Current PIN"
+                placeholder="?꾩옱 PIN"
                 className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
                   theme === "light" ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
                 }`}
               />
               <input
+                name="new-pin"
                 type="password"
                 inputMode="numeric"
                 maxLength={4}
                 value={profilePinInputs.nextPin}
                 onChange={(event) => handleChangeProfilePinInput("nextPin", event.target.value)}
-                placeholder="New PIN"
+                placeholder="??PIN"
                 className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
                   theme === "light" ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
                 }`}
               />
               <input
+                name="confirm-new-pin"
                 type="password"
                 inputMode="numeric"
                 maxLength={4}
                 value={profilePinInputs.confirmPin}
                 onChange={(event) => handleChangeProfilePinInput("confirmPin", event.target.value)}
-                placeholder="Confirm new PIN"
+                placeholder="??PIN ?뺤씤"
                 className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
                   theme === "light" ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
                 }`}
@@ -2907,6 +4439,91 @@ function App() {
           </form>
         </div>
       )}
+      {isFeedbackDialogOpen && (
+        <div className="fixed inset-0 z-[165] flex items-center justify-center px-4">
+          <button
+            type="button"
+            aria-label="\uD53C\uB4DC\uBC31 \uCC3D \uB2EB\uAE30"
+            onClick={handleCloseFeedbackDialog}
+            className={`absolute inset-0 ${
+              theme === "light" ? "bg-slate-900/25" : "bg-black/75"
+            } backdrop-blur-[2px]`}
+          />
+          <form
+            onSubmit={handleSubmitFeedback}
+            className={`relative z-[166] w-full max-w-lg rounded-2xl border p-5 ${
+              theme === "light"
+                ? "border-slate-200 bg-white text-slate-900 shadow-[0_20px_80px_rgba(15,23,42,0.2)]"
+                : "border-white/10 bg-slate-950/[0.97] text-slate-100 shadow-[0_20px_80px_rgba(0,0,0,0.72)]"
+            }`}
+          >
+            <p className="text-sm font-semibold">{"\uD53C\uB4DC\uBC31 \uBCF4\uB0B4\uAE30"}</p>
+            <p className={`mt-1 text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
+              {"\uBC84\uADF8, \uAE30\uB2A5 \uC81C\uC548, \uC0AC\uC6A9\uC131 \uAC1C\uC120 \uC758\uACAC\uC744 \uC790\uC720\uB86D\uAC8C \uB0A8\uACA8 \uC8FC\uC138\uC694."}
+            </p>
+            <div className="mt-4 space-y-3">
+              <select
+                name="feedback-category"
+                value={feedbackCategory}
+                onChange={(event) => setFeedbackCategory(event.target.value)}
+                className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
+                  theme === "light"
+                    ? "border-slate-300 bg-white text-slate-900"
+                    : "border-white/15 bg-white/5 text-slate-100"
+                }`}
+              >
+                <option value="general">{"\uC77C\uBC18"}</option>
+                <option value="bug">{"\uBC84\uADF8 \uC81C\uBCF4"}</option>
+                <option value="feature">{"\uAE30\uB2A5 \uC81C\uC548"}</option>
+                <option value="ux">{"\uC0AC\uC6A9\uC131 \uC758\uACAC"}</option>
+              </select>
+              <textarea
+                name="feedback-message"
+                value={feedbackInput}
+                onChange={(event) => setFeedbackInput(event.target.value)}
+                rows={7}
+                maxLength={2000}
+                placeholder={"\uC5B4\uB5A4 \uBB38\uC81C\uB97C \uACAA\uC73C\uC168\uB294\uC9C0, \uC5B4\uB5BB\uAC8C \uAC1C\uC120\uD558\uBA74 \uC88B\uC744\uC9C0 \uC791\uC131\uD574 \uC8FC\uC138\uC694."}
+                className={`w-full resize-y rounded-xl border px-3 py-2 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
+                  theme === "light"
+                    ? "border-slate-300 bg-white text-slate-900"
+                    : "border-white/15 bg-white/5 text-slate-100"
+                }`}
+              />
+              <div className="flex items-center justify-between text-[11px]">
+                <span className={theme === "light" ? "text-slate-500" : "text-slate-400"}>
+                  {"\uBB38\uB9E5: "}{file?.name || "\uC120\uD0DD\uB41C \uBB38\uC11C \uC5C6\uC74C"}
+                </span>
+                <span className={theme === "light" ? "text-slate-500" : "text-slate-400"}>
+                  {feedbackInput.length}/2000
+                </span>
+              </div>
+            </div>
+            {feedbackError && <p className="mt-2 text-xs text-rose-300">{feedbackError}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={handleCloseFeedbackDialog}
+                disabled={isSubmittingFeedback}
+                className={`ghost-button text-xs ${theme === "light" ? "text-slate-700" : "text-slate-200"}`}
+                data-ghost-size="sm"
+                style={{ "--ghost-color": "148, 163, 184" }}
+              >
+                {"\uCDE8\uC18C"}
+              </button>
+              <button
+                type="submit"
+                disabled={isSubmittingFeedback}
+                className="ghost-button text-xs text-emerald-100"
+                data-ghost-size="sm"
+                style={{ "--ghost-color": "52, 211, 153" }}
+              >
+                {isSubmittingFeedback ? "\uC804\uC1A1 \uC911..." : "\uC804\uC1A1"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
       {isResizingSplit && showDetail && (
         <div className="pointer-events-none fixed inset-0 z-[160] cursor-col-resize" aria-hidden="true" />
       )}
@@ -2927,11 +4544,14 @@ function App() {
               signingOut={isSigningOut}
               theme={theme}
               onGoHome={showDetail ? goBackToList : null}
+              onOpenFeedbackDialog={handleOpenFeedbackDialog}
               onOpenBilling={openBilling}
               onToggleTheme={toggleTheme}
               onOpenLogin={openAuth}
               isPremiumTier={isPremiumTier}
               loadingTier={loadingTier}
+              onRefresh={handleManualSync}
+              isRefreshing={isManualSyncing}
               activeProfile={activePremiumProfile}
               onOpenProfilePicker={handleOpenProfilePicker}
               onOpenProfilePinDialog={handleOpenProfilePinDialog}
@@ -2960,4 +4580,8 @@ function App() {
 }
 
 export default App;
+
+
+
+
 

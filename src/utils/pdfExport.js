@@ -88,3 +88,23 @@ export async function exportPagedElementToPdf(
 
   pdf.save(filename);
 }
+
+export function exportTextFile(content, { filename = "summary.txt" } = {}) {
+  const normalized = String(content || "").replace(/\r\n/g, "\n").trim();
+  if (!normalized) {
+    throw new Error("No text to export.");
+  }
+
+  // Prefix BOM so UTF-8 text is opened correctly in Windows editors.
+  const blob = new Blob([`\uFEFF${normalized}\n`], {
+    type: "text/plain;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}

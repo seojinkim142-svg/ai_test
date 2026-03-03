@@ -5,6 +5,29 @@ export function useSupabaseAuth() {
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const handledOAuthRef = useRef(false);
+  const authResolveVersionRef = useRef(0);
+
+  const resolveFreshUser = useCallback(async (sessionUser) => {
+    const version = ++authResolveVersionRef.current;
+    if (!sessionUser) {
+      setUser(null);
+      return;
+    }
+
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (version !== authResolveVersionRef.current) return;
+      if (!userError && userData?.user) {
+        setUser(userData.user);
+        return;
+      }
+    } catch {
+      // Fallback to session user below.
+    }
+
+    if (version !== authResolveVersionRef.current) return;
+    setUser(sessionUser);
+  }, []);
 
   const refreshSession = useCallback(async () => {
     if (!supabase) {
@@ -24,22 +47,16 @@ export function useSupabaseAuth() {
           const access_token = params.get("access_token");
           const refresh_token = params.get("refresh_token") || params.get("provider_refresh_token");
           if (access_token) {
-            const { data, error } = await supabase.auth.setSession({
+            await supabase.auth.setSession({
               access_token,
               refresh_token: refresh_token || undefined,
             });
-            if (!error && data?.session?.user) {
-              setUser(data.session.user);
-            }
           }
           const cleanUrl = `${window.location.origin}${window.location.pathname}`;
           window.history.replaceState({}, document.title, cleanUrl);
         } else if (hasCode) {
           handledOAuthRef.current = true;
-          const { data, error } = await supabase.auth.exchangeCodeForSession(url);
-          if (!error && data?.session?.user) {
-            setUser(data.session.user);
-          }
+          await supabase.auth.exchangeCodeForSession(url);
           const cleanUrl = url.split("?")[0];
           window.history.replaceState({}, document.title, cleanUrl);
         }
@@ -47,26 +64,25 @@ export function useSupabaseAuth() {
 
       const { data, error } = await supabase.auth.getSession();
       if (!error) {
-        setUser(data.session?.user || null);
+        await resolveFreshUser(data.session?.user || null);
       }
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn("Supabase 세션 확인 실패:", err);
+      console.warn("Supabase session check failed:", err);
     } finally {
       setAuthReady(true);
     }
-  }, []);
+  }, [resolveFreshUser]);
 
   useEffect(() => {
     refreshSession();
     if (!supabase) return undefined;
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user || null);
+      resolveFreshUser(session?.user || null);
     });
     return () => {
       data?.subscription?.unsubscribe();
     };
-  }, [refreshSession]);
+  }, [refreshSession, resolveFreshUser]);
 
   const handleSignOut = useCallback(async () => {
     if (!supabase) return;
@@ -74,8 +90,7 @@ export function useSupabaseAuth() {
       await supabaseSignOut();
       setUser(null);
     } catch (err) {
-      // eslint-disable-next-line no-console
-      console.warn("Supabase 로그아웃 실패:", err);
+      console.warn("Supabase signout failed:", err);
     }
   }, []);
 

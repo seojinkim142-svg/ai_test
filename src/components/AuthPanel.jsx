@@ -136,6 +136,7 @@ function AuthPanel({ user, onAuth }) {
       {showEmailForm && (
         <form className="flex w-full flex-col items-center gap-2" onSubmit={handleEmailSubmit}>
           <input
+            name="auth-email"
             type="email"
             placeholder="이메일"
             value={email}
@@ -143,6 +144,7 @@ function AuthPanel({ user, onAuth }) {
             className="h-11 w-full max-w-xs rounded-2xl border border-emerald-200/50 bg-slate-800 px-4 text-sm text-slate-100 outline-none transition focus:border-emerald-400 focus:ring-1 focus:ring-emerald-300"
           />
           <input
+            name="auth-password"
             type="password"
             placeholder="비밀번호"
             value={password}

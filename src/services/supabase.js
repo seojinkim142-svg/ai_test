@@ -8,8 +8,12 @@ const FLASHCARDS_TABLE = import.meta.env.VITE_SUPABASE_FLASHCARDS_TABLE || "flas
 const UPLOADS_TABLE = import.meta.env.VITE_SUPABASE_UPLOADS_TABLE || "uploads";
 const ARTIFACTS_TABLE = import.meta.env.VITE_SUPABASE_ARTIFACTS_TABLE || "artifacts";
 const USER_TIER_TABLE = import.meta.env.VITE_SUPABASE_USER_TIER_TABLE || "user_tiers";
+const FEEDBACK_TABLE = import.meta.env.VITE_SUPABASE_FEEDBACK_TABLE || "user_feedback";
 const ALLOWED_TIERS = ["free", "pro", "premium"];
 export const DEFAULT_TIER = "free";
+const PREMIUM_PROFILES_META_KEY = "premium_profiles_v1";
+const PREMIUM_ACTIVE_PROFILE_META_KEY = "premium_active_profile_id_v1";
+const PREMIUM_SPACE_MODE_META_KEY = "premium_space_mode_v1";
 const SUPABASE_REDIRECT =
   import.meta.env.VITE_SUPABASE_REDIRECT_URL ||
   (typeof window !== "undefined" ? `${window.location.origin}/` : undefined);
@@ -28,6 +32,21 @@ const requireSupabase = () => {
 const requireUser = (userId) => {
   if (!userId) throw new Error("로그인 정보가 없습니다.");
   return userId;
+};
+
+const STORAGE_FILE_NAME_FALLBACK = "document.pdf";
+
+const toSafeStorageFileName = (fileName) => {
+  const rawName = String(fileName || "").trim();
+  const noPath = rawName.replace(/[\\/]+/g, "-");
+  const normalized = noPath.normalize("NFKD").replace(/[^\x20-\x7E]/g, "");
+  const asciiOnly = normalized
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .slice(0, 120);
+  if (!asciiOnly) return STORAGE_FILE_NAME_FALLBACK;
+  return /\.pdf$/i.test(asciiOnly) ? asciiOnly : `${asciiOnly}.pdf`;
 };
 
 export async function signInWithEmail(email, password) {
@@ -71,8 +90,12 @@ export async function uploadPdfToStorage(userId, file) {
   requireUser(userId);
   if (!file) throw new Error("업로드할 파일이 없습니다.");
 
-  const safeName = file.name.replace(/\s+/g, "-");
-  const path = `${userId}/${Date.now()}-${safeName}`;
+  const safeName = toSafeStorageFileName(file.name);
+  const uniqueSuffix =
+    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const path = `${userId}/${Date.now()}-${uniqueSuffix}-${safeName}`;
   const { error } = await client.storage
     .from(supabaseBucket)
     .upload(path, file, { contentType: file.type || "application/pdf", upsert: true });
@@ -408,4 +431,66 @@ export async function setUserTier({ userId, tier }) {
     .single();
   if (error) throw error;
   return data?.tier || tier;
+}
+
+export async function saveUserFeedback({
+  userId,
+  category = "general",
+  content,
+  docId = null,
+  docName = "",
+  panel = "",
+  metadata = null,
+}) {
+  const client = requireSupabase();
+  requireUser(userId);
+  const trimmedContent = String(content || "").trim();
+  if (!trimmedContent) {
+    throw new Error("Feedback content is required.");
+  }
+
+  const payload = {
+    user_id: userId,
+    category: String(category || "general").trim() || "general",
+    content: trimmedContent,
+    doc_id: docId || null,
+    doc_name: docName || "",
+    panel: panel || "",
+    metadata_json: metadata || null,
+  };
+
+  const { data, error } = await client.from(FEEDBACK_TABLE).insert(payload).select().single();
+  if (error) throw error;
+  return data;
+}
+
+export function getPremiumProfileStateFromUser(user) {
+  const metadata = user?.user_metadata && typeof user.user_metadata === "object" ? user.user_metadata : {};
+  const profiles = Array.isArray(metadata?.[PREMIUM_PROFILES_META_KEY]) ? metadata[PREMIUM_PROFILES_META_KEY] : [];
+  const activeProfileId = metadata?.[PREMIUM_ACTIVE_PROFILE_META_KEY];
+  const spaceMode = metadata?.[PREMIUM_SPACE_MODE_META_KEY];
+  return {
+    profiles,
+    activeProfileId: typeof activeProfileId === "string" ? activeProfileId : "",
+    spaceMode: typeof spaceMode === "string" ? spaceMode : "",
+  };
+}
+
+export async function savePremiumProfileState({
+  profiles = [],
+  activeProfileId = null,
+  spaceMode = "profile",
+} = {}) {
+  const client = requireSupabase();
+  const payload = {
+    [PREMIUM_PROFILES_META_KEY]: Array.isArray(profiles) ? profiles : [],
+    [PREMIUM_ACTIVE_PROFILE_META_KEY]:
+      typeof activeProfileId === "string" && activeProfileId.trim() ? activeProfileId.trim() : null,
+    [PREMIUM_SPACE_MODE_META_KEY]:
+      typeof spaceMode === "string" && spaceMode.trim() ? spaceMode.trim() : "profile",
+  };
+
+  const { data, error } = await client.auth.updateUser({ data: payload });
+  if (error) throw error;
+  return data?.user || null;
 }

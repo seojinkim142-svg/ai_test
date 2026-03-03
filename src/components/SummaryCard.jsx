@@ -1,11 +1,240 @@
-import { useCallback, useMemo, useState } from "react";
+﻿import { useCallback, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 
-function splitLongSection(section, maxChars = 1800) {
+const AUTO_MATH_TOKEN_RE = /(?:\\[a-zA-Z]+|[\^_\u221A\u221E\u2264\u2265\u2260\u2248\u2211\u222B\u220F]|->|\u2192|<=|>=|!=|~=)/;
+const DEFAULT_SECTION_PAGE_CHARS = 2600;
+const MIN_TAIL_PAGE_CHARS = 520;
+const SOFT_MERGE_LIMIT_RATIO = 1.45;
+const BARE_LATEX_COMMAND_RE =
+  /\\(?:begin|end|frac|dfrac|tfrac|sum|prod|int|sqrt|left|right|cdot|times|to|infty|leq?|geq?|neq?|approx|mathbb|mathbf|mathrm|text|quad|qquad|lim)\b/;
+const BARE_LATEX_COMMAND_GLOBAL_RE =
+  /\\(?:begin|end|frac|dfrac|tfrac|sum|prod|int|sqrt|left|right|cdot|times|to|infty|leq?|geq?|neq?|approx|mathbb|mathbf|mathrm|text|quad|qquad|lim)\b/g;
+const BARE_LATEX_ENV_RE = /\\begin\{[A-Za-z*]+\}[\s\S]*?\\end\{[A-Za-z*]+\}/g;
+const MATH_CONTEXT_CHAR_RE = /[A-Za-z0-9_\\^=+\-*/(){}\[\].,| ]/;
+const DISPLAY_ENV_RE = /\\begin\{(?:cases|aligned|align|matrix|pmatrix|bmatrix)\}/;
+const AUTO_INLINE_MATH_PATTERNS = [
+  /(^|[\s:(])((?:P|F|f)\([^)\n]{1,40}\)\s*=\s*[A-Za-z0-9_^\-+*/=(){}\[\]|\\.,\s\u2264\u2265\u2260\u2248\u221E]{1,160})/g,
+  /(^|[\s:(])(E\[[^\]\n]{1,50}\]\s*=\s*[A-Za-z0-9_^\-+*/=(){}\[\]|\\.,\s\u2264\u2265\u2260\u2248\u221E]{1,160})/g,
+  /(^|[\s:(])((?:Var|Cov)\([^)\n]{1,50}\)\s*=\s*[A-Za-z0-9_^\-+*/=(){}\[\]|\\.,\s\u2264\u2265\u2260\u2248\u221E]{1,160})/g,
+];
+
+function normalizeMathExpression(expr) {
+  return String(expr || "")
+    .trim()
+    .replace(/\u221A\s*([A-Za-z0-9]+)/g, "\\sqrt{$1}")
+    .replace(/\\leq?/g, " \\le ")
+    .replace(/\\geq?/g, " \\ge ")
+    .replace(/\\neq?/g, " \\ne ")
+    .replace(/\\to/g, " \\to ")
+    .replace(/<=|\u2264/g, " \\le ")
+    .replace(/>=|\u2265/g, " \\ge ")
+    .replace(/!=|\u2260/g, " \\ne ")
+    .replace(/~=|\u2248/g, " \\approx ")
+    .replace(/->|\u2192/g, " \\to ")
+    .replace(/\u221E/g, " \\infty ")
+    .replace(/\u00D7/g, " \\times ")
+    .replace(/\u00B7/g, " \\cdot ")
+    .replace(/\u2211/g, " \\sum ")
+    .replace(/\u222B/g, " \\int ")
+    .replace(/\u220F/g, " \\prod ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function repairBrokenDollarSequences(line) {
+  return String(line || "")
+    .replace(/\\\$\$/g, "$$")
+    .replace(/\\\$/g, "$")
+    .replace(/([A-Za-z0-9)\]])\s*\$\$\s*([A-Za-z0-9(\[])/g, "$1 쨌 $2")
+    .replace(/([A-Za-z0-9)\]])\s*\$(?=[A-Za-z0-9(\[])/g, "$1 쨌 ")
+    .replace(/\$\$/g, " ")
+    .replace(/\$/g, "");
+}
+
+function convertFormulaLikeSegments(line, toPlaceholder) {
+  let working = line;
+  for (const pattern of AUTO_INLINE_MATH_PATTERNS) {
+    working = working.replace(pattern, (full, prefix, expr) => {
+      const normalized = normalizeMathExpression(expr);
+      if (!normalized) return full;
+      return `${prefix}${toPlaceholder(`$${normalized}$`)}`;
+    });
+  }
+  return working;
+}
+
+function pushMathRange(ranges, start, end) {
+  if (end <= start) return;
+  const last = ranges[ranges.length - 1];
+  if (!last || start > last.end) {
+    ranges.push({ start, end });
+    return;
+  }
+  last.end = Math.max(last.end, end);
+}
+
+function normalizeLatexSnippet(expr) {
+  return String(expr || "")
+    .replace(/\\big\\\(/g, "\\big(")
+    .replace(/\\big\\\)/g, "\\big)")
+    .replace(/\\Big\\\(/g, "\\Big(")
+    .replace(/\\Big\\\)/g, "\\Big)")
+    .replace(/\\left\\\(/g, "\\left(")
+    .replace(/\\right\\\)/g, "\\right)")
+    .replace(/\\(?:tfrac|dfrac)\s*([0-9])\s*([0-9])/g, (full, a, b) =>
+      full.startsWith("\\tfrac") ? `\\tfrac{${a}}{${b}}` : `\\dfrac{${a}}{${b}}`
+    )
+    // LLM output often drops \\ before [4pt] in cases rows.
+    .replace(/,\s*\[([0-9]+(?:\.[0-9]+)?(?:pt|em|ex))\]\s*/g, " \\\\[$1] ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function autoWrapBareLatexSegments(line, toPlaceholder) {
+  const source = String(line || "");
+  if (!BARE_LATEX_COMMAND_RE.test(source)) return source;
+
+  const ranges = [];
+
+  for (const match of source.matchAll(BARE_LATEX_ENV_RE)) {
+    const start = match.index ?? -1;
+    if (start < 0) continue;
+    const end = start + String(match[0] || "").length;
+    pushMathRange(ranges, start, end);
+  }
+
+  for (const match of source.matchAll(BARE_LATEX_COMMAND_GLOBAL_RE)) {
+    const commandStart = match.index ?? -1;
+    if (commandStart < 0) continue;
+
+    let start = commandStart;
+    while (start > 0 && MATH_CONTEXT_CHAR_RE.test(source[start - 1])) {
+      start -= 1;
+    }
+
+    let end = commandStart + String(match[0] || "").length;
+    while (end < source.length && MATH_CONTEXT_CHAR_RE.test(source[end])) {
+      end += 1;
+    }
+
+    while (start < end && /\s/.test(source[start])) start += 1;
+    while (start < end && /[-*]/.test(source[start])) start += 1;
+    while (start < end && /\s/.test(source[start])) start += 1;
+    while (end > start && /\s/.test(source[end - 1])) end -= 1;
+
+    const candidate = source.slice(start, end).trim();
+    if (!candidate) continue;
+    if (
+      !/[=^_{}]/.test(candidate) &&
+      !/\\(?:frac|dfrac|tfrac|sum|prod|int|begin|end|sqrt|lim)\b/.test(candidate)
+    ) {
+      continue;
+    }
+
+    pushMathRange(ranges, start, end);
+  }
+
+  if (!ranges.length) return source;
+
+  let cursor = 0;
+  let output = "";
+  for (const range of ranges) {
+    output += source.slice(cursor, range.start);
+    const expr = normalizeLatexSnippet(source.slice(range.start, range.end));
+    const wrapped = DISPLAY_ENV_RE.test(expr) ? `$$${expr}$$` : `$${expr}$`;
+    output += toPlaceholder(wrapped);
+    cursor = range.end;
+  }
+  output += source.slice(cursor);
+  return output;
+}
+function sanitizeSummaryForMath(rawSummary) {
+  const source = String(rawSummary || "").replace(/\r\n/g, "\n");
+  if (!source) return "";
+
+  const lines = source.split("\n");
+  let inCodeFence = false;
+
+  return lines
+    .map((line) => {
+      if (/^\s*```/.test(line)) {
+        inCodeFence = !inCodeFence;
+        return line;
+      }
+      if (inCodeFence) return line;
+
+      // Keep inline code untouched.
+      if (line.includes("`")) return line;
+
+      let working = String(line || "").replace(/\\\$/g, "$");
+      const placeholders = [];
+      const toPlaceholder = (value) => {
+        const token = `%%MATH${placeholders.length}%%`;
+        placeholders.push(value);
+        return token;
+      };
+
+      // Protect already-valid math blocks first.
+      working = working.replace(/\$\$[\s\S]*?\$\$|\$[^$\n]+\$/g, (match) => toPlaceholder(match));
+
+      // Repair malformed dollar markers left outside valid math segments.
+      working = repairBrokenDollarSequences(working);
+
+      // [ ... ] blocks that look like formulas -> block math.
+      working = working.replace(/\[\s*([^[\]\n]+?)\s*\]/g, (full, expr) => {
+        if (!AUTO_MATH_TOKEN_RE.test(expr)) return full;
+        return toPlaceholder(`$$${normalizeMathExpression(expr)}$$`);
+      });
+
+      // Wrap common probability/statistics equations with inline math delimiters.
+      working = convertFormulaLikeSegments(working, toPlaceholder);
+
+      // Auto-wrap bare LaTeX commands (e.g. \frac, \begin{cases}) in mixed prose lines.
+      working = autoWrapBareLatexSegments(working, toPlaceholder);
+
+      // NOTE: keep auto-conversion conservative to avoid malformed $/$$ sequences.
+
+      // Recover both current and legacy placeholder formats.
+      return working
+        .replace(/%%MATH(\d+)%%/g, (full, idx) => placeholders[Number(idx)] || full)
+        .replace(/@@MATH_?(\d+)@@/g, (full, idx) => placeholders[Number(idx)] || full);
+    })
+    .join("\n");
+}
+
+function rebalanceTrailingPages(pages, { maxChars, minTailChars = MIN_TAIL_PAGE_CHARS }) {
+  const chunks = Array.isArray(pages)
+    ? pages
+        .map((page) => String(page || "").trim())
+        .filter(Boolean)
+    : [];
+  if (chunks.length < 2) return chunks;
+
+  const mergeLimit = Math.round(maxChars * SOFT_MERGE_LIMIT_RATIO);
+
+  // If the trailing page is too short, merge it back when the previous page
+  // can absorb it without becoming overly dense.
+  while (chunks.length > 1) {
+    const lastIndex = chunks.length - 1;
+    const tail = chunks[lastIndex];
+    if (tail.length >= minTailChars) break;
+
+    const prevIndex = lastIndex - 1;
+    const merged = `${chunks[prevIndex]}\n\n${tail}`.trim();
+    if (merged.length > mergeLimit) break;
+
+    chunks[prevIndex] = merged;
+    chunks.pop();
+  }
+
+  return chunks;
+}
+
+function splitLongSection(section, maxChars = DEFAULT_SECTION_PAGE_CHARS) {
   const source = String(section || "").trim();
   if (!source) return [];
   if (source.length <= maxChars) return [source];
@@ -30,7 +259,41 @@ function splitLongSection(section, maxChars = 1800) {
     pages.push(chunk.join("\n").trim());
   }
 
-  return pages.filter(Boolean);
+  return rebalanceTrailingPages(pages, { maxChars });
+}
+
+function packSectionChunksIntoPages(sectionChunks, maxChars = DEFAULT_SECTION_PAGE_CHARS) {
+  const chunks = Array.isArray(sectionChunks)
+    ? sectionChunks
+        .map((chunk) => String(chunk || "").trim())
+        .filter(Boolean)
+    : [];
+  if (!chunks.length) return [];
+
+  const pages = [];
+  let currentPage = "";
+
+  for (const chunk of chunks) {
+    if (!currentPage) {
+      currentPage = chunk;
+      continue;
+    }
+
+    const merged = `${currentPage}\n\n${chunk}`.trim();
+    if (merged.length <= maxChars) {
+      currentPage = merged;
+      continue;
+    }
+
+    pages.push(currentPage);
+    currentPage = chunk;
+  }
+
+  if (currentPage) {
+    pages.push(currentPage);
+  }
+
+  return rebalanceTrailingPages(pages, { maxChars });
 }
 
 function getFirstNonEmptyLine(text) {
@@ -44,7 +307,10 @@ function getFirstNonEmptyLine(text) {
 
 function isOverviewSection(section) {
   const heading = getFirstNonEmptyLine(section);
-  return /^##\s*(overview|overall overview|전체\s*개요)\s*$/i.test(heading);
+  return (
+    /^##\s*(overview|overall overview)\s*$/i.test(heading) ||
+    /^##\s*\uC804\uCCB4\s*\uAC1C\uC694\s*$/i.test(heading)
+  );
 }
 
 function mergeOverviewWithNextSection(sections) {
@@ -75,11 +341,15 @@ function splitSummaryIntoPages(summary) {
   }
 
   const baseSections = mergeOverviewWithNextSection(sections.length ? sections : [normalized]);
-  return baseSections.flatMap((section) => splitLongSection(section));
+  const sectionChunks = baseSections.flatMap((section) => splitLongSection(section));
+  return packSectionChunksIntoPages(sectionChunks);
 }
 
 function SummaryCard({ summary, renderExportPages = false }) {
-  const normalizedSummary = String(summary || "").trim();
+  const normalizedSummary = useMemo(
+    () => sanitizeSummaryForMath(summary).trim(),
+    [summary]
+  );
   const hasSummary = normalizedSummary.length > 0;
   const summaryKey = useMemo(
     () => `${normalizedSummary.length}:${normalizedSummary.slice(0, 120)}`,
@@ -117,6 +387,36 @@ function SummaryCard({ summary, renderExportPages = false }) {
         <th className="border-b border-white/10 px-3 py-2 font-semibold text-emerald-100" {...props} />
       ),
       td: (props) => <td className="border-b border-white/5 px-3 py-2 text-slate-100" {...props} />,
+    }),
+    []
+  );
+  const exportMarkdownComponents = useMemo(
+    () => ({
+      h1: (props) => <h1 className="mt-4 text-[22px] font-bold text-slate-900" {...props} />,
+      h2: (props) => <h2 className="mt-3 text-[19px] font-semibold text-slate-900" {...props} />,
+      h3: (props) => <h3 className="mt-2 text-[16px] font-semibold text-slate-800" {...props} />,
+      p: (props) => <p className="text-[13px] leading-[1.75] text-slate-800" {...props} />,
+      strong: (props) => <strong className="font-semibold text-slate-900" {...props} />,
+      ul: (props) => <ul className="list-disc space-y-1 pl-5 text-[13px] text-slate-800" {...props} />,
+      ol: (props) => <ol className="list-decimal space-y-1 pl-5 text-[13px] text-slate-800" {...props} />,
+      li: (props) => <li className="leading-[1.7]" {...props} />,
+      code: ({ inline, className, children, ...props }) =>
+        inline ? (
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[12px] text-slate-900" {...props}>
+            {children}
+          </code>
+        ) : (
+          <pre className="overflow-auto rounded-lg bg-slate-100 p-3 text-[12px] text-slate-900" {...props}>
+            <code className={className}>{children}</code>
+          </pre>
+        ),
+      table: (props) => (
+        <div className="overflow-auto">
+          <table className="min-w-full text-left text-[13px] text-slate-900" {...props} />
+        </div>
+      ),
+      th: (props) => <th className="border border-slate-300 px-3 py-2 font-semibold text-slate-900" {...props} />,
+      td: (props) => <td className="border border-slate-200 px-3 py-2 text-slate-800" {...props} />,
     }),
     []
   );
@@ -173,27 +473,26 @@ function SummaryCard({ summary, renderExportPages = false }) {
 
   return (
     <div
-      className="summary-card mt-4 rounded-2xl bg-gradient-to-br from-slate-900/60 via-slate-900/50 to-slate-900/40 p-4 ring-1 ring-white/10"
+      className="summary-card mt-4 rounded-2xl bg-gradient-to-br from-slate-900/60 via-slate-900/50 to-slate-900/40 p-4 ring-1 ring-white/10 caret-transparent"
       tabIndex={0}
       onKeyDown={handleCardKeyDown}
     >
       <div className="mb-3 flex items-center justify-between">
-        <p className="text-xs uppercase tracking-[0.2em] text-slate-300">Summary</p>
+        <p className="text-xs uppercase tracking-[0.2em] text-slate-300">요약</p>
         <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-slate-100 ring-1 ring-white/20">
           A4 Bundle {safePageIndex + 1}/{totalPages}
         </span>
       </div>
 
-      <div className="relative flex items-center justify-center px-8 md:px-10">
+      <div className="relative flex items-center justify-center px-10 md:px-12">
         <button
           type="button"
           onPointerDown={(event) => handleNavPointerDown(event, goPrev)}
           onClick={(event) => handleNavClick(event, goPrev)}
           disabled={!canGoPrev}
-          aria-label="Previous summary page"
-          className="ghost-button absolute left-0 top-1/2 z-20 h-11 w-11 -translate-y-1/2 p-0 text-sm text-slate-100 pointer-events-auto"
-          data-ghost-size="sm"
-          style={{ "--ghost-color": "148, 163, 184", touchAction: "manipulation" }}
+          aria-label="이전 요약 페이지"
+          className="ghost-button absolute left-1 top-1/2 z-20 h-7 w-7 -translate-y-1/2 text-[11px] text-slate-100 pointer-events-auto sm:h-8 sm:w-8 sm:text-xs"
+          style={{ "--ghost-color": "148, 163, 184", touchAction: "manipulation", padding: 0 }}
         >
           {"<"}
         </button>
@@ -201,7 +500,7 @@ function SummaryCard({ summary, renderExportPages = false }) {
         <div className="w-full max-w-[860px]">
           <div className="mx-auto aspect-[210/297] w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950/45 p-4 shadow-inner shadow-black/30 md:p-6">
             <div className="show-scrollbar h-full overflow-auto pr-1">
-              <div className="summary-prose prose prose-invert max-w-none space-y-2 text-slate-100 prose-p:leading-relaxed prose-headings:text-slate-50 prose-strong:text-slate-50 prose-a:text-slate-50">
+              <div className="summary-prose prose prose-invert max-w-none space-y-2 text-slate-100 prose-p:leading-relaxed prose-headings:text-slate-50 prose-strong:text-slate-50 prose-a:text-slate-50 caret-transparent">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm, remarkMath]}
                   rehypePlugins={[rehypeKatex]}
@@ -219,10 +518,9 @@ function SummaryCard({ summary, renderExportPages = false }) {
           onPointerDown={(event) => handleNavPointerDown(event, goNext)}
           onClick={(event) => handleNavClick(event, goNext)}
           disabled={!canGoNext}
-          aria-label="Next summary page"
-          className="ghost-button absolute right-0 top-1/2 z-20 h-11 w-11 -translate-y-1/2 p-0 text-sm text-slate-100 pointer-events-auto"
-          data-ghost-size="sm"
-          style={{ "--ghost-color": "148, 163, 184", touchAction: "manipulation" }}
+          aria-label="다음 요약 페이지"
+          className="ghost-button absolute right-1 top-1/2 z-20 h-7 w-7 -translate-y-1/2 text-[11px] text-slate-100 pointer-events-auto sm:h-8 sm:w-8 sm:text-xs"
+          style={{ "--ghost-color": "148, 163, 184", touchAction: "manipulation", padding: 0 }}
         >
           {">"}
         </button>
@@ -233,19 +531,19 @@ function SummaryCard({ summary, renderExportPages = false }) {
           {pages.map((page, index) => (
             <section
               key={`summary-export-page-${index}`}
-              className="summary-export-page w-[794px] min-h-[1123px] rounded-2xl bg-gradient-to-br from-slate-900/90 via-slate-900/85 to-slate-950/95 p-10 ring-1 ring-white/10"
+              className="summary-export-page w-[794px] min-h-[1123px] bg-white px-16 py-16"
             >
-              <div className="mb-4 flex items-center justify-between">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-300">Summary</p>
-                <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-slate-100 ring-1 ring-white/20">
-                  A4 Bundle {index + 1}/{totalPages}
+              <div className="mb-5 flex items-center justify-between border-b border-slate-200 pb-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">요약</p>
+                <span className="text-[11px] font-medium text-slate-500">
+                  페이지 {index + 1} / {totalPages}
                 </span>
               </div>
-              <div className="summary-prose prose prose-invert max-w-none space-y-2 text-slate-100 prose-p:leading-relaxed prose-headings:text-slate-50 prose-strong:text-slate-50 prose-a:text-slate-50">
+              <div className="summary-prose prose max-w-none space-y-2 text-slate-900 prose-p:leading-relaxed prose-headings:text-slate-900 prose-strong:text-slate-900 prose-a:text-slate-900 caret-transparent">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm, remarkMath]}
                   rehypePlugins={[rehypeKatex]}
-                  components={markdownComponents}
+                  components={exportMarkdownComponents}
                 >
                   {page}
                 </ReactMarkdown>
@@ -259,3 +557,4 @@ function SummaryCard({ summary, renderExportPages = false }) {
 }
 
 export default SummaryCard;
+

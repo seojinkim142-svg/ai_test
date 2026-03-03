@@ -481,6 +481,95 @@ export async function extractPdfTextFromPages(file, pageNumbers, maxLength = 120
   };
 }
 
+export async function extractPdfPageTexts(file, pageNumbers, options = {}) {
+  const pdfjsLib = await loadPdfRuntime();
+  const { getDocument } = pdfjsLib;
+  const {
+    useOcr = false,
+    ocrLang = "kor+eng",
+    ocrScale = 2,
+    onOcrProgress,
+    maxCharsPerPage = 6000,
+  } = options || {};
+  const notifyOcr = (message) => {
+    if (typeof onOcrProgress === "function") onOcrProgress(message);
+  };
+
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await getDocument({ data: arrayBuffer }).promise;
+  const totalPages = pdf.numPages;
+  const normalizedPages = Array.from(
+    new Set(
+      (pageNumbers || [])
+        .map((page) => Number.parseInt(page, 10))
+        .filter((page) => Number.isFinite(page) && page > 0 && page <= totalPages)
+    )
+  ).sort((a, b) => a - b);
+
+  const pages = [];
+  const missingPages = [];
+  for (const pageNumber of normalizedPages) {
+    const page = await pdf.getPage(pageNumber);
+    const text = await extractPageTextWithAttempts(page);
+    const normalized = String(text || "").replace(/\s+/g, " ").trim().slice(0, maxCharsPerPage);
+    if (normalized) {
+      pages.push({
+        pageNumber,
+        text: normalized,
+        ocrUsed: false,
+      });
+    } else {
+      pages.push({
+        pageNumber,
+        text: "",
+        ocrUsed: false,
+      });
+      missingPages.push(pageNumber);
+    }
+  }
+
+  if (useOcr && missingPages.length > 0) {
+    notifyOcr("페이지별 OCR을 시작합니다...");
+    const { createWorker } = await import("tesseract.js");
+    const worker = await createWorker(ocrLang, 1, {
+      logger: (info) => {
+        if (!info || typeof info.progress !== "number") return;
+        const pct = Math.round(info.progress * 100);
+        notifyOcr(`OCR ${info.status || "processing"}... ${pct}%`);
+      },
+    });
+
+    try {
+      for (let idx = 0; idx < missingPages.length; idx += 1) {
+        const pageNumber = missingPages[idx];
+        notifyOcr(`OCR 진행 중... (${idx + 1}/${missingPages.length}페이지)`);
+        const page = await pdf.getPage(pageNumber);
+        const canvas = await renderPageToCanvas(page, ocrScale);
+        const result = await worker.recognize(canvas);
+        const text = String(result?.data?.text || "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, maxCharsPerPage);
+        canvas.width = 0;
+        canvas.height = 0;
+
+        const target = pages.find((item) => item.pageNumber === pageNumber);
+        if (target && text) {
+          target.text = text;
+          target.ocrUsed = true;
+        }
+      }
+    } finally {
+      await worker.terminate();
+    }
+  }
+
+  return {
+    pages: pages.sort((a, b) => a.pageNumber - b.pageNumber),
+    totalPages,
+  };
+}
+
 export async function extractPdfTextByRanges(
   file,
   ranges,

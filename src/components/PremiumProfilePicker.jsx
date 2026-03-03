@@ -175,6 +175,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
               </p>
               <input
                 ref={nameInputRef}
+                name="premium-profile-name"
                 type="text"
                 value={draftName}
                 maxLength={16}
@@ -236,6 +237,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
               </p>
               <input
                 ref={pinInputRef}
+                name="premium-profile-pin"
                 type="password"
                 inputMode="numeric"
                 maxLength={4}

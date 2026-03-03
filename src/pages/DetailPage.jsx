@@ -58,6 +58,8 @@ export default function DetailPage({
   formatMockExamTitle,
   handleDeleteMockExam,
   handleCreateMockExam,
+  mockExamChapterSelectionInput,
+  setMockExamChapterSelectionInput,
   isGeneratingMockExam,
   selectedFileId,
   handleExportMockExam,
@@ -73,6 +75,8 @@ export default function DetailPage({
   isLoadingQuiz,
   shortPreview,
   requestQuestions,
+  quizChapterSelectionInput,
+  setQuizChapterSelectionInput,
   quizMix,
   setQuizMix,
   quizSets,
@@ -82,6 +86,8 @@ export default function DetailPage({
   regenerateQuiz,
   isLoadingOx,
   requestOxQuiz,
+  oxChapterSelectionInput,
+  setOxChapterSelectionInput,
   regenerateOxQuiz,
   oxItems,
   oxSelections,
@@ -93,6 +99,8 @@ export default function DetailPage({
   handleAddFlashcard,
   handleDeleteFlashcard,
   handleGenerateFlashcards,
+  flashcardChapterSelectionInput,
+  setFlashcardChapterSelectionInput,
   isGeneratingFlashcards,
   extractedText,
   flashcardStatus,
@@ -120,6 +128,38 @@ export default function DetailPage({
     quizMixOptions,
     setQuizMix,
   });
+  const normalizeChapterSelectionInput = (value) => String(value || "").replace(/\s+/g, "");
+  const mockExamAnswerEntries = useMemo(() => {
+    const persistedAnswerSheet = Array.isArray(activeMockExam?.payload?.answerSheet)
+      ? activeMockExam.payload.answerSheet
+      : [];
+
+    if (persistedAnswerSheet.length > 0) {
+      return persistedAnswerSheet.map((item, idx) => ({
+        number: Number.isFinite(item?.number) ? item.number : idx + 1,
+        answer: String(item?.answer || "-"),
+        explanation: String(item?.explanation || "").trim(),
+        evidence: String(item?.evidence || "").trim(),
+      }));
+    }
+
+    return mockExamOrderedItems.map((item, idx) => {
+      const answerText =
+        item.type === "ox"
+          ? item.answer || "-"
+          : item.type === "quiz-short"
+            ? item.answer || "-"
+            : Number.isFinite(item.answerIndex)
+              ? LETTERS[item.answerIndex] || "-"
+              : "-";
+      return {
+        number: idx + 1,
+        answer: answerText,
+        explanation: String(item?.explanation || "").trim(),
+        evidence: String(item?.evidence || "").trim(),
+      };
+    });
+  }, [activeMockExam, mockExamOrderedItems]);
 
 
   return (
@@ -127,7 +167,10 @@ export default function DetailPage({
       ref={detailContainerRef}
       className="flex flex-col gap-4 lg:h-[clamp(70vh,calc(100vh-120px),90vh)] lg:flex-row lg:items-stretch lg:gap-0 lg:overflow-hidden"
     >
-      <div className="flex flex-col gap-3 lg:h-full lg:overflow-y-auto" style={splitStyle}>
+      <div
+        className="flex flex-col gap-3 lg:h-full lg:flex-[0_0_var(--split-basis)] lg:overflow-y-auto"
+        style={splitStyle}
+      >
         <PdfPreview
           pdfUrl={pdfUrl}
           file={file}
@@ -373,6 +416,31 @@ export default function DetailPage({
               </div>
 
               <div className="mt-4 space-y-3">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <input
+                      type="text"
+                      value={mockExamChapterSelectionInput}
+                      onChange={(event) =>
+                        setMockExamChapterSelectionInput(
+                          normalizeChapterSelectionInput(event.target.value)
+                        )
+                      }
+                      placeholder="챕터 범위 (예: 1-3,5)"
+                      className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleCreateMockExam}
+                      disabled={isGeneratingMockExam || isLoadingText || !selectedFileId}
+                      className="ghost-button text-xs text-emerald-100"
+                      data-ghost-size="sm"
+                      style={{ "--ghost-color": "52, 211, 153" }}
+                    >
+                      확인
+                    </button>
+                  </div>
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="relative" ref={mockExamMenuRef}>
                     <button
@@ -533,25 +601,20 @@ export default function DetailPage({
                         <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
                           <p className="text-sm font-semibold text-emerald-200">정답/해설</p>
                           <div className="mt-3 space-y-2 text-xs text-slate-200">
-                            {mockExamOrderedItems.map((item, idx) => {
-                              const answerText =
-                                item.type === "ox"
-                                  ? item.answer || "-"
-                                  : item.type === "quiz-short"
-                                    ? item.answer || "-"
-                                    : Number.isFinite(item.answerIndex)
-                                      ? LETTERS[item.answerIndex] || "-"
-                                      : "-";
-                              return (
-                                <div key={`mock-exam-answer-${idx}`} className="rounded-lg bg-white/5 px-3 py-2">
-                                  <p className="font-semibold text-emerald-200">
-                                    {idx + 1}번 정답: {answerText}
-                                  </p>
-                                  {item.explanation && <p className="mt-1">해설: {item.explanation}</p>}
-                                  {item.evidence && <p className="mt-1">근거: {item.evidence}</p>}
-                                </div>
-                              );
-                            })}
+                            {mockExamAnswerEntries.length === 0 && (
+                              <p className="rounded-lg bg-white/5 px-3 py-2 text-slate-300">
+                                답지 데이터가 없습니다.
+                              </p>
+                            )}
+                            {mockExamAnswerEntries.map((item, idx) => (
+                              <div key={`mock-exam-answer-${idx}`} className="rounded-lg bg-white/5 px-3 py-2">
+                                <p className="font-semibold text-emerald-200">
+                                  {item.number}번 정답: {item.answer}
+                                </p>
+                                {item.explanation && <p className="mt-1">해설: {item.explanation}</p>}
+                                {item.evidence && <p className="mt-1">근거: {item.evidence}</p>}
+                              </div>
+                            ))}
                           </div>
                         </div>
                       )}
@@ -579,6 +642,32 @@ export default function DetailPage({
                 onRequestQuiz={requestQuestions}
                 onRequestSummary={requestSummary}
               />
+
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    type="text"
+                    value={quizChapterSelectionInput}
+                    onChange={(event) =>
+                      setQuizChapterSelectionInput(
+                        normalizeChapterSelectionInput(event.target.value)
+                      )
+                    }
+                    placeholder="챕터 범위 (예: 1-3,5)"
+                    className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
+                  />
+                  <button
+                    type="button"
+                    onClick={requestQuestions}
+                    disabled={isLoadingQuiz || isLoadingText || (isFreeTier && quizSets.length > 0)}
+                    className="ghost-button text-xs text-emerald-100"
+                    data-ghost-size="sm"
+                    style={{ "--ghost-color": "52, 211, 153" }}
+                  >
+                    확인
+                  </button>
+                </div>
+              </div>
 
               <div className="rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-300">문항 비율</p>
@@ -685,6 +774,32 @@ export default function DetailPage({
                 onRequestSummary={requestSummary}
               />
 
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    type="text"
+                    value={oxChapterSelectionInput}
+                    onChange={(event) =>
+                      setOxChapterSelectionInput(
+                        normalizeChapterSelectionInput(event.target.value)
+                      )
+                    }
+                    placeholder="챕터 범위 (예: 1-3,5)"
+                    className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => requestOxQuiz({ auto: false })}
+                    disabled={isLoadingOx || isLoadingText}
+                    className="ghost-button text-xs text-emerald-100"
+                    data-ghost-size="sm"
+                    style={{ "--ghost-color": "52, 211, 153" }}
+                  >
+                    확인
+                  </button>
+                </div>
+              </div>
+
               <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <button
                   type="button"
@@ -732,17 +847,44 @@ export default function DetailPage({
           )}
 
           {panelTab === "flashcards" && (
-            <FlashcardsPanel
-              cards={flashcards}
-              isLoading={isLoadingFlashcards}
-              onAdd={handleAddFlashcard}
-              onDelete={handleDeleteFlashcard}
-              onGenerate={handleGenerateFlashcards}
-              isGenerating={isGeneratingFlashcards}
-              canGenerate={Boolean(file && selectedFileId && extractedText && !isLoadingText)}
-              status={flashcardStatus}
-              error={flashcardError}
-            />
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    type="text"
+                    value={flashcardChapterSelectionInput}
+                    onChange={(event) =>
+                      setFlashcardChapterSelectionInput(
+                        normalizeChapterSelectionInput(event.target.value)
+                      )
+                    }
+                    placeholder="챕터 범위 (예: 1-3,5)"
+                    className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleGenerateFlashcards}
+                    disabled={isGeneratingFlashcards || isLoadingText || !file || !selectedFileId}
+                    className="ghost-button text-xs text-emerald-100"
+                    data-ghost-size="sm"
+                    style={{ "--ghost-color": "52, 211, 153" }}
+                  >
+                    확인
+                  </button>
+                </div>
+              </div>
+              <FlashcardsPanel
+                cards={flashcards}
+                isLoading={isLoadingFlashcards}
+                onAdd={handleAddFlashcard}
+                onDelete={handleDeleteFlashcard}
+                onGenerate={handleGenerateFlashcards}
+                isGenerating={isGeneratingFlashcards}
+                canGenerate={Boolean(file && selectedFileId && extractedText && !isLoadingText)}
+                status={flashcardStatus}
+                error={flashcardError}
+              />
+            </div>
           )}
           {panelTab === "tutor" && (
             <AiTutorPanel
