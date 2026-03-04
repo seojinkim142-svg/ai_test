@@ -68,3 +68,18 @@ npm run android:live:target
 ```
 
 After this, saving code in `src/` should update the app on the tablet right away.
+
+## Auth Toggle
+
+Use `VITE_AUTH_ENABLED` to switch login/auth UI on or off.
+
+```bash
+# disable auth (default)
+VITE_AUTH_ENABLED=false
+
+# enable auth
+VITE_AUTH_ENABLED=true
+```
+
+- Team-shared default (committed to Git): change `AUTH_DEFAULT_ENABLED` in `src/config/auth.js`.
+- Local override (not committed): set `VITE_AUTH_ENABLED` in `.env`.
