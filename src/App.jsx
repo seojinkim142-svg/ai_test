@@ -4,6 +4,7 @@ import StartPage from "./pages/StartPage";
 import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
 import { useUserTier } from "./hooks/useUserTier";
 import { usePageProgressCache } from "./hooks/usePageProgressCache";
+import { AUTH_ENABLED } from "./config/auth";
 import {
   supabase,
   uploadPdfToStorage,
@@ -65,6 +66,7 @@ import {
   formatMockExamTitle,
   chunkMockExamPages,
 } from "./utils/appStateHelpers";
+import { LETTERS } from "./constants";
 
 const AuthPanel = lazy(() => import("./components/AuthPanel"));
 const Header = lazy(() => import("./components/Header"));
@@ -124,10 +126,15 @@ const PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY = "__partial_summary_library_v1";
 const LEGACY_HIGHLIGHTS_WRAP_KEY = "__legacy_highlights_payload_v1";
 
 function shouldOpenAuthOnInitialLoad() {
-  if (typeof window === "undefined") return false;
-  const params = new URLSearchParams(window.location.search);
-  if (params.get("auth") === "1") return true;
-  return Capacitor.isNativePlatform();
+  if (!AUTH_ENABLED) return false;
+  return true;
+}
+
+function createLocalEntityId(prefix) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function buildChapterRangeStorageKey({ userId, scopeId, docId }) {
@@ -560,6 +567,7 @@ function App() {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
   const [showAuth, setShowAuth] = useState(shouldOpenAuthOnInitialLoad);
+  const [showGuestIntro, setShowGuestIntro] = useState(() => !AUTH_ENABLED);
   const [currentPage, setCurrentPage] = useState(1);
   const [visitedPages, setVisitedPages] = useState(() => new Set());
   const [mockExams, setMockExams] = useState([]);
@@ -709,6 +717,7 @@ function App() {
   );
 
   const openAuth = useCallback(() => {
+    if (!AUTH_ENABLED) return;
     setShowAuth(true);
   }, []);
 
@@ -1351,6 +1360,15 @@ function App() {
   const handleDeleteUpload = useCallback(
     async (upload) => {
       if (!user) {
+        if (!AUTH_ENABLED) {
+          const uploadId = upload?.id || null;
+          if (!uploadId) return;
+          setUploadedFiles((prev) => prev.filter((u) => u.id !== uploadId));
+          setSelectedUploadIds((prev) => prev.filter((id) => id !== uploadId));
+          persistChapterRangeInput(uploadId, "");
+          setStatus("Local upload removed.");
+          return;
+        }
         setError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
         return;
       }
@@ -1488,7 +1506,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!user && isNativePlatform) {
+    if (AUTH_ENABLED && !user && isNativePlatform) {
       setShowAuth(true);
     }
   }, [isNativePlatform, user]);
@@ -1786,7 +1804,7 @@ function App() {
           idleHandle = window.setTimeout(runBackfill, 250);
         }
       });
-    } else {
+    } else if (AUTH_ENABLED) {
       setUploadedFiles([]);
     }
 
@@ -2067,7 +2085,7 @@ function App() {
 
   const handleFileChange = useCallback(
     async (event, targetFolderId = null) => {
-      if (!user) {
+      if (AUTH_ENABLED && !user) {
         openAuth();
         return;
       }
@@ -2138,8 +2156,14 @@ function App() {
 
       const withUploads = await Promise.all(
         withThumbs.map(async (item) => {
-          if (!supabase || !user) {
+          if (!user) {
+            if (!AUTH_ENABLED) {
+              return { ...item, remote: false };
+            }
             return { ...item, uploadError: "?대씪?곕뱶 ?낅줈?쒕? ?ъ슜?????놁뒿?덈떎. ?ㅼ떆 濡쒓렇?명빐二쇱꽭??" };
+          }
+          if (!supabase) {
+            return { ...item, uploadError: "Supabase client is not available." };
           }
 
           // Reuse existing remote upload by hash to avoid duplicate storage writes.
@@ -2241,7 +2265,9 @@ function App() {
       const firstReadyUpload = successfulUploads.find((item) => item?.file);
       if (firstReadyUpload) {
         await processSelectedFile(firstReadyUpload);
-        await loadUploadsRef.current?.();
+        if (AUTH_ENABLED && user) {
+          await loadUploadsRef.current?.();
+        }
       } else {
         setStatus("??λ맂 ?뚯씪???놁뒿?덈떎. ?낅줈???ㅻ쪟 硫붿떆吏瑜??뺤씤?댁＜?몄슂.");
       }
@@ -2568,39 +2594,39 @@ function App() {
   const requestQuestions = async ({ force = false } = {}) => {
     if (isLoadingQuiz && !force) return;
     if (!file) {
-      setError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+      setError("먼저 PDF를 열어주세요.");
       return;
     }
     if (isFreeTier && quizSets.length > 0) {
-      setError("臾대즺 ?뚮옖?먯꽌???댁쫰 ?명듃瑜?1媛쒕쭔 ?앹꽦?????덉뒿?덈떎.");
+      setError("무료 플랜에서는 퀴즈 세트를 1개만 생성할 수 있습니다.");
       return;
     }
     if (!force && hasReached("maxQuiz")) {
-      setError("?꾩옱 ?붽툑?쒖쓽 ?댁쫰 ?앹꽦 ?쒕룄???꾨떖?덉뒿?덈떎.");
+      setError("현재 요금제의 퀴즈 생성 한도에 도달했습니다.");
       return;
     }
     const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
 
     if (!extractedText && !chapterSelectionRaw) {
-      setError("異붿텧???띿뒪?멸? ?놁뒿?덈떎. 癒쇱? PDF ?띿뒪??異붿텧???ㅽ뻾?댁＜?몄슂.");
+      setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
       return;
     }
 
     setIsLoadingQuiz(true);
     setError("");
-    setStatus("?댁쫰 ?명듃 ?앹꽦 以?..");
+    setStatus("퀴즈 세트 생성 중...");
 
     try {
       let quizSourceText = extractedText;
       let scopeLabel = "";
       if (chapterSelectionRaw) {
         const scoped = await extractTextForChapterSelection({
-          featureLabel: "?댁쫰",
+          featureLabel: "퀴즈",
           chapterSelectionInput: chapterSelectionRaw,
         });
         quizSourceText = scoped.text;
         scopeLabel = scoped.scopeLabel;
-        setStatus(`?댁쫰 ?명듃 ?앹꽦 以?(${scopeLabel})...`);
+        setStatus(`퀴즈 세트 생성 중... (${scopeLabel})`);
       }
 
       const { generateQuiz } = await getOpenAiService();
@@ -2623,11 +2649,11 @@ function App() {
         shortAnswerResult: {},
       };
       setQuizSets((prev) => [...prev, newSet]);
-      setStatus(scopeLabel ? `?댁쫰 ?명듃媛 ?앹꽦?섏뿀?듬땲??(${scopeLabel}).` : "?댁쫰 ?명듃媛 ?앹꽦?섏뿀?듬땲??");
+      setStatus(scopeLabel ? `퀴즈 세트가 생성되었습니다. (${scopeLabel})` : "퀴즈 세트가 생성되었습니다.");
       setUsageCounts((prev) => ({ ...prev, quiz: prev.quiz + 1 }));
       persistArtifacts({ quiz: trimmedQuiz });
     } catch (err) {
-      setError(`?댁쫰 ?명듃 ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+      setError(`퀴즈 세트 생성에 실패했습니다: ${err.message}`);
     } finally {
       setIsLoadingQuiz(false);
     }
@@ -2636,25 +2662,25 @@ function App() {
   const regenerateQuiz = async () => {
     if (isLoadingQuiz) return;
     if (!file) {
-      setError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+      setError("먼저 PDF를 열어주세요.");
       return;
     }
     if (isFreeTier) {
-      setError("臾대즺 ?뚮옖?먯꽌???댁쫰 ?명듃瑜??ㅼ떆 ?앹꽦?????놁뒿?덈떎.");
+      setError("무료 플랜에서는 퀴즈 세트를 다시 생성할 수 없습니다.");
       return;
     }
     if (hasReached("maxQuiz")) {
-      setError("?꾩옱 ?붽툑?쒖쓽 ?댁쫰 ?앹꽦 ?쒕룄???꾨떖?덉뒿?덈떎.");
+      setError("현재 요금제의 퀴즈 생성 한도에 도달했습니다.");
       return;
     }
     const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
     if (!extractedText && !chapterSelectionRaw) {
-      setError("異붿텧???띿뒪?멸? ?놁뒿?덈떎. 癒쇱? PDF ?띿뒪??異붿텧???ㅽ뻾?댁＜?몄슂.");
+      setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
       return;
     }
     quizAutoRequestedRef.current = true;
     resetQuizState();
-    setStatus("?댁쫰 ?명듃瑜?珥덇린?뷀븯怨??ㅼ떆 ?앹꽦?섎뒗 以?..");
+    setStatus("퀴즈 세트를 초기화하고 다시 생성하는 중...");
     setError("");
     await persistArtifacts({ quiz: null });
     await requestQuestions({ force: true });
@@ -2868,19 +2894,19 @@ function App() {
     if (isLoadingSummary || (!force && summaryRequestedRef.current)) return;
     const hasManualChapterConfig = Boolean(String(chapterRangeInput || "").trim());
     if (!file) {
-      setError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+      setError("먼저 PDF를 열어주세요.");
       return;
     }
     if (isFreeTier && summary) {
-      setError("臾대즺 ?뚮옖?먯꽌???붿빟??1?뚮쭔 ?앹꽦?????덉뒿?덈떎.");
+      setError("무료 플랜에서는 요약을 1회만 생성할 수 있습니다.");
       return;
     }
     if (hasReached("maxSummary")) {
-      setError("?꾩옱 ?붽툑?쒖쓽 ?붿빟 ?앹꽦 ?쒕룄???꾨떖?덉뒿?덈떎.");
+      setError("현재 요금제의 요약 생성 한도에 도달했습니다.");
       return;
     }
     if (!extractedText && !hasManualChapterConfig) {
-      setError("異붿텧???띿뒪?멸? ?놁뒿?덈떎. 梨뺥꽣 踰붿쐞瑜??낅젰?섍굅??PDF ?띿뒪??異붿텧??癒쇱? ?ㅽ뻾?댁＜?몄슂.");
+      setError("추출된 텍스트가 없습니다. 챕터 범위를 입력하거나 PDF 텍스트 추출을 먼저 실행해주세요.");
       return;
     }
 
@@ -2888,7 +2914,7 @@ function App() {
     setIsLoadingSummary(true);
     setError("");
     setChapterRangeError("");
-    setStatus("?붿빟 ?앹꽦 以?..");
+    setStatus("요약 생성 중...");
     try {
       const chapterConfigRaw = String(chapterRangeInput || "").trim();
       let customChapterSections = null;
@@ -2901,12 +2927,12 @@ function App() {
         }
         const adaptiveChapterRanges = buildAdaptiveChapterSummaryRanges(parsedChapters.chapters);
         if (!adaptiveChapterRanges.length) {
-          throw new Error("?곸쓳??遺꾪븷 ???좏슚??梨뺥꽣 踰붿쐞媛 ?⑥? ?딆븯?듬땲??");
+          throw new Error("적응형 분할에 사용할 수 있는 챕터 범위가 없습니다.");
         }
         const pagesPerChunkById = new Map(
           adaptiveChapterRanges.map((range) => [String(range.id), Number(range.pagesPerChunk) || 1])
         );
-        setStatus("?ㅼ젙??梨뺥꽣 踰붿쐞???띿뒪?몃? 異붿텧?섎뒗 以?..");
+        setStatus("설정한 챕터 범위의 텍스트를 추출하는 중...");
         const chapterExtraction = await extractPdfTextByRanges(file, adaptiveChapterRanges, {
           maxLengthPerRange: 14000,
           useOcr: true,
@@ -2927,7 +2953,7 @@ function App() {
           }))
           .filter((chapter) => String(chapter.text || "").trim().length > 0);
         if (!customChapterSections.length) {
-          throw new Error("?ㅼ젙??梨뺥꽣 踰붿쐞?먯꽌 ?띿뒪?몃? 異붿텧?섏? 紐삵뻽?듬땲??");
+          throw new Error("설정한 챕터 범위에서 텍스트를 추출하지 못했습니다.");
         }
       }
 
@@ -2942,7 +2968,7 @@ function App() {
           summarySourceText = cachedSummaryText;
         } else if (file && summaryCacheKey) {
           try {
-            setStatus("?붿빟 ?덉쭏 ?μ긽???꾪빐 異붿텧 踰붿쐞瑜??뺤옣?섎뒗 以?..");
+            setStatus("요약 정확도 향상을 위해 추출 범위를 확장하는 중...");
             const extended = await extractPdfText(file, 80, 50000, { useOcr: false });
             const extendedText = String(extended?.text || "").trim();
             if (extendedText.length > summarySourceText.length) {
@@ -2955,21 +2981,21 @@ function App() {
         }
       }
 
-      setStatus("AI濡??댁슜???붿빟?섎뒗 以?..");
+      setStatus("AI로 요약을 생성하는 중...");
       const { generateSummary } = await getOpenAiService();
       const summarized = customChapterSections
         ? await generateSummary("", {
-            scope: "?ъ슜??吏??梨뺥꽣 踰붿쐞",
+            scope: "사용자 지정 챕터 범위",
             chapterized: true,
             chapterSections: customChapterSections,
           })
         : await generateSummary(summarySourceText);
       setSummary(summarized);
       setUsageCounts((prev) => ({ ...prev, summary: prev.summary + 1 }));
-      setStatus("?붿빟???앹꽦?섏뿀?듬땲??");
+      setStatus("요약이 생성되었습니다.");
       persistArtifacts({ summary: summarized });
     } catch (err) {
-      setError(`?붿빟 ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+      setError(`요약 생성에 실패했습니다: ${err.message}`);
       setStatus("");
       summaryRequestedRef.current = false;
       setStatus("");
@@ -2981,7 +3007,7 @@ function App() {
   const regenerateSummary = async () => {
     if (isLoadingSummary) return;
     if (!file) {
-      setError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+      setError("먼저 PDF를 열어주세요.");
       return;
     }
     summaryRequestedRef.current = false;
@@ -2989,7 +3015,7 @@ function App() {
     setPartialSummary("");
     setPartialSummaryRange("");
     setError("");
-    setStatus("?붿빟??珥덇린?뷀븯怨??ㅼ떆 ?앹꽦?섎뒗 以?..");
+    setStatus("요약을 초기화하고 다시 생성하는 중...");
     try {
       const nextHighlights = writePartialSummaryBundleToHighlights(artifacts?.highlights, {
         summary: "",
@@ -3406,6 +3432,21 @@ function App() {
   const handleAddFlashcard = useCallback(
     async (front, back, hint) => {
       if (!user) {
+        if (!AUTH_ENABLED) {
+          const deckId = selectedFileId || "default";
+          const localCard = {
+            id: createLocalEntityId("flashcard"),
+            deck_id: deckId,
+            front,
+            back,
+            hint: hint || "",
+            created_at: new Date().toISOString(),
+          };
+          setFlashcardError("");
+          setFlashcards((prev) => [localCard, ...prev]);
+          setFlashcardStatus("Flashcard added (local mode).");
+          return;
+        }
         setFlashcardError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
         return;
       }
@@ -3433,6 +3474,12 @@ function App() {
   const handleDeleteFlashcard = useCallback(
     async (cardId) => {
       if (!user) {
+        if (!AUTH_ENABLED) {
+          setFlashcardError("");
+          setFlashcards((prev) => prev.filter((c) => c.id !== cardId));
+          setFlashcardStatus("Flashcard removed (local mode).");
+          return;
+        }
         setFlashcardError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
         return;
       }
@@ -3450,7 +3497,7 @@ function App() {
 
   const handleGenerateFlashcards = useCallback(async () => {
     if (isGeneratingFlashcards) return;
-    if (!user) {
+    if (AUTH_ENABLED && !user) {
       setFlashcardError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
       return;
     }
@@ -3506,7 +3553,16 @@ function App() {
         throw new Error("蹂몃Ц?먯꽌 ?좏슚???뚮옒?쒖뭅?쒕? ?앹꽦?섏? 紐삵뻽?듬땲??");
       }
       const deckId = selectedFileId || "default";
-      const saved = await addFlashcards({ userId: user.id, deckId, cards: cleaned });
+      const saved = user
+        ? await addFlashcards({ userId: user.id, deckId, cards: cleaned })
+        : cleaned.map((card) => ({
+            id: createLocalEntityId("flashcard"),
+            deck_id: deckId,
+            front: card.front,
+            back: card.back,
+            hint: card.hint || "",
+            created_at: new Date().toISOString(),
+          }));
       if (!saved.length) {
         throw new Error("?앹꽦???뚮옒?쒖뭅????μ뿉 ?ㅽ뙣?덉뒿?덈떎.");
       }
@@ -3771,7 +3827,7 @@ function App() {
 
   const handleCreateMockExam = useCallback(async () => {
     if (isGeneratingMockExam) return;
-    if (!user) {
+    if (AUTH_ENABLED && !user) {
       setMockExamError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
       return;
     }
@@ -3961,14 +4017,24 @@ function App() {
         generatedAt: new Date().toISOString(),
       };
 
-      const saved = await saveMockExam({
-        userId: user.id,
-        docId: selectedFileId,
-        docName: file?.name || "",
-        title,
-        totalQuestions: examItems.length,
-        payload,
-      });
+      const saved = user
+        ? await saveMockExam({
+            userId: user.id,
+            docId: selectedFileId,
+            docName: file?.name || "",
+            title,
+            totalQuestions: examItems.length,
+            payload,
+          })
+        : {
+            id: createLocalEntityId("mock-exam"),
+            doc_id: selectedFileId,
+            doc_name: file?.name || "",
+            title,
+            total_questions: examItems.length,
+            payload,
+            created_at: new Date().toISOString(),
+          };
 
       setMockExams((prev) => [saved, ...prev]);
       setActiveMockExamId(saved.id);
@@ -4002,6 +4068,14 @@ function App() {
   const handleDeleteMockExam = useCallback(
     async (examId) => {
       if (!user) {
+        if (!AUTH_ENABLED) {
+          setMockExams((prev) => prev.filter((item) => item.id !== examId));
+          if (activeMockExamId === examId) {
+            setActiveMockExamId(null);
+          }
+          setMockExamStatus("Mock exam removed (local mode).");
+          return;
+        }
         setMockExamError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
         return;
       }
@@ -4178,7 +4252,9 @@ function App() {
     onClearSelection: handleClearSelection,
     isFolderFeatureEnabled,
     onDeleteUpload: handleDeleteUpload,
-    isGuest: !user,
+    isGuest: AUTH_ENABLED && !user,
+    showIntro: !AUTH_ENABLED && !user && showGuestIntro,
+    onIntroDone: () => setShowGuestIntro(false),
     onRequireAuth: openAuth,
     currentTier: tier,
     maxPdfSizeBytes: limits.maxPdfSizeBytes,
@@ -4298,7 +4374,7 @@ function App() {
     handleResetTutor,
   };
 
-  if (!user && showAuth) {
+  if (AUTH_ENABLED && !user && showAuth) {
     const canCloseAuth = !(isNativePlatform && !user);
     return (
       <Suspense fallback={<div className="min-h-screen bg-black" />}>
@@ -4324,7 +4400,8 @@ function App() {
     );
   }
 
-  const showHeader = Boolean(user || showDetail);
+  const isGuestFreeMode = !AUTH_ENABLED && !user;
+  const showHeader = Boolean(user || showDetail || (isGuestFreeMode && !showGuestIntro));
   const showAmbient = showHeader;
 
   return (
@@ -4544,10 +4621,12 @@ function App() {
               signingOut={isSigningOut}
               theme={theme}
               onGoHome={showDetail ? goBackToList : null}
-              onOpenFeedbackDialog={handleOpenFeedbackDialog}
+              onOpenFeedbackDialog={AUTH_ENABLED ? handleOpenFeedbackDialog : null}
               onOpenBilling={openBilling}
+              showBilling={AUTH_ENABLED}
               onToggleTheme={toggleTheme}
               onOpenLogin={openAuth}
+              authEnabled={AUTH_ENABLED}
               isPremiumTier={isPremiumTier}
               loadingTier={loadingTier}
               onRefresh={handleManualSync}

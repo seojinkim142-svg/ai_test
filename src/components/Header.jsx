@@ -13,6 +13,7 @@ const Header = memo(function Header({
   onOpenFeedbackDialog,
   onOpenBilling,
   onOpenLogin,
+  showBilling = true,
   onRefresh,
   isRefreshing = false,
   isPremiumTier = false,
@@ -22,6 +23,7 @@ const Header = memo(function Header({
   onOpenProfilePinDialog,
   premiumSpaceMode = "profile",
   onTogglePremiumSpaceMode,
+  authEnabled = true,
 }) {
   const handleAvatarError = (event) => {
     const img = event.currentTarget;
@@ -79,15 +81,17 @@ const Header = memo(function Header({
             </button>
           )}
 
-          <button
-            type="button"
-            onClick={onOpenBilling}
-            className="ghost-button text-xs text-emerald-100"
-            data-ghost-size="sm"
-            style={{ "--ghost-color": "16, 185, 129" }}
-          >
-            {"\uC694\uAE08\uC81C"}
-          </button>
+          {showBilling && (
+            <button
+              type="button"
+              onClick={onOpenBilling}
+              className="ghost-button text-xs text-emerald-100"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "16, 185, 129" }}
+            >
+              {"\uC694\uAE08\uC81C"}
+            </button>
+          )}
 
           <button
             type="button"
@@ -172,7 +176,7 @@ const Header = memo(function Header({
             </div>
           )}
 
-          {!user && (
+          {!user && authEnabled && (
             <button
               type="button"
               onClick={onOpenLogin}

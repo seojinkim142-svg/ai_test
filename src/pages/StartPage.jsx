@@ -24,24 +24,28 @@ const StartPage = memo(function StartPage({
   isFolderFeatureEnabled,
   onDeleteUpload,
   isGuest = false,
+  showIntro = false,
+  onIntroDone,
   onRequireAuth,
   currentTier = "free",
   maxPdfSizeBytes = 0,
 }) {
   const uploadRef = useRef(null);
+  const showPromo = isGuest || showIntro;
 
   const handleStart = useCallback(() => {
     if (isGuest) {
       onRequireAuth?.();
       return;
     }
+    onIntroDone?.();
     uploadRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [isGuest, onRequireAuth]);
+  }, [isGuest, onIntroDone, onRequireAuth]);
 
   return (
     <section className="grid grid-cols-1 gap-6">
-      {isGuest && <PromoIntro onStart={handleStart} />}
-      {!isGuest && (
+      {showPromo && <PromoIntro onStart={handleStart} />}
+      {!isGuest && !showPromo && (
         <Suspense fallback={<div className="min-h-[40vh]" />}>
           <div ref={uploadRef} className="scroll-mt-24">
             <FileUpload

@@ -40,6 +40,10 @@ const StartSplash = memo(function StartSplash({ onActivated }) {
       className="splash-screen"
       data-active={active}
       data-skip={reduceMotion}
+      onMouseDown={(event) => {
+        // Prevent focus-caret artifacts on the splash container.
+        event.preventDefault();
+      }}
       onClick={activate}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {

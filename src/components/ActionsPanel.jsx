@@ -4,21 +4,18 @@ function ActionsPanel({
   isLoadingText,
   status,
   error,
-  shortPreview,
   onRequestQuiz,
   onRequestSummary,
   hideQuiz = false,
   hideSummary = false,
-  title = "문제 생성",
+  title = "퀴즈 생성",
   stepLabel = "2단계",
 }) {
   return (
     <div className="rounded-3xl border border-white/5 bg-slate-900/60 p-6 shadow-lg shadow-black/30 backdrop-blur">
       <p className="text-sm text-slate-300">{stepLabel}</p>
       <h2 className="text-xl font-semibold text-white">{title}</h2>
-      <p className="mt-2 text-sm text-slate-400">
-        퀴즈를 생성중입니다.
-      </p>
+      <p className="mt-2 text-sm text-slate-400">퀴즈를 생성중입니다.</p>
 
       <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
         {!hideQuiz && (
@@ -29,7 +26,7 @@ function ActionsPanel({
             data-ghost-size="xl"
             style={{ "--ghost-color": "52, 211, 153" }}
           >
-            {isLoadingQuiz ? "문제 생성 중.." : "퀴즈 생성 (5문항)"}
+            {isLoadingQuiz ? "퀴즈 생성 중..." : "퀴즈 생성 (5문항)"}
           </button>
         )}
         {!hideSummary && (
@@ -40,7 +37,7 @@ function ActionsPanel({
             data-ghost-size="xl"
             style={{ "--ghost-color": "34, 211, 238" }}
           >
-            {isLoadingSummary ? "요약 생성 중.." : "요약 생성"}
+            {isLoadingSummary ? "요약 생성 중..." : "요약 생성"}
           </button>
         )}
       </div>
@@ -51,7 +48,6 @@ function ActionsPanel({
           {error}
         </p>
       )}
-
     </div>
   );
 }

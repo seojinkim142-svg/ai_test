@@ -25,6 +25,29 @@ body {
     #06080f;
 }
 
+/* Hide text caret on non-editable UI to avoid caret-browsing artifacts. */
+html,
+body,
+#root {
+  caret-color: transparent;
+}
+
+input,
+textarea,
+[contenteditable="true"],
+[role="textbox"] {
+  caret-color: auto;
+}
+
+*:not(input):not(textarea):not([contenteditable="true"]):not([role="textbox"]) {
+  caret-color: transparent !important;
+}
+
+.splash-screen,
+.zeus-landing {
+  caret-color: transparent;
+}
+
 * {
   scrollbar-width: none;
 }
