@@ -83,3 +83,21 @@ VITE_AUTH_ENABLED=true
 
 - Team-shared default (committed to Git): change `AUTH_DEFAULT_ENABLED` in `src/config/auth.js`.
 - Local override (not committed): set `VITE_AUTH_ENABLED` in `.env`.
+
+### Vercel
+
+Set this in **Project Settings -> Environment Variables**:
+
+```bash
+VITE_AUTH_ENABLED=true
+```
+
+or
+
+```bash
+VITE_AUTH_ENABLED=false
+```
+
+Important:
+- `VITE_AUTH_ENABLED` is a **build-time** variable in Vite.
+- After changing it in Vercel, you must **redeploy** for the change to take effect.

@@ -9,10 +9,15 @@ export default defineConfig(({ mode }) => {
   const root = process.cwd();
   const supabaseEnvPath = path.resolve(root, "supabase.env");
 
-  // Load .env first so local flags can override fallback values.
+  // Priority:
+  // 1) Already defined env (e.g. Vercel Project Environment Variables)
+  // 2) .env/.env.[mode]
+  // 3) supabase.env fallback
   const modeEnv = loadEnv(mode, root, "");
   for (const [key, value] of Object.entries(modeEnv)) {
-    if (typeof value === "string") process.env[key] = value;
+    if (process.env[key] == null && typeof value === "string") {
+      process.env[key] = value;
+    }
   }
 
   // Use supabase.env as fallback only when a key is still missing.
