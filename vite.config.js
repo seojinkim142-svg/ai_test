@@ -15,6 +15,7 @@ export default defineConfig(({ mode }) => {
   // 3) supabase.env fallback
   const modeEnv = loadEnv(mode, root, "");
   for (const [key, value] of Object.entries(modeEnv)) {
+    if (key === "VITE_AUTH_ENABLED") continue;
     if (process.env[key] == null && typeof value === "string") {
       process.env[key] = value;
     }
@@ -29,7 +30,15 @@ export default defineConfig(({ mode }) => {
     }
   }
 
+  // Auth toggle is controlled only by build environment variables
+  // (e.g. Vercel Project Settings -> Environment Variables).
+  const authEnabledFromBuildEnv =
+    process.env.VITE_AUTH_ENABLED == null ? "" : String(process.env.VITE_AUTH_ENABLED);
+
   return {
+    define: {
+      __APP_AUTH_ENABLED__: JSON.stringify(authEnabledFromBuildEnv),
+    },
     plugins: [react({ jsxRuntime: "automatic" })],
     esbuild: {
       jsx: "automatic",

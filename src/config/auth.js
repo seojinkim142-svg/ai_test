@@ -1,6 +1,10 @@
+/* global __APP_AUTH_ENABLED__ */
+
 const TRUE_VALUES = new Set(["1", "true", "yes", "on", "enabled"]);
 const FALSE_VALUES = new Set(["0", "false", "no", "off", "disabled"]);
 export const AUTH_DEFAULT_ENABLED = false;
+const BUILD_AUTH_ENABLED_RAW =
+  typeof __APP_AUTH_ENABLED__ !== "undefined" ? __APP_AUTH_ENABLED__ : "";
 
 function parseEnvBoolean(value, defaultValue = true) {
   if (typeof value === "boolean") return value;
@@ -15,6 +19,6 @@ function parseEnvBoolean(value, defaultValue = true) {
 }
 
 export const AUTH_ENABLED = parseEnvBoolean(
-  import.meta.env.VITE_AUTH_ENABLED,
+  BUILD_AUTH_ENABLED_RAW,
   AUTH_DEFAULT_ENABLED
 );
