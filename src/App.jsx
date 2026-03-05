@@ -2003,7 +2003,7 @@ function App() {
         typeof performance !== "undefined" && typeof performance.now === "function"
           ? performance.now()
           : Date.now();
-      setStatus("PDF ?띿뒪?몄? 誘몃━蹂닿린瑜?異붿텧?섎뒗 以?..");
+      setStatus("Extracting PDF text for preview...");
       setIsLoadingText(true);
       setThumbnailUrl(null);
         setMockExams([]);
@@ -2048,7 +2048,7 @@ function App() {
             ? performance.now()
             : Date.now();
         const elapsedSeconds = Math.max(0, (extractEnd - extractStart) / 1000);
-        setStatus(`異붿텧 ?꾨즺: ${pagesUsed}/${totalPages}?섏씠吏, ${elapsedSeconds.toFixed(1)}s`);
+        setStatus(`Text extraction complete: ${pagesUsed}/${totalPages} pages, ${elapsedSeconds.toFixed(1)}s`);
         setError("");
         const [, , loaded] = await Promise.all([
           loadMockExams(nextDocId),
@@ -2056,10 +2056,10 @@ function App() {
           loadArtifacts(nextDocId),
         ]);
         if (loaded?.summary) {
-          setStatus("??λ맂 ?붿빟??遺덈윭?붿뒿?덈떎.");
+          setStatus("Loaded saved summary.");
         }
       } catch (err) {
-        setError(`PDF 泥섎━???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+        setError(`Failed to process PDF: ${err.message}`);
         setExtractedText("");
         setPreviewText("");
         setPageInfo({ used: 0, total: 0 });

@@ -347,6 +347,27 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
         </div>
       </section>
 
+      <section id="company" className="relative px-6 py-20">
+        <div className="mx-auto max-w-4xl rounded-3xl border border-emerald-200/15 bg-black/45 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.35)] sm:p-10">
+          <p className="text-xs uppercase tracking-[0.34em] text-emerald-300/75">Company Info</p>
+          <h2 className="mt-3 text-2xl font-bold text-white sm:text-3xl">헤스트라(Hestra)</h2>
+          <div className="mt-6 grid gap-4 text-sm text-emerald-100/85 sm:grid-cols-2 sm:text-base">
+            <p className="rounded-2xl border border-emerald-200/10 bg-emerald-300/5 px-4 py-3">
+              <span className="mr-2 text-emerald-300/90">상호명</span>
+              헤스트라(Hestra)
+            </p>
+            <p className="rounded-2xl border border-emerald-200/10 bg-emerald-300/5 px-4 py-3">
+              <span className="mr-2 text-emerald-300/90">대표자</span>
+              김서진
+            </p>
+            <p className="rounded-2xl border border-emerald-200/10 bg-emerald-300/5 px-4 py-3 sm:col-span-2">
+              <span className="mr-2 text-emerald-300/90">사업자 등록번호</span>
+              393-0303517
+            </p>
+          </div>
+        </div>
+      </section>
+
       <section id="features" className="relative bg-black/60 px-6 py-28">
         <div className="mx-auto max-w-7xl space-y-24">
           {FEATURE_ITEMS.map((feature, index) => {
