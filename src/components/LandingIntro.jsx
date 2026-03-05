@@ -316,6 +316,14 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
       >
         <div className="mx-auto flex min-h-[82vh] max-w-6xl flex-col items-center justify-center text-center zeus-hero-reveal">
           <p className="text-xs uppercase tracking-[0.34em] text-emerald-200/90">AI STUDY SUITE</p>
+          <div className="mt-5 inline-flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-emerald-200/20 bg-black/45 px-4 py-3 text-xs text-emerald-100/85 sm:text-sm">
+            <span className="rounded-full bg-emerald-300/15 px-2 py-1 text-emerald-200">Company Info</span>
+            <span>상호명 헤스트라(Hestra)</span>
+            <span className="hidden text-emerald-300/60 sm:inline">|</span>
+            <span>대표자 김서진</span>
+            <span className="hidden text-emerald-300/60 sm:inline">|</span>
+            <span>사업자등록번호 393-0303517</span>
+          </div>
           <h1 className="landing-title mt-5 text-5xl font-bold leading-[0.98] text-white drop-shadow-[0_8px_35px_rgba(0,0,0,0.45)] sm:text-7xl md:text-[96px]">
             PDF 하나로
             <br />
@@ -344,27 +352,6 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
         </div>
         <div className="absolute bottom-10 left-1/2 z-10 -translate-x-1/2 text-emerald-200/60 zeus-float">
           <span className="text-xs uppercase tracking-[0.32em]">Scroll</span>
-        </div>
-      </section>
-
-      <section id="company" className="relative px-6 py-20">
-        <div className="mx-auto max-w-4xl rounded-3xl border border-emerald-200/15 bg-black/45 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.35)] sm:p-10">
-          <p className="text-xs uppercase tracking-[0.34em] text-emerald-300/75">Company Info</p>
-          <h2 className="mt-3 text-2xl font-bold text-white sm:text-3xl">헤스트라(Hestra)</h2>
-          <div className="mt-6 grid gap-4 text-sm text-emerald-100/85 sm:grid-cols-2 sm:text-base">
-            <p className="rounded-2xl border border-emerald-200/10 bg-emerald-300/5 px-4 py-3">
-              <span className="mr-2 text-emerald-300/90">상호명</span>
-              헤스트라(Hestra)
-            </p>
-            <p className="rounded-2xl border border-emerald-200/10 bg-emerald-300/5 px-4 py-3">
-              <span className="mr-2 text-emerald-300/90">대표자</span>
-              김서진
-            </p>
-            <p className="rounded-2xl border border-emerald-200/10 bg-emerald-300/5 px-4 py-3 sm:col-span-2">
-              <span className="mr-2 text-emerald-300/90">사업자 등록번호</span>
-              393-0303517
-            </p>
-          </div>
         </div>
       </section>
 
