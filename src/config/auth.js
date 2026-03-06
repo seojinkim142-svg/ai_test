@@ -2,7 +2,7 @@
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on", "enabled"]);
 const FALSE_VALUES = new Set(["0", "false", "no", "off", "disabled"]);
-export const AUTH_DEFAULT_ENABLED = false;
+export const AUTH_DEFAULT_ENABLED = true;
 const BUILD_AUTH_ENABLED_RAW =
   typeof __APP_AUTH_ENABLED__ !== "undefined" ? __APP_AUTH_ENABLED__ : "";
 

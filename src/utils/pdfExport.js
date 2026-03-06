@@ -15,6 +15,57 @@ async function loadExportRuntime() {
   return exportRuntimePromise;
 }
 
+async function saveBlobAsFile(blob, filename) {
+  if (!blob) throw new Error("File blob is unavailable.");
+
+  if (
+    typeof navigator !== "undefined" &&
+    typeof navigator.share === "function" &&
+    typeof File === "function"
+  ) {
+    try {
+      const file = new File([blob], filename, { type: blob.type || "application/pdf" });
+      const canShare =
+        typeof navigator.canShare !== "function" || navigator.canShare({ files: [file] });
+      if (canShare) {
+        await navigator.share({ files: [file], title: filename });
+        return;
+      }
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+    }
+  }
+
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    if (typeof window !== "undefined") {
+      const userAgent = typeof navigator !== "undefined" ? String(navigator.userAgent || "") : "";
+      const isNativeWebView =
+        /WebView|wv\)|; wv\)/i.test(userAgent) ||
+        Boolean(window?.Capacitor?.isNativePlatform?.());
+      if (isNativeWebView) {
+        window.open(url, "_blank", "noopener,noreferrer");
+      }
+    }
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
+}
+
+async function savePdfDocument(pdf, filename) {
+  if (!pdf) throw new Error("PDF document is unavailable.");
+  const blob = pdf.output("blob");
+  await saveBlobAsFile(blob, filename);
+}
+
 export async function exportElementToPdf(element, { filename = "summary.pdf", margin = 10 } = {}) {
   if (!element) throw new Error("Element not found.");
 
@@ -45,7 +96,7 @@ export async function exportElementToPdf(element, { filename = "summary.pdf", ma
     heightLeft -= pageHeight;
   }
 
-  pdf.save(filename);
+  await savePdfDocument(pdf, filename);
 }
 
 export async function exportPagedElementToPdf(
@@ -86,7 +137,65 @@ export async function exportPagedElementToPdf(
     pdf.addImage(imgData, "PNG", x, y, imgWidth, imgHeight);
   }
 
-  pdf.save(filename);
+  await savePdfDocument(pdf, filename);
+}
+
+export async function exportMockAnswerSheetToPdf(
+  { title = "모의고사 답지", entries = [], filename = "mock-exam-answers.pdf" } = {}
+) {
+  const list = Array.isArray(entries) ? entries : [];
+  if (list.length === 0) {
+    throw new Error("답지 데이터가 없습니다.");
+  }
+
+  const { jsPDF } = await loadExportRuntime();
+  const pdf = new jsPDF("p", "mm", "a4");
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 14;
+  const maxWidth = pageWidth - margin * 2;
+  const lineHeight = 5;
+  const bottomLimit = pageHeight - margin;
+  let y = margin;
+
+  const ensureSpace = (lineCount = 1) => {
+    if (y + Math.max(1, lineCount) * lineHeight <= bottomLimit) return;
+    pdf.addPage();
+    y = margin;
+  };
+
+  const drawTextBlock = (text, { bold = false, size = 10, gapAfter = 1 } = {}) => {
+    const normalized = String(text || "")
+      .replace(/\r\n/g, "\n")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!normalized) return;
+    pdf.setFont("helvetica", bold ? "bold" : "normal");
+    pdf.setFontSize(size);
+    const lines = pdf.splitTextToSize(normalized, maxWidth);
+    ensureSpace(lines.length + gapAfter);
+    pdf.text(lines, margin, y);
+    y += lines.length * lineHeight + gapAfter;
+  };
+
+  drawTextBlock(title, { bold: true, size: 15, gapAfter: 2 });
+  drawTextBlock(`생성 시각: ${new Date().toLocaleString("ko-KR")}`, { size: 9, gapAfter: 3 });
+
+  list.forEach((entry, idx) => {
+    const number = Number.isFinite(entry?.number) ? entry.number : idx + 1;
+    const answerText = String(entry?.answer || "-").trim() || "-";
+    drawTextBlock(`${number}번 정답: ${answerText}`, { bold: true, size: 11, gapAfter: 1 });
+    if (entry?.explanation) {
+      drawTextBlock(`해설: ${entry.explanation}`, { size: 10, gapAfter: 1 });
+    }
+    if (entry?.evidence) {
+      drawTextBlock(`근거: ${entry.evidence}`, { size: 9, gapAfter: 2 });
+    } else {
+      y += 1;
+    }
+  });
+
+  await savePdfDocument(pdf, filename);
 }
 
 export function exportTextFile(content, { filename = "summary.txt" } = {}) {

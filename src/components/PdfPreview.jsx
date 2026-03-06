@@ -123,6 +123,25 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
 
   useEffect(() => {
     if (!isNativePlatform) return undefined;
+    const handleKeyNavigation = (event) => {
+      const tagName = String(event?.target?.tagName || "").toLowerCase();
+      if (tagName === "input" || tagName === "textarea") return;
+      if (event.key === "ArrowLeft" || event.key === "PageUp") {
+        event.preventDefault();
+        goToPreviousPage();
+      } else if (event.key === "ArrowRight" || event.key === "PageDown") {
+        event.preventDefault();
+        goToNextPage();
+      }
+    };
+    window.addEventListener("keydown", handleKeyNavigation);
+    return () => {
+      window.removeEventListener("keydown", handleKeyNavigation);
+    };
+  }, [goToNextPage, goToPreviousPage, isNativePlatform]);
+
+  useEffect(() => {
+    if (!isNativePlatform) return undefined;
     const syncTabletState = () => {
       setIsTabletDevice(detectTabletDevice());
     };
@@ -221,10 +240,81 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
     [goToNextPage, goToPreviousPage, isTabletDevice]
   );
 
+  const handleNativeCanvasClick = useCallback(
+    (event) => {
+      if (!isTabletDevice) return;
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const isInsideX = event.clientX >= rect.left && event.clientX <= rect.right;
+      const isInsideY = event.clientY >= rect.top && event.clientY <= rect.bottom;
+      if (!isInsideX || !isInsideY) return;
+      const midX = rect.left + rect.width / 2;
+      if (event.clientX < midX) {
+        goToPreviousPage();
+      } else {
+        goToNextPage();
+      }
+    },
+    [goToNextPage, goToPreviousPage, isTabletDevice]
+  );
+
   const viewerSrc = useMemo(() => {
     if (!pdfUrl) return "";
     return buildViewerSrc(pdfUrl, currentPage);
   }, [currentPage, pdfUrl]);
+
+  const pageController = (
+    <div className="pointer-events-none absolute inset-x-0 bottom-3 z-30 flex justify-center">
+      <div className="pointer-events-auto inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-slate-900/90 px-2 py-1 text-xs text-slate-100 shadow-lg shadow-black/40">
+        <button
+          type="button"
+          onClick={goToPreviousPage}
+          disabled={normalizedCurrentPage <= 1}
+          className="rounded-full border border-white/20 px-3 py-1 disabled:opacity-40"
+        >
+          Prev
+        </button>
+        <span className="min-w-[78px] text-center tabular-nums">
+          {normalizedCurrentPage} / {totalPages}
+        </span>
+        <button
+          type="button"
+          onClick={goToNextPage}
+          disabled={normalizedCurrentPage >= totalPages}
+          className="rounded-full border border-white/20 px-3 py-1 disabled:opacity-40"
+        >
+          Next
+        </button>
+        <input
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={pageJumpInput}
+          onChange={(event) => {
+            const next = String(event.target.value || "");
+            if (!/^\d*$/.test(next)) return;
+            setPageJumpInput(next);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              handlePageJumpSubmit();
+            }
+          }}
+          placeholder="p"
+          className="w-14 rounded-md border border-white/20 bg-black/25 px-2 py-1 text-center text-xs text-slate-100 outline-none ring-1 ring-transparent focus:border-emerald-300/60 focus:ring-emerald-300/40"
+        />
+        <button
+          type="button"
+          onClick={handlePageJumpSubmit}
+          className="rounded-full border border-emerald-300/40 px-3 py-1 text-emerald-100"
+        >
+          확인
+        </button>
+      </div>
+    </div>
+  );
 
   useEffect(() => {
     if (!isNativePlatform) return undefined;
@@ -396,7 +486,13 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
           onTouchStart={handleNativeTouchStart}
           onTouchEnd={handleNativeTouchEnd}
         >
-          <canvas ref={canvasRef} className="mx-auto block rounded-xl bg-white shadow-lg shadow-black/30" />
+          <canvas
+            ref={canvasRef}
+            onClick={handleNativeCanvasClick}
+            className={`mx-auto block rounded-xl bg-white shadow-lg shadow-black/30 ${
+              isTabletDevice ? "cursor-pointer" : ""
+            }`}
+          />
         </div>
 
         {isNativeLoading && (
@@ -412,55 +508,7 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
           </div>
         )}
 
-        <div className="pointer-events-none absolute inset-x-0 bottom-3 z-30 flex justify-center">
-          <div className="pointer-events-auto inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-slate-900/90 px-2 py-1 text-xs text-slate-100 shadow-lg shadow-black/40">
-            <button
-              type="button"
-              onClick={goToPreviousPage}
-              disabled={normalizedCurrentPage <= 1}
-              className="rounded-full border border-white/20 px-3 py-1 disabled:opacity-40"
-            >
-              Prev
-            </button>
-            <span className="min-w-[78px] text-center tabular-nums">
-              {normalizedCurrentPage} / {totalPages}
-            </span>
-            <button
-              type="button"
-              onClick={goToNextPage}
-              disabled={normalizedCurrentPage >= totalPages}
-              className="rounded-full border border-white/20 px-3 py-1 disabled:opacity-40"
-            >
-              Next
-            </button>
-            <input
-              type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              value={pageJumpInput}
-              onChange={(event) => {
-                const next = String(event.target.value || "");
-                if (!/^\d*$/.test(next)) return;
-                setPageJumpInput(next);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  handlePageJumpSubmit();
-                }
-              }}
-              placeholder="p"
-              className="w-14 rounded-md border border-white/20 bg-black/25 px-2 py-1 text-center text-xs text-slate-100 outline-none ring-1 ring-transparent focus:border-emerald-300/60 focus:ring-emerald-300/40"
-            />
-            <button
-              type="button"
-              onClick={handlePageJumpSubmit}
-              className="rounded-full border border-emerald-300/40 px-3 py-1 text-emerald-100"
-            >
-              확인
-            </button>
-          </div>
-        </div>
+        {pageController}
       </div>
     );
   }
@@ -507,6 +555,7 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
           </a>
         </div>
       )}
+
     </div>
   );
 }

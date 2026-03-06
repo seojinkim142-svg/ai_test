@@ -15,7 +15,48 @@ const TUTOR_FALLBACK_MODELS = [
   .filter(Boolean)
   .filter((name, index, arr) => arr.indexOf(name) === index);
 
-function buildQuizPrompt(extractedText, { multipleChoiceCount, shortAnswerCount }) {
+function normalizeInstructorEmphasisInput(value) {
+  return String(value || "").replace(/\r\n/g, "\n").trim().slice(0, 2000);
+}
+
+function buildInstructorEmphasisBlock(instructorEmphasis) {
+  const normalized = normalizeInstructorEmphasisInput(instructorEmphasis);
+  if (!normalized) return "";
+  return `
+[Instructor emphasis notes]
+- Prioritize these topics when selecting summary/quiz focus.
+- Treat this as weighting guidance only; never invent facts outside the document.
+${normalized}
+  `.trim();
+}
+
+function buildAvoidReuseBlock(items, { title = "Do not reuse these prompts", maxItems = 40, maxLength = 120 } = {}) {
+  const normalized = [];
+  const seen = new Set();
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const raw = String(item || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!raw) return;
+    const key = raw.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    normalized.push(raw.slice(0, maxLength));
+  });
+  if (!normalized.length) return "";
+  const lines = normalized.slice(0, maxItems).map((item, index) => `${index + 1}. ${item}`);
+  return `
+[${title}]
+${lines.join("\n")}
+  `.trim();
+}
+
+function buildQuizPrompt(
+  extractedText,
+  { multipleChoiceCount, shortAnswerCount, instructorEmphasis = "", avoidQuestions = [] }
+) {
+  const emphasisBlock = buildInstructorEmphasisBlock(instructorEmphasis);
+  const avoidBlock = buildAvoidReuseBlock(avoidQuestions, { title: "Do not reuse these previously asked questions" });
   return `
 You are a professor creating quiz questions from lecture material.
 
@@ -44,11 +85,16 @@ You are a professor creating quiz questions from lecture material.
 [Language]
 - Write all question/explanation text in Korean.
 
+[Priority]
+${emphasisBlock || "- No extra instructor emphasis notes provided."}
+${avoidBlock ? `\n\n${avoidBlock}` : ""}
+
 [Document]
 ${extractedText}
   `.trim();
 }
-function buildHardQuizPrompt(extractedText, count) {
+function buildHardQuizPrompt(extractedText, count, { avoidQuestions = [] } = {}) {
+  const avoidBlock = buildAvoidReuseBlock(avoidQuestions, { title: "Do not reuse these previously asked questions" });
   return `
 You are creating high-difficulty mock exam items from the document.
 
@@ -71,12 +117,15 @@ You are creating high-difficulty mock exam items from the document.
 
 [Language]
 - Write all question/explanation text in Korean.
+${avoidBlock ? `\n\n${avoidBlock}` : ""}
 
 [Document]
 ${extractedText}
   `.trim();
 }
-function buildOxPrompt(contextText, highlightText = "") {
+function buildOxPrompt(contextText, highlightText = "", instructorEmphasis = "", avoidStatements = []) {
+  const emphasisBlock = buildInstructorEmphasisBlock(instructorEmphasis);
+  const avoidBlock = buildAvoidReuseBlock(avoidStatements, { title: "Do not reuse these previously asked statements" });
   return `
 You create O/X (true/false) quiz items from PDF content.
 Follow all rules and return JSON only.
@@ -84,6 +133,8 @@ Follow all rules and return JSON only.
 [Input]
 - PDF summary/body excerpt
 ${highlightText ? `- Highlight sentences:\n${highlightText}` : ""}
+${emphasisBlock ? `- Instructor emphasis notes:\n${emphasisBlock}` : ""}
+${avoidBlock ? `- ${avoidBlock.replace(/\n/g, "\n  ")}` : ""}
 
 [Rules]
 1. Maximum 10 items.
@@ -109,7 +160,8 @@ ${highlightText ? `- Highlight sentences:\n${highlightText}` : ""}
 ${contextText}
   `.trim();
 }
-function buildSummaryPrompt(extractedText) {
+function buildSummaryPrompt(extractedText, { instructorEmphasis = "" } = {}) {
+  const emphasisBlock = buildInstructorEmphasisBlock(instructorEmphasis);
   return `
 You are a teaching assistant who writes a detailed Korean markdown summary.
 
@@ -140,6 +192,9 @@ You are a teaching assistant who writes a detailed Korean markdown summary.
 [Output]
 - Markdown only.
 - Language: Korean.
+
+[Priority]
+${emphasisBlock || "- No extra instructor emphasis notes provided."}
 
 [Document]
 ${extractedText}
@@ -199,7 +254,7 @@ You are an AI tutor helping the user study with their PDF.
 - When using formulas, always format math with LaTeX delimiters:
   - inline math: $...$
   - display math: $$...$$
-- Prefer canonical LaTeX symbols (\sum, \frac, \sqrt, \le, \ge) instead of plain ASCII where possible.
+- Prefer canonical LaTeX symbols (\\sum, \\frac, \\sqrt, \\le, \\ge) instead of plain ASCII where possible.
   `.trim();
 }
 
@@ -1036,9 +1091,13 @@ function formatChapterSummaryMarkdown(parsed, summaryInput) {
   return markdown.join("\n").trim();
 }
 
-async function generateChapterSummary(extractedText, { scope, chapterSections } = {}) {
+async function generateChapterSummary(
+  extractedText,
+  { scope, chapterSections, instructorEmphasis = "" } = {}
+) {
   const summaryInput = buildChapterSummaryInput(extractedText, { scope, chapterSections });
   if (!summaryInput.chapters.length) return "";
+  const emphasisBlock = buildInstructorEmphasisBlock(instructorEmphasis);
 
   const payload = {
     scope: summaryInput.scope,
@@ -1106,6 +1165,9 @@ Rules:
 - Keep overview focused on lecture topic and learning goals only.
 - Preserve chapter ids exactly as input.
 - Return strict JSON only.
+${emphasisBlock ? `- Follow the instructor emphasis notes when evidence exists.\n` : ""}
+
+${emphasisBlock ? `${emphasisBlock}\n\n` : ""}
 
 Input:
 ${JSON.stringify(payload)}
@@ -1269,13 +1331,15 @@ async function postChatRequest(body, { retries = 1 } = {}) {
 }
 export async function generateQuiz(
   extractedText,
-  { multipleChoiceCount = 4, shortAnswerCount = 1 } = {}
+  { multipleChoiceCount = 4, shortAnswerCount = 1, instructorEmphasis = "", avoidQuestions = [] } = {}
 ) {
   const mcCount = Math.max(0, Math.min(5, Number(multipleChoiceCount) || 0));
   const saCount = Math.max(0, Math.min(5, Number(shortAnswerCount) || 0));
   const prompt = buildQuizPrompt(extractedText, {
     multipleChoiceCount: mcCount,
     shortAnswerCount: saCount,
+    instructorEmphasis,
+    avoidQuestions,
   });
 
   const data = await postChatRequest(
@@ -1298,8 +1362,8 @@ export async function generateQuiz(
   return parseJsonSafe(sanitized, "quiz JSON");
 }
 
-export async function generateHardQuiz(extractedText, { count = 3 } = {}) {
-  const prompt = buildHardQuizPrompt(extractedText, count);
+export async function generateHardQuiz(extractedText, { count = 3, avoidQuestions = [] } = {}) {
+  const prompt = buildHardQuizPrompt(extractedText, count, { avoidQuestions });
 
   const data = await postChatRequest(
     {
@@ -1325,11 +1389,14 @@ export async function generateHardQuiz(extractedText, { count = 3 } = {}) {
   return { items };
 }
 
-export async function generateOxQuiz(extractedText) {
+export async function generateOxQuiz(extractedText, { instructorEmphasis = "", avoidStatements = [] } = {}) {
   const chunked = chunkText(extractedText, { maxChunks: 5, maxChunkLength: 1400 });
   let summaryForOx = "";
   try {
-    summaryForOx = await generateSummary(extractedText, { chapterized: false });
+    summaryForOx = await generateSummary(extractedText, {
+      chapterized: false,
+      instructorEmphasis,
+    });
   } catch {
     // Fallback to chunked context when summary generation fails.
   }
@@ -1356,7 +1423,7 @@ export async function generateOxQuiz(extractedText) {
     };
   }
 
-  const prompt = buildOxPrompt(contextForOx, highlightText);
+  const prompt = buildOxPrompt(contextForOx, highlightText, instructorEmphasis, avoidStatements);
 
   const data = await postChatRequest(
     {
@@ -1395,7 +1462,7 @@ export async function generateOxQuiz(extractedText) {
 
 export async function generateSummary(
   extractedText,
-  { scope, chapterized = true, chapterSections = null } = {}
+  { scope, chapterized = true, chapterSections = null, instructorEmphasis = "" } = {}
 ) {
   const normalized = String(extractedText || "").trim();
   const hasManualChapters = Array.isArray(chapterSections) && chapterSections.length > 0;
@@ -1408,6 +1475,7 @@ export async function generateSummary(
       const chapterSummary = await generateChapterSummary(normalized, {
         scope,
         chapterSections,
+        instructorEmphasis,
       });
       if (chapterSummary) return chapterSummary;
     } catch {
@@ -1419,7 +1487,7 @@ export async function generateSummary(
     throw new Error("Summary source text is empty.");
   }
 
-  const prompt = buildSummaryPrompt(extractedText);
+  const prompt = buildSummaryPrompt(extractedText, { instructorEmphasis });
   const scopeGuard = scope
     ? {
         role: "system",

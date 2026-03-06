@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { resolveAppRedirectUrl } from "../utils/appOrigin";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -14,9 +15,17 @@ export const DEFAULT_TIER = "free";
 const PREMIUM_PROFILES_META_KEY = "premium_profiles_v1";
 const PREMIUM_ACTIVE_PROFILE_META_KEY = "premium_active_profile_id_v1";
 const PREMIUM_SPACE_MODE_META_KEY = "premium_space_mode_v1";
+const normalizeAbsoluteUrl = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    return new URL(raw).toString();
+  } catch {
+    return "";
+  }
+};
 const SUPABASE_REDIRECT =
-  import.meta.env.VITE_SUPABASE_REDIRECT_URL ||
-  (typeof window !== "undefined" ? `${window.location.origin}/` : undefined);
+  normalizeAbsoluteUrl(import.meta.env.VITE_SUPABASE_REDIRECT_URL) || resolveAppRedirectUrl("/") || undefined;
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn("Supabase 환경변수(VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)가 설정되지 않았습니다.");
@@ -71,15 +80,20 @@ export async function signOut() {
 
 export async function signInWithProvider(provider) {
   const client = requireSupabase();
+  const options = {
+    queryParams: {
+      prompt: "consent",
+      access_type: "offline",
+    },
+  };
+
+  if (SUPABASE_REDIRECT) {
+    options.redirectTo = SUPABASE_REDIRECT;
+  }
+
   const { data, error } = await client.auth.signInWithOAuth({
     provider,
-    options: {
-      redirectTo: SUPABASE_REDIRECT,
-      queryParams: {
-        prompt: "consent",
-        access_type: "offline",
-      },
-    },
+    options,
   });
   if (error) throw error;
   return data;

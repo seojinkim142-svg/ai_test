@@ -38,7 +38,7 @@ import {
   extractPdfPageTexts,
   generatePdfThumbnail,
 } from "./utils/pdf";
-import { exportPagedElementToPdf } from "./utils/pdfExport";
+import { exportMockAnswerSheetToPdf, exportPagedElementToPdf } from "./utils/pdfExport";
 import {
   PDF_MAX_SIZE_BY_TIER,
   DEFAULT_PREMIUM_PROFILE_PIN,
@@ -60,13 +60,29 @@ import {
   normalizeQuizPayload,
   parseChapterRangeSelectionInput,
   parsePageSelectionInput,
-  pickRandomItems,
   sanitizePremiumProfileName,
   sanitizePremiumProfilePin,
   formatMockExamTitle,
   chunkMockExamPages,
 } from "./utils/appStateHelpers";
-import { LETTERS } from "./constants";
+import {
+  resolveAnswerIndex,
+  resolveShortAnswerText,
+  buildMockExamAnswerSheet,
+} from "./utils/mockExamUtils";
+import {
+  dedupeQuestionTexts,
+  mergeQuestionHistory,
+  getQuizPromptText,
+  getOxPromptText,
+  getMockExamPromptText,
+  collectQuestionTextsFromQuizSets,
+  collectQuestionTextsFromOxItems,
+  collectQuestionTextsFromMockExams,
+  createQuestionKeySet,
+  pushUniqueByQuestionKey,
+  pickRandomUniqueByQuestionKey,
+} from "./utils/questionDedupe";
 
 const AuthPanel = lazy(() => import("./components/AuthPanel"));
 const Header = lazy(() => import("./components/Header"));
@@ -123,7 +139,22 @@ function isSafeStoragePathForReuse(rawPath) {
 const CHAPTER_RANGE_STORAGE_PREFIX = "zeusian:chapter-ranges:v1";
 const PARTIAL_SUMMARY_ARTIFACT_KEY = "__partial_summary_state_v1";
 const PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY = "__partial_summary_library_v1";
+const INSTRUCTOR_EMPHASIS_ARTIFACT_KEY = "__instructor_emphasis_v1";
+const INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY = "__instructor_emphasis_library_v1";
+const INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY = "__instructor_emphasis_active_id_v1";
 const LEGACY_HIGHLIGHTS_WRAP_KEY = "__legacy_highlights_payload_v1";
+const INSTRUCTOR_EMPHASIS_MAX_LENGTH = 2000;
+
+function normalizeInstructorEmphasisInput(value) {
+  const normalized = String(value || "")
+    .replace(/\r\n/g, "\n")
+    .split("\0")
+    .join("")
+    .trim();
+  if (!normalized) return "";
+  if (normalized.length <= INSTRUCTOR_EMPHASIS_MAX_LENGTH) return normalized;
+  return normalized.slice(0, INSTRUCTOR_EMPHASIS_MAX_LENGTH).trim();
+}
 
 function shouldOpenAuthOnInitialLoad() {
   if (!AUTH_ENABLED) return false;
@@ -184,6 +215,41 @@ function normalizeSavedPartialSummaryEntries(input) {
       name,
       summary: summaryText,
       range,
+      createdAt,
+      updatedAt,
+    });
+  }
+
+  normalized.sort((left, right) => {
+    const l = new Date(left.updatedAt).getTime() || 0;
+    const r = new Date(right.updatedAt).getTime() || 0;
+    return r - l;
+  });
+  return normalized;
+}
+
+function normalizeSavedInstructorEmphasisEntries(input) {
+  const list = Array.isArray(input) ? input : [];
+  const normalized = [];
+  for (const entry of list) {
+    const text = normalizeInstructorEmphasisInput(entry?.text);
+    if (!text) continue;
+
+    const createdAtSource = String(entry?.createdAt || "").trim();
+    const updatedAtSource = String(entry?.updatedAt || "").trim();
+    const createdAtDate = new Date(createdAtSource || Date.now());
+    const updatedAtDate = new Date(updatedAtSource || createdAtDate.getTime());
+    const createdAt = Number.isNaN(createdAtDate.getTime())
+      ? new Date().toISOString()
+      : createdAtDate.toISOString();
+    const updatedAt = Number.isNaN(updatedAtDate.getTime())
+      ? createdAt
+      : updatedAtDate.toISOString();
+    const id =
+      typeof entry?.id === "string" && entry.id.trim() ? entry.id.trim() : createPremiumProfileId();
+    normalized.push({
+      id,
+      text,
       createdAt,
       updatedAt,
     });
@@ -499,25 +565,100 @@ function readPartialSummaryBundleFromHighlights(highlightsValue) {
   const range = String(rawState?.range || "").trim();
   const libraryRaw = base?.[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY];
   const library = normalizeSavedPartialSummaryEntries(libraryRaw);
+  const instructorLibraryRaw = base?.[INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY];
+  const instructorEmphasisLibrary = normalizeSavedInstructorEmphasisEntries(instructorLibraryRaw);
+  const rawInstructorEmphasis = base?.[INSTRUCTOR_EMPHASIS_ARTIFACT_KEY];
+  const legacyInstructorText = normalizeInstructorEmphasisInput(
+    typeof rawInstructorEmphasis === "string" ? rawInstructorEmphasis : rawInstructorEmphasis?.text
+  );
+  let mergedInstructorLibrary = instructorEmphasisLibrary;
+  if (!mergedInstructorLibrary.length && legacyInstructorText) {
+    const nowIso = new Date().toISOString();
+    mergedInstructorLibrary = [
+      {
+        id: createPremiumProfileId(),
+        text: legacyInstructorText,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+    ];
+  }
+  const requestedActiveId = String(base?.[INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY] || "").trim();
+  const activeInstructorEmphasisId =
+    mergedInstructorLibrary.find((item) => item.id === requestedActiveId)?.id ||
+    mergedInstructorLibrary[0]?.id ||
+    "";
+  const instructorEmphasis =
+    mergedInstructorLibrary.find((item) => item.id === activeInstructorEmphasisId)?.text || "";
   return {
     summary,
     range,
     library,
+    instructorEmphasisLibrary: mergedInstructorLibrary,
+    activeInstructorEmphasisId,
+    instructorEmphasis,
   };
 }
 
 function writePartialSummaryBundleToHighlights(
   highlightsValue,
-  { summary = "", range = "", library = [] } = {}
+  {
+    summary,
+    range,
+    library,
+    instructorEmphasis,
+    instructorEmphasisLibrary,
+    activeInstructorEmphasisId,
+  } = {}
 ) {
   const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
   if (!isPlainObject(highlightsValue) && highlightsValue != null) {
     base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
   }
 
-  const normalizedSummary = String(summary || "").trim();
-  const normalizedRange = String(range || "").trim();
-  const normalizedLibrary = normalizeSavedPartialSummaryEntries(library);
+  const existingSummaryState = isPlainObject(base?.[PARTIAL_SUMMARY_ARTIFACT_KEY])
+    ? base[PARTIAL_SUMMARY_ARTIFACT_KEY]
+    : null;
+  const normalizedSummary =
+    summary === undefined
+      ? String(existingSummaryState?.summary || "").trim()
+      : String(summary || "").trim();
+  const normalizedRange =
+    range === undefined ? String(existingSummaryState?.range || "").trim() : String(range || "").trim();
+  const normalizedLibrary = normalizeSavedPartialSummaryEntries(
+    library === undefined ? base?.[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY] : library
+  );
+  const currentInstructorLibrary = normalizeSavedInstructorEmphasisEntries(
+    base?.[INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY]
+  );
+  const explicitInstructorLibrary = normalizeSavedInstructorEmphasisEntries(instructorEmphasisLibrary);
+  let normalizedInstructorLibrary =
+    instructorEmphasisLibrary === undefined ? currentInstructorLibrary : explicitInstructorLibrary;
+  const normalizedInstructorEmphasis = normalizeInstructorEmphasisInput(instructorEmphasis);
+  if (instructorEmphasis !== undefined) {
+    if (normalizedInstructorEmphasis) {
+      const nowIso = new Date().toISOString();
+      const newItem = {
+        id: createPremiumProfileId(),
+        text: normalizedInstructorEmphasis,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      normalizedInstructorLibrary = normalizeSavedInstructorEmphasisEntries([
+        newItem,
+        ...normalizedInstructorLibrary,
+      ]);
+    } else {
+      normalizedInstructorLibrary = [];
+    }
+  }
+  const requestedActiveId = String(activeInstructorEmphasisId || "").trim();
+  const normalizedActiveInstructorEmphasisId =
+    normalizedInstructorLibrary.find((item) => item.id === requestedActiveId)?.id ||
+    normalizedInstructorLibrary[0]?.id ||
+    "";
+  const activeInstructorText =
+    normalizedInstructorLibrary.find((item) => item.id === normalizedActiveInstructorEmphasisId)?.text || "";
 
   if (normalizedSummary) {
     base[PARTIAL_SUMMARY_ARTIFACT_KEY] = {
@@ -533,6 +674,27 @@ function writePartialSummaryBundleToHighlights(
     base[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY] = normalizedLibrary;
   } else {
     delete base[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY];
+  }
+
+  if (normalizedInstructorLibrary.length > 0) {
+    base[INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY] = normalizedInstructorLibrary;
+  } else {
+    delete base[INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY];
+  }
+
+  if (normalizedActiveInstructorEmphasisId) {
+    base[INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY] = normalizedActiveInstructorEmphasisId;
+  } else {
+    delete base[INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY];
+  }
+
+  if (activeInstructorText) {
+    base[INSTRUCTOR_EMPHASIS_ARTIFACT_KEY] = {
+      text: activeInstructorText,
+      updatedAt: new Date().toISOString(),
+    };
+  } else {
+    delete base[INSTRUCTOR_EMPHASIS_ARTIFACT_KEY];
   }
 
   return Object.keys(base).length > 0 ? base : null;
@@ -599,6 +761,9 @@ function App() {
   const [partialSummary, setPartialSummary] = useState("");
   const [partialSummaryRange, setPartialSummaryRange] = useState("");
   const [savedPartialSummaries, setSavedPartialSummaries] = useState([]);
+  const [instructorEmphasisInput, setInstructorEmphasisInput] = useState("");
+  const [savedInstructorEmphases, setSavedInstructorEmphases] = useState([]);
+  const [activeInstructorEmphasisId, setActiveInstructorEmphasisId] = useState("");
   const [isSavedPartialSummaryOpen, setIsSavedPartialSummaryOpen] = useState(false);
   const [quizChapterSelectionInput, setQuizChapterSelectionInput] = useState("");
   const [oxChapterSelectionInput, setOxChapterSelectionInput] = useState("");
@@ -819,6 +984,9 @@ function App() {
     setPartialSummary("");
     setPartialSummaryRange("");
     setSavedPartialSummaries([]);
+    setInstructorEmphasisInput("");
+    setSavedInstructorEmphases([]);
+    setActiveInstructorEmphasisId("");
     setIsSavedPartialSummaryOpen(false);
     setQuizChapterSelectionInput("");
     setOxChapterSelectionInput("");
@@ -1543,9 +1711,22 @@ function App() {
       setIsLoadingMockExams(true);
       try {
         const list = await fetchMockExams({ userId: user.id, docId });
-        setMockExams(list);
+        const normalized = (Array.isArray(list) ? list : []).map((exam) => {
+          const payload = exam?.payload || {};
+          const items = Array.isArray(payload?.items) ? payload.items : [];
+          const answerSheet = buildMockExamAnswerSheet(items, payload?.answerSheet);
+          return {
+            ...exam,
+            payload: {
+              ...payload,
+              items,
+              answerSheet,
+            },
+          };
+        });
+        setMockExams(normalized);
       } catch (err) {
-        setMockExamError(`紐⑥쓽怨좎궗 紐⑸줉??遺덈윭?ㅼ? 紐삵뻽?듬땲?? ${err.message}`);
+        setMockExamError(`모의고사 목록을 불러오지 못했습니다: ${err.message}`);
       } finally {
         setIsLoadingMockExams(false);
       }
@@ -1687,10 +1868,18 @@ function App() {
           highlights: data?.highlights_json || null,
         };
         const partialBundle = readPartialSummaryBundleFromHighlights(mapped.highlights);
+        const activeInstructorText = normalizeInstructorEmphasisInput(
+          partialBundle.instructorEmphasisLibrary.find(
+            (item) => item.id === partialBundle.activeInstructorEmphasisId
+          )?.text
+        );
         setArtifacts(mapped);
         setPartialSummary(partialBundle.summary);
         setPartialSummaryRange(partialBundle.range);
         setSavedPartialSummaries(partialBundle.library);
+        setInstructorEmphasisInput(activeInstructorText);
+        setSavedInstructorEmphases(partialBundle.instructorEmphasisLibrary);
+        setActiveInstructorEmphasisId(partialBundle.activeInstructorEmphasisId);
         setIsSavedPartialSummaryOpen(false);
         if (mapped.summary) {
           setSummary(mapped.summary);
@@ -1990,6 +2179,9 @@ function App() {
       setPartialSummary("");
       setPartialSummaryRange("");
       setSavedPartialSummaries([]);
+      setInstructorEmphasisInput("");
+      setSavedInstructorEmphases([]);
+      setActiveInstructorEmphasisId("");
       setIsSavedPartialSummaryOpen(false);
       setQuizChapterSelectionInput("");
       setOxChapterSelectionInput("");
@@ -2028,15 +2220,17 @@ function App() {
       setChapterRangeInput(savedChapterRangeInput);
       setChapterRangeError("");
       oxAutoRequestedRef.current = false;
+      const artifactsPromise = loadArtifacts(nextDocId);
 
       try {
-        const [textResult, thumb] = await Promise.all([
+        const [textResult, thumb, loaded] = await Promise.all([
           extractPdfText(targetFile, 30, 12000, {
             useOcr: true,
             ocrLang: "kor+eng",
             onOcrProgress: (message) => setStatus(message),
           }),
           generatePdfThumbnail(targetFile),
+          artifactsPromise,
         ]);
         const { text, pagesUsed, totalPages } = textResult;
         setExtractedText(text);
@@ -2050,11 +2244,7 @@ function App() {
         const elapsedSeconds = Math.max(0, (extractEnd - extractStart) / 1000);
         setStatus(`Text extraction complete: ${pagesUsed}/${totalPages} pages, ${elapsedSeconds.toFixed(1)}s`);
         setError("");
-        const [, , loaded] = await Promise.all([
-          loadMockExams(nextDocId),
-          loadFlashcards(nextDocId),
-          loadArtifacts(nextDocId),
-        ]);
+        await Promise.all([loadMockExams(nextDocId), loadFlashcards(nextDocId)]);
         if (loaded?.summary) {
           setStatus("Loaded saved summary.");
         }
@@ -2314,6 +2504,9 @@ function App() {
     setPartialSummary("");
     setPartialSummaryRange("");
     setSavedPartialSummaries([]);
+    setInstructorEmphasisInput("");
+    setSavedInstructorEmphases([]);
+    setActiveInstructorEmphasisId("");
     setIsSavedPartialSummaryOpen(false);
     setQuizChapterSelectionInput("");
     setOxChapterSelectionInput("");
@@ -2413,6 +2606,116 @@ function App() {
     },
     [artifacts?.highlights, persistArtifacts, savedPartialSummaries]
   );
+
+  const persistInstructorEmphasisState = useCallback(
+    ({ library = savedInstructorEmphases, activeId = activeInstructorEmphasisId } = {}) => {
+      const nextHighlights = writePartialSummaryBundleToHighlights(artifacts?.highlights, {
+        instructorEmphasisLibrary: library,
+        activeInstructorEmphasisId: activeId,
+      });
+      persistArtifacts({ highlights: nextHighlights });
+    },
+    [activeInstructorEmphasisId, artifacts?.highlights, persistArtifacts, savedInstructorEmphases]
+  );
+
+  const handleSaveInstructorEmphasis = useCallback(
+    ({ value } = {}) => {
+      const nextValue =
+        value === undefined
+          ? normalizeInstructorEmphasisInput(instructorEmphasisInput)
+          : normalizeInstructorEmphasisInput(value);
+      if (!nextValue) {
+        setStatus("\uC800\uC7A5\uD560 \uAC15\uC870 \uD3EC\uC778\uD2B8\uB97C \uC785\uB825\uD574\uC8FC\uC138\uC694.");
+        return;
+      }
+
+      const existing = savedInstructorEmphases.find((item) => item.text === nextValue);
+      if (existing) {
+        setActiveInstructorEmphasisId(existing.id);
+        setInstructorEmphasisInput("");
+        persistInstructorEmphasisState({
+          library: savedInstructorEmphases,
+          activeId: existing.id,
+        });
+        setStatus("\uC774\uBBF8 \uC800\uC7A5\uB41C \uAC15\uC870 \uD3EC\uC778\uD2B8\uB97C \uC120\uD0DD\uD588\uC2B5\uB2C8\uB2E4.");
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+      const newItem = {
+        id: createPremiumProfileId(),
+        text: nextValue,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      const nextLibrary = normalizeSavedInstructorEmphasisEntries([
+        newItem,
+        ...(Array.isArray(savedInstructorEmphases) ? savedInstructorEmphases : []),
+      ]);
+      setSavedInstructorEmphases(nextLibrary);
+      setActiveInstructorEmphasisId(newItem.id);
+      setInstructorEmphasisInput("");
+      persistInstructorEmphasisState({ library: nextLibrary, activeId: newItem.id });
+      setStatus("\uAC15\uC870 \uD3EC\uC778\uD2B8\uB97C \uBCC4\uB3C4 \uD56D\uBAA9\uC73C\uB85C \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.");
+    },
+    [instructorEmphasisInput, persistInstructorEmphasisState, savedInstructorEmphases]
+  );
+
+  const handleSelectInstructorEmphasis = useCallback(
+    (itemId) => {
+      const targetId = String(itemId || "").trim();
+      if (!targetId) return;
+      const found = savedInstructorEmphases.find((item) => item.id === targetId);
+      if (!found) return;
+      setActiveInstructorEmphasisId(targetId);
+      setInstructorEmphasisInput(found.text);
+      persistInstructorEmphasisState({ library: savedInstructorEmphases, activeId: targetId });
+    },
+    [persistInstructorEmphasisState, savedInstructorEmphases]
+  );
+
+  const handleDeleteInstructorEmphasis = useCallback(
+    (itemId) => {
+      const targetId = String(itemId || "").trim();
+      if (!targetId) return;
+      const nextLibrary = (Array.isArray(savedInstructorEmphases) ? savedInstructorEmphases : []).filter(
+        (item) => item.id !== targetId
+      );
+      const nextActiveId =
+        targetId === activeInstructorEmphasisId ? nextLibrary[0]?.id || "" : activeInstructorEmphasisId;
+      const nextActiveItem = nextLibrary.find((item) => item.id === nextActiveId) || null;
+      setSavedInstructorEmphases(nextLibrary);
+      setActiveInstructorEmphasisId(nextActiveId);
+      setInstructorEmphasisInput(nextActiveItem?.text || "");
+      persistInstructorEmphasisState({ library: nextLibrary, activeId: nextActiveId });
+      setStatus("\uAC15\uC870 \uD3EC\uC778\uD2B8 \uD56D\uBAA9\uC744 \uC0AD\uC81C\uD588\uC2B5\uB2C8\uB2E4.");
+    },
+    [activeInstructorEmphasisId, persistInstructorEmphasisState, savedInstructorEmphases]
+  );
+
+  const cycleActiveInstructorEmphasis = useCallback(
+    (direction = 1) => {
+      const list = Array.isArray(savedInstructorEmphases) ? savedInstructorEmphases : [];
+      if (list.length <= 1) return;
+      const currentIndex = list.findIndex((item) => item.id === activeInstructorEmphasisId);
+      const start = currentIndex >= 0 ? currentIndex : 0;
+      const step = Number(direction) >= 0 ? 1 : -1;
+      const nextIndex = (start + step + list.length) % list.length;
+      const nextId = list[nextIndex]?.id || "";
+      if (!nextId) return;
+      handleSelectInstructorEmphasis(nextId);
+    },
+    [activeInstructorEmphasisId, handleSelectInstructorEmphasis, savedInstructorEmphases]
+  );
+
+  const getEffectiveInstructorEmphasisText = useCallback(() => {
+    const draft = normalizeInstructorEmphasisInput(instructorEmphasisInput);
+    if (draft) return draft;
+    const active = (Array.isArray(savedInstructorEmphases) ? savedInstructorEmphases : []).find(
+      (item) => item.id === activeInstructorEmphasisId
+    );
+    return normalizeInstructorEmphasisInput(active?.text);
+  }, [activeInstructorEmphasisId, instructorEmphasisInput, savedInstructorEmphases]);
 
   useEffect(() => {
     uploadedFilesRef.current = uploadedFiles;
@@ -2606,6 +2909,7 @@ function App() {
       return;
     }
     const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
+    const instructorEmphasisText = getEffectiveInstructorEmphasisText();
 
     if (!extractedText && !chapterSelectionRaw) {
       setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
@@ -2629,16 +2933,63 @@ function App() {
         setStatus(`퀴즈 세트 생성 중... (${scopeLabel})`);
       }
 
+      const historicalQuizTexts = collectQuestionTextsFromQuizSets(quizSets);
+      const historicalMockTexts = collectQuestionTextsFromMockExams(mockExams);
+      const avoidQuestionTexts = dedupeQuestionTexts([...historicalQuizTexts, ...historicalMockTexts]).slice(0, 80);
+      const seenQuestionKeys = createQuestionKeySet(avoidQuestionTexts);
+
+      const targetMcCount = Math.max(0, Number(quizMix.multipleChoice) || 0);
+      const targetSaCount = Math.max(0, Number(quizMix.shortAnswer) || 0);
+      const nextMultipleChoice = [];
+      const nextShortAnswer = [];
+
       const { generateQuiz } = await getOpenAiService();
-      const quiz = normalizeQuizPayload(
-        await generateQuiz(quizSourceText, {
-          multipleChoiceCount: quizMix.multipleChoice,
-          shortAnswerCount: quizMix.shortAnswer,
-        })
-      );
+      const maxAttempts = 3;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        if (nextMultipleChoice.length >= targetMcCount && nextShortAnswer.length >= targetSaCount) break;
+
+        const requestMcCount = Math.min(5, Math.max(targetMcCount - nextMultipleChoice.length, 1) + 1);
+        const requestSaCount = Math.min(5, Math.max(targetSaCount - nextShortAnswer.length, 0) + 1);
+
+        const quiz = normalizeQuizPayload(
+          await generateQuiz(quizSourceText, {
+            multipleChoiceCount: requestMcCount,
+            shortAnswerCount: requestSaCount,
+            instructorEmphasis: instructorEmphasisText,
+            avoidQuestions: avoidQuestionTexts,
+          })
+        );
+
+        pushUniqueByQuestionKey(
+          nextMultipleChoice,
+          Array.isArray(quiz.multipleChoice) ? quiz.multipleChoice : [],
+          getQuizPromptText,
+          seenQuestionKeys,
+          targetMcCount
+        );
+        pushUniqueByQuestionKey(
+          nextShortAnswer,
+          Array.isArray(quiz.shortAnswer) ? quiz.shortAnswer : [],
+          getQuizPromptText,
+          seenQuestionKeys,
+          targetSaCount
+        );
+
+        const mergedAvoidQuestions = mergeQuestionHistory(
+          avoidQuestionTexts,
+          [...nextMultipleChoice.map(getQuizPromptText), ...nextShortAnswer.map(getQuizPromptText)],
+          120
+        );
+        avoidQuestionTexts.splice(0, avoidQuestionTexts.length, ...mergedAvoidQuestions);
+      }
+
+      if (nextMultipleChoice.length < targetMcCount || nextShortAnswer.length < targetSaCount) {
+        throw new Error("중복 문항을 제외하느라 충분한 새 문항을 만들지 못했습니다. 범위를 바꿔 다시 시도해 주세요.");
+      }
+
       const trimmedQuiz = {
-        multipleChoice: quiz.multipleChoice.slice(0, quizMix.multipleChoice),
-        shortAnswer: quiz.shortAnswer.slice(0, quizMix.shortAnswer),
+        multipleChoice: nextMultipleChoice.slice(0, targetMcCount),
+        shortAnswer: nextShortAnswer.slice(0, targetSaCount),
       };
       const newSet = {
         id: `quiz-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -2893,6 +3244,7 @@ function App() {
   const requestSummary = async ({ force = false } = {}) => {
     if (isLoadingSummary || (!force && summaryRequestedRef.current)) return;
     const hasManualChapterConfig = Boolean(String(chapterRangeInput || "").trim());
+    const instructorEmphasisText = getEffectiveInstructorEmphasisText();
     if (!file) {
       setError("먼저 PDF를 열어주세요.");
       return;
@@ -2988,8 +3340,11 @@ function App() {
             scope: "사용자 지정 챕터 범위",
             chapterized: true,
             chapterSections: customChapterSections,
+            instructorEmphasis: instructorEmphasisText,
           })
-        : await generateSummary(summarySourceText);
+        : await generateSummary(summarySourceText, {
+            instructorEmphasis: instructorEmphasisText,
+          });
       setSummary(summarized);
       setUsageCounts((prev) => ({ ...prev, summary: prev.summary + 1 }));
       setStatus("요약이 생성되었습니다.");
@@ -3125,12 +3480,12 @@ function App() {
   const handleSummaryByPages = useCallback(async () => {
     if (isPageSummaryLoading || isLoadingSummary) return;
     if (!file || !selectedFileId) {
-      setPageSummaryError("PDF瑜?癒쇱? ?댁뼱二쇱꽭??");
+      setPageSummaryError("PDF를 먼저 열어주세요.");
       return;
     }
     const totalPages = pageInfo.total || pageInfo.used || 0;
     if (!totalPages) {
-      setPageSummaryError("珥??섏씠吏 ?섎? ?뺤씤?????놁뒿?덈떎. PDF瑜??ㅼ떆 ?댁뼱二쇱꽭??");
+      setPageSummaryError("총 페이지 수를 확인할 수 없습니다. PDF를 다시 열어주세요.");
       return;
     }
     const parsed = parsePageSelectionInput(pageSummaryInput, totalPages);
@@ -3143,7 +3498,7 @@ function App() {
     setIsPageSummaryOpen(false);
     setPageSummaryError("");
     setError("");
-    setStatus("遺遺꾩슂?쎌쓣 ?앹꽦?섍퀬 ?덉뒿?덈떎...");
+    setStatus("부분 요약을 생성하고 있습니다...");
     setIsPageSummaryLoading(true);
     try {
       const extracted = await extractPdfTextFromPages(file, parsed.pages, 18000, {
@@ -3152,29 +3507,62 @@ function App() {
         onOcrProgress: (message) => setStatus(message),
       });
       if (!extracted?.text) {
-        const suffix = extracted?.ocrUsed ? " OCR源뚯? ?쒕룄?덉?留??쎌쓣 ???덈뒗 ?띿뒪?멸? ?놁뒿?덈떎." : "";
-        throw new Error(`?좏깮???섏씠吏?먯꽌 ?띿뒪?몃? 異붿텧?섏? 紐삵뻽?듬땲??${suffix}`);
+        const suffix = extracted?.ocrUsed
+          ? " OCR까지 시도했지만 추출할 수 있는 텍스트가 없습니다."
+          : "";
+        throw new Error(`선택한 페이지에서 텍스트를 추출하지 못했습니다.${suffix}`);
       }
       if (extracted?.ocrUsed) {
-        setStatus("OCR???꾨즺?섏뿀?듬땲?? 遺遺꾩슂?쎌쓣 ?앹꽦?섍퀬 ?덉뒿?덈떎...");
+        setStatus("OCR이 완료되었습니다. 부분 요약을 생성하고 있습니다...");
       }
-      setStatus("?좏깮 踰붿쐞 遺遺꾩슂???앹꽦 以?..");
+      setStatus("선택 범위 부분 요약 생성 중...");
       const { generateSummary } = await getOpenAiService();
       const summarized = await generateSummary(extracted.text, {
         scope: "선택 범위에서 추출한 텍스트",
         chapterized: false,
+        instructorEmphasis: getEffectiveInstructorEmphasisText(),
       });
       setPartialSummary(summarized);
       setPartialSummaryRange(selectionLabel);
+      const nowIso = new Date().toISOString();
+      const currentSaved = Array.isArray(savedPartialSummaries) ? savedPartialSummaries : [];
+      const duplicate = currentSaved.find(
+        (item) =>
+          String(item.summary || "").trim() === String(summarized || "").trim() &&
+          String(item.range || "").trim() === selectionLabel
+      );
+      const nextSavedPartialSummaries = duplicate
+        ? normalizeSavedPartialSummaryEntries(
+            currentSaved.map((item) =>
+              item.id === duplicate.id
+                ? {
+                    ...item,
+                    updatedAt: nowIso,
+                  }
+                : item
+            )
+          )
+        : normalizeSavedPartialSummaryEntries([
+            {
+              id: createPremiumProfileId(),
+              name: formatPartialSummaryDefaultName(nowIso),
+              summary: summarized,
+              range: selectionLabel,
+              createdAt: nowIso,
+              updatedAt: nowIso,
+            },
+            ...currentSaved,
+          ]);
+      setSavedPartialSummaries(nextSavedPartialSummaries);
       persistPartialSummaryBundle({
         summary: summarized,
         range: selectionLabel,
-        library: savedPartialSummaries,
+        library: nextSavedPartialSummaries,
       });
-      setStatus("遺遺꾩슂?쎌씠 ?앹꽦?섏뿀?듬땲??");
+      setStatus("부분 요약이 생성되고 저장되었습니다.");
     } catch (err) {
-      setPageSummaryError(`遺遺꾩슂???앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
-      setError(`遺遺꾩슂???앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+      setPageSummaryError(`부분 요약 생성에 실패했습니다: ${err.message}`);
+      setError(`부분 요약 생성에 실패했습니다: ${err.message}`);
       setStatus("");
     } finally {
       setIsPageSummaryLoading(false);
@@ -3187,6 +3575,7 @@ function App() {
     pageInfo.total,
     pageInfo.used,
     pageSummaryInput,
+    getEffectiveInstructorEmphasisText,
     persistPartialSummaryBundle,
     savedPartialSummaries,
     selectedFileId,
@@ -3355,6 +3744,7 @@ function App() {
       return;
     }
     const chapterSelectionRaw = String(oxChapterSelectionInput || "").trim();
+    const instructorEmphasisText = getEffectiveInstructorEmphasisText();
     if (!extractedText && !chapterSelectionRaw) {
       setError("異붿텧???띿뒪?멸? ?놁뒿?덈떎. 癒쇱? PDF ?띿뒪??異붿텧???ㅽ뻾?댁＜?몄슂.");
       return;
@@ -3376,9 +3766,19 @@ function App() {
         setStatus(`O/X 臾몄젣 ?앹꽦 以?(${scopeLabel})...`);
       }
 
+      const historicalOxTexts = collectQuestionTextsFromOxItems(oxItems);
+      const historicalMockTexts = collectQuestionTextsFromMockExams(mockExams);
+      const avoidStatementTexts = dedupeQuestionTexts([...historicalOxTexts, ...historicalMockTexts]).slice(0, 80);
+      const seenQuestionKeys = createQuestionKeySet(avoidStatementTexts);
+
       const { generateOxQuiz } = await getOpenAiService();
-      const ox = await generateOxQuiz(oxSourceText);
-      const items = Array.isArray(ox?.items) ? ox.items : [];
+      const ox = await generateOxQuiz(oxSourceText, {
+        instructorEmphasis: instructorEmphasisText,
+        avoidStatements: avoidStatementTexts,
+      });
+      const rawItems = Array.isArray(ox?.items) ? ox.items : [];
+      const items = [];
+      pushUniqueByQuestionKey(items, rawItems, getOxPromptText, seenQuestionKeys, 10);
 
       if (ox?.debug || items.length === 0) {
         setOxItems([]);
@@ -3828,15 +4228,15 @@ function App() {
   const handleCreateMockExam = useCallback(async () => {
     if (isGeneratingMockExam) return;
     if (AUTH_ENABLED && !user) {
-      setMockExamError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
+      setMockExamError("먼저 로그인해 주세요.");
       return;
     }
     if (!file || !selectedFileId) {
-      setMockExamError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+      setMockExamError("먼저 PDF를 열어 주세요.");
       return;
     }
     if (isLoadingText) {
-      setMockExamError("PDF ?띿뒪??異붿텧???꾩쭅 吏꾪뻾 以묒엯?덈떎. ?좎떆留?湲곕떎?ㅼ＜?몄슂.");
+      setMockExamError("PDF 텍스트 추출이 아직 진행 중입니다. 잠시만 기다려 주세요.");
       return;
     }
 
@@ -3845,28 +4245,28 @@ function App() {
     let sourceText = (extractedText || "").trim();
     let scopeLabel = "";
     if (!sourceText && !hasChapterScope) {
-      setMockExamError("紐⑥쓽怨좎궗瑜??앹꽦?섍린??異붿텧???띿뒪?멸? 遺議깊빀?덈떎.");
+      setMockExamError("모의고사를 생성하기에 추출된 텍스트가 부족합니다.");
       return;
     }
     if (hasChapterScope) {
       try {
         const scoped = await extractTextForChapterSelection({
-          featureLabel: "紐⑥쓽怨좎궗",
+          featureLabel: "모의고사",
           chapterSelectionInput: chapterSelectionRaw,
         });
         sourceText = String(scoped.text || "").trim();
         scopeLabel = scoped.scopeLabel;
       } catch (err) {
-        setMockExamError(String(err?.message || "紐⑥쓽怨좎궗??梨뺥꽣 ?띿뒪??異붿텧???ㅽ뙣?덉뒿?덈떎."));
+        setMockExamError(String(err?.message || "모의고사 챕터 텍스트 추출에 실패했습니다."));
         return;
       }
     }
     if (sourceText.length < 80) {
-      setMockExamError("紐⑥쓽怨좎궗瑜??앹꽦?섍린??異붿텧???띿뒪?멸? 遺議깊빀?덈떎.");
+      setMockExamError("모의고사를 생성하기에 추출된 텍스트가 부족합니다.");
       return;
     }
 
-    setMockExamStatus("紐⑥쓽怨좎궗 ?앹꽦 以?..");
+    setMockExamStatus("모의고사 생성 중...");
     setMockExamError("");
     setIsGeneratingMockExam(true);
 
@@ -3874,13 +4274,25 @@ function App() {
       const ai = await getOpenAiService();
       let oxPool = Array.isArray(oxItems) ? oxItems : [];
       let quizPool = [];
+      const historicalMockTexts = collectQuestionTextsFromMockExams(mockExams);
+      const avoidMockQuestionTexts = dedupeQuestionTexts(historicalMockTexts).slice(0, 120);
+      const usedMockQuestionKeys = createQuestionKeySet(avoidMockQuestionTexts);
 
       if (hasChapterScope) {
-        setMockExamStatus(`紐⑥쓽怨좎궗 ?앹꽦 以?(${scopeLabel})...`);
+        setMockExamStatus(`모의고사 생성 중 (${scopeLabel})...`);
+        const instructorEmphasisText = getEffectiveInstructorEmphasisText();
 
         const [oxResult, quizResult] = await Promise.all([
-          ai.generateOxQuiz(sourceText),
-          ai.generateQuiz(sourceText, { multipleChoiceCount: 4, shortAnswerCount: 1 }),
+          ai.generateOxQuiz(sourceText, {
+            instructorEmphasis: instructorEmphasisText,
+            avoidStatements: avoidMockQuestionTexts,
+          }),
+          ai.generateQuiz(sourceText, {
+            multipleChoiceCount: 4,
+            shortAnswerCount: 1,
+            instructorEmphasis: instructorEmphasisText,
+            avoidQuestions: avoidMockQuestionTexts,
+          }),
         ]);
 
         oxPool = Array.isArray(oxResult?.items) ? oxResult.items : [];
@@ -3893,22 +4305,29 @@ function App() {
         scopedMultipleChoice.forEach((question) => {
           const prompt = String(question?.question || "").trim();
           if (!prompt) return;
+          const choices = Array.isArray(question?.choices) ? question.choices : [];
+          const explanation = String(question?.explanation || "").trim();
           quizPool.push({
             type: "quiz-mc",
             prompt,
-            choices: Array.isArray(question?.choices) ? question.choices : [],
-            answerIndex: Number.isFinite(question?.answerIndex) ? question.answerIndex : null,
-            explanation: String(question?.explanation || "").trim(),
+            choices,
+            answerIndex: resolveAnswerIndex({
+              answerIndex: question?.answerIndex,
+              explanation,
+              choices,
+            }),
+            explanation,
           });
         });
         scopedShortAnswers.forEach((item) => {
           const prompt = String(item?.question || "").trim();
           if (!prompt) return;
+          const explanation = String(item?.explanation || "").trim();
           quizPool.push({
             type: "quiz-short",
             prompt,
-            answer: String(item?.answer || "").trim(),
-            explanation: String(item?.explanation || "").trim(),
+            answer: resolveShortAnswerText(item?.answer, explanation),
+            explanation,
           });
         });
       } else {
@@ -3918,42 +4337,86 @@ function App() {
           multipleChoice.forEach((question) => {
             const prompt = String(question?.question || "").trim();
             if (!prompt) return;
+            const choices = Array.isArray(question?.choices) ? question.choices : [];
+            const explanation = String(question?.explanation || "").trim();
             quizPool.push({
               type: "quiz-mc",
               prompt,
-              choices: Array.isArray(question?.choices) ? question.choices : [],
-              answerIndex: Number.isFinite(question?.answerIndex) ? question.answerIndex : null,
-              explanation: String(question?.explanation || "").trim(),
+              choices,
+              answerIndex: resolveAnswerIndex({
+                answerIndex: question?.answerIndex,
+                explanation,
+                choices,
+              }),
+              explanation,
             });
           });
           shortAnswers.forEach((item) => {
             const prompt = String(item?.question || "").trim();
             if (!prompt) return;
+            const explanation = String(item?.explanation || "").trim();
             quizPool.push({
               type: "quiz-short",
               prompt,
-              answer: String(item?.answer || "").trim(),
-              explanation: String(item?.explanation || "").trim(),
+              answer: resolveShortAnswerText(item?.answer, explanation),
+              explanation,
             });
           });
         });
       }
 
       if (oxPool.length < 3) {
-        throw new Error("紐⑥쓽怨좎궗瑜?留뚮뱾?ㅻ㈃ O/X 臾명빆??理쒖냼 3媛??꾩슂?⑸땲??");
+        throw new Error("모의고사를 만들려면 O/X 문항이 최소 3개 필요합니다.");
       }
       if (quizPool.length < 4) {
-        throw new Error("紐⑥쓽怨좎궗瑜?留뚮뱾?ㅻ㈃ ?댁쫰 臾명빆??理쒖냼 4媛??꾩슂?⑸땲??");
+        throw new Error("모의고사를 만들려면 퀴즈 문항이 최소 4개 필요합니다.");
       }
 
-      const pickedOx = pickRandomItems(oxPool, 3);
-      const pickedQuiz = pickRandomItems(quizPool, 4);
+      const pickedOx = pickRandomUniqueByQuestionKey(oxPool, 3, getOxPromptText, usedMockQuestionKeys);
+      const pickedQuiz = pickRandomUniqueByQuestionKey(quizPool, 4, getMockExamPromptText, usedMockQuestionKeys);
+
+      if (pickedOx.length < 3) {
+        throw new Error("이미 출제된 문항을 제외하느라 O/X 신규 문항이 부족합니다. 범위를 바꿔 다시 시도해 주세요.");
+      }
+      if (pickedQuiz.length < 4) {
+        throw new Error("이미 출제된 문항을 제외하느라 퀴즈 신규 문항이 부족합니다. 범위를 바꿔 다시 시도해 주세요.");
+      }
+
+      const mergedAvoidForMock = mergeQuestionHistory(
+        avoidMockQuestionTexts,
+        [...pickedOx.map((item) => getOxPromptText(item)), ...pickedQuiz.map((item) => getMockExamPromptText(item))],
+        160
+      );
+      avoidMockQuestionTexts.splice(0, avoidMockQuestionTexts.length, ...mergedAvoidForMock);
+
       const hardCount = Math.max(3, 10 - (pickedOx.length + pickedQuiz.length));
-      const hardResult = await ai.generateHardQuiz(sourceText, { count: hardCount });
-      const hardItems = Array.isArray(hardResult?.items) ? hardResult.items.slice(0, hardCount) : [];
+      const hardItems = [];
+      const maxHardAttempts = 3;
+      for (let attempt = 0; attempt < maxHardAttempts; attempt += 1) {
+        if (hardItems.length >= hardCount) break;
+        const requestCount = Math.min(10, hardCount + attempt * 2 + 1);
+        const hardResult = await ai.generateHardQuiz(sourceText, {
+          count: requestCount,
+          avoidQuestions: avoidMockQuestionTexts,
+        });
+        const rawHardItems = Array.isArray(hardResult?.items) ? hardResult.items : [];
+        pushUniqueByQuestionKey(
+          hardItems,
+          rawHardItems,
+          (item) => String(item?.question || "").trim(),
+          usedMockQuestionKeys,
+          hardCount
+        );
+        const mergedAvoidWithHard = mergeQuestionHistory(
+          avoidMockQuestionTexts,
+          hardItems.map((item) => String(item?.question || "").trim()),
+          200
+        );
+        avoidMockQuestionTexts.splice(0, avoidMockQuestionTexts.length, ...mergedAvoidWithHard);
+      }
 
       if (hardItems.length < hardCount) {
-        throw new Error("怨좊궃??臾명빆??異⑸텇???앹꽦?섏? 紐삵뻽?듬땲??");
+        throw new Error("고난도 문항을 충분히 생성하지 못했습니다.");
       }
 
       const mappedOx = pickedOx.map((item) => ({
@@ -3970,7 +4433,11 @@ function App() {
         type: "hard",
         prompt: String(item?.question || "").trim(),
         choices: Array.isArray(item?.choices) ? item.choices : [],
-        answerIndex: Number.isFinite(item?.answerIndex) ? item.answerIndex : null,
+        answerIndex: resolveAnswerIndex({
+          answerIndex: item?.answerIndex,
+          explanation: String(item?.explanation || "").trim(),
+          choices: Array.isArray(item?.choices) ? item.choices : [],
+        }),
         explanation: String(item?.explanation || "").trim(),
       }));
 
@@ -3980,31 +4447,15 @@ function App() {
       }));
 
       if (examItems.length !== 10) {
-        throw new Error("紐⑥쓽怨좎궗???뺥솗??10臾명빆?댁뼱???⑸땲??");
+        throw new Error("모의고사는 정확히 10문항이어야 합니다.");
       }
 
-      const answerSheet = examItems.map((item, idx) => {
-        const answerText =
-          item.type === "ox"
-            ? item.answer || "-"
-            : item.type === "quiz-short"
-              ? item.answer || "-"
-              : Number.isFinite(item.answerIndex)
-                ? LETTERS[item.answerIndex] || "-"
-                : "-";
-        return {
-          number: idx + 1,
-          type: item.type,
-          answer: answerText,
-          explanation: String(item?.explanation || "").trim(),
-          evidence: String(item?.evidence || "").trim(),
-        };
-      });
+      const answerSheet = buildMockExamAnswerSheet(examItems);
 
       const now = new Date();
       const dateStamp = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
       const nextIndex = mockExams.length + 1;
-      const title = `${dateStamp} 紐⑥쓽怨좎궗 ${nextIndex}`;
+      const title = `${dateStamp} 모의고사 ${nextIndex}`;
       const payload = {
         title,
         items: examItems,
@@ -4041,11 +4492,11 @@ function App() {
       setShowMockExamAnswers(true);
       setMockExamStatus(
         scopeLabel
-          ? `紐⑥쓽怨좎궗? ?듭?媛 ??λ릺?덉뒿?덈떎 (${scopeLabel}).`
-          : "紐⑥쓽怨좎궗? ?듭?媛 ??λ릺?덉뒿?덈떎."
+          ? `모의고사와 답지가 저장되었습니다 (${scopeLabel}).`
+          : "모의고사와 답지가 저장되었습니다."
       );
     } catch (err) {
-      setMockExamError(`紐⑥쓽怨좎궗 ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+      setMockExamError(`모의고사 생성에 실패했습니다: ${err.message}`);
       setMockExamStatus("");
     } finally {
       setIsGeneratingMockExam(false);
@@ -4056,12 +4507,13 @@ function App() {
     isGeneratingMockExam,
     isLoadingText,
     oxItems,
-    mockExams.length,
+    mockExams,
     quizSets,
     mockExamChapterSelectionInput,
     selectedFileId,
     extractTextForChapterSelection,
     getOpenAiService,
+    getEffectiveInstructorEmphasisText,
     user,
   ]);
 
@@ -4073,10 +4525,10 @@ function App() {
           if (activeMockExamId === examId) {
             setActiveMockExamId(null);
           }
-          setMockExamStatus("Mock exam removed (local mode).");
+          setMockExamStatus("모의고사를 삭제했습니다. (로컬 모드)");
           return;
         }
-        setMockExamError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
+        setMockExamError("먼저 로그인해 주세요.");
         return;
       }
       try {
@@ -4085,9 +4537,9 @@ function App() {
         if (activeMockExamId === examId) {
           setActiveMockExamId(null);
         }
-        setMockExamStatus("紐⑥쓽怨좎궗瑜???젣?덉뒿?덈떎.");
+        setMockExamStatus("모의고사를 삭제했습니다.");
       } catch (err) {
-        setMockExamError(`紐⑥쓽怨좎궗 ??젣???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+        setMockExamError(`모의고사 삭제에 실패했습니다: ${err.message}`);
       }
     },
     [activeMockExamId, user]
@@ -4096,26 +4548,39 @@ function App() {
   const handleExportMockExam = useCallback(
     async (exam) => {
       if (!exam) {
-        setMockExamError("?대낫??紐⑥쓽怨좎궗媛 ?좏깮?섏? ?딆븯?듬땲??");
+        setMockExamError("내보낼 모의고사가 선택되지 않았습니다.");
         return;
       }
       if (!mockExamPrintRef.current) {
-        setMockExamError("紐⑥쓽怨좎궗 異쒕젰 ?곸뿭??李얠쓣 ???놁뒿?덈떎.");
+        setMockExamError("모의고사 출력 영역을 찾을 수 없습니다.");
         return;
       }
       setMockExamError("");
       try {
-        const safeTitle = (exam.title || "mock-exam").replace(/[^\w-]+/g, "-");
+        const examIndex = mockExams.findIndex((item) => item.id === exam.id);
+        const displayTitle = formatMockExamTitle(exam, examIndex >= 0 ? examIndex : 0);
+        const safeTitle = (displayTitle || "mock-exam").replace(/[^\w-]+/g, "-");
+        const answerSheet = buildMockExamAnswerSheet(
+          Array.isArray(exam?.payload?.items) ? exam.payload.items : [],
+          exam?.payload?.answerSheet
+        );
+
         await exportPagedElementToPdf(mockExamPrintRef.current, {
           filename: `${safeTitle}.pdf`,
           margin: 0,
           pageSelector: ".mock-exam-page",
         });
+        await exportMockAnswerSheetToPdf({
+          title: `${displayTitle} 답지`,
+          entries: answerSheet,
+          filename: `${safeTitle}-answers.pdf`,
+        });
+        setMockExamStatus("모의고사 문제지와 답지 PDF를 함께 저장했습니다.");
       } catch (err) {
-        setMockExamError(`PDF ?대낫?닿린???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+        setMockExamError(`PDF 내보내기에 실패했습니다: ${err.message}`);
       }
     },
-    [mockExamPrintRef]
+    [mockExamPrintRef, mockExams]
   );
 
   const handleSubmitFeedback = useCallback(
@@ -4205,33 +4670,6 @@ function App() {
     [mockExamOrderedItems]
   );
 
-  const renderMockExamItem = (item, number) => {
-    const choices = Array.isArray(item?.choices) ? item.choices : [];
-    const isOx = item?.type === "ox";
-    const isShort = item?.type === "quiz-short";
-    const isMultiple = !isOx && !isShort;
-
-    return (
-      <div key={`mock-exam-q-${number}`} className="space-y-2">
-        <p className="text-[13px] font-semibold text-black">
-          {number}. {item?.prompt}
-        </p>
-        {isOx && <p className="text-[12px] text-black/80">1) O  2) X</p>}
-        {isShort && <p className="text-[12px] text-black/80">?? ____________________</p>}
-        {isMultiple && choices.length > 0 && (
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[12px] text-black/85">
-            {choices.slice(0, 4).map((choice, idx) => (
-              <div key={`choice-${number}-${idx}`} className="flex gap-2">
-                <span className="w-4">{idx + 1})</span>
-                <span>{choice}</span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
   const startPageProps = {
     file,
     pageInfo,
@@ -4275,6 +4713,14 @@ function App() {
     isLoadingText,
     isFreeTier,
     summary,
+    instructorEmphasisInput,
+    setInstructorEmphasisInput,
+    savedInstructorEmphases,
+    activeInstructorEmphasisId,
+    handleSaveInstructorEmphasis,
+    handleSelectInstructorEmphasis,
+    handleDeleteInstructorEmphasis,
+    cycleActiveInstructorEmphasis,
     partialSummary,
     partialSummaryRange,
     savedPartialSummaries,
@@ -4331,7 +4777,6 @@ function App() {
     setShowMockExamAnswers,
     mockExamStatus,
     mockExamError,
-    renderMockExamItem,
     setActiveMockExamId,
     isLoadingQuiz,
     shortPreview,

@@ -11,14 +11,7 @@ function SummaryIcon({ className = "h-10 w-10" }) {
 function QuizIcon({ className = "h-10 w-10" }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <text
-        x="12"
-        y="17"
-        textAnchor="middle"
-        fontSize="16"
-        fontWeight="700"
-        fill="currentColor"
-      >
+      <text x="12" y="17" textAnchor="middle" fontSize="16" fontWeight="700" fill="currentColor">
         ?
       </text>
     </svg>
@@ -37,7 +30,13 @@ function CardsIcon({ className = "h-10 w-10" }) {
 function TutorIcon({ className = "h-10 w-10" }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7A2.5 2.5 0 0 1 17.5 16H11l-4 4v-4H6.5A2.5 2.5 0 0 1 4 13.5v-7Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v7A2.5 2.5 0 0 1 17.5 16H11l-4 4v-4H6.5A2.5 2.5 0 0 1 4 13.5v-7Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
       <path d="M8 9h8M8 12h5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   );
@@ -46,7 +45,13 @@ function TutorIcon({ className = "h-10 w-10" }) {
 function ExamIcon({ className = "h-10 w-10" }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <path d="M8 4h8l3 3v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h2Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M8 4h8l3 3v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h2Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
       <path d="M9 11h6M9 15h4M14 4v3h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
@@ -55,46 +60,46 @@ function ExamIcon({ className = "h-10 w-10" }) {
 const FEATURE_ITEMS = [
   {
     id: "summary",
-    kicker: "Summary",
+    kicker: "요약",
     label: "핵심 요약",
-    description: "긴 문서도 시험에 필요한 핵심만 3단 구조로 정리해요.",
-    bullets: ["핵심 키워드 강조", "페이지별 요약", "요약 PDF 저장"],
-    stats: "핵심만 빠르게 정리",
+    description: "긴 PDF에서 핵심만 추려 빠르게 복습할 수 있게 정리합니다.",
+    bullets: ["핵심 개념 중심 정리", "페이지별 요약", "요약 PDF 내보내기"],
+    stats: "짧은 시간에 핵심 복습",
     Icon: SummaryIcon,
   },
   {
     id: "quiz",
-    kicker: "Quiz",
-    label: "맞춤 퀴즈",
-    description: "객관식·단답형·O/X를 섞어 실제 시험처럼 구성합니다.",
-    bullets: ["난이도 혼합", "해설 포함", "모의고사 10문항"],
+    kicker: "퀴즈",
+    label: "문제 생성",
+    description: "객관식, OX 등 시험형 문제를 자동 생성해 실전처럼 연습합니다.",
+    bullets: ["문항 유형 자동 혼합", "해설 자동 생성", "10문항 모의 테스트"],
     stats: "실전 감각 강화",
     Icon: QuizIcon,
   },
   {
     id: "flashcards",
-    kicker: "Cards",
+    kicker: "카드",
     label: "암기 카드",
-    description: "자주 나오는 개념만 카드로 뽑아 빠르게 복습해요.",
-    bullets: ["AI 카드 자동 생성", "오답 중심 복습", "학습 기록"],
-    stats: "짧은 루프 반복 학습",
+    description: "헷갈리는 개념을 카드로 만들어 반복 학습합니다.",
+    bullets: ["카드 자동 생성", "오답 중심 복습", "학습 진행 추적"],
+    stats: "반복으로 기억 고정",
     Icon: CardsIcon,
   },
   {
     id: "tutor",
-    kicker: "Tutor",
+    kicker: "튜터",
     label: "AI 튜터",
-    description: "모르는 부분을 바로 질문하고 문서 기반 답변을 받아요.",
-    bullets: ["문서 기반 답변", "복습 질문", "개념 비교"],
-    stats: "질문 즉시 피드백",
+    description: "학습 중 궁금한 내용을 바로 물어보고 문서 기반 답변을 받습니다.",
+    bullets: ["문서 기반 답변", "후속 질문 연결", "개념 비교 설명"],
+    stats: "공부 중 즉시 피드백",
     Icon: TutorIcon,
   },
   {
     id: "mockExam",
-    kicker: "Mock",
+    kicker: "모의",
     label: "모의고사",
-    description: "실전처럼 10문항 모의고사로 학습 감각을 체크해요.",
-    bullets: ["OX+객관식 혼합", "자동 채점", "PDF 저장"],
+    description: "10문항 모의고사로 실전 대비 상태를 점검합니다.",
+    bullets: ["OX + 객관식 혼합", "자동 채점", "결과 PDF 저장"],
     stats: "시험 전 최종 점검",
     Icon: ExamIcon,
   },
@@ -104,56 +109,59 @@ const STEP_ITEMS = [
   {
     step: "01",
     title: "PDF 업로드",
-    description: "강의안, 교재, 필기를 올리면 준비 완료",
+    description: "강의자료, 교재, 필기를 올리면 준비가 끝납니다.",
   },
   {
     step: "02",
     title: "AI 분석",
-    description: "요약, 퀴즈, 카드가 자동으로 생성",
+    description: "요약, 문제, 카드가 자동으로 생성됩니다.",
   },
   {
     step: "03",
     title: "반복 학습",
-    description: "오답 체크와 모의고사로 복습",
+    description: "오답 복습과 모의고사로 기억을 강화합니다.",
   },
 ];
 
 const STATS = [
-  { value: "5", unit: "핵심 기능", label: "요약, 퀴즈, 카드, 튜터, 모의고사" },
-  { value: "10", unit: "문항", label: "실전형 모의고사 자동 구성" },
-  { value: "1", unit: "페이지", label: "학습 흐름을 한 화면에서 완성" },
+  { value: "5", unit: "기능", label: "요약, 퀴즈, 카드, 튜터, 모의고사" },
+  { value: "10", unit: "문항", label: "자동 생성 모의 테스트" },
+  { value: "1", unit: "플로우", label: "업로드부터 복습까지 한 화면" },
 ];
 
 const PLAN_ITEMS = [
   {
-    name: "Free",
+    name: "무료",
     price: "무료",
     description: "가볍게 시작하는 개인 학습",
-    features: ["PDF 업로드 최대 4개", "요약/퀴즈/OX 기본 기능", "기본 저장소 제공"],
+    features: ["PDF 최대 4개 업로드", "요약/퀴즈/OX 기본 기능", "기본 저장공간 제공"],
   },
   {
-    name: "Pro",
-    price: "₩4,900 /월",
-    description: "자주 공부하는 사용자에게 최적",
-    features: ["무제한 업로드", "요약/퀴즈/OX/카드 무제한 생성", "핵심 기능 우선 처리"],
+    name: "프로",
+    price: "월 4,900원",
+    description: "꾸준히 공부하는 사용자에게 추천",
+    features: ["업로드 무제한", "요약/퀴즈/OX/카드 무제한 생성", "우선 처리"],
     featured: true,
   },
   {
-    name: "Premium",
-    price: "₩16,000 /월",
-    description: "팀과 강의 운영까지 확장",
-    features: ["팀 스페이스 지원", "관리자 권한/사용자 관리", "확장 지원 + SLA 옵션"],
+    name: "프리미엄",
+    price: "월 16,000원",
+    description: "팀/고급 사용 환경",
+    features: ["전용 워크스페이스", "관리자/멤버 관리", "확장 지원 + SLA 옵션"],
   },
 ];
 
 const NAV_ITEMS = [
-  { id: "features", label: "Features" },
-  { id: "pricing", label: "Pricing" },
+  { id: "features", label: "기능" },
+  { id: "pricing", label: "요금제" },
 ];
+
+const DEFAULT_ACTIVE_PLAN = PLAN_ITEMS.find((plan) => plan.featured)?.name || PLAN_ITEMS[0]?.name || "";
 
 const LandingIntro = memo(function LandingIntro({ onStart }) {
   const [scrollY, setScrollY] = useState(0);
   const [activeSection, setActiveSection] = useState(0);
+  const [activePlanName, setActivePlanName] = useState(DEFAULT_ACTIVE_PLAN);
   const heroRef = useRef(null);
   const featureRefs = useRef([]);
   const scrollRafRef = useRef(null);
@@ -248,6 +256,10 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
     featureRefs.current[index] = node;
   }, []);
 
+  const handlePlanInteract = useCallback((planName) => {
+    setActivePlanName(planName);
+  }, []);
+
   return (
     <div className="zeus-landing relative overflow-hidden bg-[#020403] text-emerald-50 select-none">
       <style>{`
@@ -315,23 +327,15 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
         }}
       >
         <div className="mx-auto flex min-h-[82vh] max-w-6xl flex-col items-center justify-center text-center zeus-hero-reveal">
-          <p className="text-xs uppercase tracking-[0.34em] text-emerald-200/90">AI STUDY SUITE</p>
-          <div className="mt-5 inline-flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-emerald-200/20 bg-black/45 px-4 py-3 text-xs text-emerald-100/85 sm:text-sm">
-            <span className="rounded-full bg-emerald-300/15 px-2 py-1 text-emerald-200">Company Info</span>
-            <span>상호명 헤스트라(Hestra)</span>
-            <span className="hidden text-emerald-300/60 sm:inline">|</span>
-            <span>대표자 김서진</span>
-            <span className="hidden text-emerald-300/60 sm:inline">|</span>
-            <span>사업자등록번호 393-0303517</span>
-          </div>
+          <p className="text-xs uppercase tracking-[0.34em] text-emerald-200/90">AI 학습 도우미</p>
           <h1 className="landing-title mt-5 text-5xl font-bold leading-[0.98] text-white drop-shadow-[0_8px_35px_rgba(0,0,0,0.45)] sm:text-7xl md:text-[96px]">
             PDF 하나로
             <br />
             요약, 퀴즈, 카드까지
           </h1>
           <p className="landing-subtitle mt-6 max-w-3xl text-base text-emerald-50/90 sm:text-xl">
-            강의안과 교재를 올리면 핵심 요약부터 문제 생성, AI 튜터까지 자동으로 이어집니다.
-            반복 학습 흐름을 한 페이지에서 완성하세요.
+            강의자료를 올리면 요약부터 문제 생성, AI 튜터까지 자동으로 연결됩니다.
+            반복 복습 루프를 한 곳에서 완성하세요.
           </p>
           <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row">
             <button
@@ -346,12 +350,12 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
               onClick={() => handleJump("features")}
               className="rounded-full border border-emerald-300/35 px-8 py-3 text-base font-medium text-emerald-100/90 transition hover:border-emerald-200/55 hover:text-emerald-100"
             >
-              기능 먼저 보기
+              기능 보기
             </button>
           </div>
         </div>
         <div className="absolute bottom-10 left-1/2 z-10 -translate-x-1/2 text-emerald-200/60 zeus-float">
-          <span className="text-xs uppercase tracking-[0.32em]">Scroll</span>
+          <span className="text-xs uppercase tracking-[0.32em]">아래로</span>
         </div>
       </section>
 
@@ -403,7 +407,7 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
                   >
                     <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(16,185,129,0.18),transparent_55%)]" />
                     <div className="relative min-h-[18rem] space-y-3 rounded-2xl border border-emerald-100/10 bg-black/45 p-6">
-                      <p className="text-xs uppercase tracking-[0.34em] text-emerald-300/80">Preview</p>
+                      <p className="text-xs uppercase tracking-[0.34em] text-emerald-300/80">미리보기</p>
                       <p className="text-2xl font-semibold text-emerald-50">{feature.label}</p>
                       <p className="text-sm text-emerald-100/70">{feature.description}</p>
                       <div className="mt-4 space-y-2">
@@ -442,7 +446,7 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
       <section id="steps" className="px-6 py-24">
         <div className="mx-auto max-w-7xl">
           <div className="mb-10 text-center">
-            <p className="text-xs uppercase tracking-[0.34em] text-emerald-300/70">Learning Flow</p>
+            <p className="text-xs uppercase tracking-[0.34em] text-emerald-300/70">학습 흐름</p>
             <h2 className="mt-3 text-4xl font-bold text-white sm:text-6xl">3단계 자동 학습 루프</h2>
           </div>
           <div className="grid gap-5 md:grid-cols-3">
@@ -463,45 +467,64 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
       <section id="pricing" className="px-6 py-24">
         <div className="mx-auto max-w-7xl">
           <div className="mb-10 text-center">
-            <p className="text-xs uppercase tracking-[0.34em] text-emerald-300/70">Pricing</p>
+            <p className="text-xs uppercase tracking-[0.34em] text-emerald-300/70">요금제</p>
             <h2 className="mt-3 text-4xl font-bold text-white sm:text-6xl">필요한 만큼 선택하세요</h2>
           </div>
           <div className="grid gap-6 md:grid-cols-3">
-            {PLAN_ITEMS.map((plan) => (
-              <article
-                key={plan.name}
-                className={`rounded-3xl border p-7 ${
-                  plan.featured
-                    ? "border-emerald-300/60 bg-emerald-500/10 shadow-[0_0_60px_rgba(16,185,129,0.16)]"
-                    : "border-emerald-200/15 bg-black/45"
-                }`}
-              >
-                {plan.featured && (
-                  <p className="mb-4 inline-flex rounded-full bg-emerald-300 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-950">
-                    Best Value
-                  </p>
-                )}
-                <h3 className="text-2xl font-bold text-emerald-50">{plan.name}</h3>
-                <p className="mt-2 text-sm text-emerald-100/70">{plan.description}</p>
-                <p className="mt-5 text-4xl font-extrabold text-white">{plan.price}</p>
-                <ul className="mt-6 space-y-3 text-sm text-emerald-100/80">
-                  {plan.features.map((feature) => (
-                    <li key={`${plan.name}-${feature}`} className="flex items-start gap-2">
-                      <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-emerald-300" />
-                      <span>{feature}</span>
-                    </li>
-                  ))}
-                </ul>
-              </article>
-            ))}
+            {PLAN_ITEMS.map((plan) => {
+              const isActive = activePlanName === plan.name;
+              return (
+                <article
+                  key={plan.name}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={isActive}
+                  onClick={() => handlePlanInteract(plan.name)}
+                  onFocus={() => handlePlanInteract(plan.name)}
+                  onPointerEnter={(event) => {
+                    if (event.pointerType === "mouse") {
+                      handlePlanInteract(plan.name);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      handlePlanInteract(plan.name);
+                    }
+                  }}
+                  className={`rounded-3xl border p-7 transition-all duration-300 ${
+                    isActive
+                      ? "border-emerald-300/60 bg-emerald-500/10 shadow-[0_0_60px_rgba(16,185,129,0.16)]"
+                      : "border-emerald-200/15 bg-black/45"
+                  }`}
+                >
+                  {plan.featured && (
+                    <p className="mb-4 inline-flex rounded-full bg-emerald-300 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-950">
+                      추천
+                    </p>
+                  )}
+                  <h3 className="text-2xl font-bold text-emerald-50">{plan.name}</h3>
+                  <p className="mt-2 text-sm text-emerald-100/70">{plan.description}</p>
+                  <p className="mt-5 text-4xl font-extrabold text-white">{plan.price}</p>
+                  <ul className="mt-6 space-y-3 text-sm text-emerald-100/80">
+                    {plan.features.map((feature) => (
+                      <li key={`${plan.name}-${feature}`} className="flex items-start gap-2">
+                        <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-emerald-300" />
+                        <span>{feature}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </article>
+              );
+            })}
           </div>
         </div>
       </section>
 
       <section className="border-t border-emerald-300/10 bg-black/75 px-6 py-28">
         <div className="mx-auto max-w-5xl text-center">
-          <h2 className="text-4xl font-bold text-white sm:text-6xl">이제 시험 공부 흐름을 바꿔보세요</h2>
-          <p className="mt-5 text-lg text-emerald-100/70 sm:text-2xl">PDF 업로드부터 문제 풀이까지, 학습 루프를 자동화하세요.</p>
+          <h2 className="text-4xl font-bold text-white sm:text-6xl">이제 공부 루프를 자동화하세요</h2>
+          <p className="mt-5 text-lg text-emerald-100/70 sm:text-2xl">PDF 업로드부터 복습 문제까지, 학습 흐름을 자동으로 완성합니다.</p>
           <button
             type="button"
             onClick={handleStart}
@@ -511,6 +534,14 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
           </button>
         </div>
       </section>
+
+      <footer className="border-t border-emerald-300/10 px-6 py-10">
+        <div className="mx-auto max-w-7xl text-center text-sm text-emerald-100/65">
+          <p className="uppercase tracking-[0.24em] text-emerald-300/75">회사 정보</p>
+          <p className="mt-3">Zeusian</p>
+          <p className="mt-1">사업자 및 문의 정보는 앱 내 고객지원에서 확인하실 수 있습니다.</p>
+        </div>
+      </footer>
     </div>
   );
 });

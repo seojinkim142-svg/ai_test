@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { approveKakaoPay, requestKakaoPayReady } from "../services/kakaopay";
 import { setUserTier } from "../services/supabase";
 import { useCardPayment } from "../hooks/useCardPayment";
+import { resolvePublicAppOrigin } from "../utils/appOrigin";
 
 const tierMeta = {
   free: "Free",
@@ -169,9 +170,10 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
     setPaying(true);
 
     const orderId = `kpay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const approvalUrl = `${window.location.origin}/?kakaoPay=approve`;
-    const cancelUrl = `${window.location.origin}/?kakaoPay=cancel`;
-    const failUrl = `${window.location.origin}/?kakaoPay=fail`;
+    const appOrigin = resolvePublicAppOrigin() || window.location.origin;
+    const approvalUrl = `${appOrigin}/?kakaoPay=approve`;
+    const cancelUrl = `${appOrigin}/?kakaoPay=cancel`;
+    const failUrl = `${appOrigin}/?kakaoPay=fail`;
 
     try {
       const data = await requestKakaoPayReady({
