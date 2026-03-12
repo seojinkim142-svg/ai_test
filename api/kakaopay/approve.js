@@ -41,6 +41,8 @@ export default async function handler(req, res) {
   const tid = String(body?.tid || "").trim();
   const orderId = String(body?.orderId || "").trim();
   const pgToken = String(body?.pgToken || "").trim();
+  const requestedTier = String(body?.tier || body?.planTier || "").trim().toLowerCase();
+  const requestedMonths = Number(body?.billingMonths ?? body?.months ?? 1);
 
   if (!tid || !orderId || !pgToken) {
     sendJson(res, 400, { message: "tid, orderId, and pgToken are required." }, allowOrigin);
@@ -81,7 +83,10 @@ export default async function handler(req, res) {
 
     const data = await parseApiResponse(response);
     if (!response.ok) {
-      const message = data?.msg || data?.message || data?.error || "KakaoPay approve failed.";
+      const rawDetail = String(data?.raw || "").trim();
+      const detail =
+        data?.msg || data?.message || data?.error || data?.code || (rawDetail ? rawDetail.slice(0, 300) : "");
+      const message = detail ? `KakaoPay approve failed: ${detail}` : "KakaoPay approve failed.";
       sendJson(res, response.status, { ...data, message }, allowOrigin);
       return;
     }
@@ -91,6 +96,8 @@ export default async function handler(req, res) {
     const tierSyncResult = await syncPaidTierFromAmount({
       req,
       amount: approvedAmount,
+      requestedTier,
+      requestedMonths,
     });
 
     if (!tierSyncResult.ok) {
@@ -114,6 +121,7 @@ export default async function handler(req, res) {
         ...data,
         tierUpdated: true,
         tier: tierSyncResult.tier,
+        tierMonths: tierSyncResult.months,
         tierExpiresAt: tierSyncResult.tierExpiresAt,
       },
       allowOrigin

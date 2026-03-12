@@ -101,7 +101,10 @@ export default async function handler(req, res) {
 
     const data = await parseApiResponse(response);
     if (!response.ok) {
-      const message = data?.msg || data?.message || data?.error || "KakaoPay ready failed.";
+      const rawDetail = String(data?.raw || "").trim();
+      const detail =
+        data?.msg || data?.message || data?.error || data?.code || (rawDetail ? rawDetail.slice(0, 300) : "");
+      const message = detail ? `KakaoPay ready failed: ${detail}` : "KakaoPay ready failed.";
       sendJson(res, response.status, { ...data, message }, allowOrigin);
       return;
     }

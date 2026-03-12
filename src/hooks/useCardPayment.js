@@ -5,12 +5,12 @@ import { getAccessToken } from "../services/supabase";
 const CARD_PAYMENT_STORAGE_KEY = "nicepayments_session";
 const cardPayPlans = {
   Pro: {
-    amount: 4900,
+    baseAmount: 4900,
     tier: "pro",
     orderName: "Zeusian Pro (Monthly)",
   },
   Premium: {
-    amount: 16000,
+    baseAmount: 16000,
     tier: "premium",
     orderName: "Zeusian Premium (Monthly)",
   },
@@ -67,6 +67,7 @@ function loadNicePaymentsScript(src) {
 export function useCardPayment({
   user,
   selectedPlan,
+  billingMonths = 1,
   currentPlan,
   onTierUpdated,
   setPaymentError,
@@ -80,6 +81,11 @@ export function useCardPayment({
   const scriptUrl = import.meta.env.VITE_NICEPAYMENTS_JS_URL || DEFAULT_NICEPAYMENTS_SCRIPT;
 
   const selectedCardPlan = cardPayPlans[selectedPlan];
+  const normalizedBillingMonths =
+    Number.isFinite(Number(billingMonths)) && Number(billingMonths) > 0
+      ? Math.floor(Number(billingMonths))
+      : 1;
+  const selectedCardAmount = selectedCardPlan ? selectedCardPlan.baseAmount * normalizedBillingMonths : 0;
   const canPayWithCard = Boolean(selectedCardPlan) && currentPlan !== selectedPlan && !cardPaying;
 
   useEffect(() => {
@@ -129,6 +135,8 @@ export function useCardPayment({
 
     const amount = Number(amountParam);
     const storedAmount = Number(stored.amount);
+    const storedTier = String(stored.tier || stored.planTier || "").trim().toLowerCase();
+    const storedMonths = Number(stored.billingMonths ?? stored.months ?? 1);
 
     if (!Number.isFinite(amount) || amount <= 0) {
       setPaymentError("결제 금액 정보가 올바르지 않습니다. 다시 시도해주세요.");
@@ -158,7 +166,18 @@ export function useCardPayment({
           throw new Error("결제 확인에는 로그인 세션이 필요합니다.");
         }
 
-        const confirmation = await confirmNicePayment({ token }, { accessToken });
+        const confirmation = await confirmNicePayment(
+          {
+            token,
+            tier: storedTier || selectedCardPlan?.tier || "",
+            billingMonths:
+              Number.isFinite(storedMonths) && storedMonths > 0
+                ? Math.floor(storedMonths)
+                : normalizedBillingMonths,
+            amount: storedAmount || amount,
+          },
+          { accessToken }
+        );
         const confirmedOrderId = confirmation?.orderId || orderId;
         const confirmedAmount = Number(confirmation?.amount ?? amount);
 
@@ -184,7 +203,14 @@ export function useCardPayment({
         clearUrl();
       }
     })();
-  }, [onTierUpdated, setPaymentError, setPaymentNotice, user?.id]);
+  }, [
+    normalizedBillingMonths,
+    onTierUpdated,
+    selectedCardPlan?.tier,
+    setPaymentError,
+    setPaymentNotice,
+    user?.id,
+  ]);
 
   useEffect(() => {
     if (!showCardWidget) return;
@@ -262,7 +288,11 @@ export function useCardPayment({
     setCardPaying(true);
 
     const orderId = `nice_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const amount = selectedCardPlan.amount;
+    const amount = selectedCardAmount;
+    const goodsName =
+      normalizedBillingMonths > 1
+        ? `${selectedCardPlan.orderName} x ${normalizedBillingMonths} months`
+        : selectedCardPlan.orderName;
     const fallbackReturnUrl = `${window.location.origin}/api/nicepayments/return`;
     const configuredReturnUrl = import.meta.env.VITE_NICEPAYMENTS_RETURN_URL;
     let returnUrl = fallbackReturnUrl;
@@ -285,6 +315,8 @@ export function useCardPayment({
         orderId,
         amount,
         planName: selectedPlan,
+        tier: selectedCardPlan.tier,
+        billingMonths: normalizedBillingMonths,
       })
     );
 
@@ -294,7 +326,7 @@ export function useCardPayment({
         method: "card",
         orderId,
         amount,
-        goodsName: selectedCardPlan.orderName,
+        goodsName,
         returnUrl,
         buyerName: user?.user_metadata?.name || user?.email?.split("@")[0] || "user",
         buyerEmail: user?.email || "",
@@ -312,6 +344,7 @@ export function useCardPayment({
 
   return {
     selectedCardPlan,
+    selectedCardAmount,
     canPayWithCard,
     cardPaying,
     showCardWidget,

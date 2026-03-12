@@ -6,6 +6,60 @@ const DEFAULT_READY_PATH = "/online/v1/payment/ready";
 const DEFAULT_APPROVE_PATH = "/online/v1/payment/approve";
 
 const text = (value) => String(value ?? "").trim();
+const OPEN_API_HOST = "open-api.kakaopay.com";
+
+const normalizeAuthScheme = (value) => {
+  const normalized = text(value).toUpperCase();
+  if (!normalized) return "";
+  if (normalized === "KAKAOAK") return "KakaoAK";
+  if (normalized === "SECRET_KEY") return "SECRET_KEY";
+  if (normalized === "DEV_SECRET_KEY") return "DEV_SECRET_KEY";
+  return "";
+};
+
+const inferAuthScheme = ({ apiBase, secretKey }) => {
+  if (String(apiBase || "").includes(OPEN_API_HOST)) {
+    return String(secretKey || "").startsWith("DEV") ? "DEV_SECRET_KEY" : "SECRET_KEY";
+  }
+  return "KakaoAK";
+};
+
+const resolveAuthScheme = ({ apiBase, secretKey, explicitAuthScheme }) => {
+  const inferred = inferAuthScheme({ apiBase, secretKey });
+  const normalizedExplicit = normalizeAuthScheme(explicitAuthScheme);
+  if (!normalizedExplicit) return inferred;
+
+  const useOpenApi = String(apiBase || "").includes(OPEN_API_HOST);
+  const explicitIsLegacy = normalizedExplicit === "KakaoAK";
+  const explicitIsOpenApi =
+    normalizedExplicit === "SECRET_KEY" || normalizedExplicit === "DEV_SECRET_KEY";
+
+  // Guard against mismatched env combinations:
+  // - open-api host + KakaoAK
+  // - legacy host + SECRET_KEY/DEV_SECRET_KEY
+  if ((useOpenApi && explicitIsLegacy) || (!useOpenApi && explicitIsOpenApi)) {
+    return inferred;
+  }
+  return normalizedExplicit;
+};
+
+const normalizeOrigin = (value) => {
+  const raw = text(value);
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return "";
+  }
+};
+
+const normalizeAllowOrigin = (value) => {
+  const raw = text(value);
+  if (!raw) return "";
+  if (raw === "*") return "*";
+  return normalizeOrigin(raw);
+};
 
 const resolveVercelOrigin = () => {
   const vercelUrl = text(process.env.VERCEL_URL).replace(/^https?:\/\//, "");
@@ -54,23 +108,21 @@ export const getRuntimeConfig = (req) => {
   const secretKey = text(process.env.KAKAOPAY_SECRET_KEY || process.env.KAKAOPAY_ADMIN_KEY);
   const cid = text(process.env.KAKAOPAY_CID) || DEFAULT_CID;
   const apiBase = text(process.env.KAKAOPAY_API_BASE) || DEFAULT_API_BASE;
-  const explicitAuthScheme = text(process.env.KAKAOPAY_AUTH_SCHEME);
-  const inferredAuthScheme = explicitAuthScheme
-    ? explicitAuthScheme
-    : apiBase.includes("open-api.kakaopay.com")
-      ? secretKey.startsWith("DEV")
-        ? "DEV_SECRET_KEY"
-        : "SECRET_KEY"
-      : "KakaoAK";
+  const explicitAuthScheme = process.env.KAKAOPAY_AUTH_SCHEME;
+  const inferredAuthScheme = resolveAuthScheme({
+    apiBase,
+    secretKey,
+    explicitAuthScheme,
+  });
   const readyPath =
     text(process.env.KAKAOPAY_READY_PATH) ||
     (inferredAuthScheme === "KakaoAK" ? "/v1/payment/ready" : DEFAULT_READY_PATH);
   const approvePath =
     text(process.env.KAKAOPAY_APPROVE_PATH) ||
     (inferredAuthScheme === "KakaoAK" ? "/v1/payment/approve" : DEFAULT_APPROVE_PATH);
-  const fallbackOrigin = resolveVercelOrigin() || resolveRequestOrigin(req) || DEFAULT_LOCAL_ORIGIN;
-  const clientOrigin = text(process.env.KAKAOPAY_CLIENT_ORIGIN) || fallbackOrigin;
-  const allowOrigin = text(process.env.KAKAOPAY_ALLOW_ORIGIN) || clientOrigin;
+  const fallbackOrigin = normalizeOrigin(resolveVercelOrigin()) || normalizeOrigin(resolveRequestOrigin(req)) || DEFAULT_LOCAL_ORIGIN;
+  const clientOrigin = normalizeOrigin(process.env.KAKAOPAY_CLIENT_ORIGIN) || fallbackOrigin;
+  const allowOrigin = normalizeAllowOrigin(process.env.KAKAOPAY_ALLOW_ORIGIN) || clientOrigin;
 
   return {
     secretKey,
