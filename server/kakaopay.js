@@ -8,21 +8,63 @@ const PORT = Number(process.env.KAKAOPAY_PORT || 8787);
 const SECRET_KEY = process.env.KAKAOPAY_SECRET_KEY;
 const CID = process.env.KAKAOPAY_CID || "TC0ONETIME";
 const API_BASE = process.env.KAKAOPAY_API_BASE || "https://open-api.kakaopay.com";
-const explicitAuthScheme = String(process.env.KAKAOPAY_AUTH_SCHEME || "").trim();
-const AUTH_SCHEME = explicitAuthScheme
-  ? explicitAuthScheme
-  : API_BASE.includes("open-api.kakaopay.com")
-    ? String(SECRET_KEY || "").startsWith("DEV")
+const OPEN_API_HOST = "open-api.kakaopay.com";
+const normalizeOrigin = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  try {
+    const parsed = new URL(raw);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return "";
+  }
+};
+const normalizeAllowOrigin = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (raw === "*") return "*";
+  return normalizeOrigin(raw);
+};
+const normalizeAuthScheme = (value) => {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (!normalized) return "";
+  if (normalized === "KAKAOAK") return "KakaoAK";
+  if (normalized === "SECRET_KEY") return "SECRET_KEY";
+  if (normalized === "DEV_SECRET_KEY") return "DEV_SECRET_KEY";
+  return "";
+};
+const inferAuthScheme = (apiBase, secretKey) =>
+  String(apiBase || "").includes(OPEN_API_HOST)
+    ? String(secretKey || "").startsWith("DEV")
       ? "DEV_SECRET_KEY"
       : "SECRET_KEY"
     : "KakaoAK";
+const resolveAuthScheme = (apiBase, secretKey, explicitAuthScheme) => {
+  const inferred = inferAuthScheme(apiBase, secretKey);
+  const normalizedExplicit = normalizeAuthScheme(explicitAuthScheme);
+  if (!normalizedExplicit) return inferred;
+
+  const useOpenApi = String(apiBase || "").includes(OPEN_API_HOST);
+  const explicitIsLegacy = normalizedExplicit === "KakaoAK";
+  const explicitIsOpenApi =
+    normalizedExplicit === "SECRET_KEY" || normalizedExplicit === "DEV_SECRET_KEY";
+  if ((useOpenApi && explicitIsLegacy) || (!useOpenApi && explicitIsOpenApi)) {
+    return inferred;
+  }
+  return normalizedExplicit;
+};
+const AUTH_SCHEME = resolveAuthScheme(
+  API_BASE,
+  SECRET_KEY,
+  process.env.KAKAOPAY_AUTH_SCHEME
+);
 const READY_PATH =
   process.env.KAKAOPAY_READY_PATH || (AUTH_SCHEME === "KakaoAK" ? "/v1/payment/ready" : "/online/v1/payment/ready");
 const APPROVE_PATH =
   process.env.KAKAOPAY_APPROVE_PATH ||
   (AUTH_SCHEME === "KakaoAK" ? "/v1/payment/approve" : "/online/v1/payment/approve");
-const CLIENT_ORIGIN = process.env.KAKAOPAY_CLIENT_ORIGIN || "http://localhost:5173";
-const ALLOW_ORIGIN = process.env.KAKAOPAY_ALLOW_ORIGIN || CLIENT_ORIGIN;
+const CLIENT_ORIGIN = normalizeOrigin(process.env.KAKAOPAY_CLIENT_ORIGIN) || "http://localhost:5173";
+const ALLOW_ORIGIN = normalizeAllowOrigin(process.env.KAKAOPAY_ALLOW_ORIGIN) || CLIENT_ORIGIN;
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ALLOW_ORIGIN,

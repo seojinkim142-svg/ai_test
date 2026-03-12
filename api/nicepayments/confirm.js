@@ -30,6 +30,8 @@ export default async function handler(req, res) {
   }
 
   const token = String(body?.token || "").trim();
+  const requestedTier = String(body?.tier || body?.planTier || "").trim().toLowerCase();
+  const requestedMonths = Number(body?.billingMonths ?? body?.months ?? 1);
   if (!token) {
     sendJson(res, 400, { message: "token is required." }, allowOrigin);
     return;
@@ -55,7 +57,12 @@ export default async function handler(req, res) {
     return;
   }
 
-  const tierSync = await syncPaidTierFromAmount({ req, amount });
+  const tierSync = await syncPaidTierFromAmount({
+    req,
+    amount,
+    requestedTier,
+    requestedMonths,
+  });
   if (!tierSync.ok) {
     sendJson(
       res,
@@ -80,6 +87,7 @@ export default async function handler(req, res) {
       approvedAt: payload.approvedAt || null,
       tierUpdated: true,
       tier: tierSync.tier,
+      tierMonths: tierSync.months,
       tierExpiresAt: tierSync.tierExpiresAt,
     },
     allowOrigin

@@ -6,6 +6,8 @@ const PAID_TIER_BY_AMOUNT = new Map([
   [16000, "premium"],
 ]);
 const PAID_TIER_TERM_MONTHS = { pro: 1, premium: 1 };
+const PAID_TIER_BASE_AMOUNT = { pro: 4900, premium: 16000 };
+const MAX_BILLING_MONTHS = 24;
 const DEFAULT_TIER_TABLE = "user_tiers";
 const TIER_EXPIRY_COLUMN = "tier_expires_at";
 
@@ -76,10 +78,56 @@ const getSupabaseAdminClient = () => {
   return cachedSupabaseAdmin;
 };
 
-const resolveTierFromAmount = (amountInput) => {
+const normalizeTier = (value) => {
+  const normalized = text(value).toLowerCase();
+  if (!normalized) return "";
+  return Object.prototype.hasOwnProperty.call(PAID_TIER_BASE_AMOUNT, normalized) ? normalized : "";
+};
+
+const normalizeMonths = (value, fallback = 1) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  const normalized = Math.floor(parsed);
+  if (normalized < 1 || normalized > MAX_BILLING_MONTHS) return fallback;
+  return normalized;
+};
+
+const resolveTierByAmountOnly = (amountInput) => {
   const amount = Number(amountInput);
   if (!Number.isFinite(amount) || amount <= 0) return "";
   return PAID_TIER_BY_AMOUNT.get(amount) || "";
+};
+
+const resolveTierAndMonthsFromAmount = (amountInput) => {
+  const amount = Number(amountInput);
+  if (!Number.isFinite(amount) || amount <= 0) return { tier: "", months: 0 };
+  for (const [tier, baseAmount] of Object.entries(PAID_TIER_BASE_AMOUNT)) {
+    if (!Number.isFinite(baseAmount) || baseAmount <= 0) continue;
+    if (amount % baseAmount !== 0) continue;
+    const months = amount / baseAmount;
+    if (Number.isInteger(months) && months >= 1 && months <= MAX_BILLING_MONTHS) {
+      return { tier, months };
+    }
+  }
+  return { tier: "", months: 0 };
+};
+
+const resolvePaidTierSelection = ({ amount, requestedTier, requestedMonths }) => {
+  const normalizedTier = normalizeTier(requestedTier);
+  const normalizedMonths = normalizeMonths(requestedMonths, 1);
+  if (normalizedTier) {
+    const expectedAmount = Number(PAID_TIER_BASE_AMOUNT[normalizedTier]) * normalizedMonths;
+    if (Number(expectedAmount) === Number(amount)) {
+      return { tier: normalizedTier, months: normalizedMonths };
+    }
+  }
+
+  const fromAmount = resolveTierAndMonthsFromAmount(amount);
+  if (fromAmount.tier) return fromAmount;
+
+  const fallbackTier = resolveTierByAmountOnly(amount);
+  if (fallbackTier) return { tier: fallbackTier, months: PAID_TIER_TERM_MONTHS[fallbackTier] || 1 };
+  return { tier: "", months: 0 };
 };
 
 const fetchTierRow = async ({ client, userTierTable, userId }) => {
@@ -150,7 +198,7 @@ const upsertTierRow = async ({
   };
 };
 
-const resolveNextExpiry = ({ tier, row }) => {
+const resolveNextExpiry = ({ tier, row, months }) => {
   const now = new Date();
   const currentTier = text(row?.tier).toLowerCase();
   const currentExpiry = row?.[TIER_EXPIRY_COLUMN];
@@ -163,11 +211,20 @@ const resolveNextExpiry = ({ tier, row }) => {
     }
   }
 
-  return addMonthsUtc(baseDate, PAID_TIER_TERM_MONTHS[tier] || 1).toISOString();
+  return addMonthsUtc(baseDate, months || PAID_TIER_TERM_MONTHS[tier] || 1).toISOString();
 };
 
-export async function syncPaidTierFromAmount({ req, amount }) {
-  const tier = resolveTierFromAmount(amount);
+export async function syncPaidTierFromAmount({
+  req,
+  amount,
+  requestedTier = "",
+  requestedMonths = null,
+}) {
+  const { tier, months } = resolvePaidTierSelection({
+    amount,
+    requestedTier,
+    requestedMonths,
+  });
   if (!tier) {
     return {
       ok: false,
@@ -187,7 +244,7 @@ export async function syncPaidTierFromAmount({ req, amount }) {
       userTierTable,
       userId,
     });
-    const tierExpiresAt = resolveNextExpiry({ tier, row });
+    const tierExpiresAt = resolveNextExpiry({ tier, row, months });
     const { row: updated } = await upsertTierRow({
       client,
       userTierTable,
@@ -202,6 +259,7 @@ export async function syncPaidTierFromAmount({ req, amount }) {
       status: 200,
       userId,
       tier,
+      months,
       tierExpiresAt: updated?.[TIER_EXPIRY_COLUMN] || tierExpiresAt,
     };
   } catch (error) {
