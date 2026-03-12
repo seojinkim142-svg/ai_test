@@ -6,6 +6,10 @@ import {
   parseRequestBody,
   sendJson,
 } from "./_shared.js";
+import {
+  authenticateSupabaseUserFromRequest,
+  syncPaidTierFromAmount,
+} from "../_shared/tier-sync.js";
 
 export default async function handler(req, res) {
   const { secretKey, cid, apiBase, authScheme, approvePath, allowOrigin } = getRuntimeConfig(req);
@@ -36,13 +40,19 @@ export default async function handler(req, res) {
 
   const tid = String(body?.tid || "").trim();
   const orderId = String(body?.orderId || "").trim();
-  const userId = String(body?.userId || "").trim();
   const pgToken = String(body?.pgToken || "").trim();
 
-  if (!tid || !orderId || !userId || !pgToken) {
-    sendJson(res, 400, { message: "tid, orderId, userId, and pgToken are required." }, allowOrigin);
+  if (!tid || !orderId || !pgToken) {
+    sendJson(res, 400, { message: "tid, orderId, and pgToken are required." }, allowOrigin);
     return;
   }
+
+  const authResult = await authenticateSupabaseUserFromRequest(req);
+  if (!authResult.ok) {
+    sendJson(res, authResult.status, { message: authResult.message }, allowOrigin);
+    return;
+  }
+  const userId = authResult.userId;
 
   const requestPayload = {
     cid,
@@ -76,7 +86,38 @@ export default async function handler(req, res) {
       return;
     }
 
-    sendJson(res, 200, data, allowOrigin);
+    const approvedAmount =
+      Number(data?.amount?.total ?? data?.amount?.total_amount ?? data?.total_amount ?? body?.amount);
+    const tierSyncResult = await syncPaidTierFromAmount({
+      req,
+      amount: approvedAmount,
+    });
+
+    if (!tierSyncResult.ok) {
+      sendJson(
+        res,
+        tierSyncResult.status,
+        {
+          ...data,
+          message: tierSyncResult.message,
+          tierUpdated: false,
+        },
+        allowOrigin
+      );
+      return;
+    }
+
+    sendJson(
+      res,
+      200,
+      {
+        ...data,
+        tierUpdated: true,
+        tier: tierSyncResult.tier,
+        tierExpiresAt: tierSyncResult.tierExpiresAt,
+      },
+      allowOrigin
+    );
   } catch (error) {
     sendJson(res, 500, { message: `KakaoPay approve failed: ${error.message}` }, allowOrigin);
   }

@@ -1,3 +1,4 @@
+/* global process, Buffer */
 import crypto from "node:crypto";
 
 const DEFAULT_API_BASE = "https://sandbox-api.nicepay.co.kr";
@@ -69,7 +70,7 @@ export const getRuntimeConfig = (req) => {
 export const buildCorsHeaders = (allowOrigin) => ({
   "Access-Control-Allow-Origin": allowOrigin,
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
 });
 
 export const sendJson = (res, statusCode, body, allowOrigin) => {

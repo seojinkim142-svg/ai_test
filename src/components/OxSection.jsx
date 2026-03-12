@@ -1,3 +1,5 @@
+import MathMarkdown from "./MathMarkdown";
+
 function OxCard({ item, idx, selection, onSelect, showExplanation, onToggleExplanation }) {
   const revealed = selection === "o" || selection === "x";
   const isCorrect =
@@ -6,9 +8,13 @@ function OxCard({ item, idx, selection, onSelect, showExplanation, onToggleExpla
   return (
     <article className="rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
       <div className="flex items-start justify-between gap-3">
-        <h3 className="text-lg font-semibold text-white">
-          Q{idx + 1}. {item.statement}
-        </h3>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-lg font-semibold text-white">Q{idx + 1}.</h3>
+          <MathMarkdown
+            content={item.statement}
+            className="summary-prose mt-1 max-w-none break-words text-sm text-slate-100 [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto"
+          />
+        </div>
         <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-100">O/X</span>
       </div>
 
@@ -59,9 +65,13 @@ function OxCard({ item, idx, selection, onSelect, showExplanation, onToggleExpla
             {showExplanation ? "해설 숨기기" : "해설 보기"}
           </button>
           {showExplanation && (
-            <p className="rounded-lg bg-white/5 px-3 py-2 text-xs text-slate-200 ring-1 ring-white/10">
-              해설: {item.explanation}
-            </p>
+            <div className="rounded-lg bg-white/5 px-3 py-2 text-xs text-slate-200 ring-1 ring-white/10">
+              <p className="mb-1 font-semibold text-slate-100">해설</p>
+              <MathMarkdown
+                content={item.explanation}
+                className="summary-prose max-w-none break-words text-xs text-slate-200 [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto"
+              />
+            </div>
           )}
         </div>
       )}

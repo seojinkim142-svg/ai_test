@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 const PORT = Number(process.env.KAKAOPAY_PORT || 8787);
-const SECRET_KEY = process.env.KAKAOPAY_SECRET_KEY || process.env.KAKAOPAY_ADMIN_KEY;
+const SECRET_KEY = process.env.KAKAOPAY_SECRET_KEY;
 const CID = process.env.KAKAOPAY_CID || "TC0ONETIME";
 const API_BASE = process.env.KAKAOPAY_API_BASE || "https://open-api.kakaopay.com";
 const explicitAuthScheme = String(process.env.KAKAOPAY_AUTH_SCHEME || "").trim();
@@ -77,7 +77,7 @@ const handler = async (req, res) => {
 
   if (req.method === "POST" && url.pathname === "/api/kakaopay/ready") {
     if (!SECRET_KEY) {
-      sendJson(res, 500, { message: "KAKAOPAY_SECRET_KEY (or KAKAOPAY_ADMIN_KEY) is not set." });
+      sendJson(res, 500, { message: "KAKAOPAY_SECRET_KEY is not set." });
       return;
     }
 
@@ -142,7 +142,7 @@ const handler = async (req, res) => {
 
   if (req.method === "POST" && url.pathname === "/api/kakaopay/approve") {
     if (!SECRET_KEY) {
-      sendJson(res, 500, { message: "KAKAOPAY_SECRET_KEY (or KAKAOPAY_ADMIN_KEY) is not set." });
+      sendJson(res, 500, { message: "KAKAOPAY_SECRET_KEY is not set." });
       return;
     }
 

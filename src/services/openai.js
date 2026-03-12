@@ -1,9 +1,31 @@
+import { Capacitor } from "@capacitor/core";
 import { MODEL } from "../constants";
+import { resolvePublicAppOrigin } from "../utils/appOrigin";
 
-// Dev: force Vite proxy (/api/openai) for CORS; Prod: api.openai.com or VITE_OPENAI_BASE_URL
-const OPENAI_BASE_URL = import.meta.env.DEV
-  ? "/api/openai"
-  : import.meta.env.VITE_OPENAI_BASE_URL || "https://api.openai.com";
+const DIRECT_OPENAI_BASE_RE = /^https:\/\/api\.openai\.com(?:$|\/)/i;
+
+function trimTrailingSlash(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
+function resolveOpenAiBaseUrl() {
+  const explicitBase = trimTrailingSlash(import.meta.env.VITE_OPENAI_BASE_URL);
+  if (explicitBase) return explicitBase;
+
+  const publicAppOrigin = trimTrailingSlash(resolvePublicAppOrigin());
+  if (Capacitor.isNativePlatform() && publicAppOrigin) {
+    return `${publicAppOrigin}/api/openai`;
+  }
+
+  // Keep the default on same-origin proxy path so production web/app can use server-side key.
+  return "/api/openai";
+}
+
+const OPENAI_BASE_URL = resolveOpenAiBaseUrl();
+const IS_DIRECT_OPENAI_BASE = DIRECT_OPENAI_BASE_RE.test(OPENAI_BASE_URL);
+const USES_DEV_PROXY = import.meta.env.DEV && OPENAI_BASE_URL.startsWith("/api/openai");
+const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
+const USES_RELATIVE_BASE = OPENAI_BASE_URL.startsWith("/");
 const CHAT_URL = `${OPENAI_BASE_URL}/v1/chat/completions`;
 const TUTOR_FALLBACK_MODELS = [
   MODEL,
@@ -49,6 +71,19 @@ function buildAvoidReuseBlock(items, { title = "Do not reuse these prompts", max
 [${title}]
 ${lines.join("\n")}
   `.trim();
+}
+
+const LOW_VALUE_STUDY_PROMPT_PATTERNS = [
+  /(교재|이\s*책|본서|강의노트|강의\s*자료).*(대상|독자|수강생|출신|전공자|비전공자)/i,
+  /(교재|이\s*책|본서|강의노트|강의\s*자료).*(연습문제|부록|사이버|온라인|동영상|예제\s*코드|sage\s*코드|코드|자료).*(포함|제공|수록|없|않)/i,
+  /(저자|출판사|출판|발행|copyright|acknowledg|reference|bibliograph|isbn|email)/i,
+  /(목차|차례|chapter|절|구성).*(소개|설명|나열|순서)/i,
+];
+
+function isLowValueStudyPrompt(text) {
+  const normalized = String(text || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return true;
+  return LOW_VALUE_STUDY_PROMPT_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 function buildQuizPrompt(
@@ -102,6 +137,9 @@ You are creating high-difficulty mock exam items from the document.
 - Ban rote-memory/direct-recall items.
 - Require reasoning, application, and concept-level discrimination.
 - Include plausible distractors but keep one clear correct answer.
+- Never ask textbook/preface metadata:
+  target audience, whether exercises/cyber materials/code are included,
+  author/publisher info, TOC/chapter-structure trivia.
 
 [Output format]
 - ${count} multiple-choice questions, 4 options each.
@@ -145,6 +183,9 @@ ${avoidBlock ? `- ${avoidBlock.replace(/\n/g, "\n  ")}` : ""}
 6. Use concrete details (numbers/conditions/directions) to improve discrimination.
 7. Avoid duplicates.
 8. evidence should briefly cite source clue/location when available.
+9. Exclude low-value metadata/trivia items:
+   textbook target audience, supplement/material availability,
+   author/publisher/contact, TOC/chapter structure.
 
 [JSON schema]
 {
@@ -1273,20 +1314,29 @@ function parseRetryAfterSeconds(response) {
 
 async function postChatRequest(body, { retries = 1 } = {}) {
   const apiKey = (import.meta.env.VITE_OPENAI_API_KEY || "").trim();
-  if (!apiKey) {
+
+  if (IS_NATIVE_PLATFORM && USES_RELATIVE_BASE) {
+    throw new Error(
+      "모바일 앱에서는 API 절대 경로가 필요합니다. `VITE_PUBLIC_APP_ORIGIN` 또는 `VITE_OPENAI_BASE_URL`을 설정한 뒤 APK를 다시 빌드해주세요."
+    );
+  }
+
+  if ((IS_DIRECT_OPENAI_BASE || USES_DEV_PROXY) && !apiKey) {
     throw new Error(
       "OpenAI API key is missing. Add `VITE_OPENAI_API_KEY` to your `.env` and restart the dev server."
     );
   }
 
+  const headers = {
+    "Content-Type": "application/json",
+  };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
   let response;
   try {
     response = await fetch(CHAT_URL, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers,
       body: JSON.stringify(body),
     });
   } catch (err) {
@@ -1348,7 +1398,7 @@ export async function generateQuiz(
       messages: [
         {
           role: "system",
-          content: `Generate ${mcCount} Korean multiple-choice items (4 options each) plus ${saCount} Korean short-answer (calculation/explanation) items from the user's text only. Each question must assess understanding/apply/disambiguate/misconception check, not verbatim recall. Avoid asking for raw facts/URLs/names/numbers. Respond with JSON only using the provided schema. shortAnswer must be an array with ${saCount} items (empty if 0).`,
+          content: `Generate ${mcCount} Korean multiple-choice items (4 options each) plus ${saCount} Korean short-answer (calculation/explanation) items from the user's text only. Each question must assess understanding/apply/disambiguate/misconception check, not verbatim recall. Avoid asking for raw facts/URLs/names/numbers. Exclude textbook/preface metadata questions (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure). Respond with JSON only using the provided schema. shortAnswer must be an array with ${saCount} items (empty if 0).`,
         },
         { role: "user", content: prompt },
       ],
@@ -1359,7 +1409,18 @@ export async function generateQuiz(
 
   const content = data.choices?.[0]?.message?.content?.trim() || "";
   const sanitized = sanitizeJson(content);
-  return parseJsonSafe(sanitized, "quiz JSON");
+  const parsed = parseJsonSafe(sanitized, "quiz JSON");
+  const multipleChoice = (Array.isArray(parsed?.multipleChoice) ? parsed.multipleChoice : []).filter(
+    (item) => !isLowValueStudyPrompt(String(item?.question || item?.prompt || "").trim())
+  );
+  const shortAnswer = (Array.isArray(parsed?.shortAnswer) ? parsed.shortAnswer : []).filter(
+    (item) => !isLowValueStudyPrompt(String(item?.question || item?.prompt || "").trim())
+  );
+  return {
+    ...parsed,
+    multipleChoice,
+    shortAnswer,
+  };
 }
 
 export async function generateHardQuiz(extractedText, { count = 3, avoidQuestions = [] } = {}) {
@@ -1372,7 +1433,7 @@ export async function generateHardQuiz(extractedText, { count = 3, avoidQuestion
         {
           role: "system",
           content:
-            "Generate high-difficulty Korean multiple-choice questions from the user's text only. Each item must test reasoning/application, not verbatim recall. Output JSON only with the provided schema.",
+            "Generate high-difficulty Korean multiple-choice questions from the user's text only. Each item must test reasoning/application, not verbatim recall. Exclude textbook/preface metadata questions (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure). Output JSON only with the provided schema.",
         },
         { role: "user", content: prompt },
       ],
@@ -1385,7 +1446,9 @@ export async function generateHardQuiz(extractedText, { count = 3, avoidQuestion
   const content = data.choices?.[0]?.message?.content?.trim() || "";
   const sanitized = sanitizeJson(content);
   const parsed = parseJsonSafe(sanitized, "hard quiz JSON");
-  const items = Array.isArray(parsed?.items) ? parsed.items : [];
+  const items = (Array.isArray(parsed?.items) ? parsed.items : []).filter(
+    (item) => !isLowValueStudyPrompt(String(item?.question || item?.prompt || "").trim())
+  );
   return { items };
 }
 
@@ -1432,7 +1495,7 @@ export async function generateOxQuiz(extractedText, { instructorEmphasis = "", a
         {
           role: "system",
           content:
-            "Generate 10 Korean true/false (O/X) quiz statements strictly from the user's text. All statements, explanations, and evidence must be in Korean (translate/rephrase even if the source is English). Ensure at least 4 are false; if not possible, generate as many as possible but prefer false items. Each statement <=80 chars, explanation/evidence <=150 chars, no duplication, and every explanation cites the PDF as evidence where possible (e.g., p.3 definition paragraph, section 2.1 second sentence; if unavailable, evidence may be empty). Exclude metadata like titles/authors/credits/emails/references.",
+            "Generate 10 Korean true/false (O/X) quiz statements strictly from the user's text. All statements, explanations, and evidence must be in Korean (translate/rephrase even if the source is English). Ensure at least 4 are false; if not possible, generate as many as possible but prefer false items. Each statement <=80 chars, explanation/evidence <=150 chars, no duplication, and every explanation cites the PDF as evidence where possible (e.g., p.3 definition paragraph, section 2.1 second sentence; if unavailable, evidence may be empty). Exclude low-value textbook metadata/trivia (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure).",
         },
         { role: "user", content: prompt },
       ],
@@ -1446,8 +1509,14 @@ export async function generateOxQuiz(extractedText, { instructorEmphasis = "", a
   const sanitized = sanitizeJson(content);
   try {
     const parsed = parseJsonSafe(sanitized, "O/X JSON");
-    if (Array.isArray(parsed?.items) && parsed.items.length > 0) {
-      return parsed;
+    const items = (Array.isArray(parsed?.items) ? parsed.items : []).filter(
+      (item) => !isLowValueStudyPrompt(String(item?.statement || item?.question || item?.prompt || "").trim())
+    );
+    if (items.length > 0) {
+      return {
+        ...parsed,
+        items,
+      };
     }
   } catch {
     // fallthrough to fallback

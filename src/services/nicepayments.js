@@ -2,12 +2,16 @@ const NICE_PAYMENTS_BASE_URL = (
   import.meta.env.VITE_NICEPAYMENTS_API_BASE || "/api/nicepayments"
 ).replace(/\/$/, "");
 
-async function postJson(url, payload) {
+async function postJson(url, payload, options = {}) {
+  const accessToken = String(options?.accessToken || "").trim();
+  const headers = { "Content-Type": "application/json" };
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+
   let response;
   try {
     response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(payload),
     });
   } catch (err) {
@@ -30,6 +34,6 @@ async function postJson(url, payload) {
   return data;
 }
 
-export function confirmNicePayment(payload) {
-  return postJson(`${NICE_PAYMENTS_BASE_URL}/confirm`, payload);
+export function confirmNicePayment(payload, options = {}) {
+  return postJson(`${NICE_PAYMENTS_BASE_URL}/confirm`, payload, options);
 }

@@ -1,4 +1,5 @@
-import PropTypes from "prop-types";
+﻿import PropTypes from "prop-types";
+import { SUPPORTED_UPLOAD_ACCEPT } from "../utils/document";
 
 function UploadTile({ onFileChange, onOpenMenu, inputRef }) {
   return (
@@ -11,16 +12,16 @@ function UploadTile({ onFileChange, onOpenMenu, inputRef }) {
         <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500/15 text-2xl font-bold text-emerald-200">
           +
         </div>
-        <p className="text-base font-semibold text-white">새 PDF 추가</p>
-        <p className="max-w-xs text-sm text-slate-200">클릭하거나 끌어와서 업로드</p>
-        <p className="max-w-xs text-xs text-slate-400">최대 30페이지까지 읽습니다(추가 페이지는 무시)</p>
+        <p className="text-base font-semibold text-white">문서 추가</p>
+        <p className="max-w-xs text-sm text-slate-200">PDF, DOCX, PPTX 파일을 업로드하세요</p>
+        <p className="max-w-xs text-xs text-slate-400">미리보기는 PDF만 지원됩니다</p>
       </button>
       <input
         ref={inputRef}
-        id="pdf"
-        name="pdf"
+        id="document-upload"
+        name="document-upload"
         type="file"
-        accept="application/pdf"
+        accept={SUPPORTED_UPLOAD_ACCEPT}
         multiple
         onChange={onFileChange}
         className="hidden"

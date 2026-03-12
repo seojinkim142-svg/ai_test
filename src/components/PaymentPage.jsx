@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { approveKakaoPay, requestKakaoPayReady } from "../services/kakaopay";
-import { setUserTier } from "../services/supabase";
+import { getAccessToken } from "../services/supabase";
 import { useCardPayment } from "../hooks/useCardPayment";
 import { resolvePublicAppOrigin } from "../utils/appOrigin";
 
@@ -23,7 +23,27 @@ const kakaoPayPlans = {
     itemName: "Zeusian Premium (Monthly)",
   },
 };
-function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTierUpdated }) {
+
+function formatTierExpiryLabel(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+}
+
+function PaymentPage({
+  onClose,
+  currentTier = "free",
+  currentTierExpiresAt = null,
+  currentTierRemainingDays = null,
+  theme = "dark",
+  user,
+  onTierUpdated,
+}) {
   const [selectedPlan, setSelectedPlan] = useState(tierMeta[currentTier] || "Free");
   const [paying, setPaying] = useState(false);
   const [paymentError, setPaymentError] = useState("");
@@ -37,6 +57,12 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
   const pillClass = isLight ? "bg-slate-100 text-slate-700" : "bg-white/10 text-slate-100";
   const accentText = isLight ? "text-emerald-600" : "text-emerald-300";
   const currentPlan = tierMeta[currentTier] || "Free";
+  const currentTierExpiryLabel = formatTierExpiryLabel(currentTierExpiresAt);
+  const currentTierRemainingDaysSafe =
+    Number.isFinite(Number(currentTierRemainingDays)) && Number(currentTierRemainingDays) > 0
+      ? Number(currentTierRemainingDays)
+      : null;
+  const isPaidTier = currentTier === "pro" || currentTier === "premium";
   const selectedKakaoPlan = kakaoPayPlans[selectedPlan];
   const canPayWithKakao = Boolean(selectedKakaoPlan) && currentPlan !== selectedPlan && !paying;
   const {
@@ -74,7 +100,7 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
 
     if (kakaoState === "cancel") {
       setPaymentNotice("");
-      setPaymentError("결제가 취소되었습니다.");
+      setPaymentError("카카오페이 결제가 취소되었습니다.");
       localStorage.removeItem(KAKAOPAY_STORAGE_KEY);
       clearUrl();
       return;
@@ -82,7 +108,7 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
 
     if (kakaoState === "fail") {
       setPaymentNotice("");
-      setPaymentError("결제에 실패했습니다. 다시 시도해주세요.");
+      setPaymentError("카카오페이 결제 승인에 실패했습니다. 잠시 후 다시 시도해주세요.");
       localStorage.removeItem(KAKAOPAY_STORAGE_KEY);
       clearUrl();
       return;
@@ -98,13 +124,13 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
     }
 
     if (!stored?.tid || !stored?.orderId) {
-      setPaymentError("결제 정보를 찾을 수 없습니다. 다시 시도해주세요.");
+      setPaymentError("결제 세션 정보를 찾을 수 없습니다. 다시 결제를 진행해주세요.");
       clearUrl();
       return;
     }
 
     if (!user?.id) {
-      setPaymentError("결제 승인에 로그인 정보가 필요합니다.");
+      setPaymentError("결제 승인에는 로그인이 필요합니다.");
       return;
     }
 
@@ -114,30 +140,28 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
 
     (async () => {
       try {
-        await approveKakaoPay({
-          tid: stored.tid,
-          orderId: stored.orderId,
-          userId: user.id,
-          pgToken,
-        });
-
-        let tierError = null;
-        if (stored.tier) {
-          try {
-            await setUserTier({ userId: user.id, tier: stored.tier });
-          } catch (err) {
-            tierError = err;
-          }
+        const accessToken = await getAccessToken();
+        if (!accessToken) {
+          throw new Error("결제 승인에는 로그인 세션이 필요합니다.");
         }
 
-        if (tierError) {
-          setPaymentError(`결제 승인 완료, 권한 반영 실패: ${tierError?.message || "권한 반영 실패"}`);
-        } else {
-          onTierUpdated?.(stored.tier);
-          setPaymentNotice("결제가 완료되었습니다.");
+        const approvalResult = await approveKakaoPay(
+          {
+            tid: stored.tid,
+            orderId: stored.orderId,
+            pgToken,
+          },
+          { accessToken }
+        );
+
+        if (!approvalResult?.tierUpdated) {
+          throw new Error(approvalResult?.message || "결제는 완료되었지만 요금제 반영에 실패했습니다.");
         }
+
+        onTierUpdated?.();
+        setPaymentNotice("결제가 완료되었습니다. 요금제를 갱신했습니다.");
       } catch (err) {
-        setPaymentError(`결제 승인 실패: ${err.message}`);
+        setPaymentError(`카카오페이 결제 승인 실패: ${err.message}`);
       } finally {
         localStorage.removeItem(KAKAOPAY_STORAGE_KEY);
         setPaying(false);
@@ -149,19 +173,19 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
   const handleKakaoPay = async () => {
     if (!user?.id) {
       setPaymentNotice("");
-      setPaymentError("결제는 로그인 후 진행할 수 있습니다.");
+      setPaymentError("카카오페이 결제에는 로그인이 필요합니다.");
       return;
     }
 
     if (!selectedKakaoPlan) {
       setPaymentNotice("");
-      setPaymentError("카카오페이는 Pro/Premium 플랜에서만 지원됩니다.");
+      setPaymentError("카카오페이는 Pro/Premium 플랜에서만 지원합니다.");
       return;
     }
 
     if (currentPlan === selectedPlan) {
       setPaymentError("");
-      setPaymentNotice("이미 이용 중인 플랜입니다.");
+      setPaymentNotice("이미 사용 중인 요금제입니다.");
       return;
     }
 
@@ -176,22 +200,30 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
     const failUrl = `${appOrigin}/?kakaoPay=fail`;
 
     try {
-      const data = await requestKakaoPayReady({
-        orderId,
-        userId: user.id,
-        amount: selectedKakaoPlan.amount,
-        itemName: selectedKakaoPlan.itemName,
-        plan: selectedPlan,
-        approvalUrl,
-        cancelUrl,
-        failUrl,
-      });
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        throw new Error("결제 준비에는 로그인 세션이 필요합니다.");
+      }
+
+      const data = await requestKakaoPayReady(
+        {
+          orderId,
+          userId: user.id,
+          amount: selectedKakaoPlan.amount,
+          itemName: selectedKakaoPlan.itemName,
+          plan: selectedPlan,
+          approvalUrl,
+          cancelUrl,
+          failUrl,
+        },
+        { accessToken }
+      );
 
       const redirectUrl =
         data?.next_redirect_pc_url || data?.next_redirect_mobile_url || data?.next_redirect_app_url;
 
       if (!data?.tid || !redirectUrl) {
-        throw new Error("결제 요청에 실패했습니다. 다시 시도해주세요.");
+        throw new Error("카카오페이 결제 준비에 실패했습니다. 잠시 후 다시 시도해주세요.");
       }
 
       localStorage.setItem(
@@ -199,14 +231,13 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
         JSON.stringify({
           tid: data.tid,
           orderId,
-          tier: selectedKakaoPlan.tier,
           planName: selectedPlan,
         })
       );
 
       window.location.href = redirectUrl;
     } catch (err) {
-      setPaymentError(err?.message || "결제 요청에 실패했습니다.");
+      setPaymentError(err?.message || "카카오페이 결제 준비에 실패했습니다.");
       setPaying(false);
     }
   };
@@ -219,7 +250,7 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
         <div className={`flex items-center justify-between border-b px-5 py-4 ${headerClass}`}>
           <div>
             <p className={`text-xs uppercase tracking-[0.2em] ${accentText}`}>billing</p>
-            <h2 className="text-xl font-bold">업그레이드 & 결제</h2>
+            <h2 className="text-xl font-bold">요금제 결제</h2>
           </div>
           <button
             type="button"
@@ -243,44 +274,39 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
             {
               name: "Free",
               price: "무료",
-              desc: "가볍게 시작하는 개인 학습",
-              features: ["PDF 업로드 최대 4개", "요약/퀴즈/OX 기본 기능", "기본 저장소 제공"],
-              cta: "그대로 사용",
+              desc: "기본",
+              features: ["PDF 최대 4개", "요약/퀴즈/OX 기본 기능", "기본 저장소"],
+              cta: "현재 요금제",
               accent: "148, 163, 184",
             },
             {
               name: "Pro",
-              price: "₩4,900 /월",
-              desc: "자주 공부하는 사용자에게 추천",
-              features: [
-                "무제한 PDF 업로드",
-                "요약/퀴즈/OX/카드 무제한 생성",
-                "요약/처리 우선 처리",
-              ],
+              price: "월 4,900원",
+              desc: "개인 학습 강화",
+              features: ["PDF 업로드 무제한", "요약/퀴즈/OX/플래시카드", "우선 처리"],
               cta: "Pro로 업그레이드",
               accent: "16, 185, 129",
-              highlight: true,
             },
             {
               name: "Premium",
-              price: "₩16,000 /월",
-              desc: "강의 · 팀 프로젝트",
-              features: ["팀 스페이스/공유", "관리자 권한/사용량 대시보드", "우선 지원 · SLA"],
-              cta: "Premium로 업그레이드",
+              price: "월 16,000원",
+              desc: "최대 4명 공유",
+              features: ["최대 4명 동시 공유", "공유 스페이스로 함께 학습", "협업으로 학습 효율 향상"],
+              cta: "Premium으로 업그레이드",
               accent: "56, 189, 248",
             },
           ].map((plan) => (
             <div
               key={plan.name}
               onClick={() => setSelectedPlan(plan.name)}
-              className={`flex h-full flex-col rounded-2xl border px-4 py-5 shadow-lg shadow-black/30 ring-1 cursor-pointer ${
+              className={`flex h-full cursor-pointer flex-col rounded-2xl border px-4 py-5 shadow-lg shadow-black/30 ring-1 ${
                 selectedPlan === plan.name
                   ? isLight
                     ? "border-emerald-400/70 ring-emerald-300/50 bg-emerald-50"
                     : "border-emerald-400/60 ring-emerald-300/50 bg-emerald-500/5"
                   : isLight
-                  ? "border-slate-200 ring-slate-200/60 bg-white"
-                  : "border-white/10 ring-white/10 bg-white/5"
+                    ? "border-slate-200 ring-slate-200/60 bg-white"
+                    : "border-white/10 ring-white/10 bg-white/5"
               }`}
             >
               <div className="flex items-baseline justify-between gap-2">
@@ -291,13 +317,13 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
               </div>
               <p className="mt-2 text-2xl font-bold">{plan.price}</p>
               <ul className={`mt-3 flex-1 space-y-2 text-sm ${isLight ? "text-slate-700" : "text-slate-200"}`}>
-                {plan.features.map((f) => (
-                  <li key={f} className="flex items-start gap-2">
+                {plan.features.map((feature) => (
+                  <li key={feature} className="flex items-start gap-2">
                     <span
                       className="mt-0.5 h-2 w-2 rounded-full"
                       style={{ backgroundColor: "rgba(52,211,153,0.9)" }}
                     />
-                    <span>{f}</span>
+                    <span>{feature}</span>
                   </li>
                 ))}
               </ul>
@@ -307,7 +333,7 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
                 style={{ "--ghost-color": plan.accent }}
                 disabled={currentPlan === plan.name}
               >
-                {currentPlan === plan.name ? "현재 이용중" : plan.cta}
+                {currentPlan === plan.name ? "현재 요금제" : plan.cta}
               </button>
             </div>
           ))}
@@ -321,7 +347,7 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
           <div>
             <p className="font-semibold">결제 안내</p>
             <p className={isLight ? "text-slate-600" : "text-slate-300"}>
-              카드/계좌 이체 결제(월 구독) · 부가세 별도 · 취소/환불 정책 별도 안내
+              결제는 서버 검증 후 요금제가 자동 반영됩니다. 결제 완료 후 현재 페이지에서 바로 갱신됩니다.
             </p>
           </div>
           <div className="grid grid-cols-3 gap-2">
@@ -332,7 +358,7 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
               className={`ghost-button text-sm ${isLight ? "text-amber-700" : "text-amber-100"}`}
               style={{ "--ghost-color": "234, 179, 8" }}
             >
-              {paying ? "카카오페이 결제 진행중" : "카카오페이 결제"}
+              {paying ? "카카오페이 처리 중" : "카카오페이 결제"}
             </button>
             <button
               type="button"
@@ -341,14 +367,14 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
               className={`ghost-button text-sm ${isLight ? "text-emerald-700" : "text-emerald-100"}`}
               style={{ "--ghost-color": "16, 185, 129" }}
             >
-              {cardPaying ? "카드 결제 준비중" : "카드 결제"}
+              {cardPaying ? "카드 결제 준비 중" : "카드 결제"}
             </button>
             <button
               type="button"
               className={`ghost-button text-sm ${isLight ? "text-slate-600" : "text-slate-200"}`}
               style={{ "--ghost-color": isLight ? "100, 116, 139" : "148, 163, 184" }}
             >
-              영수증/세금계산서 문의
+              안전 결제 연동
             </button>
           </div>
         </div>
@@ -363,7 +389,7 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
               <p className="font-semibold">카드 결제</p>
               <p className={isLight ? "text-slate-600" : "text-slate-300"}>
                 선택 플랜: {selectedPlan}
-                {selectedCardPlan ? ` · ${selectedCardPlan.amount.toLocaleString()}원` : ""}
+                {selectedCardPlan ? ` / ${selectedCardPlan.amount.toLocaleString()}원` : ""}
               </p>
             </div>
             <button
@@ -380,13 +406,13 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
               isLight ? "border-slate-200 bg-white" : "border-white/10 bg-white/5"
             }`}
           >
-            <p className="text-sm font-semibold">결제 안내</p>
+            <p className="text-sm font-semibold">카드 결제 진행</p>
             <p className={isLight ? "mt-2 text-xs text-slate-500" : "mt-2 text-xs text-slate-300"}>
-              결제창은 새 창/팝업으로 열립니다. 팝업 차단을 해제해 주세요.
+              결제 창이 준비되면 아래 버튼으로 결제를 확정하세요.
             </p>
             {!cardWidgetReady && (
               <p className={isLight ? "mt-3 text-xs text-slate-400" : "mt-3 text-xs text-slate-400"}>
-                나이스페이먼츠 모듈 로딩 중..
+                결제 모듈을 로딩 중입니다.
               </p>
             )}
           </div>
@@ -398,12 +424,26 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
               className={`ghost-button text-sm ${isLight ? "text-emerald-700" : "text-emerald-100"}`}
               style={{ "--ghost-color": "16, 185, 129" }}
             >
-              {cardPaying ? "결제 진행 중" : "결제 진행"}
+              {cardPaying ? "처리 중..." : "카드 결제 확정"}
             </button>
           </div>
         </div>
 
-
+        {isPaidTier && (
+          <p
+            className={`mx-6 mb-4 rounded-lg px-3 py-2 text-sm ring-1 ${
+              isLight
+                ? "bg-sky-50 text-sky-700 ring-sky-200"
+                : "bg-sky-950/30 text-sky-100 ring-sky-500/40"
+            }`}
+          >
+            {currentTierExpiryLabel
+              ? `현재 ${currentPlan} 만료일: ${currentTierExpiryLabel}${
+                  currentTierRemainingDaysSafe != null ? ` (D-${currentTierRemainingDaysSafe})` : ""
+                }`
+              : `현재 ${currentPlan} 만료일이 아직 설정되지 않았습니다. 결제 완료 후 자동 반영됩니다.`}
+          </p>
+        )}
         {paymentError && (
           <p className="mx-6 mb-4 rounded-lg bg-red-900/30 px-3 py-2 text-sm text-red-200 ring-1 ring-red-500/40">
             {paymentError}
@@ -420,4 +460,3 @@ function PaymentPage({ onClose, currentTier = "free", theme = "dark", user, onTi
 }
 
 export default PaymentPage;
-

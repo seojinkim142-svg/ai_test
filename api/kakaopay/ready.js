@@ -6,6 +6,7 @@ import {
   parseRequestBody,
   sendJson,
 } from "./_shared.js";
+import { authenticateSupabaseUserFromRequest } from "../_shared/tier-sync.js";
 
 const normalizePositiveInteger = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -51,15 +52,26 @@ export default async function handler(req, res) {
   const cancelUrl = String(body?.cancelUrl || `${clientOrigin}/?kakaoPay=cancel`).trim();
   const failUrl = String(body?.failUrl || `${clientOrigin}/?kakaoPay=fail`).trim();
 
-  if (!amount || !orderId || !userId) {
-    sendJson(res, 400, { message: "amount, orderId, and userId are required." }, allowOrigin);
+  if (!amount || !orderId) {
+    sendJson(res, 400, { message: "amount and orderId are required." }, allowOrigin);
+    return;
+  }
+
+  const authResult = await authenticateSupabaseUserFromRequest(req);
+  if (!authResult.ok) {
+    sendJson(res, authResult.status, { message: authResult.message }, allowOrigin);
+    return;
+  }
+  const authenticatedUserId = authResult.userId;
+  if (userId && userId !== authenticatedUserId) {
+    sendJson(res, 403, { message: "userId does not match authenticated user." }, allowOrigin);
     return;
   }
 
   const requestPayload = {
     cid,
     partner_order_id: orderId,
-    partner_user_id: userId,
+    partner_user_id: authenticatedUserId,
     item_name: itemName,
     quantity: String(quantity),
     total_amount: String(amount),

@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
+import { normalizeMathMarkdown } from "./MathMarkdown";
 
 const AUTO_MATH_TOKEN_RE = /(?:\\[a-zA-Z]+|[\^_\u221A\u221E\u2264\u2265\u2260\u2248\u2211\u222B\u220F]|->|\u2192|<=|>=|!=|~=)/;
 const DEFAULT_SECTION_PAGE_CHARS = 2600;
@@ -14,12 +15,13 @@ const BARE_LATEX_COMMAND_RE =
 const BARE_LATEX_COMMAND_GLOBAL_RE =
   /\\(?:begin|end|frac|dfrac|tfrac|sum|prod|int|sqrt|left|right|cdot|times|to|infty|leq?|geq?|neq?|approx|mathbb|mathbf|mathrm|text|quad|qquad|lim)\b/g;
 const BARE_LATEX_ENV_RE = /\\begin\{[A-Za-z*]+\}[\s\S]*?\\end\{[A-Za-z*]+\}/g;
-const MATH_CONTEXT_CHAR_RE = /[A-Za-z0-9_\\^=+\-*/(){}\[\].,| ]/;
+const MATCHED_LATEX_ENV_BLOCK_RE = /\\begin\{([A-Za-z*]+)\}[\s\S]*?\\end\{\1\}/g;
+const MATH_CONTEXT_CHAR_RE = /[A-Za-z0-9_\\^=+\-*/(){}[\].,| ]/;
 const DISPLAY_ENV_RE = /\\begin\{(?:cases|aligned|align|matrix|pmatrix|bmatrix)\}/;
 const AUTO_INLINE_MATH_PATTERNS = [
-  /(^|[\s:(])((?:P|F|f)\([^)\n]{1,40}\)\s*=\s*[A-Za-z0-9_^\-+*/=(){}\[\]|\\.,\s\u2264\u2265\u2260\u2248\u221E]{1,160})/g,
-  /(^|[\s:(])(E\[[^\]\n]{1,50}\]\s*=\s*[A-Za-z0-9_^\-+*/=(){}\[\]|\\.,\s\u2264\u2265\u2260\u2248\u221E]{1,160})/g,
-  /(^|[\s:(])((?:Var|Cov)\([^)\n]{1,50}\)\s*=\s*[A-Za-z0-9_^\-+*/=(){}\[\]|\\.,\s\u2264\u2265\u2260\u2248\u221E]{1,160})/g,
+  /(^|[\s:(])((?:P|F|f)\([^)\n]{1,40}\)\s*=\s*[A-Za-z0-9_^\-+*/=(){}[\]|\\.,\s\u2264\u2265\u2260\u2248\u221E]{1,160})/g,
+  /(^|[\s:(])(E\[[^\]\n]{1,50}\]\s*=\s*[A-Za-z0-9_^\-+*/=(){}[\]|\\.,\s\u2264\u2265\u2260\u2248\u221E]{1,160})/g,
+  /(^|[\s:(])((?:Var|Cov)\([^)\n]{1,50}\)\s*=\s*[A-Za-z0-9_^\-+*/=(){}[\]|\\.,\s\u2264\u2265\u2260\u2248\u221E]{1,160})/g,
 ];
 
 function normalizeMathExpression(expr) {
@@ -49,8 +51,8 @@ function repairBrokenDollarSequences(line) {
   return String(line || "")
     .replace(/\\\$\$/g, "$$")
     .replace(/\\\$/g, "$")
-    .replace(/([A-Za-z0-9)\]])\s*\$\$\s*([A-Za-z0-9(\[])/g, "$1 쨌 $2")
-    .replace(/([A-Za-z0-9)\]])\s*\$(?=[A-Za-z0-9(\[])/g, "$1 쨌 ")
+    .replace(/([A-Za-z0-9)\]])\s*\$\$\s*([A-Za-z0-9([])/g, "$1 $2")
+    .replace(/([A-Za-z0-9)\]])\s*\$(?=[A-Za-z0-9([])/g, "$1 ")
     .replace(/\$\$/g, " ")
     .replace(/\$/g, "");
 }
@@ -156,10 +158,29 @@ function sanitizeSummaryForMath(rawSummary) {
   const source = String(rawSummary || "").replace(/\r\n/g, "\n");
   if (!source) return "";
 
-  const lines = source.split("\n");
+  // Protect math that is already well-formed (including multiline blocks)
+  // before line-by-line normalization to avoid breaking environments like
+  // \begin{cases} ... \end{cases}.
+  const globalMathPlaceholders = [];
+  const toGlobalMathPlaceholder = (value) => {
+    const token = `%%GLOBALMATH${globalMathPlaceholders.length}%%`;
+    globalMathPlaceholders.push(value);
+    return token;
+  };
+
+  let prepared = source.replace(/\$\$[\s\S]*?\$\$|\$[^$\n]+\$/g, (match) =>
+    toGlobalMathPlaceholder(match)
+  );
+  prepared = prepared.replace(MATCHED_LATEX_ENV_BLOCK_RE, (match) => {
+    const normalized = normalizeLatexSnippet(match);
+    if (!normalized) return match;
+    return toGlobalMathPlaceholder(`$$${normalized}$$`);
+  });
+
+  const lines = prepared.split("\n");
   let inCodeFence = false;
 
-  return lines
+  const normalized = lines
     .map((line) => {
       if (/^\s*```/.test(line)) {
         inCodeFence = !inCodeFence;
@@ -204,6 +225,11 @@ function sanitizeSummaryForMath(rawSummary) {
         .replace(/@@MATH_?(\d+)@@/g, (full, idx) => placeholders[Number(idx)] || full);
     })
     .join("\n");
+
+  return normalized.replace(
+    /%%GLOBALMATH(\d+)%%/g,
+    (full, idx) => globalMathPlaceholders[Number(idx)] || full
+  );
 }
 
 function rebalanceTrailingPages(pages, { maxChars, minTailChars = MIN_TAIL_PAGE_CHARS }) {
@@ -347,7 +373,7 @@ function splitSummaryIntoPages(summary) {
 
 function SummaryCard({ summary, renderExportPages = false }) {
   const normalizedSummary = useMemo(
-    () => sanitizeSummaryForMath(summary).trim(),
+    () => normalizeMathMarkdown(sanitizeSummaryForMath(summary)).trim(),
     [summary]
   );
   const hasSummary = normalizedSummary.length > 0;

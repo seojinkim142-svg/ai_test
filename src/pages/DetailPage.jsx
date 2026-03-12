@@ -145,6 +145,7 @@ export default function DetailPage({
   file,
   pageInfo,
   currentPage,
+  handlePageChange,
   handleDragStart,
   panelTab,
   setPanelTab,
@@ -169,7 +170,6 @@ export default function DetailPage({
   handleSaveCurrentPartialSummary,
   handleLoadSavedPartialSummary,
   handleDeleteSavedPartialSummary,
-  regenerateSummary,
   setIsPageSummaryOpen,
   setPageSummaryError,
   isPageSummaryOpen,
@@ -405,6 +405,10 @@ export default function DetailPage({
         : -1,
     [activeInstructorEmphasis, normalizedSavedInstructorEmphases]
   );
+  const handleRequestSummary = useCallback(
+    () => requestSummary({ force: true, replaceExisting: true }),
+    [requestSummary]
+  );
 
   useEffect(() => {
     const target = emphasisTextareaRef.current;
@@ -494,6 +498,7 @@ export default function DetailPage({
           file={file}
           pageInfo={pageInfo}
           currentPage={currentPage}
+          onPageChange={handlePageChange}
         />
       </div>
 
@@ -541,25 +546,13 @@ export default function DetailPage({
                 <div className="flex flex-wrap justify-end gap-2">
                   <button
                     type="button"
-                    onClick={() => requestSummary({ force: true })}
-                    disabled={isLoadingSummary || isLoadingText || (isFreeTier && summary)}
-                    title={isFreeTier && summary ? "무료 티어에서는 요약을 재생성할 수 없습니다." : undefined}
+                    onClick={handleRequestSummary}
+                    disabled={isLoadingSummary || isLoadingText}
                     className="ghost-button text-xs text-emerald-100"
                     style={{ "--ghost-color": "16, 185, 129" }}
                   >
                     {isLoadingSummary ? "요약 생성 중..." : "요약 생성"}
                   </button>
-                  {!isFreeTier && (
-                    <button
-                      type="button"
-                      onClick={regenerateSummary}
-                      disabled={isLoadingSummary || isLoadingText}
-                      className="ghost-button text-xs text-emerald-100"
-                      style={{ "--ghost-color": "52, 211, 153" }}
-                    >
-                      요약 재생성
-                    </button>
-                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -1213,7 +1206,7 @@ export default function DetailPage({
                 error={error}
                 shortPreview={shortPreview}
                 onRequestQuiz={requestQuestions}
-                onRequestSummary={requestSummary}
+                onRequestSummary={handleRequestSummary}
               />
 
               <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
@@ -1344,7 +1337,7 @@ export default function DetailPage({
                 error={error}
                 shortPreview={shortPreview}
                 onRequestQuiz={requestOxQuiz}
-                onRequestSummary={requestSummary}
+                onRequestSummary={handleRequestSummary}
               />
 
               <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
@@ -1476,5 +1469,4 @@ export default function DetailPage({
     </section>
   );
 }
-
 
