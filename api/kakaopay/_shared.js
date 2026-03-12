@@ -1,3 +1,4 @@
+/* global process, Buffer */
 const DEFAULT_API_BASE = "https://open-api.kakaopay.com";
 const DEFAULT_LOCAL_ORIGIN = "http://localhost:5173";
 const DEFAULT_CID = "TC0ONETIME";
@@ -86,7 +87,7 @@ export const getRuntimeConfig = (req) => {
 export const buildCorsHeaders = (allowOrigin) => ({
   "Access-Control-Allow-Origin": allowOrigin,
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
 });
 
 export const sendJson = (res, statusCode, body, allowOrigin) => {

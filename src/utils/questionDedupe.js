@@ -1,5 +1,22 @@
 import { pickRandomItems } from "./appStateHelpers";
 
+const LOW_VALUE_STUDY_PROMPT_PATTERNS = [
+  // textbook/preface metadata (audience/target)
+  /(교재|이\s*책|본서|강의노트|강의\s*자료).*(대상|독자|수강생|출신|전공자|비전공자)/i,
+  // availability of supplementary resources (exercise/cyber/code/etc.)
+  /(교재|이\s*책|본서|강의노트|강의\s*자료).*(연습문제|부록|사이버|온라인|동영상|예제\s*코드|sage\s*코드|코드|자료).*(포함|제공|수록|없|않)/i,
+  // publication metadata
+  /(저자|출판사|출판|발행|copyright|acknowledg|reference|bibliograph|isbn|email)/i,
+  // table of contents / structural trivia
+  /(목차|차례|chapter|절|구성).*(소개|설명|나열|순서)/i,
+];
+
+export function isLowValueStudyPrompt(text) {
+  const normalized = String(text || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return true;
+  return LOW_VALUE_STUDY_PROMPT_PATTERNS.some((pattern) => pattern.test(normalized));
+}
+
 export function normalizeQuestionKey(text) {
   return String(text || "")
     .toLowerCase()

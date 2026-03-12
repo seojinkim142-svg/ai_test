@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+﻿import { createClient } from "@supabase/supabase-js";
 import { resolveAppRedirectUrl } from "../utils/appOrigin";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -12,6 +12,10 @@ const USER_TIER_TABLE = import.meta.env.VITE_SUPABASE_USER_TIER_TABLE || "user_t
 const FEEDBACK_TABLE = import.meta.env.VITE_SUPABASE_FEEDBACK_TABLE || "user_feedback";
 const ALLOWED_TIERS = ["free", "pro", "premium"];
 export const DEFAULT_TIER = "free";
+const PAID_TIERS = new Set(["pro", "premium"]);
+const TIER_EXPIRY_COLUMN = "tier_expires_at";
+const PAID_TIER_TERM_MONTHS = { pro: 1, premium: 1 };
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
 const PREMIUM_PROFILES_META_KEY = "premium_profiles_v1";
 const PREMIUM_ACTIVE_PROFILE_META_KEY = "premium_active_profile_id_v1";
 const PREMIUM_SPACE_MODE_META_KEY = "premium_space_mode_v1";
@@ -28,22 +32,42 @@ const SUPABASE_REDIRECT =
   normalizeAbsoluteUrl(import.meta.env.VITE_SUPABASE_REDIRECT_URL) || resolveAppRedirectUrl("/") || undefined;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn("Supabase 환경변수(VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)가 설정되지 않았습니다.");
+  console.warn("Supabase environment variables are missing: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY");
 }
 
 export const supabase = supabaseUrl && supabaseAnonKey ? createClient(supabaseUrl, supabaseAnonKey) : null;
 
 const requireSupabase = () => {
-  if (!supabase) throw new Error("Supabase 클라이언트가 초기화되지 않았습니다.");
+  if (!supabase) throw new Error("Supabase client is not initialized. Check environment variables.");
   return supabase;
 };
 
 const requireUser = (userId) => {
-  if (!userId) throw new Error("로그인 정보가 없습니다.");
+  if (!userId) throw new Error("User ID is required.");
   return userId;
 };
 
 const STORAGE_FILE_NAME_FALLBACK = "document.pdf";
+const STORAGE_CONTENT_TYPE_BY_EXT = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
+
+const getLowerFileExtension = (fileName) => {
+  const normalized = String(fileName || "").trim().toLowerCase();
+  if (!normalized) return "";
+  const dotIndex = normalized.lastIndexOf(".");
+  if (dotIndex < 0 || dotIndex === normalized.length - 1) return "";
+  return normalized.slice(dotIndex + 1);
+};
+
+const resolveStorageContentType = (file) => {
+  const rawType = String(file?.type || "").trim().toLowerCase();
+  if (rawType) return rawType;
+  const ext = getLowerFileExtension(file?.name);
+  return STORAGE_CONTENT_TYPE_BY_EXT[ext] || "application/octet-stream";
+};
 
 const toSafeStorageFileName = (fileName) => {
   const rawName = String(fileName || "").trim();
@@ -55,7 +79,10 @@ const toSafeStorageFileName = (fileName) => {
     .replace(/^[._-]+|[._-]+$/g, "")
     .slice(0, 120);
   if (!asciiOnly) return STORAGE_FILE_NAME_FALLBACK;
-  return /\.pdf$/i.test(asciiOnly) ? asciiOnly : `${asciiOnly}.pdf`;
+
+  const ext = getLowerFileExtension(asciiOnly);
+  if (!ext) return `${asciiOnly}.pdf`;
+  return asciiOnly;
 };
 
 export async function signInWithEmail(email, password) {
@@ -99,10 +126,17 @@ export async function signInWithProvider(provider) {
   return data;
 }
 
+export async function getAccessToken() {
+  if (!supabase) return "";
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  return String(data?.session?.access_token || "").trim();
+}
+
 export async function uploadPdfToStorage(userId, file) {
   const client = requireSupabase();
   requireUser(userId);
-  if (!file) throw new Error("업로드할 파일이 없습니다.");
+  if (!file) throw new Error("File is required.");
 
   const safeName = toSafeStorageFileName(file.name);
   const uniqueSuffix =
@@ -110,12 +144,13 @@ export async function uploadPdfToStorage(userId, file) {
       ? crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const path = `${userId}/${Date.now()}-${uniqueSuffix}-${safeName}`;
+  const contentType = resolveStorageContentType(file);
   const { error } = await client.storage
     .from(supabaseBucket)
-    .upload(path, file, { contentType: file.type || "application/pdf", upsert: true });
+    .upload(path, file, { contentType, upsert: true });
   if (error) throw error;
 
-  // 프라이빗 버킷을 가정하고, 읽기용 서명 URL을 발급 (7일 유효)
+  // Upload is complete; create a signed URL for immediate preview (7 days).
   const { data: signedData, error: signedError } = await client.storage
     .from(supabaseBucket)
     .createSignedUrl(path, 60 * 60 * 24 * 7);
@@ -216,12 +251,11 @@ export async function deleteUpload({ userId, uploadId, bucket, path }) {
   requireUser(userId);
   if (!uploadId && !path) return;
 
-  // 스토리지 파일 삭제는 실패해도 메타데이터 삭제를 시도
+  // Best-effort storage cleanup before deleting DB metadata.
   if (bucket && path) {
     try {
       await client.storage.from(bucket).remove([path]);
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.warn("storage remove failed", err);
     }
   }
@@ -233,7 +267,7 @@ export async function deleteUpload({ userId, uploadId, bucket, path }) {
     lastError = error;
   }
 
-  // id가 uuid가 아니거나 실패했을 때 storage_path 기준으로 한 번 더 시도
+  // Fallback path-based delete when id-based delete did not remove rows.
   if (path) {
     const { error } = await client.from(UPLOADS_TABLE).delete().eq("storage_path", path).eq("user_id", userId);
     if (error) {
@@ -249,7 +283,7 @@ export async function createFolder({ userId, name }) {
   const client = requireSupabase();
   requireUser(userId);
   const trimmed = (name || "").trim();
-  if (!trimmed) throw new Error("폴더 이름이 필요합니다.");
+  if (!trimmed) throw new Error("Folder name is required.");
   const payload = {
     user_id: userId,
     name: trimmed,
@@ -318,7 +352,7 @@ export async function getSignedStorageUrl({ bucket, path, expiresIn = 60 * 60 * 
 
 export async function updateUploadThumbnail({ id, thumbnail }) {
   const client = requireSupabase();
-  if (!id) throw new Error("업로드 ID가 필요합니다.");
+  if (!id) throw new Error("Upload ID is required.");
   const { error } = await client
     .from(UPLOADS_TABLE)
     .update({ thumbnail })
@@ -360,11 +394,10 @@ export async function updateUploadFolder({ userId, uploadIds = [], folderId = nu
     results = [...results, ...(data || [])];
   }
 
-  // 업데이트가 하나도 되지 않은 경우(권한/RLS 등) 에러로 처리해 호출 측에서 알 수 있게 함
+  // If no rows were updated, this is usually a permission/RLS issue.
   if ((results || []).length === 0) {
-    throw new Error("폴더 이동에 실패했습니다. 권한이나 RLS 정책을 확인해주세요.");
+    throw new Error("Folder move failed. Check permissions or RLS policy.");
   }
-
   return results;
 }
 
@@ -382,7 +415,7 @@ export async function fetchDocArtifacts({ userId, docId }) {
 
 export async function saveDocArtifacts({ userId, docId, summary, quiz, ox, highlights }) {
   const client = requireSupabase();
-  if (!userId || !docId) throw new Error("userId와 docId가 필요합니다.");
+  if (!userId || !docId) throw new Error("userId and docId are required.");
   const payload = {
     user_id: userId,
     doc_id: docId,
@@ -403,50 +436,257 @@ export async function saveDocArtifacts({ userId, docId, summary, quiz, ox, highl
   return data;
 }
 
-export async function getUserTier({ userId }) {
-  const client = requireSupabase();
-  if (!userId) throw new Error("userId가 필요합니다.");
+function isPaidTier(tier) {
+  return PAID_TIERS.has(String(tier || "").trim().toLowerCase());
+}
+
+function isTierExpiryColumnError(error) {
+  if (!error) return false;
+  const code = String(error?.code || "");
+  if (code === "42703" || code === "PGRST204") return true;
+  const text = `${error?.message || ""} ${error?.details || ""} ${error?.hint || ""}`.toLowerCase();
+  return text.includes(TIER_EXPIRY_COLUMN);
+}
+
+function toIsoStringOrNull(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function addMonthsUtc(dateInput, monthsInput = 1) {
+  const baseDate = dateInput instanceof Date ? new Date(dateInput) : new Date(dateInput);
+  const parsedMonths = Number(monthsInput);
+  const safeMonths = Number.isFinite(parsedMonths) && parsedMonths > 0 ? Math.floor(parsedMonths) : 1;
+  if (Number.isNaN(baseDate.getTime())) return new Date();
+  const next = new Date(baseDate);
+  next.setUTCMonth(next.getUTCMonth() + safeMonths);
+  return next;
+}
+
+function buildTierStatus(tier, tierExpiresAtRaw) {
+  const normalizedTier = ALLOWED_TIERS.includes(tier) ? tier : DEFAULT_TIER;
+  const expiresIso = toIsoStringOrNull(tierExpiresAtRaw);
+  const now = Date.now();
+  if (!isPaidTier(normalizedTier) || !expiresIso) {
+    return {
+      tier: normalizedTier,
+      tierExpiresAt: null,
+      tierRemainingDays: null,
+      isExpired: false,
+    };
+  }
+
+  const expiresMs = Date.parse(expiresIso);
+  if (!Number.isFinite(expiresMs)) {
+    return {
+      tier: normalizedTier,
+      tierExpiresAt: null,
+      tierRemainingDays: null,
+      isExpired: false,
+    };
+  }
+
+  const remainingMs = expiresMs - now;
+  if (remainingMs <= 0) {
+    return {
+      tier: normalizedTier,
+      tierExpiresAt: expiresIso,
+      tierRemainingDays: 0,
+      isExpired: true,
+    };
+  }
+
+  return {
+    tier: normalizedTier,
+    tierExpiresAt: expiresIso,
+    tierRemainingDays: Math.max(1, Math.ceil(remainingMs / MS_PER_DAY)),
+    isExpired: false,
+  };
+}
+
+async function fetchUserTierRow(client, userId) {
+  const selectWithExpiry = `tier, ${TIER_EXPIRY_COLUMN}`;
   const { data, error } = await client
+    .from(USER_TIER_TABLE)
+    .select(selectWithExpiry)
+    .eq("user_id", userId)
+    .single();
+
+  if (!error) {
+    return {
+      row: data || null,
+      hasExpiryColumn: true,
+    };
+  }
+  if (error.code === "PGRST116") {
+    return {
+      row: null,
+      hasExpiryColumn: true,
+    };
+  }
+  if (!isTierExpiryColumnError(error)) throw error;
+
+  const { data: fallbackData, error: fallbackError } = await client
     .from(USER_TIER_TABLE)
     .select("tier")
     .eq("user_id", userId)
     .single();
-  if (error && error.code !== "PGRST116") throw error; // no rows is fine
-  const tier = data?.tier;
-  if (ALLOWED_TIERS.includes(tier)) return tier;
-
-  // 기본값을 DB에 생성 후 반환 (최초 로그인 시 자동 free 등록)
-  try {
-    const { data: inserted, error: upsertError } = await client
-      .from(USER_TIER_TABLE)
-      .upsert({ user_id: userId, tier: DEFAULT_TIER }, { onConflict: "user_id" })
-      .select("tier")
-      .single();
-    if (upsertError) throw upsertError;
-    return inserted?.tier || DEFAULT_TIER;
-  } catch (upsertErr) {
-    // eslint-disable-next-line no-console
-    console.warn("Failed to ensure user tier row", upsertErr);
-    return DEFAULT_TIER;
-  }
+  if (fallbackError && fallbackError.code !== "PGRST116") throw fallbackError;
+  return {
+    row: fallbackData ? { ...fallbackData, [TIER_EXPIRY_COLUMN]: null } : null,
+    hasExpiryColumn: false,
+  };
 }
 
-export async function setUserTier({ userId, tier }) {
-  const client = requireSupabase();
-  if (!userId) throw new Error("userId가 필요합니다.");
-  if (!ALLOWED_TIERS.includes(tier)) {
-    throw new Error(`tier는 ${ALLOWED_TIERS.join(", ")} 중 하나여야 합니다.`);
-  }
+async function upsertUserTierRow({
+  client,
+  userId,
+  tier,
+  tierExpiresAt = null,
+  hasExpiryColumn = true,
+}) {
   const payload = { user_id: userId, tier };
+  if (hasExpiryColumn) payload[TIER_EXPIRY_COLUMN] = tierExpiresAt;
+
+  const selectClause = hasExpiryColumn ? `tier, ${TIER_EXPIRY_COLUMN}` : "tier";
   const { data, error } = await client
     .from(USER_TIER_TABLE)
     .upsert(payload, { onConflict: "user_id" })
-    .select()
+    .select(selectClause)
     .single();
+
+  if (error && hasExpiryColumn && isTierExpiryColumnError(error)) {
+    const { data: fallbackData, error: fallbackError } = await client
+      .from(USER_TIER_TABLE)
+      .upsert({ user_id: userId, tier }, { onConflict: "user_id" })
+      .select("tier")
+      .single();
+    if (fallbackError) throw fallbackError;
+    return {
+      row: fallbackData ? { ...fallbackData, [TIER_EXPIRY_COLUMN]: null } : null,
+      hasExpiryColumn: false,
+    };
+  }
+
   if (error) throw error;
-  return data?.tier || tier;
+  return {
+    row: data || null,
+    hasExpiryColumn,
+  };
 }
 
+function getBaseDateForTierExtension({ tier, existingRow }) {
+  const now = new Date();
+  if (!existingRow) return now;
+  const existingTier = existingRow?.tier;
+  const existingExpiryIso = toIsoStringOrNull(existingRow?.[TIER_EXPIRY_COLUMN]);
+  if (existingTier !== tier || !existingExpiryIso) return now;
+  const existingExpiryMs = Date.parse(existingExpiryIso);
+  if (!Number.isFinite(existingExpiryMs) || existingExpiryMs <= now.getTime()) return now;
+  return new Date(existingExpiryIso);
+}
+
+function resolveTierExpiryAt({
+  tier,
+  requestedExpiresAt = null,
+  existingRow = null,
+  extendMonths = null,
+}) {
+  if (!isPaidTier(tier)) return null;
+  const normalizedRequested = toIsoStringOrNull(requestedExpiresAt);
+  if (normalizedRequested) return normalizedRequested;
+
+  const defaultMonths = PAID_TIER_TERM_MONTHS[tier] || 1;
+  const months =
+    Number.isFinite(Number(extendMonths)) && Number(extendMonths) > 0
+      ? Number(extendMonths)
+      : defaultMonths;
+  const baseDate = getBaseDateForTierExtension({ tier, existingRow });
+  return addMonthsUtc(baseDate, months).toISOString();
+}
+
+export async function getUserTierStatus({ userId }) {
+  const client = requireSupabase();
+  if (!userId) throw new Error("userId is required.");
+
+  const { row, hasExpiryColumn } = await fetchUserTierRow(client, userId);
+  const tier = row?.tier;
+
+  if (!ALLOWED_TIERS.includes(tier)) {
+    try {
+      await upsertUserTierRow({
+        client,
+        userId,
+        tier: DEFAULT_TIER,
+        tierExpiresAt: null,
+        hasExpiryColumn,
+      });
+    } catch (upsertErr) {
+      console.warn("Failed to ensure user tier row", upsertErr);
+    }
+    return {
+      tier: DEFAULT_TIER,
+      tierExpiresAt: null,
+      tierRemainingDays: null,
+      isExpired: false,
+    };
+  }
+
+  const status = buildTierStatus(tier, row?.[TIER_EXPIRY_COLUMN]);
+  if (!status.isExpired) return status;
+
+  // Expired paid plan -> downgrade to free immediately.
+  try {
+    await upsertUserTierRow({
+      client,
+      userId,
+      tier: DEFAULT_TIER,
+      tierExpiresAt: null,
+      hasExpiryColumn,
+    });
+  } catch (downgradeErr) {
+    console.warn("Failed to downgrade expired tier", downgradeErr);
+  }
+
+  return {
+    tier: DEFAULT_TIER,
+    tierExpiresAt: null,
+    tierRemainingDays: null,
+    isExpired: true,
+  };
+}
+
+export async function getUserTier({ userId }) {
+  const status = await getUserTierStatus({ userId });
+  return status.tier;
+}
+
+export async function setUserTier({ userId, tier, expiresAt = null, extendMonths = null }) {
+  const client = requireSupabase();
+  if (!userId) throw new Error("userId is required.");
+  if (!ALLOWED_TIERS.includes(tier)) {
+    throw new Error(`tier must be one of: ${ALLOWED_TIERS.join(", ")}`);
+  }
+
+  const { row: currentRow, hasExpiryColumn } = await fetchUserTierRow(client, userId);
+  const tierExpiresAt = resolveTierExpiryAt({
+    tier,
+    requestedExpiresAt: expiresAt,
+    existingRow: currentRow,
+    extendMonths,
+  });
+
+  const { row: updatedRow } = await upsertUserTierRow({
+    client,
+    userId,
+    tier,
+    tierExpiresAt,
+    hasExpiryColumn,
+  });
+  return updatedRow?.tier || tier;
+}
 export async function saveUserFeedback({
   userId,
   category = "general",

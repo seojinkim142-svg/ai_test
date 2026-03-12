@@ -5,6 +5,7 @@ import {
   sendJson,
   verifyPaymentToken,
 } from "./_shared.js";
+import { syncPaidTierFromAmount } from "../_shared/tier-sync.js";
 
 export default async function handler(req, res) {
   const { allowOrigin, secretKey } = getRuntimeConfig(req);
@@ -54,6 +55,20 @@ export default async function handler(req, res) {
     return;
   }
 
+  const tierSync = await syncPaidTierFromAmount({ req, amount });
+  if (!tierSync.ok) {
+    sendJson(
+      res,
+      tierSync.status,
+      {
+        message: tierSync.message,
+        ok: false,
+      },
+      allowOrigin
+    );
+    return;
+  }
+
   sendJson(
     res,
     200,
@@ -63,6 +78,9 @@ export default async function handler(req, res) {
       amount,
       tid,
       approvedAt: payload.approvedAt || null,
+      tierUpdated: true,
+      tier: tierSync.tier,
+      tierExpiresAt: tierSync.tierExpiresAt,
     },
     allowOrigin
   );

@@ -1,12 +1,17 @@
 import { LETTERS } from "../constants";
+import MathMarkdown from "./MathMarkdown";
 
 function MultipleChoiceItem({ question, idx, selectedChoice, revealed, onSelect }) {
   return (
     <article className="rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
       <div className="flex items-start justify-between gap-3">
-        <h3 className="text-lg font-semibold text-white">
-          Q{idx + 1}. {question.question}
-        </h3>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-lg font-semibold text-white">Q{idx + 1}.</h3>
+          <MathMarkdown
+            content={question.question}
+            className="summary-prose mt-1 max-w-none break-words text-sm text-slate-100 [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto"
+          />
+        </div>
         <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-100">객관식</span>
       </div>
       <ul className="mt-3 space-y-2">
@@ -31,7 +36,10 @@ function MultipleChoiceItem({ question, idx, selectedChoice, revealed, onSelect 
               onClick={() => onSelect(idx, cIdx)}
             >
               <span className="choice-label font-semibold text-white/80">{LETTERS[cIdx] || "-"}</span>
-              <span>{choice}</span>
+              <MathMarkdown
+                content={choice}
+                className="summary-prose min-w-0 flex-1 max-w-none break-words text-sm text-slate-100 [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto"
+              />
             </li>
           );
         })}
@@ -46,7 +54,13 @@ function MultipleChoiceItem({ question, idx, selectedChoice, revealed, onSelect 
             </p>
           )}
           {question.explanation && (
-            <p className="rounded-lg bg-white/5 px-3 py-2 text-xs text-slate-200 ring-1 ring-white/10">해설: {question.explanation}</p>
+            <div className="rounded-lg bg-white/5 px-3 py-2 text-xs text-slate-200 ring-1 ring-white/10">
+              <p className="mb-1 font-semibold text-slate-100">해설</p>
+              <MathMarkdown
+                content={question.explanation}
+                className="summary-prose max-w-none break-words text-xs text-slate-200 [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto"
+              />
+            </div>
           )}
         </div>
       )}
@@ -60,9 +74,13 @@ function ShortAnswer({ question, questionNumber, index, userInput, result, onCha
   return (
     <article className="rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
       <div className="flex items-start justify-between gap-3">
-        <h3 className="text-lg font-semibold text-white">
-          Q{questionNumber}. {question.question}
-        </h3>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-lg font-semibold text-white">Q{questionNumber}.</h3>
+          <MathMarkdown
+            content={question.question}
+            className="summary-prose mt-1 max-w-none break-words text-sm text-slate-100 [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto"
+          />
+        </div>
         <span className="rounded-full bg-cyan-500/20 px-2 py-1 text-xs font-semibold text-cyan-100">주관식</span>
       </div>
       <div className="mt-3 flex flex-col gap-2">

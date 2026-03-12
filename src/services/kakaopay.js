@@ -1,11 +1,15 @@
 const KAKAOPAY_BASE_URL = (import.meta.env.VITE_KAKAOPAY_API_BASE || "/api/kakaopay").replace(/\/$/, "");
 
-async function postJson(url, payload) {
+async function postJson(url, payload, options = {}) {
+  const accessToken = String(options?.accessToken || "").trim();
+  const headers = { "Content-Type": "application/json" };
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+
   let response;
   try {
     response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(payload),
     });
   } catch (err) {
@@ -28,10 +32,10 @@ async function postJson(url, payload) {
   return data;
 }
 
-export function requestKakaoPayReady(payload) {
-  return postJson(`${KAKAOPAY_BASE_URL}/ready`, payload);
+export function requestKakaoPayReady(payload, options = {}) {
+  return postJson(`${KAKAOPAY_BASE_URL}/ready`, payload, options);
 }
 
-export function approveKakaoPay(payload) {
-  return postJson(`${KAKAOPAY_BASE_URL}/approve`, payload);
+export function approveKakaoPay(payload, options = {}) {
+  return postJson(`${KAKAOPAY_BASE_URL}/approve`, payload, options);
 }

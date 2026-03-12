@@ -36,8 +36,15 @@ import {
   extractChapterRangesFromToc,
   extractPdfTextFromPages,
   extractPdfPageTexts,
-  generatePdfThumbnail,
 } from "./utils/pdf";
+import {
+  detectSupportedDocumentKind,
+  extractDocumentText,
+  generateDocumentThumbnail,
+  isPdfDocumentKind,
+  isSupportedUploadFile,
+  normalizeSupportedDocumentFile,
+} from "./utils/document";
 import { exportMockAnswerSheetToPdf, exportPagedElementToPdf } from "./utils/pdfExport";
 import {
   PDF_MAX_SIZE_BY_TIER,
@@ -80,6 +87,7 @@ import {
   collectQuestionTextsFromOxItems,
   collectQuestionTextsFromMockExams,
   createQuestionKeySet,
+  isLowValueStudyPrompt,
   pushUniqueByQuestionKey,
   pickRandomUniqueByQuestionKey,
 } from "./utils/questionDedupe";
@@ -144,6 +152,7 @@ const INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY = "__instructor_emphasis_library_
 const INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY = "__instructor_emphasis_active_id_v1";
 const LEGACY_HIGHLIGHTS_WRAP_KEY = "__legacy_highlights_payload_v1";
 const INSTRUCTOR_EMPHASIS_MAX_LENGTH = 2000;
+const MOJIBAKE_COMPAT_CHAR_RE = /[\uF900-\uFAFF]/;
 
 function normalizeInstructorEmphasisInput(value) {
   const normalized = String(value || "")
@@ -154,6 +163,22 @@ function normalizeInstructorEmphasisInput(value) {
   if (!normalized) return "";
   if (normalized.length <= INSTRUCTOR_EMPHASIS_MAX_LENGTH) return normalized;
   return normalized.slice(0, INSTRUCTOR_EMPHASIS_MAX_LENGTH).trim();
+}
+
+function hasMojibakeText(value) {
+  const text = String(value || "");
+  if (!text) return false;
+  if (text.includes("\uFFFD")) return true;
+  if (MOJIBAKE_COMPAT_CHAR_RE.test(text)) return true;
+  if (/[?]{2,}/.test(text) && /[\u3131-\uD79D]/.test(text)) return true;
+  return false;
+}
+
+function sanitizeUiText(value, fallback = "") {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (!hasMojibakeText(text)) return text;
+  return String(fallback || "").trim();
 }
 
 function shouldOpenAuthOnInitialLoad() {
@@ -781,6 +806,9 @@ function App() {
   const tutorPageTextCacheRef = useRef(new Map()); // docId:page -> { text, ocrUsed }
   const tutorSectionRangeCacheRef = useRef(new Map()); // docId:section:anchor -> range
   const chapterScopeTextCacheRef = useRef(new Map()); // scoped key -> text
+  const extractTextForChapterSelectionRef = useRef(null);
+  const chapterOneStartPageCacheRef = useRef(new Map()); // docId -> chapter 1 start page
+  const questionSourceTextCacheRef = useRef(new Map()); // docId:chapter1 -> source text
   const quizAutoRequestedRef = useRef(false);
   const oxAutoRequestedRef = useRef(false);
   const isDraggingRef = useRef(false);
@@ -796,7 +824,7 @@ function App() {
   const mockExamMenuButtonRef = useRef(null);
   const openAiModulePromiseRef = useRef(null);
   const { user, refreshSession, handleSignOut: authSignOut } = useSupabaseAuth();
-  const { tier, loadingTier, refreshTier } = useUserTier(user);
+  const { tier, tierExpiresAt, tierRemainingDays, loadingTier, refreshTier } = useUserTier(user);
   const isFreeTier = tier === "free";
   const isPremiumTier = tier === "premium";
   const isFolderFeatureEnabled = !isFreeTier;
@@ -818,6 +846,40 @@ function App() {
   const premiumProfileHydratedRef = useRef(false);
   const premiumProfileSyncSignatureRef = useRef("");
   const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
+  const safeStatus = useMemo(() => sanitizeUiText(status, ""), [status]);
+  const safeError = useMemo(() => sanitizeUiText(error, "오류가 발생했습니다."), [error]);
+  const safePageSummaryError = useMemo(
+    () => sanitizeUiText(pageSummaryError, "페이지 요약 처리 중 오류가 발생했습니다."),
+    [pageSummaryError]
+  );
+  const safeChapterRangeError = useMemo(
+    () => sanitizeUiText(chapterRangeError, "챕터 범위를 다시 확인해주세요."),
+    [chapterRangeError]
+  );
+  const safeMockExamStatus = useMemo(
+    () => sanitizeUiText(mockExamStatus, "모의고사 작업이 완료되었습니다."),
+    [mockExamStatus]
+  );
+  const safeMockExamError = useMemo(
+    () => sanitizeUiText(mockExamError, "모의고사 처리 중 오류가 발생했습니다."),
+    [mockExamError]
+  );
+  const safeFlashcardStatus = useMemo(
+    () => sanitizeUiText(flashcardStatus, "플래시카드 작업이 완료되었습니다."),
+    [flashcardStatus]
+  );
+  const safeFlashcardError = useMemo(
+    () => sanitizeUiText(flashcardError, "플래시카드 처리 중 오류가 발생했습니다."),
+    [flashcardError]
+  );
+  const safeTutorError = useMemo(
+    () => sanitizeUiText(tutorError, "튜터 응답 처리 중 오류가 발생했습니다."),
+    [tutorError]
+  );
+  const safeProfilePinError = useMemo(
+    () => sanitizeUiText(profilePinError, "PIN 입력을 다시 확인해주세요."),
+    [profilePinError]
+  );
 
   const computeFileHash = useCallback(async (file) => {
     const buffer = await file.arrayBuffer();
@@ -825,18 +887,7 @@ function App() {
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
   }, []);
-  const normalizePdfFile = useCallback((inputFile) => {
-    if (!(inputFile instanceof File)) return inputFile;
-    const fileType = String(inputFile.type || "").toLowerCase();
-    const fileName = String(inputFile.name || "").toLowerCase();
-    const looksLikePdf = fileType.includes("pdf") || fileName.endsWith(".pdf");
-    if (!looksLikePdf) return inputFile;
-    if (fileType === "application/pdf") return inputFile;
-    return new File([inputFile], inputFile.name, {
-      type: "application/pdf",
-      lastModified: inputFile.lastModified || Date.now(),
-    });
-  }, []);
+  const normalizeSupportedFile = useCallback((inputFile) => normalizeSupportedDocumentFile(inputFile), []);
   const getOpenAiService = useCallback(async () => {
     if (!openAiModulePromiseRef.current) {
       openAiModulePromiseRef.current = import("./services/openai");
@@ -1921,7 +1972,7 @@ function App() {
         for (const item of needs) {
           try {
             const ensured = await ensureFileForItemRef.current(item);
-            const thumb = ensured.thumbnail || (await generatePdfThumbnail(ensured.file));
+            const thumb = ensured.thumbnail || (await generateDocumentThumbnail(ensured.file));
             if (!thumb) continue;
             await updateUploadThumbnail({ id: item.id, thumbnail: thumb });
             setUploadedFiles((prev) =>
@@ -2011,7 +2062,7 @@ function App() {
   const ensureFileForItem = useCallback(
     async (item) => {
       if (item.file) return item;
-      if (!item.path && !item.remotePath) throw new Error("??PDF ??ぉ???ㅽ넗由ъ? 寃쎈줈媛 ?놁뒿?덈떎.");
+      if (!item.path && !item.remotePath) throw new Error("파일 스토리지 경로가 없습니다.");
       const storagePath = item.path || item.remotePath;
 
       // Reuse downloaded file/blob from memory cache when possible
@@ -2075,22 +2126,17 @@ function App() {
 
       if (!blob) {
         if (lastFetchStatus) {
-          throw new Error(`?ㅽ넗由ъ??먯꽌 PDF瑜??대젮諛쏆? 紐삵뻽?듬땲??(?곹깭: ${lastFetchStatus}).`);
+          throw new Error(`스토리지에서 파일을 내려받지 못했습니다. (status: ${lastFetchStatus})`);
         }
-        throw new Error(lastErr?.message || "?ㅽ넗由ъ??먯꽌 PDF瑜??대젮諛쏆? 紐삵뻽?듬땲??");
+        throw new Error(lastErr?.message || "스토리지에서 파일을 내려받지 못했습니다.");
       }
 
       if (headerType.includes("text/html")) {
-        throw new Error("PDF ???HTML???묐떟?섏뿀?듬땲?? ?쒕챸 URL???섎せ?섏뿀嫄곕굹 留뚮즺?섏뿀?????덉뒿?덈떎.");
+        throw new Error("파일 대신 HTML 응답이 내려왔습니다. 서명 URL 또는 경로를 확인해주세요.");
       }
       const name = item.name || item.file?.name || "document.pdf";
-      const blobType = String(blob.type || "").toLowerCase();
-      const resolvedType =
-        blobType.includes("pdf") || name.toLowerCase().endsWith(".pdf")
-          ? "application/pdf"
-          : blob.type || "application/pdf";
-      const fileObj = new File([blob], name, { type: resolvedType });
-      const thumb = await generatePdfThumbnail(fileObj);
+      const fileObj = normalizeSupportedFile(new File([blob], name, { type: blob.type || "" }));
+      const thumb = await generateDocumentThumbnail(fileObj);
       const enriched = {
         ...item,
         file: fileObj,
@@ -2111,7 +2157,7 @@ function App() {
       setUploadedFiles((prev) => prev.map((p) => (p.id === item.id ? enriched : p)));
       return enriched;
     },
-    [setUploadedFiles]
+    [normalizeSupportedFile, setUploadedFiles]
   );
 
   useEffect(() => {
@@ -2134,16 +2180,23 @@ function App() {
         try {
           resolvedItem = await ensureFileForItem(resolvedItem);
         } catch (err) {
-          setError(`PDF ?뚯씪??遺덈윭?ㅼ? 紐삵뻽?듬땲?? ${err.message}`);
+          setError(`파일을 불러오지 못했습니다. ${err.message}`);
           return;
         }
       }
       if (!resolvedItem?.file) return;
 
-      const targetFile = normalizePdfFile(resolvedItem.file);
+      const targetFile = normalizeSupportedFile(resolvedItem.file);
       if (!(targetFile instanceof File)) return;
+      const targetFileKind = detectSupportedDocumentKind(targetFile);
+      if (!targetFileKind) {
+        setError("지원하지 않는 파일 형식입니다. PDF, DOCX, PPTX만 지원합니다.");
+        return;
+      }
       const nextDocId = resolvedItem.id;
-      const savedChapterRangeInput = loadSavedChapterRangeInput(nextDocId);
+      const savedChapterRangeInput = isPdfDocumentKind(targetFileKind)
+        ? loadSavedChapterRangeInput(nextDocId)
+        : "";
 
       if (targetFile !== resolvedItem.file && nextDocId) {
         setUploadedFiles((prev) =>
@@ -2158,7 +2211,9 @@ function App() {
           page: currentPage,
         });
       }
-      const restoredPageProgress = loadPageProgressSnapshot({ docId: nextDocId });
+      const restoredPageProgress = isPdfDocumentKind(targetFileKind)
+        ? loadPageProgressSnapshot({ docId: nextDocId })
+        : { currentPage: 1, visitedPages: [] };
 
       if (pushState && selectedFileId !== nextDocId) {
         window.history.pushState({ view: "detail", fileId: nextDocId }, "", window.location.pathname);
@@ -2167,7 +2222,7 @@ function App() {
       if (pdfUrl) {
         URL.revokeObjectURL(pdfUrl);
       }
-      setPdfUrl(URL.createObjectURL(targetFile));
+      setPdfUrl(isPdfDocumentKind(targetFileKind) ? URL.createObjectURL(targetFile) : null);
       setFile(targetFile);
       setSelectedFileId(nextDocId);
       setPanelTab("summary");
@@ -2195,7 +2250,7 @@ function App() {
         typeof performance !== "undefined" && typeof performance.now === "function"
           ? performance.now()
           : Date.now();
-      setStatus("Extracting PDF text for preview...");
+      setStatus("문서 텍스트 추출 중...");
       setIsLoadingText(true);
       setThumbnailUrl(null);
         setMockExams([]);
@@ -2224,12 +2279,14 @@ function App() {
 
       try {
         const [textResult, thumb, loaded] = await Promise.all([
-          extractPdfText(targetFile, 30, 12000, {
-            useOcr: true,
+          extractDocumentText(targetFile, {
+            pageLimit: 30,
+            maxLength: 12000,
+            useOcr: isPdfDocumentKind(targetFileKind),
             ocrLang: "kor+eng",
             onOcrProgress: (message) => setStatus(message),
           }),
-          generatePdfThumbnail(targetFile),
+          generateDocumentThumbnail(targetFile),
           artifactsPromise,
         ]);
         const { text, pagesUsed, totalPages } = textResult;
@@ -2242,14 +2299,14 @@ function App() {
             ? performance.now()
             : Date.now();
         const elapsedSeconds = Math.max(0, (extractEnd - extractStart) / 1000);
-        setStatus(`Text extraction complete: ${pagesUsed}/${totalPages} pages, ${elapsedSeconds.toFixed(1)}s`);
+        setStatus(`텍스트 추출 완료 (${elapsedSeconds.toFixed(1)}s)`);
         setError("");
         await Promise.all([loadMockExams(nextDocId), loadFlashcards(nextDocId)]);
         if (loaded?.summary) {
           setStatus("Loaded saved summary.");
         }
       } catch (err) {
-        setError(`Failed to process PDF: ${err.message}`);
+        setError(`문서 처리에 실패했습니다: ${err.message}`);
         setExtractedText("");
         setPreviewText("");
         setPageInfo({ used: 0, total: 0 });
@@ -2265,7 +2322,7 @@ function App() {
       loadFlashcards,
       loadMockExams,
       loadPageProgressSnapshot,
-      normalizePdfFile,
+      normalizeSupportedFile,
       pdfUrl,
       savePageProgressSnapshot,
       selectedFileId,
@@ -2290,13 +2347,9 @@ function App() {
         return;
       }
 
-      const invalidTypeFile = files.find((f) => {
-        const fileType = String(f?.type || "").toLowerCase();
-        const fileName = String(f?.name || "").toLowerCase();
-        return fileType !== "application/pdf" && !fileName.endsWith(".pdf");
-      });
+      const invalidTypeFile = files.find((f) => !isSupportedUploadFile(f));
       if (invalidTypeFile) {
-        setError(`PDF ?뚯씪留??낅줈?쒗븷 ???덉뒿?덈떎. (${invalidTypeFile.name})`);
+        setError(`지원 형식은 PDF/DOCX/PPTX 입니다. (${invalidTypeFile.name})`);
         fileInput.value = "";
         return;
       }
@@ -2304,7 +2357,7 @@ function App() {
       const oversizedFile = files.find((f) => f.size > limits.maxPdfSizeBytes);
       if (oversizedFile) {
         setError(
-          `${getTierLabel(tier)} tier allows up to ${formatSizeMB(limits.maxPdfSizeBytes)} per PDF. (${oversizedFile.name}: ${formatSizeMB(oversizedFile.size)})`
+          `${getTierLabel(tier)} tier allows up to ${formatSizeMB(limits.maxPdfSizeBytes)} per file. (${oversizedFile.name}: ${formatSizeMB(oversizedFile.size)})`
         );
         fileInput.value = "";
         return;
@@ -2328,8 +2381,8 @@ function App() {
 
       const withThumbs = await Promise.all(
         files.map(async (rawFile) => {
-          const f = normalizePdfFile(rawFile);
-          const [thumb, hash] = await Promise.all([generatePdfThumbnail(f), computeFileHash(f)]);
+          const f = normalizeSupportedFile(rawFile);
+          const [thumb, hash] = await Promise.all([generateDocumentThumbnail(f), computeFileHash(f)]);
           return {
             id: `${f.name}-${f.lastModified}-${Math.random().toString(16).slice(2)}`,
             file: f,
@@ -2469,7 +2522,7 @@ function App() {
       limits,
       supabase,
       computeFileHash,
-      normalizePdfFile,
+      normalizeSupportedFile,
       isPremiumTier,
       premiumScopeProfileId,
       premiumOwnerProfileId,
@@ -2894,6 +2947,136 @@ function App() {
     "--split-basis": `${splitPercent}%`,
   };
 
+  const resolveChapterOneStartPage = useCallback(async () => {
+    if (!file || !isPdfDocumentKind(detectSupportedDocumentKind(file))) return 1;
+    const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
+    if (!Number.isFinite(totalPages) || totalPages <= 0) return 1;
+
+    const manualRangeRaw = String(chapterRangeInput || "").trim();
+    if (manualRangeRaw) {
+      const parsed = parseChapterRangeSelectionInput(manualRangeRaw, totalPages);
+      if (!parsed.error && Array.isArray(parsed.chapters) && parsed.chapters.length > 0) {
+        const sorted = [...parsed.chapters].sort(
+          (left, right) => (Number(left?.pageStart) || 0) - (Number(right?.pageStart) || 0)
+        );
+        const chapterOne =
+          sorted.find((chapter) => Number.parseInt(chapter?.chapterNumber, 10) === 1) || sorted[0];
+        const start = Number.parseInt(chapterOne?.pageStart, 10);
+        if (Number.isFinite(start) && start > 0) {
+          return Math.min(totalPages, Math.max(1, start));
+        }
+      }
+    }
+
+    const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
+    const cachedStart = Number(chapterOneStartPageCacheRef.current.get(docKey));
+    if (Number.isFinite(cachedStart) && cachedStart > 0) {
+      return Math.min(totalPages, Math.max(1, cachedStart));
+    }
+
+    try {
+      const detected = await extractChapterRangesFromToc(file, {
+        maxScanPages: totalPages ? Math.min(totalPages, 30) : 24,
+      });
+      const chapters = Array.isArray(detected?.chapters) ? detected.chapters : [];
+      if (chapters.length > 0) {
+        const sorted = [...chapters].sort(
+          (left, right) => (Number(left?.pageStart) || 0) - (Number(right?.pageStart) || 0)
+        );
+        const chapterOne =
+          sorted.find((chapter) => Number.parseInt(chapter?.chapterNumber, 10) === 1) || sorted[0];
+        const start = Number.parseInt(chapterOne?.pageStart, 10);
+        if (Number.isFinite(start) && start > 0) {
+          const normalizedStart = Math.min(totalPages, Math.max(1, start));
+          chapterOneStartPageCacheRef.current.set(docKey, normalizedStart);
+          return normalizedStart;
+        }
+      }
+    } catch {
+      // Ignore chapter detection failures and fallback to page 1.
+    }
+
+    chapterOneStartPageCacheRef.current.set(docKey, 1);
+    return 1;
+  }, [chapterRangeInput, file, pageInfo?.total, pageInfo?.used, selectedFileId]);
+
+  const resolveQuestionSourceText = useCallback(
+    async ({ featureLabel, chapterSelectionInput, baseText }) => {
+      const chapterSelectionRaw = String(chapterSelectionInput || "").trim();
+      if (chapterSelectionRaw) {
+        const extractor = extractTextForChapterSelectionRef.current;
+        if (typeof extractor !== "function") {
+          throw new Error("챕터 범위 추출기가 아직 준비되지 않았습니다. 다시 시도해주세요.");
+        }
+        const scoped = await extractor({
+          featureLabel,
+          chapterSelectionInput: chapterSelectionRaw,
+        });
+        return {
+          text: String(scoped?.text || "").trim(),
+          scopeLabel: String(scoped?.scopeLabel || "").trim(),
+        };
+      }
+
+      let sourceText = String(baseText || "").trim();
+      if (!file || !isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+        return { text: sourceText, scopeLabel: "" };
+      }
+
+      const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
+      if (!Number.isFinite(totalPages) || totalPages <= 0) {
+        return { text: sourceText, scopeLabel: "" };
+      }
+
+      const chapterOneStartPage = await resolveChapterOneStartPage();
+      if (!Number.isFinite(chapterOneStartPage) || chapterOneStartPage <= 1) {
+        return { text: sourceText, scopeLabel: "" };
+      }
+
+      const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
+      const cacheKey = `${docKey}:chapter1:${chapterOneStartPage}`;
+      const cachedText = questionSourceTextCacheRef.current.get(cacheKey);
+      if (typeof cachedText === "string" && cachedText.trim().length > 80) {
+        return {
+          text: cachedText,
+          scopeLabel: `chapter 1+ (p.${chapterOneStartPage}~)`,
+        };
+      }
+
+      const pageEnd = Math.min(totalPages, chapterOneStartPage + 119);
+      const pages = [];
+      for (let page = chapterOneStartPage; page <= pageEnd; page += 1) {
+        pages.push(page);
+      }
+      setStatus(`${featureLabel}: 챕터 1 이전 머릿말을 제외하고 텍스트를 준비 중...`);
+
+      let extracted = await extractPdfTextFromPages(file, pages, 52000, {
+        useOcr: false,
+      });
+      let filteredText = String(extracted?.text || "").trim();
+      let filteredApplied = false;
+      if (!filteredText) {
+        extracted = await extractPdfTextFromPages(file, pages, 52000, {
+          useOcr: true,
+          ocrLang: "kor+eng",
+          onOcrProgress: (message) => setStatus(message),
+        });
+        filteredText = String(extracted?.text || "").trim();
+      }
+      if (filteredText) {
+        questionSourceTextCacheRef.current.set(cacheKey, filteredText);
+        sourceText = filteredText;
+        filteredApplied = true;
+      }
+
+      return {
+        text: sourceText,
+        scopeLabel: filteredApplied ? `chapter 1+ (p.${chapterOneStartPage}~)` : "",
+      };
+    },
+    [file, pageInfo?.total, pageInfo?.used, resolveChapterOneStartPage, selectedFileId]
+  );
+
   const requestQuestions = async ({ force = false } = {}) => {
     if (isLoadingQuiz && !force) return;
     if (!file) {
@@ -2909,9 +3092,10 @@ function App() {
       return;
     }
     const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
+    const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
     const instructorEmphasisText = getEffectiveInstructorEmphasisText();
 
-    if (!extractedText && !chapterSelectionRaw) {
+    if (!extractedText && !chapterSelectionRaw && !isPdfSource) {
       setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
       return;
     }
@@ -2921,15 +3105,17 @@ function App() {
     setStatus("퀴즈 세트 생성 중...");
 
     try {
-      let quizSourceText = extractedText;
-      let scopeLabel = "";
-      if (chapterSelectionRaw) {
-        const scoped = await extractTextForChapterSelection({
-          featureLabel: "퀴즈",
-          chapterSelectionInput: chapterSelectionRaw,
-        });
-        quizSourceText = scoped.text;
-        scopeLabel = scoped.scopeLabel;
+      const scopedSource = await resolveQuestionSourceText({
+        featureLabel: "퀴즈",
+        chapterSelectionInput: chapterSelectionRaw,
+        baseText: extractedText,
+      });
+      const quizSourceText = String(scopedSource?.text || "").trim();
+      const scopeLabel = String(scopedSource?.scopeLabel || "").trim();
+      if (!quizSourceText) {
+        throw new Error("챕터 1 이후 텍스트를 찾지 못했습니다. 챕터 범위를 먼저 설정해주세요.");
+      }
+      if (scopeLabel) {
         setStatus(`퀴즈 세트 생성 중... (${scopeLabel})`);
       }
 
@@ -3025,7 +3211,7 @@ function App() {
       return;
     }
     const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
-    if (!extractedText && !chapterSelectionRaw) {
+    if (!extractedText && !chapterSelectionRaw && !isPdfDocumentKind(detectSupportedDocumentKind(file))) {
       setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
       return;
     }
@@ -3110,7 +3296,7 @@ function App() {
         expanded.push({
           id: `${rangeIdBase}-part-${sectionIndex}`,
           chapterNumber: normalizedChapterNumber,
-          chapterTitle: `梨뺥꽣 ${normalizedChapterNumber} (${pageStart}-${pageEnd}p)`,
+          chapterTitle: `챕터 ${normalizedChapterNumber} (${pageStart}-${pageEnd}p)`,
           pagesPerChunk,
           pageStart,
           pageEnd,
@@ -3125,7 +3311,10 @@ function App() {
   const extractTextForChapterSelection = useCallback(
     async ({ featureLabel, chapterSelectionInput }) => {
       if (!file) {
-        throw new Error("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+        throw new Error("먼저 PDF를 열어주세요.");
+      }
+      if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+        throw new Error("챕터/페이지 범위 기능은 PDF에서만 지원됩니다.");
       }
 
       let chapterConfigRaw = String(chapterRangeInput || "").trim();
@@ -3133,7 +3322,7 @@ function App() {
         const totalPages = pageInfo.total || pageInfo.used || 0;
         let autoChapterInput = "";
         try {
-          setStatus(`${featureLabel}: 梨뺥꽣 踰붿쐞瑜??먮룞?쇰줈 李얜뒗 以?..`);
+          setStatus(`${featureLabel}: 챕터 범위를 자동 탐색 중...`);
           const detected = await extractChapterRangesFromToc(file, {
             maxScanPages: totalPages ? Math.min(totalPages, 30) : 24,
           });
@@ -3167,13 +3356,13 @@ function App() {
         }
 
         if (!autoChapterInput) {
-          throw new Error("癒쇱? 梨뺥꽣 踰붿쐞瑜??ㅼ젙?댁＜?몄슂. ?붿빟 ??뿉??梨뺥꽣 踰붿쐞 ?ㅼ젙 ???ㅼ떆 ?쒕룄?댁＜?몄슂.");
+          throw new Error("먼저 챕터 범위를 설정해주세요. 요약 탭의 챕터 범위 설정에서 다시 시도해주세요.");
         }
         chapterConfigRaw = autoChapterInput;
       }
 
       if (!chapterConfigRaw) {
-        throw new Error("癒쇱? 梨뺥꽣 踰붿쐞瑜??ㅼ젙?댁＜?몄슂.");
+        throw new Error("먼저 챕터 범위를 설정해주세요.");
       }
 
       const totalPages = pageInfo.total || pageInfo.used || 0;
@@ -3183,7 +3372,7 @@ function App() {
         throw new Error(parsedChapters.error);
       }
       if (!parsedChapters.chapters.length) {
-        throw new Error("?ㅼ젙??梨뺥꽣 踰붿쐞瑜?李얠? 紐삵뻽?듬땲??");
+        throw new Error("설정된 챕터 범위를 찾지 못했습니다.");
       }
 
       const selected = parseChapterNumberSelectionInput(chapterSelectionInput, parsedChapters.chapters);
@@ -3196,7 +3385,7 @@ function App() {
         selectedNumberSet.has(Number.parseInt(chapter?.chapterNumber, 10))
       );
       if (!targetChapters.length) {
-        throw new Error("?좏깮??梨뺥꽣???대떦?섎뒗 踰붿쐞媛 ?놁뒿?덈떎.");
+        throw new Error("선택한 챕터에 해당하는 범위가 없습니다.");
       }
 
       const normalizedSelection = selectedNumbers.join(",");
@@ -3207,7 +3396,7 @@ function App() {
         return { text: cached, scopeLabel };
       }
 
-      setStatus(`${featureLabel}: 梨뺥꽣 踰붿쐞 ?띿뒪??異붿텧 以?..`);
+      setStatus(`${featureLabel}: 챕터 범위 텍스트 추출 중...`);
       const chapterExtraction = await extractPdfTextByRanges(file, targetChapters, {
         maxLengthPerRange: 14000,
         useOcr: true,
@@ -3217,7 +3406,7 @@ function App() {
       const scopedText = (chapterExtraction?.chapters || [])
         .map((chapter) => {
           const chapterNumber = Number.parseInt(chapter?.chapterNumber, 10);
-          const title = chapterNumber > 0 ? `梨뺥꽣 ${chapterNumber}` : "梨뺥꽣";
+          const title = chapterNumber > 0 ? `챕터 ${chapterNumber}` : "챕터";
           const text = String(chapter?.text || "").trim();
           if (!text) return "";
           return `## ${title}\n${text}`;
@@ -3225,7 +3414,7 @@ function App() {
         .filter(Boolean)
         .join("\n\n");
       if (!scopedText.trim()) {
-        throw new Error("?좏깮??梨뺥꽣 踰붿쐞?먯꽌 ?띿뒪?몃? 異붿텧?섏? 紐삵뻽?듬땲??");
+        throw new Error("선택한 챕터 범위에서 텍스트를 추출하지 못했습니다.");
       }
 
       chapterScopeTextCacheRef.current.set(cacheKey, scopedText);
@@ -3240,26 +3429,35 @@ function App() {
       selectedFileId,
     ]
   );
+  useEffect(() => {
+    extractTextForChapterSelectionRef.current = extractTextForChapterSelection;
+  }, [extractTextForChapterSelection]);
 
-  const requestSummary = async ({ force = false } = {}) => {
-    if (isLoadingSummary || (!force && summaryRequestedRef.current)) return;
+  const requestSummary = async ({ force = false, replaceExisting = true } = {}) => {
+    const hasExistingSummary = Boolean(String(summary || "").trim());
+    const shouldReplaceExisting = replaceExisting && hasExistingSummary;
+    if (isLoadingSummary || (!force && summaryRequestedRef.current && !shouldReplaceExisting)) return;
     const hasManualChapterConfig = Boolean(String(chapterRangeInput || "").trim());
     const instructorEmphasisText = getEffectiveInstructorEmphasisText();
+    const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
     if (!file) {
       setError("먼저 PDF를 열어주세요.");
       return;
     }
-    if (isFreeTier && summary) {
-      setError("무료 플랜에서는 요약을 1회만 생성할 수 있습니다.");
-      return;
-    }
-    if (hasReached("maxSummary")) {
+    if (!force && hasReached("maxSummary") && !shouldReplaceExisting) {
       setError("현재 요금제의 요약 생성 한도에 도달했습니다.");
       return;
     }
     if (!extractedText && !hasManualChapterConfig) {
       setError("추출된 텍스트가 없습니다. 챕터 범위를 입력하거나 PDF 텍스트 추출을 먼저 실행해주세요.");
       return;
+    }
+
+    if (shouldReplaceExisting) {
+      summaryRequestedRef.current = false;
+      setSummary("");
+      setStatus("기존 요약을 지우는 중...");
+      await persistArtifacts({ summary: null });
     }
 
     summaryRequestedRef.current = true;
@@ -3271,6 +3469,9 @@ function App() {
       const chapterConfigRaw = String(chapterRangeInput || "").trim();
       let customChapterSections = null;
       if (chapterConfigRaw) {
+        if (!isPdfSource) {
+          throw new Error("챕터 범위 요약은 PDF에서만 지원됩니다. 챕터 범위를 비우고 다시 시도해주세요.");
+        }
         const totalPages = pageInfo.total || pageInfo.used || 0;
         const parsedChapters = parseChapterRangeSelectionInput(chapterConfigRaw, totalPages);
         if (parsedChapters.error) {
@@ -3318,7 +3519,7 @@ function App() {
 
         if (typeof cachedSummaryText === "string" && cachedSummaryText.length > summarySourceText.length) {
           summarySourceText = cachedSummaryText;
-        } else if (file && summaryCacheKey) {
+        } else if (file && summaryCacheKey && isPdfSource) {
           try {
             setStatus("요약 정확도 향상을 위해 추출 범위를 확장하는 중...");
             const extended = await extractPdfText(file, 80, 50000, { useOcr: false });
@@ -3359,42 +3560,21 @@ function App() {
     }
   };
 
-  const regenerateSummary = async () => {
-    if (isLoadingSummary) return;
-    if (!file) {
-      setError("먼저 PDF를 열어주세요.");
-      return;
-    }
-    summaryRequestedRef.current = false;
-    setSummary("");
-    setPartialSummary("");
-    setPartialSummaryRange("");
-    setError("");
-    setStatus("요약을 초기화하고 다시 생성하는 중...");
-    try {
-      const nextHighlights = writePartialSummaryBundleToHighlights(artifacts?.highlights, {
-        summary: "",
-        range: "",
-        library: savedPartialSummaries,
-      });
-      await persistArtifacts({ summary: null, highlights: nextHighlights });
-    } catch {
-      // Keep generation flow even if artifact cleanup fails.
-    }
-    await requestSummary({ force: true });
-  };
-
   const handleAutoDetectChapterRanges = useCallback(async () => {
     if (isDetectingChapterRanges || isLoadingSummary || isLoadingText) return;
     if (!file) {
-      setChapterRangeError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+      setChapterRangeError("먼저 PDF를 열어주세요.");
+      return;
+    }
+    if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+      setChapterRangeError("목차 자동 감지는 PDF에서만 지원됩니다.");
       return;
     }
 
     setIsDetectingChapterRanges(true);
     setChapterRangeError("");
     setError("");
-    setStatus("紐⑹감?먯꽌 梨뺥꽣 踰붿쐞瑜??먮룞 異붿텧 以?..");
+    setStatus("목차에서 챕터 범위를 자동 추출 중...");
     try {
       const totalPages = Number(pageInfo.total || pageInfo.used || 0);
       const detected = await extractChapterRangesFromToc(file, {
@@ -3404,7 +3584,7 @@ function App() {
       if (chapters.length < 2) {
         throw new Error(
           detected?.error ||
-            "紐⑹감?먯꽌 梨뺥꽣 踰붿쐞瑜?李얠? 紐삵뻽?듬땲?? ?섎룞 ?낅젰(?? 1:1-12)?쇰줈 ?ㅼ젙?댁＜?몄슂."
+            "목차에서 챕터 범위를 찾지 못했습니다. 수동 입력(예: 1:1-12)으로 설정해주세요."
         );
       }
 
@@ -3419,7 +3599,7 @@ function App() {
         .join("\n");
 
       if (!chapterInput) {
-        throw new Error("紐⑹감 異붿텧 寃곌낵媛 鍮꾩뼱 ?덉뒿?덈떎.");
+        throw new Error("목차 추출 결과가 비어 있습니다.");
       }
 
       const limit = totalPages || Number(detected?.totalPages) || 0;
@@ -3429,11 +3609,11 @@ function App() {
       setChapterRangeInput(chapterInput);
       setChapterRangeError("");
       const sourceLabel =
-        detected?.source === "outline" ? "PDF 媛쒖슂(遺곷쭏??" : "?욎そ 紐⑹감 ?섏씠吏";
-      setStatus(`${sourceLabel}?먯꽌 梨뺥꽣 踰붿쐞 ${parsed.chapters.length}媛쒕? ?먮룞 ?ㅼ젙?덉뒿?덈떎.`);
+        detected?.source === "outline" ? "PDF 개요(북마크)" : "앞쪽 목차 페이지";
+      setStatus(`${sourceLabel}에서 챕터 범위 ${parsed.chapters.length}개를 자동 설정했습니다.`);
       setIsChapterRangeOpen(true);
     } catch (err) {
-      setChapterRangeError(err?.message || "紐⑹감 ?먮룞 異붿텧???ㅽ뙣?덉뒿?덈떎.");
+      setChapterRangeError(err?.message || "목차 자동 추출에 실패했습니다.");
       setStatus("");
     } finally {
       setIsDetectingChapterRanges(false);
@@ -3448,9 +3628,13 @@ function App() {
   ]);
 
   const handleConfirmChapterRanges = useCallback(() => {
+    if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+      setChapterRangeError("챕터 범위 설정은 PDF에서만 지원됩니다.");
+      return;
+    }
     const raw = String(chapterRangeInput || "").trim();
     if (!raw) {
-      setChapterRangeError("癒쇱? 梨뺥꽣 踰붿쐞瑜??낅젰?섏꽭??");
+      setChapterRangeError("먼저 챕터 범위를 입력해주세요.");
       return;
     }
     const totalPages = pageInfo.total || pageInfo.used || 0;
@@ -3461,16 +3645,16 @@ function App() {
     }
     const targetDocId = selectedFileId || file?.name || "";
     if (!targetDocId) {
-      setChapterRangeError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+      setChapterRangeError("먼저 PDF를 열어주세요.");
       return;
     }
     persistChapterRangeInput(targetDocId, raw);
     setChapterRangeError("");
-    setStatus(`梨뺥꽣 踰붿쐞瑜???ν뻽?듬땲??(${parsed.chapters.length} sections).`);
+    setStatus(`챕터 범위를 저장했습니다. (${parsed.chapters.length} sections)`);
     setIsChapterRangeOpen(false);
   }, [
     chapterRangeInput,
-    file?.name,
+    file,
     pageInfo.total,
     pageInfo.used,
     persistChapterRangeInput,
@@ -3479,6 +3663,10 @@ function App() {
 
   const handleSummaryByPages = useCallback(async () => {
     if (isPageSummaryLoading || isLoadingSummary) return;
+    if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+      setPageSummaryError("페이지 범위 요약은 PDF에서만 지원됩니다.");
+      return;
+    }
     if (!file || !selectedFileId) {
       setPageSummaryError("PDF를 먼저 열어주세요.");
       return;
@@ -3724,9 +3912,9 @@ function App() {
         pageSelector: ".summary-export-page",
         background: "#ffffff",
       });
-      setStatus("?붿빟 PDF ?대낫?닿린媛 ?꾨즺?섏뿀?듬땲??");
+      setStatus("요약 PDF 내보내기가 완료되었습니다.");
     } catch (err) {
-      setError(`?붿빟 PDF ?대낫?닿린???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+      setError(`요약 PDF 내보내기에 실패했습니다: ${err.message}`);
       setStatus("");
     } finally {
       setIsExportingSummary(false);
@@ -3736,34 +3924,37 @@ function App() {
   const requestOxQuiz = async ({ auto = false, force = false } = {}) => {
     if (isLoadingOx && !force) return;
     if (!file) {
-      setError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+      setError("먼저 PDF를 열어주세요.");
       return;
     }
     if (!force && hasReached("maxOx")) {
-      setError("?꾩옱 ?붽툑?쒖쓽 O/X ?앹꽦 ?쒕룄???꾨떖?덉뒿?덈떎.");
+      setError("현재 요금제의 O/X 생성 한도에 도달했습니다.");
       return;
     }
     const chapterSelectionRaw = String(oxChapterSelectionInput || "").trim();
+    const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
     const instructorEmphasisText = getEffectiveInstructorEmphasisText();
-    if (!extractedText && !chapterSelectionRaw) {
-      setError("異붿텧???띿뒪?멸? ?놁뒿?덈떎. 癒쇱? PDF ?띿뒪??異붿텧???ㅽ뻾?댁＜?몄슂.");
+    if (!extractedText && !chapterSelectionRaw && !isPdfSource) {
+      setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
       return;
     }
     if (auto) oxAutoRequestedRef.current = true;
     setIsLoadingOx(true);
     setError("");
-    setStatus("O/X 臾몄젣 ?앹꽦 以?..");
+    setStatus("O/X 문제 생성 중...");
     try {
-      let oxSourceText = extractedText;
-      let scopeLabel = "";
-      if (chapterSelectionRaw) {
-        const scoped = await extractTextForChapterSelection({
-          featureLabel: "O/X",
-          chapterSelectionInput: chapterSelectionRaw,
-        });
-        oxSourceText = scoped.text;
-        scopeLabel = scoped.scopeLabel;
-        setStatus(`O/X 臾몄젣 ?앹꽦 以?(${scopeLabel})...`);
+      const scopedSource = await resolveQuestionSourceText({
+        featureLabel: "O/X",
+        chapterSelectionInput: chapterSelectionRaw,
+        baseText: extractedText,
+      });
+      const oxSourceText = String(scopedSource?.text || "").trim();
+      const scopeLabel = String(scopedSource?.scopeLabel || "").trim();
+      if (!oxSourceText) {
+        throw new Error("챕터 1 이후 텍스트를 찾지 못했습니다. 챕터 범위를 먼저 설정해주세요.");
+      }
+      if (scopeLabel) {
+        setStatus(`O/X 문제 생성 중... (${scopeLabel})`);
       }
 
       const historicalOxTexts = collectQuestionTextsFromOxItems(oxItems);
@@ -3777,13 +3968,16 @@ function App() {
         avoidStatements: avoidStatementTexts,
       });
       const rawItems = Array.isArray(ox?.items) ? ox.items : [];
+      const qualityRawItems = rawItems.filter(
+        (item) => !isLowValueStudyPrompt(getOxPromptText(item))
+      );
       const items = [];
-      pushUniqueByQuestionKey(items, rawItems, getOxPromptText, seenQuestionKeys, 10);
+      pushUniqueByQuestionKey(items, qualityRawItems, getOxPromptText, seenQuestionKeys, 10);
 
       if (ox?.debug || items.length === 0) {
         setOxItems([]);
         setStatus("");
-        setError("?좏슚??O/X 臾몄젣媛 ?앹꽦?섏? ?딆븯?듬땲??");
+        setError("유효한 O/X 문제가 생성되지 않았습니다.");
         if (ox?.fallback && import.meta.env.DEV) {
           // Keep fallback payload visible in dev tools for debugging.
           // eslint-disable-next-line no-console
@@ -3795,11 +3989,11 @@ function App() {
       setOxItems(items);
       setOxSelections({});
       setOxExplanationOpen({});
-      setStatus(scopeLabel ? `O/X 臾몄젣媛 ?앹꽦?섏뿀?듬땲??(${scopeLabel}).` : "O/X 臾몄젣媛 ?앹꽦?섏뿀?듬땲??");
+      setStatus(scopeLabel ? `O/X 문제가 생성되었습니다. (${scopeLabel})` : "O/X 문제가 생성되었습니다.");
       setUsageCounts((prev) => ({ ...prev, ox: prev.ox + 1 }));
       persistArtifacts({ ox });
     } catch (err) {
-      setError(`O/X 臾몄젣 ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+      setError(`O/X 문제 생성에 실패했습니다: ${err.message}`);
     } finally {
       setIsLoadingOx(false);
     }
@@ -3808,22 +4002,22 @@ function App() {
   const regenerateOxQuiz = async () => {
     if (isLoadingOx) return;
     if (!file) {
-      setError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+      setError("먼저 PDF를 열어주세요.");
       return;
     }
     if (hasReached("maxOx")) {
-      setError("?꾩옱 ?붽툑?쒖쓽 O/X ?앹꽦 ?쒕룄???꾨떖?덉뒿?덈떎.");
+      setError("현재 요금제의 O/X 생성 한도에 도달했습니다.");
       return;
     }
     const chapterSelectionRaw = String(oxChapterSelectionInput || "").trim();
-    if (!extractedText && !chapterSelectionRaw) {
-      setError("異붿텧???띿뒪?멸? ?놁뒿?덈떎. 癒쇱? PDF ?띿뒪??異붿텧???ㅽ뻾?댁＜?몄슂.");
+    if (!extractedText && !chapterSelectionRaw && !isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+      setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
       return;
     }
     oxAutoRequestedRef.current = true;
     setOxItems(null);
       setOxSelections({});
-    setStatus("O/X瑜?珥덇린?뷀븯怨??ㅼ떆 ?앹꽦?섎뒗 以?..");
+    setStatus("O/X를 초기화하고 다시 생성하는 중...");
     setError("");
     await persistArtifacts({ ox: null });
     await requestOxQuiz({ auto: false, force: true });
@@ -4000,6 +4194,10 @@ function App() {
       if (!trimmed || isTutorLoading) return;
       if (!file || !selectedFileId) {
         setTutorError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+        return;
+      }
+      if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+        setTutorError("AI 튜터의 페이지 근거 모드는 PDF에서만 지원됩니다.");
         return;
       }
       if (isLoadingText) {
@@ -4242,24 +4440,24 @@ function App() {
 
     const chapterSelectionRaw = String(mockExamChapterSelectionInput || "").trim();
     const hasChapterScope = Boolean(chapterSelectionRaw);
-    let sourceText = (extractedText || "").trim();
+    const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
+    let sourceText = "";
     let scopeLabel = "";
-    if (!sourceText && !hasChapterScope) {
-      setMockExamError("모의고사를 생성하기에 추출된 텍스트가 부족합니다.");
+    try {
+      const scopedSource = await resolveQuestionSourceText({
+        featureLabel: "모의고사",
+        chapterSelectionInput: chapterSelectionRaw,
+        baseText: extractedText,
+      });
+      sourceText = String(scopedSource?.text || "").trim();
+      scopeLabel = String(scopedSource?.scopeLabel || "").trim();
+    } catch (err) {
+      setMockExamError(String(err?.message || "모의고사 텍스트 추출에 실패했습니다."));
       return;
     }
-    if (hasChapterScope) {
-      try {
-        const scoped = await extractTextForChapterSelection({
-          featureLabel: "모의고사",
-          chapterSelectionInput: chapterSelectionRaw,
-        });
-        sourceText = String(scoped.text || "").trim();
-        scopeLabel = scoped.scopeLabel;
-      } catch (err) {
-        setMockExamError(String(err?.message || "모의고사 챕터 텍스트 추출에 실패했습니다."));
-        return;
-      }
+    if (!sourceText) {
+      setMockExamError("모의고사를 생성하기에 추출된 텍스트가 부족합니다.");
+      return;
     }
     if (sourceText.length < 80) {
       setMockExamError("모의고사를 생성하기에 추출된 텍스트가 부족합니다.");
@@ -4272,14 +4470,19 @@ function App() {
 
     try {
       const ai = await getOpenAiService();
-      let oxPool = Array.isArray(oxItems) ? oxItems : [];
+      let oxPool = (Array.isArray(oxItems) ? oxItems : []).filter(
+        (item) => !isLowValueStudyPrompt(getOxPromptText(item))
+      );
       let quizPool = [];
       const historicalMockTexts = collectQuestionTextsFromMockExams(mockExams);
       const avoidMockQuestionTexts = dedupeQuestionTexts(historicalMockTexts).slice(0, 120);
       const usedMockQuestionKeys = createQuestionKeySet(avoidMockQuestionTexts);
 
-      if (hasChapterScope) {
-        setMockExamStatus(`모의고사 생성 중 (${scopeLabel})...`);
+      const shouldGeneratePoolsFromSource = hasChapterScope || isPdfSource;
+      if (shouldGeneratePoolsFromSource) {
+        if (scopeLabel) {
+          setMockExamStatus(`모의고사 생성 중 (${scopeLabel})...`);
+        }
         const instructorEmphasisText = getEffectiveInstructorEmphasisText();
 
         const [oxResult, quizResult] = await Promise.all([
@@ -4295,7 +4498,9 @@ function App() {
           }),
         ]);
 
-        oxPool = Array.isArray(oxResult?.items) ? oxResult.items : [];
+        oxPool = (Array.isArray(oxResult?.items) ? oxResult.items : []).filter(
+          (item) => !isLowValueStudyPrompt(getOxPromptText(item))
+        );
         const normalizedQuiz = normalizeQuizPayload(quizResult);
         const scopedMultipleChoice = Array.isArray(normalizedQuiz?.multipleChoice)
           ? normalizedQuiz.multipleChoice
@@ -4305,6 +4510,7 @@ function App() {
         scopedMultipleChoice.forEach((question) => {
           const prompt = String(question?.question || "").trim();
           if (!prompt) return;
+          if (isLowValueStudyPrompt(prompt)) return;
           const choices = Array.isArray(question?.choices) ? question.choices : [];
           const explanation = String(question?.explanation || "").trim();
           quizPool.push({
@@ -4322,6 +4528,7 @@ function App() {
         scopedShortAnswers.forEach((item) => {
           const prompt = String(item?.question || "").trim();
           if (!prompt) return;
+          if (isLowValueStudyPrompt(prompt)) return;
           const explanation = String(item?.explanation || "").trim();
           quizPool.push({
             type: "quiz-short",
@@ -4337,6 +4544,7 @@ function App() {
           multipleChoice.forEach((question) => {
             const prompt = String(question?.question || "").trim();
             if (!prompt) return;
+            if (isLowValueStudyPrompt(prompt)) return;
             const choices = Array.isArray(question?.choices) ? question.choices : [];
             const explanation = String(question?.explanation || "").trim();
             quizPool.push({
@@ -4354,6 +4562,7 @@ function App() {
           shortAnswers.forEach((item) => {
             const prompt = String(item?.question || "").trim();
             if (!prompt) return;
+            if (isLowValueStudyPrompt(prompt)) return;
             const explanation = String(item?.explanation || "").trim();
             quizPool.push({
               type: "quiz-short",
@@ -4399,7 +4608,9 @@ function App() {
           count: requestCount,
           avoidQuestions: avoidMockQuestionTexts,
         });
-        const rawHardItems = Array.isArray(hardResult?.items) ? hardResult.items : [];
+        const rawHardItems = (Array.isArray(hardResult?.items) ? hardResult.items : []).filter(
+          (item) => !isLowValueStudyPrompt(String(item?.question || "").trim())
+        );
         pushUniqueByQuestionKey(
           hardItems,
           rawHardItems,
@@ -4511,9 +4722,9 @@ function App() {
     quizSets,
     mockExamChapterSelectionInput,
     selectedFileId,
-    extractTextForChapterSelection,
     getOpenAiService,
     getEffectiveInstructorEmphasisText,
+    resolveQuestionSourceText,
     user,
   ]);
 
@@ -4725,14 +4936,13 @@ function App() {
     partialSummaryRange,
     savedPartialSummaries,
     isSavedPartialSummaryOpen,
-    regenerateSummary,
     setIsPageSummaryOpen,
     setIsSavedPartialSummaryOpen,
     setPageSummaryError,
     isPageSummaryOpen,
     pageSummaryInput,
     setPageSummaryInput,
-    pageSummaryError,
+    pageSummaryError: safePageSummaryError,
     handleSummaryByPages,
     handleSaveCurrentPartialSummary,
     handleLoadSavedPartialSummary,
@@ -4744,15 +4954,15 @@ function App() {
     setIsChapterRangeOpen,
     chapterRangeInput,
     setChapterRangeInput,
-    chapterRangeError,
+    chapterRangeError: safeChapterRangeError,
     setChapterRangeError,
     handleAutoDetectChapterRanges,
     isDetectingChapterRanges,
     handleConfirmChapterRanges,
     handleExportSummaryPdf,
     isExportingSummary,
-    status,
-    error,
+    status: safeStatus,
+    error: safeError,
     summaryRef,
     mockExams,
     mockExamMenuRef,
@@ -4775,8 +4985,8 @@ function App() {
     mockExamPages,
     showMockExamAnswers,
     setShowMockExamAnswers,
-    mockExamStatus,
-    mockExamError,
+    mockExamStatus: safeMockExamStatus,
+    mockExamError: safeMockExamError,
     setActiveMockExamId,
     isLoadingQuiz,
     shortPreview,
@@ -4809,11 +5019,11 @@ function App() {
     setFlashcardChapterSelectionInput,
     isGeneratingFlashcards,
     extractedText,
-    flashcardStatus,
-    flashcardError,
+    flashcardStatus: safeFlashcardStatus,
+    flashcardError: safeFlashcardError,
     tutorMessages,
     isTutorLoading,
-    tutorError,
+    tutorError: safeTutorError,
     tutorNotice,
     handleSendTutorMessage,
     handleResetTutor,
@@ -4860,6 +5070,8 @@ function App() {
           <PaymentPage
             onClose={() => setShowPayment(false)}
             currentTier={tier}
+            currentTierExpiresAt={tierExpiresAt}
+            currentTierRemainingDays={tierRemainingDays}
             theme={theme}
             user={user}
             onTierUpdated={refreshTier}
@@ -4884,7 +5096,7 @@ function App() {
         <div className="fixed inset-0 z-[155] flex items-center justify-center px-4">
           <button
             type="button"
-            aria-label="PIN 蹂寃?李??リ린"
+            aria-label="PIN 변경 창 닫기"
             onClick={handleCloseProfilePinDialog}
             className={`absolute inset-0 ${theme === "light" ? "bg-slate-900/25" : "bg-black/75"} backdrop-blur-[2px]`}
           />
@@ -4898,7 +5110,7 @@ function App() {
           >
             <p className="text-sm font-semibold">{activePremiumProfile.name} PIN 변경</p>
             <p className={`mt-1 text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
-              ?꾩옱 PIN???낅젰?섍퀬 ??4?먮━ PIN???ㅼ젙?댁＜?몄슂.
+              현재 PIN을 입력하고 새 4자리 PIN을 설정해주세요.
             </p>
             <div className="mt-4 space-y-2">
               <input
@@ -4908,7 +5120,7 @@ function App() {
                 maxLength={4}
                 value={profilePinInputs.currentPin}
                 onChange={(event) => handleChangeProfilePinInput("currentPin", event.target.value)}
-                placeholder="?꾩옱 PIN"
+                placeholder="현재 PIN"
                 className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
                   theme === "light" ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
                 }`}
@@ -4920,7 +5132,7 @@ function App() {
                 maxLength={4}
                 value={profilePinInputs.nextPin}
                 onChange={(event) => handleChangeProfilePinInput("nextPin", event.target.value)}
-                placeholder="??PIN"
+                placeholder="새 PIN"
                 className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
                   theme === "light" ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
                 }`}
@@ -4932,13 +5144,13 @@ function App() {
                 maxLength={4}
                 value={profilePinInputs.confirmPin}
                 onChange={(event) => handleChangeProfilePinInput("confirmPin", event.target.value)}
-                placeholder="??PIN ?뺤씤"
+                placeholder="새 PIN 확인"
                 className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
                   theme === "light" ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
                 }`}
               />
             </div>
-            {profilePinError && <p className="mt-2 text-xs text-rose-300">{profilePinError}</p>}
+            {safeProfilePinError && <p className="mt-2 text-xs text-rose-300">{safeProfilePinError}</p>}
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"

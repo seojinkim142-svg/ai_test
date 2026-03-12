@@ -15,16 +15,18 @@ async function loadPdfRuntime() {
   return pdfRuntimePromise;
 }
 
-const TOC_HEADER_RE = /(?:table\s+of\s+contents|contents|목차|차례)/i;
+const TOC_HEADER_RE = /(?:table\s+of\s+contents|contents|\uBAA9\uCC28|\uCC28\uB840)/i;
+const TOC_HEADER_LINE_RE = /^\s*(?:table\s+of\s+contents|contents?|\uBAA9\uCC28|\uCC28\uB840)\s*$/i;
 const CHAPTER_LIKE_TITLE_RE =
-  /(?:^|\s)(?:chapter|chap\.?|ch\.?|part|unit)\s*[0-9ivxlcdm]+|제\s*\d+\s*장|\d+\s*장/i;
+  /(?:^|\s)(?:chapter|chap\.?|ch\.?|part|unit)\s*[0-9ivxlcdm]+|(?:^|\s)(?:\uC81C\s*)?\d+\s*(?:\uC7A5|\uC808)|(?:^|\s)\d+(?:\.\d+){1,3}|^(?:\d{1,3}|[ivxlcdm]{1,8})(?:[.)]|\s+-|\s+)/i;
 
 const SECTION_WORD_STOP_RE =
-  /\b(?:section|sec\.?|appendix|reference|references|index|preface|foreword)\b|부록|참고문헌|찾아보기|서문/i;
+  /\b(?:section|sec\.?|appendix|reference|references|index|preface|foreword)\b|\uBD80\uB85D|\uCC38\uACE0\uBB38\uD5CC|\uCC3E\uC544\uBCF4\uAE30|\uC11C\uBB38/i;
 
 function sanitizeTocTitle(raw) {
   return String(raw || "")
-    .replace(/[·•⋯…]+/g, " ")
+    .replace(/[\u00a0\t]/g, " ")
+    .replace(/[\u2024\u2025\u2026\u00b7\u30fb\u318d\u2022]{2,}/g, " ")
     .replace(/[._-]{3,}/g, " ")
     .replace(/\s+/g, " ")
     .trim();
@@ -48,8 +50,9 @@ function romanToInt(value) {
 function inferChapterNumberFromTitle(title, fallback) {
   const normalized = sanitizeTocTitle(title);
   const arabicMatch =
-    normalized.match(/(?:chapter|chap\.?|ch\.?|part|unit|제)?\s*([0-9]{1,3})\s*(?:장)?/i) ||
-    normalized.match(/^([0-9]{1,3})(?:[.)]|\s|장)/);
+    normalized.match(/(?:chapter|chap\.?|ch\.?|part|unit)\s*([0-9]{1,3})/i) ||
+    normalized.match(/(?:\uC81C\s*)?([0-9]{1,3})\s*(?:\uC7A5|\uC808)/) ||
+    normalized.match(/^([0-9]{1,3})(?:[.)]|\s+-|\s+)/);
   if (arabicMatch) {
     const parsed = Number.parseInt(arabicMatch[1], 10);
     if (Number.isFinite(parsed) && parsed > 0) return parsed;
@@ -68,9 +71,10 @@ function inferChapterNumberFromTitle(title, fallback) {
 function isLikelyChapterTitle(rawTitle) {
   const title = sanitizeTocTitle(rawTitle);
   if (!title || title.length < 3) return false;
+  if (TOC_HEADER_LINE_RE.test(title)) return false;
   if (SECTION_WORD_STOP_RE.test(title)) return false;
   if (CHAPTER_LIKE_TITLE_RE.test(title)) return true;
-  return /^(?:\d{1,3}|[ivxlcdm]{1,8})(?:[.)]|\s+-|\s+)[A-Za-z가-힣]/i.test(title);
+  return /^(?:\d{1,3}|[ivxlcdm]{1,8})(?:[.)]|\s+-|\s+)[A-Za-z\uAC00-\uD7A3]/i.test(title);
 }
 
 function clampPage(value, totalPages) {
@@ -190,18 +194,114 @@ async function extractPageLines(page) {
   return lines;
 }
 
-function parseTocLine(line) {
+const TOC_PAGE_NUMBER_RE = /(\d{1,4})\s*$/;
+const TOC_LEADER_RE = /[.\u2024\u2025\u2026\u00b7\u30fb\u2022_-]{2,}/;
+
+function normalizeParsedTocTitle(rawTitle) {
+  return sanitizeTocTitle(
+    String(rawTitle || "")
+      .replace(/\(\s*(?:p|pp|page)\.?\s*\)$/i, "")
+      .replace(/\b(?:p|pp|page)\.?\s*$/i, "")
+      .replace(/(?:[.\u2024\u2025\u2026\u00b7\u30fb\u2022_-]{2,}|[:\-\u2013\u2014]+)\s*$/g, " ")
+  );
+}
+
+function parseTocLine(line, { allowLooseTitle = false } = {}) {
   const raw = String(line || "").replace(/\s+/g, " ").trim();
-  if (!raw) return null;
-  const matched = raw.match(/^(.*?)(?:\s*[.·•⋯…-]{2,}\s*|\s+)(\d{1,4})$/);
-  if (!matched) return null;
+  if (!raw || TOC_HEADER_LINE_RE.test(raw)) return null;
 
-  const title = sanitizeTocTitle(matched[1]);
-  const listedPage = Number.parseInt(matched[2], 10);
-  if (!title || !Number.isFinite(listedPage) || listedPage <= 0) return null;
-  if (!isLikelyChapterTitle(title)) return null;
+  const pageMatch = raw.match(TOC_PAGE_NUMBER_RE);
+  if (!pageMatch) return null;
 
-  return { title, pageStart: listedPage };
+  const listedPage = Number.parseInt(pageMatch[1], 10);
+  if (!Number.isFinite(listedPage) || listedPage <= 0) return null;
+
+  const rawTitle = raw.slice(0, pageMatch.index).trim();
+  const title = normalizeParsedTocTitle(rawTitle);
+  if (!title || title.length < 2) return null;
+  if (!/[A-Za-z0-9\uAC00-\uD7A3]/.test(title)) return null;
+  if (TOC_HEADER_LINE_RE.test(title)) return null;
+
+  const chapterLike = isLikelyChapterTitle(title);
+  const hasLeaderDots = TOC_LEADER_RE.test(raw);
+
+  if (!allowLooseTitle && !chapterLike) return null;
+  if (allowLooseTitle && !chapterLike && !hasLeaderDots) {
+    const tokens = title.split(/\s+/).filter(Boolean);
+    if (tokens.length < 2) return null;
+  }
+
+  const confidence = (chapterLike ? 2 : 0) + (hasLeaderDots ? 1 : 0);
+  return {
+    title,
+    pageStart: listedPage,
+    chapterLike,
+    hasLeaderDots,
+    confidence,
+  };
+}
+
+function countTocKeywordHits(text) {
+  const raw = String(text || "");
+  if (!raw) return 0;
+
+  let hits = 0;
+  const lower = raw.toLowerCase();
+  if (lower.includes("table of contents")) hits += 2;
+
+  const englishMatches = lower.match(/\bcontents?\b/g);
+  if (englishMatches) hits += Math.min(2, englishMatches.length);
+
+  const koreanMatches = raw.match(/\uBAA9\uCC28|\uCC28\uB840/g);
+  if (koreanMatches) hits += Math.min(3, koreanMatches.length * 2);
+
+  return hits;
+}
+
+function analyzeTocPage(lines, pageText) {
+  const safeLines = Array.isArray(lines) ? lines : [];
+  const keywordHits = countTocKeywordHits(pageText);
+  let headerLineHits = 0;
+  let parsedLineCount = 0;
+  let chapterLikeCount = 0;
+  let leaderLineCount = 0;
+  const parsedLooseEntries = [];
+
+  for (const line of safeLines) {
+    if (TOC_HEADER_LINE_RE.test(String(line || ""))) headerLineHits += 1;
+    const parsedLoose = parseTocLine(line, { allowLooseTitle: true });
+    if (!parsedLoose) continue;
+    parsedLooseEntries.push(parsedLoose);
+    parsedLineCount += 1;
+    if (parsedLoose.chapterLike) chapterLikeCount += 1;
+    if (parsedLoose.hasLeaderDots) leaderLineCount += 1;
+  }
+
+  let score = 0;
+  score += Math.min(6, keywordHits);
+  score += Math.min(4, headerLineHits * 2);
+  score += Math.min(5, parsedLineCount);
+  score += Math.min(4, chapterLikeCount);
+  if (leaderLineCount >= 2) score += 2;
+
+  const looksTocPage =
+    score >= 7 ||
+    (keywordHits >= 2 && parsedLineCount >= 2) ||
+    chapterLikeCount >= 3 ||
+    leaderLineCount >= 3;
+
+  return {
+    signals: {
+      score,
+      keywordHits,
+      headerLineHits,
+      parsedLineCount,
+      chapterLikeCount,
+      leaderLineCount,
+      looksTocPage,
+    },
+    parsedLooseEntries,
+  };
 }
 
 export async function extractPdfText(file, pageLimit = 30, maxLength = 12000, options = {}) {
@@ -304,7 +404,7 @@ export async function extractPdfText(file, pageLimit = 30, maxLength = 12000, op
   }
 
   // OCR fallback for scanned PDFs.
-  notifyOcr("텍스트가 없어 OCR을 시작합니다...");
+  notifyOcr("\uD14D\uC2A4\uD2B8\uAC00 \uC5C6\uC5B4 OCR\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4...");
   const { createWorker } = await import("tesseract.js");
   const worker = await createWorker(ocrLang, 1, {
     logger: (info) => {
@@ -318,7 +418,7 @@ export async function extractPdfText(file, pageLimit = 30, maxLength = 12000, op
   try {
     for (let idx = 1; idx <= pagesToRead; idx += 1) {
       if (ocrLength >= maxLength) break;
-      notifyOcr(`OCR 진행 중... (${idx}/${pagesToRead}페이지)`);
+      notifyOcr(`OCR \uC9C4\uD589 \uC911... (${idx}/${pagesToRead}\uD398\uC774\uC9C0)`);
       const page = await pdf.getPage(idx);
       const canvas = await renderPageToCanvas(page, ocrScale);
       const result = await worker.recognize(canvas);
@@ -439,7 +539,9 @@ export async function extractPdfTextFromPages(file, pageNumbers, maxLength = 120
   }
 
   // OCR fallback for scanned pages.
-  notifyOcr("선택한 페이지에서 텍스트가 없어 OCR을 시작합니다...");
+  notifyOcr(
+    "\uC120\uD0DD\uD55C \uD398\uC774\uC9C0\uC5D0\uC11C \uD14D\uC2A4\uD2B8\uAC00 \uC5C6\uC5B4 OCR\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4..."
+  );
   const { createWorker } = await import("tesseract.js");
   const worker = await createWorker(ocrLang, 1, {
     logger: (info) => {
@@ -455,7 +557,7 @@ export async function extractPdfTextFromPages(file, pageNumbers, maxLength = 120
     for (let idx = 0; idx < normalizedPages.length; idx += 1) {
       if (ocrLength >= resolvedMaxLength) break;
       const pageNumber = normalizedPages[idx];
-      notifyOcr(`OCR 진행 중... (${idx + 1}/${normalizedPages.length}페이지)`);
+      notifyOcr(`OCR \uC9C4\uD589 \uC911... (${idx + 1}/${normalizedPages.length}\uD398\uC774\uC9C0)`);
       const page = await pdf.getPage(pageNumber);
       const canvas = await renderPageToCanvas(page, ocrScale);
       const result = await worker.recognize(canvas);
@@ -529,7 +631,7 @@ export async function extractPdfPageTexts(file, pageNumbers, options = {}) {
   }
 
   if (useOcr && missingPages.length > 0) {
-    notifyOcr("페이지별 OCR을 시작합니다...");
+    notifyOcr("\uD398\uC774\uC9C0\uBCC4 OCR\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4...");
     const { createWorker } = await import("tesseract.js");
     const worker = await createWorker(ocrLang, 1, {
       logger: (info) => {
@@ -542,7 +644,7 @@ export async function extractPdfPageTexts(file, pageNumbers, options = {}) {
     try {
       for (let idx = 0; idx < missingPages.length; idx += 1) {
         const pageNumber = missingPages[idx];
-        notifyOcr(`OCR 진행 중... (${idx + 1}/${missingPages.length}페이지)`);
+        notifyOcr(`OCR \uC9C4\uD589 \uC911... (${idx + 1}/${missingPages.length}\uD398\uC774\uC9C0)`);
         const page = await pdf.getPage(pageNumber);
         const canvas = await renderPageToCanvas(page, ocrScale);
         const result = await worker.recognize(canvas);
@@ -651,7 +753,7 @@ export async function extractPdfTextByRanges(
     return { totalPages, chapters };
   }
 
-  notifyOcr("선택 챕터 텍스트가 없어 OCR을 시작합니다...");
+  notifyOcr("\uC120\uD0DD \uCC55\uD130 \uD14D\uC2A4\uD2B8\uAC00 \uC5C6\uC5B4 OCR\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4...");
   const { createWorker } = await import("tesseract.js");
   const worker = await createWorker(ocrLang, 1, {
     logger: (info) => {
@@ -684,7 +786,9 @@ export async function extractPdfTextByRanges(
       for (let idx = 0; idx < chapter.pages.length; idx += 1) {
         if (currentLength >= maxLengthPerRange) break;
         const pageNumber = chapter.pages[idx];
-        notifyOcr(`OCR 진행 중... (${chapter.chapterNumber}챕터 ${idx + 1}/${chapter.pages.length}페이지)`);
+        notifyOcr(
+          `OCR \uC9C4\uD589 \uC911... (${chapter.chapterNumber}\uCC55\uD130 ${idx + 1}/${chapter.pages.length}\uD398\uC774\uC9C0)`
+        );
         const text = await getOcrText(pageNumber);
         if (!text) continue;
         chunks.push(text);
@@ -746,16 +850,32 @@ async function extractChapterRangesFromFrontTocPages(pdf, totalPages, maxScanPag
     const page = await pdf.getPage(pageNumber);
     const lines = await extractPageLines(page);
     const pageText = lines.join(" ");
-    if (TOC_HEADER_RE.test(pageText)) {
-      tocWindowUntil = Math.max(tocWindowUntil, pageNumber + 3);
-    }
-    const inTocWindow = pageNumber <= tocWindowUntil;
+    const pageAnalysis = analyzeTocPage(lines, pageText);
+    const pageSignals = pageAnalysis.signals;
 
-    for (const line of lines) {
-      const parsed = parseTocLine(line);
-      if (!parsed) continue;
-      if (!inTocWindow && !CHAPTER_LIKE_TITLE_RE.test(parsed.title)) continue;
-      entries.push(parsed);
+    if (pageSignals.keywordHits > 0 || TOC_HEADER_RE.test(pageText)) {
+      tocWindowUntil = Math.max(tocWindowUntil, pageNumber + 6);
+    } else if (pageSignals.looksTocPage) {
+      tocWindowUntil = Math.max(tocWindowUntil, pageNumber + 2);
+    }
+
+    const inTocWindow = pageNumber <= tocWindowUntil || pageSignals.looksTocPage;
+    const allowLooseTitle = inTocWindow || pageSignals.keywordHits > 0;
+
+    for (const parsed of pageAnalysis.parsedLooseEntries) {
+      if (!allowLooseTitle && !parsed.chapterLike) continue;
+      if (!inTocWindow && !parsed.chapterLike) continue;
+      if (!parsed.chapterLike && !pageSignals.looksTocPage) continue;
+
+      entries.push({
+        title: parsed.title,
+        pageStart: parsed.pageStart,
+        confidence:
+          (parsed.confidence || 0) +
+          (inTocWindow ? 1 : 0) +
+          (pageSignals.keywordHits > 0 ? 2 : 0) +
+          (pageSignals.looksTocPage ? 1 : 0),
+      });
     }
   }
 
@@ -768,7 +888,10 @@ async function extractChapterRangesFromFrontTocPages(pdf, totalPages, maxScanPag
     .filter((entry) => entry.pageStart > 0);
 
   if (normalized.length < 2) return [];
-  return buildChapterRangesFromStarts(normalized, totalPages);
+
+  const highConfidence = normalized.filter((entry) => (entry.confidence || 0) >= 4);
+  const selected = highConfidence.length >= 2 ? highConfidence : normalized;
+  return buildChapterRangesFromStarts(selected, totalPages);
 }
 
 export async function extractChapterRangesFromToc(
@@ -814,11 +937,12 @@ export async function extractChapterRangesFromToc(
     chapters: [],
     totalPages,
     source: null,
-    error: "목차에서 챕터 범위를 찾지 못했습니다. 직접 입력 형식(예: 1:1-12)을 사용해주세요.",
+    error:
+      "\uBAA9\uCC28\uC5D0\uC11C \uCC55\uD130 \uBC94\uC704\uB97C \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uC9C1\uC811 \uC785\uB825 \uD615\uC2DD(\uC608: 1:1-12)\uC744 \uC0AC\uC6A9\uD574\uC8FC\uC138\uC694.",
   };
 }
 
-// 썸네일 생성 속도를 위해 기본 스케일을 낮게 설정하고 WebP로 저장합니다.
+// Lower default scale for faster thumbnail generation and save as WebP.
 export async function generatePdfThumbnail(file, { scale = 0.2, quality = 1.0 } = {}) {
   const pdfjsLib = await loadPdfRuntime();
   const { getDocument } = pdfjsLib;
@@ -838,3 +962,4 @@ export async function generatePdfThumbnail(file, { scale = 0.2, quality = 1.0 } 
   if (webp.startsWith("data:image/webp")) return webp;
   return canvas.toDataURL("image/png");
 }
+

@@ -14,7 +14,7 @@ const TIER_LABEL = {
 const formatUploadLimitText = (tier, maxPdfSizeBytes) => {
   const safeBytes = Number(maxPdfSizeBytes) || 0;
   const sizeLabel = `${Math.max(1, Math.round(safeBytes / MB))}MB`;
-  return `${TIER_LABEL[tier] || "Free"} 요금제: PDF 1개당 최대 ${sizeLabel}`;
+  return `${TIER_LABEL[tier] || "Free"} 요금제: 파일 1개당 최대 ${sizeLabel}`;
 };
 
 const FileUpload = memo(function FileUpload({
@@ -209,7 +209,7 @@ const FileUpload = memo(function FileUpload({
                   handleTriggerFileInput();
                 }}
               >
-                PDF 추가
+                문서 추가
               </button>
               <button
                 type="button"
@@ -309,7 +309,7 @@ const FileUpload = memo(function FileUpload({
                   data-ghost-size="sm"
                   style={{ "--ghost-color": "52, 211, 153" }}
                 >
-                  폴더에 PDF 추가
+                  폴더에 문서 추가
                 </button>
                 <button
                   type="button"

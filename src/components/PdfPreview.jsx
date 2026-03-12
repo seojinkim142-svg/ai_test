@@ -38,6 +38,21 @@ function buildFileSignature(file) {
   return `${name}:${size}:${modified}`;
 }
 
+function getFileExtension(fileName) {
+  const raw = String(fileName || "").trim().toLowerCase();
+  if (!raw) return "";
+  const dotIndex = raw.lastIndexOf(".");
+  if (dotIndex < 0 || dotIndex === raw.length - 1) return "";
+  return raw.slice(dotIndex + 1);
+}
+
+function isPdfLikeFile(file) {
+  if (!file) return false;
+  const fileType = String(file.type || "").trim().toLowerCase();
+  if (fileType.includes("pdf")) return true;
+  return getFileExtension(file.name) === "pdf";
+}
+
 function detectTabletDevice() {
   if (typeof window === "undefined" || typeof navigator === "undefined") return false;
   const ua = String(navigator.userAgent || "");
@@ -76,6 +91,7 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
     () => (file ? buildFileSignature(file) : String(pdfUrl || "")),
     [file, pdfUrl]
   );
+  const canPreviewPdf = useMemo(() => Boolean(pdfUrl) || isPdfLikeFile(file), [file, pdfUrl]);
   const normalizedCurrentPage = normalizePageNumber(currentPage);
   const totalPages = useMemo(() => {
     const fromInfo = Number(pageInfo?.total || pageInfo?.used || 0);
@@ -101,9 +117,11 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
       setPageJumpInput(String(normalizedCurrentPage));
       return;
     }
-    goToPage(parsed);
+    const bounded = Math.min(Math.max(1, parsed), totalPages);
+    goToPage(bounded);
+    setPageJumpInput(String(bounded));
     if (nativeScrollRef.current) nativeScrollRef.current.scrollTop = 0;
-  }, [goToPage, normalizedCurrentPage, pageJumpInput]);
+  }, [goToPage, normalizedCurrentPage, pageJumpInput, totalPages]);
 
   useEffect(() => {
     setPageJumpInput(String(normalizedCurrentPage));
@@ -197,11 +215,21 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
       const touch = event.changedTouches?.[0];
       if (!touch) return;
 
+      const deltaX = touch.clientX - start.x;
+      const deltaY = touch.clientY - start.y;
+      const absX = Math.abs(deltaX);
+      const absY = Math.abs(deltaY);
+      const elapsed = Date.now() - start.time;
+
+      // Horizontal swipe: move pages regardless of in-page scroll location.
+      if (elapsed <= 900 && absX >= 70 && absX > absY * 1.1) {
+        if (deltaX < 0) goToNextPage();
+        else goToPreviousPage();
+        return;
+      }
+
       if (isTabletDevice) {
-        const deltaX = touch.clientX - start.x;
-        const deltaY = touch.clientY - start.y;
         const travel = Math.hypot(deltaX, deltaY);
-        const elapsed = Date.now() - start.time;
         if (travel > 24 || elapsed > 350) return;
 
         const canvas = canvasRef.current;
@@ -220,10 +248,7 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
         return;
       }
 
-      const deltaY = touch.clientY - start.y;
-      const travel = Math.abs(deltaY);
-      const elapsed = Date.now() - start.time;
-      if (travel < 70 || elapsed > 900) return;
+      if (absY < 70 || elapsed > 900) return;
 
       const container = nativeScrollRef.current;
       if (!container) return;
@@ -296,6 +321,7 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
             if (!/^\d*$/.test(next)) return;
             setPageJumpInput(next);
           }}
+          onBlur={handlePageJumpSubmit}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
@@ -310,14 +336,14 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
           onClick={handlePageJumpSubmit}
           className="rounded-full border border-emerald-300/40 px-3 py-1 text-emerald-100"
         >
-          확인
+          이동
         </button>
       </div>
     </div>
   );
 
   useEffect(() => {
-    if (!isNativePlatform) return undefined;
+    if (!isNativePlatform || !canPreviewPdf) return undefined;
     let cancelled = false;
 
     const releaseCurrentDoc = async () => {
@@ -348,7 +374,7 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
         await releaseCurrentDoc();
 
         let source = null;
-        if (file && typeof file.arrayBuffer === "function") {
+        if (isPdfLikeFile(file) && typeof file?.arrayBuffer === "function") {
           source = { data: await file.arrayBuffer() };
         } else if (pdfUrl) {
           source = pdfUrl;
@@ -383,10 +409,10 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
       cancelled = true;
       releaseCurrentDoc();
     };
-  }, [file, isNativePlatform, pdfUrl, sourceKey]);
+  }, [canPreviewPdf, file, isNativePlatform, pdfUrl, sourceKey]);
 
   useEffect(() => {
-    if (!isNativePlatform) return undefined;
+    if (!isNativePlatform || !canPreviewPdf) return undefined;
 
     const doc = pdfDocRef.current;
     const canvas = canvasRef.current;
@@ -466,7 +492,7 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
         renderTaskRef.current = null;
       }
     };
-  }, [currentPage, docVersion, isNativePlatform, onPageChange]);
+  }, [canPreviewPdf, currentPage, docVersion, isNativePlatform, onPageChange]);
 
   if (!pdfUrl && !file) {
     return (
@@ -476,12 +502,22 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
     );
   }
 
+  if (!canPreviewPdf) {
+    const extension = getFileExtension(file?.name);
+    const label = extension ? extension.toUpperCase() : "문서";
+    return (
+      <div className="flex h-full flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-5 text-center text-sm text-slate-300">
+        {label} 파일은 본문 미리보기를 지원하지 않습니다. 요약/퀴즈는 추출 텍스트 기반으로 생성됩니다.
+      </div>
+    );
+  }
+
   if (isNativePlatform) {
     return (
       <div className="relative flex h-full min-h-[72vh] flex-1 overflow-hidden rounded-3xl border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/40 lg:min-h-0">
         <div
           ref={nativeScrollRef}
-          className="h-full w-full overflow-auto p-2 sm:p-3"
+          className="h-full w-full overflow-y-auto overflow-x-hidden p-2 sm:p-3"
           onWheel={handleNativeWheel}
           onTouchStart={handleNativeTouchStart}
           onTouchEnd={handleNativeTouchEnd}
@@ -555,7 +591,6 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
           </a>
         </div>
       )}
-
     </div>
   );
 }

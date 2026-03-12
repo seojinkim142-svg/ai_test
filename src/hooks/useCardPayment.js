@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { confirmNicePayment } from "../services/nicepayments";
-import { setUserTier } from "../services/supabase";
+import { getAccessToken } from "../services/supabase";
 
 const CARD_PAYMENT_STORAGE_KEY = "nicepayments_session";
 const cardPayPlans = {
@@ -103,11 +103,7 @@ export function useCardPayment({
 
     if (cardState === "fail") {
       setPaymentNotice("");
-      setPaymentError(
-        failMessage
-          ? `나이스페이먼츠 결제 실패: ${failMessage}`
-          : "나이스페이먼츠 결제가 실패했습니다."
-      );
+      setPaymentError(failMessage ? `나이스페이 결제 실패: ${failMessage}` : "나이스페이 결제가 실패했습니다.");
       localStorage.removeItem(CARD_PAYMENT_STORAGE_KEY);
       clearUrl();
       return;
@@ -119,7 +115,7 @@ export function useCardPayment({
     }
 
     if (!token || !orderId || !amountParam) {
-      setPaymentError("결제 정보를 찾을 수 없습니다. 다시 시도해 주세요.");
+      setPaymentError("결제 정보를 찾을 수 없습니다. 다시 시도해주세요.");
       clearUrl();
       return;
     }
@@ -135,19 +131,19 @@ export function useCardPayment({
     const storedAmount = Number(stored.amount);
 
     if (!Number.isFinite(amount) || amount <= 0) {
-      setPaymentError("결제 금액이 올바른 형태가 아닙니다. 다시 시도해 주세요.");
+      setPaymentError("결제 금액 정보가 올바르지 않습니다. 다시 시도해주세요.");
       clearUrl();
       return;
     }
 
     if (storedAmount && storedAmount !== amount) {
-      setPaymentError("결제 금액이 일치하지 않습니다. 다시 시도해 주세요.");
+      setPaymentError("결제 금액이 일치하지 않습니다. 다시 시도해주세요.");
       clearUrl();
       return;
     }
 
     if (!user?.id) {
-      setPaymentError("결제 확인에는 로그인 정보가 필요합니다.");
+      setPaymentError("결제 확인에는 로그인이 필요합니다.");
       return;
     }
 
@@ -157,7 +153,12 @@ export function useCardPayment({
 
     (async () => {
       try {
-        const confirmation = await confirmNicePayment({ token });
+        const accessToken = await getAccessToken();
+        if (!accessToken) {
+          throw new Error("결제 확인에는 로그인 세션이 필요합니다.");
+        }
+
+        const confirmation = await confirmNicePayment({ token }, { accessToken });
         const confirmedOrderId = confirmation?.orderId || orderId;
         const confirmedAmount = Number(confirmation?.amount ?? amount);
 
@@ -169,23 +170,12 @@ export function useCardPayment({
           throw new Error("결제 금액이 일치하지 않습니다.");
         }
 
-        let tierError = null;
-        if (stored.tier) {
-          try {
-            await setUserTier({ userId: user.id, tier: stored.tier });
-          } catch (err) {
-            tierError = err;
-          }
+        if (!confirmation?.tierUpdated) {
+          throw new Error(confirmation?.message || "결제는 완료되었지만 요금제 반영에 실패했습니다.");
         }
 
-        if (tierError) {
-          setPaymentError(
-            `결제 확인 완료, 권한 반영 실패: ${tierError?.message || "권한 반영 실패"}`
-          );
-        } else {
-          onTierUpdated?.(stored.tier);
-          setPaymentNotice("결제가 완료되었습니다.");
-        }
+        onTierUpdated?.();
+        setPaymentNotice("결제가 완료되었습니다.");
       } catch (err) {
         setPaymentError(`결제 확인 실패: ${err.message}`);
       } finally {
@@ -200,7 +190,7 @@ export function useCardPayment({
     if (!showCardWidget) return;
     if (!selectedCardPlan) return;
     if (!cardClientId) {
-      setPaymentError("NICEPAYMENTS Client ID가 설정되어 있지 않습니다.");
+      setPaymentError("NICEPAYMENTS Client ID가 설정되지 않았습니다.");
       return;
     }
 
@@ -213,7 +203,7 @@ export function useCardPayment({
       })
       .catch((err) => {
         if (active) {
-          setPaymentError(`나이스페이먼츠 결제 모듈 로드 실패: ${err.message}`);
+          setPaymentError(`나이스페이 SDK 로드 실패: ${err.message}`);
         }
       });
 
@@ -225,19 +215,19 @@ export function useCardPayment({
   const openCardWidget = () => {
     if (!user?.id) {
       setPaymentNotice("");
-      setPaymentError("결제는 로그인 후 진행할 수 있습니다.");
+      setPaymentError("카드 결제에는 로그인이 필요합니다.");
       return;
     }
 
     if (!selectedCardPlan) {
       setPaymentNotice("");
-      setPaymentError("카드 결제는 Pro/Premium 플랜에서만 지원됩니다.");
+      setPaymentError("카드 결제는 Pro/Premium 플랜에서만 지원합니다.");
       return;
     }
 
     if (currentPlan === selectedPlan) {
       setPaymentError("");
-      setPaymentNotice("이미 사용 중인 플랜입니다.");
+      setPaymentNotice("이미 사용 중인 요금제입니다.");
       return;
     }
 
@@ -248,22 +238,22 @@ export function useCardPayment({
 
   const requestCardPayment = () => {
     if (!selectedCardPlan) {
-      setPaymentError("결제 플랜을 선택해 주세요.");
+      setPaymentError("결제할 플랜을 선택해주세요.");
       return;
     }
 
     if (!cardClientId) {
-      setPaymentError("NICEPAYMENTS Client ID가 설정되어 있지 않습니다.");
+      setPaymentError("NICEPAYMENTS Client ID가 설정되지 않았습니다.");
       return;
     }
 
     if (!cardWidgetReady || typeof window === "undefined" || !window.AUTHNICE) {
-      setPaymentError("나이스페이먼츠 결제 준비 중입니다. 잠시 후 다시 시도해 주세요.");
+      setPaymentError("나이스페이 결제 모듈을 준비 중입니다. 잠시 후 다시 시도해주세요.");
       return;
     }
 
     if (!user?.id) {
-      setPaymentError("결제는 로그인 후 진행할 수 있습니다.");
+      setPaymentError("카드 결제에는 로그인이 필요합니다.");
       return;
     }
 
@@ -294,7 +284,6 @@ export function useCardPayment({
       JSON.stringify({
         orderId,
         amount,
-        tier: selectedCardPlan.tier,
         planName: selectedPlan,
       })
     );
@@ -311,12 +300,12 @@ export function useCardPayment({
         buyerEmail: user?.email || "",
         fnError: (err) => {
           const message = err?.errorMsg || err?.message || "결제 요청이 취소되었습니다.";
-          setPaymentError(`나이스페이먼츠 결제 요청 실패: ${message}`);
+          setPaymentError(`나이스페이 결제 요청 실패: ${message}`);
           setCardPaying(false);
         },
       });
     } catch (err) {
-      setPaymentError(err?.message || "나이스페이먼츠 결제 요청을 진행할 수 없습니다.");
+      setPaymentError(err?.message || "나이스페이 결제 요청을 진행할 수 없습니다.");
       setCardPaying(false);
     }
   };
@@ -332,4 +321,3 @@ export function useCardPayment({
     requestCardPayment,
   };
 }
-
