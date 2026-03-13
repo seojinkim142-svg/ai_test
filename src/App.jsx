@@ -1,4 +1,5 @@
 ﻿import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Capacitor } from "@capacitor/core";
 import StartPage from "./pages/StartPage";
 import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
 import { useUserTier } from "./hooks/useUserTier";
@@ -872,6 +873,35 @@ function App() {
   const safeProfilePinError = useMemo(
     () => sanitizeUiText(profilePinError, "PIN 입력을 다시 확인해주세요."),
     [profilePinError]
+  );
+  const isNativePlatform = Capacitor.isNativePlatform();
+  const shouldForceNativeAuthEntry = AUTH_ENABLED && isNativePlatform && authReady && !user;
+  const shouldRenderAuthScreen = AUTH_ENABLED && !user && (showAuth || shouldForceNativeAuthEntry);
+  const canReturnHomeFromAuth = showAuth && !shouldForceNativeAuthEntry;
+  const buildHistoryState = useCallback(
+    (override = null) => {
+      if (override && typeof override === "object") {
+        return { appNav: true, ...override };
+      }
+      if (selectedFileId) {
+        return { appNav: true, view: "detail", fileId: selectedFileId };
+      }
+      return { appNav: true, view: "list" };
+    },
+    [selectedFileId]
+  );
+  const updateHistoryState = useCallback(
+    (mode = "replace", override = null) => {
+      if (typeof window === "undefined" || !window.history) return;
+      const url = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      const nextState = buildHistoryState(override);
+      if (mode === "push") {
+        window.history.pushState(nextState, "", url);
+        return;
+      }
+      window.history.replaceState(nextState, "", url);
+    },
+    [buildHistoryState]
   );
 
   const computeFileHash = useCallback(async (file) => {
@@ -2608,7 +2638,67 @@ function App() {
     resetQuizState();
     setStatus("?낅줈??紐⑸줉?쇰줈 ?뚯븘?붿뒿?덈떎.");
     setSelectedUploadIds([]);
-  }, [currentPage, pdfUrl, savePageProgressSnapshot, selectedFileId, visitedPages]);
+    updateHistoryState("replace", { view: "list" });
+  }, [currentPage, pdfUrl, savePageProgressSnapshot, selectedFileId, updateHistoryState, visitedPages]);
+
+  const consumeOverlayBack = useCallback(() => {
+    if (showPayment) {
+      setShowPayment(false);
+      return true;
+    }
+    if (showProfilePinDialog) {
+      handleCloseProfilePinDialog();
+      return true;
+    }
+    if (isFeedbackDialogOpen) {
+      handleCloseFeedbackDialog();
+      return true;
+    }
+    if (shouldShowPremiumProfilePicker) {
+      handleCloseProfilePicker();
+      return true;
+    }
+    if (isMockExamMenuOpen) {
+      setIsMockExamMenuOpen(false);
+      return true;
+    }
+    if (showMockExamAnswers) {
+      setShowMockExamAnswers(false);
+      return true;
+    }
+    if (isSavedPartialSummaryOpen) {
+      setIsSavedPartialSummaryOpen(false);
+      return true;
+    }
+    if (isPageSummaryOpen) {
+      setIsPageSummaryOpen(false);
+      return true;
+    }
+    if (isChapterRangeOpen) {
+      setIsChapterRangeOpen(false);
+      return true;
+    }
+    if (showAuth) {
+      closeAuth();
+      return true;
+    }
+    return false;
+  }, [
+    closeAuth,
+    handleCloseFeedbackDialog,
+    handleCloseProfilePicker,
+    handleCloseProfilePinDialog,
+    isChapterRangeOpen,
+    isFeedbackDialogOpen,
+    isMockExamMenuOpen,
+    isPageSummaryOpen,
+    isSavedPartialSummaryOpen,
+    shouldShowPremiumProfilePicker,
+    showAuth,
+    showMockExamAnswers,
+    showPayment,
+    showProfilePinDialog,
+  ]);
 
   const uploadedFilesRef = useRef(uploadedFiles);
   const goBackToListRef = useRef(goBackToList);
@@ -2874,10 +2964,21 @@ function App() {
   }, [isResizingSplit, stopSplitDragging]);
 
   useEffect(() => {
-    window.history.replaceState({ view: "list" }, "", window.location.pathname);
+    if (!isNativePlatform || typeof window === "undefined" || !window.history) return;
+    const url = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    window.history.replaceState({ appNav: true, view: "root" }, "", url);
+    window.history.pushState({ appNav: true, view: "list" }, "", url);
+  }, [isNativePlatform]);
 
+  useEffect(() => {
     const handlePopState = (event) => {
       const state = event.state;
+
+      if (isNativePlatform && consumeOverlayBack()) {
+        updateHistoryState("push");
+        return;
+      }
+
       if (state?.view === "detail" && state.fileId) {
         const target = uploadedFilesRef.current.find((f) => f.id === state.fileId);
         if (target) {
@@ -2885,12 +2986,25 @@ function App() {
           return;
         }
       }
-      goBackToListRef.current();
+
+      if (showDetail) {
+        goBackToListRef.current();
+        return;
+      }
+
+      if (isNativePlatform && state?.view === "root") {
+        updateHistoryState("push", { view: "list" });
+        return;
+      }
+
+      if (!isNativePlatform) {
+        goBackToListRef.current();
+      }
     };
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, []);
+  }, [consumeOverlayBack, isNativePlatform, showDetail, updateHistoryState]);
 
   const handleDragStart = useCallback((event) => {
     if (typeof event?.button === "number" && event.button !== 0) return;
@@ -5034,22 +5148,28 @@ function App() {
     handleResetTutor,
   };
 
-  if (AUTH_ENABLED && !user && showAuth) {
+  if (AUTH_ENABLED && isNativePlatform && !authReady) {
+    return <div className="min-h-screen bg-black" />;
+  }
+
+  if (shouldRenderAuthScreen) {
     return (
       <Suspense fallback={<div className="min-h-screen bg-black" />}>
         <LoginBackground theme={theme}>
         <div className="relative z-10 flex min-h-screen flex-col items-center justify-center gap-4 px-4 py-8">
-          <div className="flex w-full max-w-md justify-end">
-            <button
-              type="button"
-              onClick={closeAuth}
-              className="ghost-button text-xs text-slate-200"
-              data-ghost-size="sm"
-              style={{ "--ghost-color": "148, 163, 184" }}
-            >
-              Back to Home
-            </button>
-          </div>
+          {canReturnHomeFromAuth && (
+            <div className="flex w-full max-w-md justify-end">
+              <button
+                type="button"
+                onClick={closeAuth}
+                className="ghost-button text-xs text-slate-200"
+                data-ghost-size="sm"
+                style={{ "--ghost-color": "148, 163, 184" }}
+              >
+                Back to Home
+              </button>
+            </div>
+          )}
           <AuthPanel user={user} onAuth={refreshSession} />
         </div>
         </LoginBackground>

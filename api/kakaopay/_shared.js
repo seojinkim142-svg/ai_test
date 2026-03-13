@@ -5,6 +5,7 @@ const DEFAULT_CID = "TC0ONETIME";
 const DEFAULT_READY_PATH = "/online/v1/payment/ready";
 const DEFAULT_APPROVE_PATH = "/online/v1/payment/approve";
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
+const NATIVE_APP_ORIGINS = new Set(["http://localhost", "https://localhost", "capacitor://localhost"]);
 
 const text = (value) => String(value ?? "").trim();
 const OPEN_API_HOST = "open-api.kakaopay.com";
@@ -108,6 +109,17 @@ const normalizeAllowOrigin = (value) => {
   if (raw === "*") return "*";
   return normalizeOrigin(raw);
 };
+const parseAllowedOrigins = (...values) => {
+  const origins = new Set();
+  values.forEach((value) => {
+    String(value || "")
+      .split(/[,\s]+/)
+      .map((entry) => normalizeAllowOrigin(entry))
+      .filter(Boolean)
+      .forEach((origin) => origins.add(origin));
+  });
+  return origins;
+};
 
 const resolveVercelOrigin = () => {
   const vercelUrl = text(process.env.VERCEL_URL).replace(/^https?:\/\//, "");
@@ -168,9 +180,22 @@ export const getRuntimeConfig = (req) => {
   const approvePath =
     text(process.env.KAKAOPAY_APPROVE_PATH) ||
     (inferredAuthScheme === "KakaoAK" ? "/v1/payment/approve" : DEFAULT_APPROVE_PATH);
-  const fallbackOrigin = normalizeOrigin(resolveVercelOrigin()) || normalizeOrigin(resolveRequestOrigin(req)) || DEFAULT_LOCAL_ORIGIN;
+  const requestOrigin = normalizeOrigin(resolveRequestOrigin(req));
+  const fallbackOrigin = normalizeOrigin(resolveVercelOrigin()) || requestOrigin || DEFAULT_LOCAL_ORIGIN;
   const clientOrigin = normalizeOrigin(process.env.KAKAOPAY_CLIENT_ORIGIN) || fallbackOrigin;
-  const allowOrigin = normalizeAllowOrigin(process.env.KAKAOPAY_ALLOW_ORIGIN) || clientOrigin;
+  const allowedOrigins = parseAllowedOrigins(
+    process.env.KAKAOPAY_ALLOW_ORIGIN,
+    clientOrigin,
+    "http://localhost",
+    "https://localhost",
+    "capacitor://localhost"
+  );
+  const allowOrigin =
+    requestOrigin && (allowedOrigins.has(requestOrigin) || NATIVE_APP_ORIGINS.has(requestOrigin))
+      ? requestOrigin
+      : allowedOrigins.has("*")
+        ? "*"
+        : [...allowedOrigins][0] || clientOrigin;
 
   return {
     secretKey,

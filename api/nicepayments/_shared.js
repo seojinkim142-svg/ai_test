@@ -4,8 +4,31 @@ import crypto from "node:crypto";
 const DEFAULT_API_BASE = "https://sandbox-api.nicepay.co.kr";
 const DEFAULT_LOCAL_ORIGIN = "http://localhost:5173";
 const TOKEN_TTL_MS = 15 * 60 * 1000;
+const NATIVE_APP_ORIGINS = new Set(["http://localhost", "https://localhost", "capacitor://localhost"]);
 
 const text = (value) => String(value ?? "").trim();
+const normalizeOrigin = (value) => {
+  const raw = text(value);
+  if (!raw) return "";
+  if (raw === "*") return "*";
+  try {
+    const parsed = new URL(raw);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return "";
+  }
+};
+const parseAllowedOrigins = (...values) => {
+  const origins = new Set();
+  values.forEach((value) => {
+    String(value || "")
+      .split(/[,\s]+/)
+      .map((entry) => normalizeOrigin(entry))
+      .filter(Boolean)
+      .forEach((origin) => origins.add(origin));
+  });
+  return origins;
+};
 
 const resolveVercelOrigin = () => {
   const vercelUrl = text(process.env.VERCEL_URL).replace(/^https?:\/\//, "");
@@ -54,9 +77,22 @@ export const getRuntimeConfig = (req) => {
   const clientId = text(process.env.NICEPAYMENTS_CLIENT_ID || process.env.NICEPAYMENTS_CLIENT_KEY);
   const secretKey = text(process.env.NICEPAYMENTS_SECRET_KEY);
   const apiBase = text(process.env.NICEPAYMENTS_API_BASE) || DEFAULT_API_BASE;
-  const fallbackOrigin = resolveVercelOrigin() || resolveRequestOrigin(req) || DEFAULT_LOCAL_ORIGIN;
-  const clientOrigin = text(process.env.NICEPAYMENTS_CLIENT_ORIGIN) || fallbackOrigin;
-  const allowOrigin = text(process.env.NICEPAYMENTS_ALLOW_ORIGIN) || clientOrigin;
+  const requestOrigin = normalizeOrigin(resolveRequestOrigin(req));
+  const fallbackOrigin = normalizeOrigin(resolveVercelOrigin()) || requestOrigin || DEFAULT_LOCAL_ORIGIN;
+  const clientOrigin = normalizeOrigin(process.env.NICEPAYMENTS_CLIENT_ORIGIN) || fallbackOrigin;
+  const allowedOrigins = parseAllowedOrigins(
+    process.env.NICEPAYMENTS_ALLOW_ORIGIN,
+    clientOrigin,
+    "http://localhost",
+    "https://localhost",
+    "capacitor://localhost"
+  );
+  const allowOrigin =
+    requestOrigin && (allowedOrigins.has(requestOrigin) || NATIVE_APP_ORIGINS.has(requestOrigin))
+      ? requestOrigin
+      : allowedOrigins.has("*")
+        ? "*"
+        : [...allowedOrigins][0] || clientOrigin;
 
   return {
     clientId,
