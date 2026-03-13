@@ -1,5 +1,4 @@
 ﻿import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Capacitor } from "@capacitor/core";
 import StartPage from "./pages/StartPage";
 import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
 import { useUserTier } from "./hooks/useUserTier";
@@ -179,11 +178,6 @@ function sanitizeUiText(value, fallback = "") {
   if (!text) return "";
   if (!hasMojibakeText(text)) return text;
   return String(fallback || "").trim();
-}
-
-function shouldOpenAuthOnInitialLoad() {
-  if (!AUTH_ENABLED) return false;
-  return true;
 }
 
 function createLocalEntityId(prefix) {
@@ -753,7 +747,7 @@ function App() {
   const [isResizingSplit, setIsResizingSplit] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
-  const [showAuth, setShowAuth] = useState(shouldOpenAuthOnInitialLoad);
+  const [showAuth, setShowAuth] = useState(false);
   const [showGuestIntro, setShowGuestIntro] = useState(() => !AUTH_ENABLED);
   const [currentPage, setCurrentPage] = useState(1);
   const [visitedPages, setVisitedPages] = useState(() => new Set());
@@ -823,7 +817,7 @@ function App() {
   const mockExamMenuRef = useRef(null);
   const mockExamMenuButtonRef = useRef(null);
   const openAiModulePromiseRef = useRef(null);
-  const { user, refreshSession, handleSignOut: authSignOut } = useSupabaseAuth();
+  const { user, authReady, refreshSession, handleSignOut: authSignOut } = useSupabaseAuth();
   const { tier, tierExpiresAt, tierRemainingDays, loadingTier, refreshTier } = useUserTier(user);
   const isFreeTier = tier === "free";
   const isPremiumTier = tier === "premium";
@@ -845,7 +839,6 @@ function App() {
   const [premiumSpaceMode, setPremiumSpaceMode] = useState(PREMIUM_SPACE_MODE_PROFILE);
   const premiumProfileHydratedRef = useRef(false);
   const premiumProfileSyncSignatureRef = useRef("");
-  const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
   const safeStatus = useMemo(() => sanitizeUiText(status, ""), [status]);
   const safeError = useMemo(() => sanitizeUiText(error, "오류가 발생했습니다."), [error]);
   const safePageSummaryError = useMemo(
@@ -938,9 +931,8 @@ function App() {
   }, []);
 
   const closeAuth = useCallback(() => {
-    if (isNativePlatform && !user) return;
     setShowAuth(false);
-  }, [isNativePlatform, user]);
+  }, []);
 
   const openBilling = useCallback(() => {
     setShowPayment(true);
@@ -1725,10 +1717,23 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (AUTH_ENABLED && !user && isNativePlatform) {
-      setShowAuth(true);
-    }
-  }, [isNativePlatform, user]);
+    if (!AUTH_ENABLED || !authReady || user || typeof window === "undefined") return;
+
+    const url = new URL(window.location.href);
+    const authParam = String(url.searchParams.get("auth") || url.searchParams.get("login") || "")
+      .trim()
+      .toLowerCase();
+
+    if (!["1", "true", "yes", "on"].includes(authParam)) return;
+
+    setShowAuth(true);
+    url.searchParams.delete("auth");
+    url.searchParams.delete("login");
+
+    const nextSearch = url.searchParams.toString();
+    const nextUrl = `${url.pathname}${nextSearch ? `?${nextSearch}` : ""}${url.hash}`;
+    window.history.replaceState({}, document.title, nextUrl);
+  }, [authReady, user]);
 
   useEffect(() => {
     if (!isMockExamMenuOpen) return;
@@ -5030,24 +5035,21 @@ function App() {
   };
 
   if (AUTH_ENABLED && !user && showAuth) {
-    const canCloseAuth = !(isNativePlatform && !user);
     return (
       <Suspense fallback={<div className="min-h-screen bg-black" />}>
         <LoginBackground theme={theme}>
         <div className="relative z-10 flex min-h-screen flex-col items-center justify-center gap-4 px-4 py-8">
-          {canCloseAuth && (
-            <div className="flex w-full max-w-md justify-end">
-              <button
-                type="button"
-                onClick={closeAuth}
-                className="ghost-button text-xs text-slate-200"
-                data-ghost-size="sm"
-                style={{ "--ghost-color": "148, 163, 184" }}
-              >
-                Back to Home
-              </button>
-            </div>
-          )}
+          <div className="flex w-full max-w-md justify-end">
+            <button
+              type="button"
+              onClick={closeAuth}
+              className="ghost-button text-xs text-slate-200"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "148, 163, 184" }}
+            >
+              Back to Home
+            </button>
+          </div>
           <AuthPanel user={user} onAuth={refreshSession} />
         </div>
         </LoginBackground>
