@@ -538,8 +538,13 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
       <footer className="border-t border-emerald-300/10 px-6 py-10">
         <div className="mx-auto max-w-7xl text-center text-sm text-emerald-100/65">
           <p className="uppercase tracking-[0.24em] text-emerald-300/75">회사 정보</p>
-          <p className="mt-3">Zeusian</p>
-          <p className="mt-1">사업자 및 문의 정보는 앱 내 고객지원에서 확인하실 수 있습니다.</p>
+          <div className="mt-3 space-y-1 leading-6">
+            <p>상호명: Hestra</p>
+            <p>사업자등록번호: 393-03-03517</p>
+            <p>대표자명: 김서진</p>
+            <p>사업장 주소: 부산광역시 금정구 금강로 335번길 125</p>
+            <p>전화번호: 010-5906-5692</p>
+          </div>
         </div>
       </footer>
     </div>

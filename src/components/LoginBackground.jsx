@@ -14,10 +14,15 @@ function LoginBackground({ children, intensity = 80, theme = "dark" }) {
   const [allowMotion, setAllowMotion] = useState(true);
 
   useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return undefined;
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
     const update = () => setAllowMotion(!media.matches);
     update();
-    media.addEventListener("change", update);
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", update);
+    } else if (typeof media.addListener === "function") {
+      media.addListener(update);
+    }
 
     const animate = () => {
       const { x: tx, y: ty } = targetRef.current;
@@ -42,7 +47,11 @@ function LoginBackground({ children, intensity = 80, theme = "dark" }) {
     rafRef.current = requestAnimationFrame(animate);
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      media.removeEventListener("change", update);
+      if (typeof media.removeEventListener === "function") {
+        media.removeEventListener("change", update);
+      } else if (typeof media.removeListener === "function") {
+        media.removeListener(update);
+      }
     };
   }, []);
 
