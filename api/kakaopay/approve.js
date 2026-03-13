@@ -5,6 +5,7 @@ import {
   parseApiResponse,
   parseRequestBody,
   sendJson,
+  validateKakaoRuntimeConfig,
 } from "./_shared.js";
 import {
   authenticateSupabaseUserFromRequest,
@@ -27,6 +28,12 @@ export default async function handler(req, res) {
 
   if (!secretKey) {
     sendJson(res, 500, { message: "KAKAOPAY_SECRET_KEY (or KAKAOPAY_ADMIN_KEY) is not set." }, allowOrigin);
+    return;
+  }
+
+  const configError = validateKakaoRuntimeConfig({ secretKey, cid, apiBase });
+  if (configError) {
+    sendJson(res, 500, { message: configError }, allowOrigin);
     return;
   }
 

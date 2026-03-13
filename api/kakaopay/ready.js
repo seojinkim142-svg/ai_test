@@ -5,6 +5,8 @@ import {
   parseApiResponse,
   parseRequestBody,
   sendJson,
+  validateKakaoRuntimeConfig,
+  validateKakaoReadyUrls,
 } from "./_shared.js";
 import { authenticateSupabaseUserFromRequest } from "../_shared/tier-sync.js";
 
@@ -33,6 +35,12 @@ export default async function handler(req, res) {
     return;
   }
 
+  const configError = validateKakaoRuntimeConfig({ secretKey, cid, apiBase });
+  if (configError) {
+    sendJson(res, 500, { message: configError }, allowOrigin);
+    return;
+  }
+
   let body;
   try {
     body = await parseRequestBody(req);
@@ -43,7 +51,6 @@ export default async function handler(req, res) {
 
   const amount = normalizePositiveInteger(body?.amount);
   const orderId = String(body?.orderId || "").trim();
-  const userId = String(body?.userId || "").trim();
   const itemName = String(body?.itemName || body?.plan || "KakaoPay Plan").trim() || "KakaoPay Plan";
   const quantity = normalizePositiveInteger(body?.quantity, 1) || 1;
   const vatAmount = normalizePositiveInteger(body?.vatAmount, Math.floor(amount / 11));
@@ -57,16 +64,24 @@ export default async function handler(req, res) {
     return;
   }
 
+  const readyUrlError = validateKakaoReadyUrls({
+    secretKey,
+    apiBase,
+    approvalUrl,
+    cancelUrl,
+    failUrl,
+  });
+  if (readyUrlError) {
+    sendJson(res, 400, { message: readyUrlError }, allowOrigin);
+    return;
+  }
+
   const authResult = await authenticateSupabaseUserFromRequest(req);
   if (!authResult.ok) {
     sendJson(res, authResult.status, { message: authResult.message }, allowOrigin);
     return;
   }
   const authenticatedUserId = authResult.userId;
-  if (userId && userId !== authenticatedUserId) {
-    sendJson(res, 403, { message: "userId does not match authenticated user." }, allowOrigin);
-    return;
-  }
 
   const requestPayload = {
     cid,

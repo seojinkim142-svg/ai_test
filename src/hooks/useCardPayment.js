@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { confirmNicePayment } from "../services/nicepayments";
+import { confirmNicePayment, fetchNicePaymentsConfig } from "../services/nicepayments";
 import { getAccessToken } from "../services/supabase";
+import { resolvePublicAppOrigin } from "../utils/appOrigin";
 
 const CARD_PAYMENT_STORAGE_KEY = "nicepayments_session";
 const cardPayPlans = {
@@ -76,9 +77,18 @@ export function useCardPayment({
   const [cardPaying, setCardPaying] = useState(false);
   const [showCardWidget, setShowCardWidget] = useState(false);
   const [cardWidgetReady, setCardWidgetReady] = useState(false);
+  const [runtimeCardConfig, setRuntimeCardConfig] = useState({
+    clientId: "",
+    returnUrl: "",
+    scriptUrl: "",
+  });
   const handledCardReturnRef = useRef(false);
-  const cardClientId = import.meta.env.VITE_NICEPAYMENTS_CLIENT_ID;
-  const scriptUrl = import.meta.env.VITE_NICEPAYMENTS_JS_URL || DEFAULT_NICEPAYMENTS_SCRIPT;
+  const runtimeConfigRequestedRef = useRef(false);
+  const envCardClientId = String(import.meta.env.VITE_NICEPAYMENTS_CLIENT_ID || "").trim();
+  const envScriptUrl = String(import.meta.env.VITE_NICEPAYMENTS_JS_URL || "").trim() || DEFAULT_NICEPAYMENTS_SCRIPT;
+  const envReturnUrl = String(import.meta.env.VITE_NICEPAYMENTS_RETURN_URL || "").trim();
+  const cardClientId = runtimeCardConfig.clientId || envCardClientId;
+  const scriptUrl = runtimeCardConfig.scriptUrl || envScriptUrl;
 
   const selectedCardPlan = cardPayPlans[selectedPlan];
   const normalizedBillingMonths =
@@ -87,6 +97,25 @@ export function useCardPayment({
       : 1;
   const selectedCardAmount = selectedCardPlan ? selectedCardPlan.baseAmount * normalizedBillingMonths : 0;
   const canPayWithCard = Boolean(selectedCardPlan) && currentPlan !== selectedPlan && !cardPaying;
+
+  useEffect(() => {
+    if (runtimeConfigRequestedRef.current) return;
+
+    runtimeConfigRequestedRef.current = true;
+
+    fetchNicePaymentsConfig()
+      .then((config) => {
+        setRuntimeCardConfig({
+          clientId: String(config?.clientId || "").trim(),
+          returnUrl: String(config?.returnUrl || "").trim(),
+          scriptUrl: String(config?.jsUrl || "").trim(),
+        });
+      })
+      .catch((error) => {
+        runtimeConfigRequestedRef.current = false;
+        console.warn("Failed to load NICEPAYMENTS runtime config:", error);
+      });
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -293,13 +322,14 @@ export function useCardPayment({
       normalizedBillingMonths > 1
         ? `${selectedCardPlan.orderName} x ${normalizedBillingMonths} months`
         : selectedCardPlan.orderName;
-    const fallbackReturnUrl = `${window.location.origin}/api/nicepayments/return`;
-    const configuredReturnUrl = import.meta.env.VITE_NICEPAYMENTS_RETURN_URL;
+    const appOrigin = resolvePublicAppOrigin() || window.location.origin;
+    const fallbackReturnUrl = `${appOrigin}/api/nicepayments/return`;
+    const configuredReturnUrl = envReturnUrl || runtimeCardConfig.returnUrl;
     let returnUrl = fallbackReturnUrl;
 
     if (configuredReturnUrl) {
       try {
-        const parsedReturnUrl = new URL(configuredReturnUrl, window.location.origin);
+        const parsedReturnUrl = new URL(configuredReturnUrl, appOrigin);
         const isLocalhostReturn = ["localhost", "127.0.0.1"].includes(parsedReturnUrl.hostname);
         if (!import.meta.env.PROD || !isLocalhostReturn) {
           returnUrl = parsedReturnUrl.toString();

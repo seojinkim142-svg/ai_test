@@ -26,6 +26,11 @@ const sendJson = (res, status, body) => {
   res.end(JSON.stringify(body));
 };
 
+const sendText = (res, status, body) => {
+  res.writeHead(status, { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" });
+  res.end(body);
+};
+
 const readBody = (req) =>
   new Promise((resolve, reject) => {
     let data = "";
@@ -89,6 +94,30 @@ const handler = async (req, res) => {
   }
 
   const url = new URL(req.url, `http://${req.headers.host}`);
+
+  if (req.method === "POST" && url.pathname === "/api/nicepayments/config") {
+    sendJson(res, 200, {
+      ok: true,
+      clientId: CLIENT_ID || "",
+      returnUrl: `${CLIENT_ORIGIN.replace(/\/$/, "")}/api/nicepayments/return`,
+      jsUrl: process.env.NICEPAYMENTS_JS_URL || "https://pay.nicepay.co.kr/v1/js/",
+    });
+    return;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/nicepayments/return") {
+    sendText(
+      res,
+      200,
+      [
+        "NICEPAYMENTS return endpoint is running.",
+        "This URL is a callback endpoint and expects a POST request from NICEPAYMENTS.",
+        `clientOrigin=${CLIENT_ORIGIN}`,
+        `apiBase=${API_BASE}`,
+      ].join("\n")
+    );
+    return;
+  }
 
   if (req.method === "POST" && url.pathname === "/api/nicepayments/confirm") {
     cleanupPending();

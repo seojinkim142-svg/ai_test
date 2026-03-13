@@ -9,6 +9,7 @@ const SECRET_KEY = process.env.KAKAOPAY_SECRET_KEY;
 const CID = process.env.KAKAOPAY_CID || "TC0ONETIME";
 const API_BASE = process.env.KAKAOPAY_API_BASE || "https://open-api.kakaopay.com";
 const OPEN_API_HOST = "open-api.kakaopay.com";
+const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
 const normalizeOrigin = (value) => {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -24,6 +25,26 @@ const normalizeAllowOrigin = (value) => {
   if (!raw) return "";
   if (raw === "*") return "*";
   return normalizeOrigin(raw);
+};
+const isLocalHostOrigin = (value) => {
+  const origin = normalizeOrigin(value);
+  if (!origin) return false;
+  try {
+    const parsed = new URL(origin);
+    return LOCAL_HOSTNAMES.has(parsed.hostname);
+  } catch {
+    return false;
+  }
+};
+const hasNonHttpsOrigin = (value) => {
+  const origin = normalizeOrigin(value);
+  if (!origin) return false;
+  try {
+    const parsed = new URL(origin);
+    return parsed.protocol !== "https:";
+  } catch {
+    return false;
+  }
 };
 const normalizeAuthScheme = (value) => {
   const normalized = String(value || "").trim().toUpperCase();
@@ -51,6 +72,9 @@ const resolveAuthScheme = (apiBase, secretKey, explicitAuthScheme) => {
   if ((useOpenApi && explicitIsLegacy) || (!useOpenApi && explicitIsOpenApi)) {
     return inferred;
   }
+  if (useOpenApi && explicitIsOpenApi && normalizedExplicit !== inferred) {
+    return inferred;
+  }
   return normalizedExplicit;
 };
 const AUTH_SCHEME = resolveAuthScheme(
@@ -65,6 +89,7 @@ const APPROVE_PATH =
   (AUTH_SCHEME === "KakaoAK" ? "/v1/payment/approve" : "/online/v1/payment/approve");
 const CLIENT_ORIGIN = normalizeOrigin(process.env.KAKAOPAY_CLIENT_ORIGIN) || "http://localhost:5173";
 const ALLOW_ORIGIN = normalizeAllowOrigin(process.env.KAKAOPAY_ALLOW_ORIGIN) || CLIENT_ORIGIN;
+const isProductionOpenApi = String(API_BASE || "").includes(OPEN_API_HOST) && !String(SECRET_KEY || "").startsWith("DEV");
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": ALLOW_ORIGIN,
@@ -153,6 +178,18 @@ const handler = async (req, res) => {
       cancel_url: body.cancelUrl || `${CLIENT_ORIGIN}/?kakaoPay=cancel`,
       fail_url: body.failUrl || `${CLIENT_ORIGIN}/?kakaoPay=fail`,
     };
+    const redirectUrls = [payload.approval_url, payload.cancel_url, payload.fail_url];
+    if (isProductionOpenApi && redirectUrls.some(isLocalHostOrigin)) {
+      sendJson(res, 400, {
+        message:
+          "Production KakaoPay cannot use localhost approval/cancel/fail URLs. Set VITE_PUBLIC_APP_ORIGIN and KAKAOPAY_CLIENT_ORIGIN to your public HTTPS domain and test there.",
+      });
+      return;
+    }
+    if (isProductionOpenApi && redirectUrls.some(hasNonHttpsOrigin)) {
+      sendJson(res, 400, { message: "Production KakaoPay approval/cancel/fail URLs must use HTTPS." });
+      return;
+    }
     const requestOptions = buildRequestOptions(READY_PATH, payload);
 
     try {

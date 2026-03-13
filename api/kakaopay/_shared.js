@@ -4,6 +4,7 @@ const DEFAULT_LOCAL_ORIGIN = "http://localhost:5173";
 const DEFAULT_CID = "TC0ONETIME";
 const DEFAULT_READY_PATH = "/online/v1/payment/ready";
 const DEFAULT_APPROVE_PATH = "/online/v1/payment/approve";
+const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
 
 const text = (value) => String(value ?? "").trim();
 const OPEN_API_HOST = "open-api.kakaopay.com";
@@ -40,7 +41,54 @@ const resolveAuthScheme = ({ apiBase, secretKey, explicitAuthScheme }) => {
   if ((useOpenApi && explicitIsLegacy) || (!useOpenApi && explicitIsOpenApi)) {
     return inferred;
   }
+  if (useOpenApi && explicitIsOpenApi && normalizedExplicit !== inferred) {
+    return inferred;
+  }
   return normalizedExplicit;
+};
+
+export const validateKakaoRuntimeConfig = ({ secretKey, cid, apiBase }) => {
+  const normalizedSecretKey = text(secretKey);
+  const normalizedCid = text(cid);
+  const useOpenApi = String(apiBase || "").includes(OPEN_API_HOST);
+  if (!useOpenApi || !normalizedSecretKey) return "";
+
+  const isDevSecret = normalizedSecretKey.startsWith("DEV");
+  const isDefaultCid = normalizedCid === DEFAULT_CID;
+
+  if (!isDevSecret && isDefaultCid) {
+    return "KAKAOPAY_CID is still set to the test value TC0ONETIME. Set your production CID.";
+  }
+
+  if (isDevSecret && normalizedCid && normalizedCid !== DEFAULT_CID) {
+    return "KAKAOPAY_SECRET_KEY looks like a dev key while KAKAOPAY_CID looks like a production CID.";
+  }
+
+  return "";
+};
+
+const isLocalHostOrigin = (value) => {
+  const origin = normalizeOrigin(value);
+  if (!origin) return false;
+
+  try {
+    const parsed = new URL(origin);
+    return LOCAL_HOSTNAMES.has(parsed.hostname);
+  } catch {
+    return false;
+  }
+};
+
+const hasNonHttpsOrigin = (value) => {
+  const origin = normalizeOrigin(value);
+  if (!origin) return false;
+
+  try {
+    const parsed = new URL(origin);
+    return parsed.protocol !== "https:";
+  } catch {
+    return false;
+  }
 };
 
 const normalizeOrigin = (value) => {
@@ -171,6 +219,23 @@ export const parseRequestBody = async (req) => {
 };
 
 export const makeKakaoApiUrl = (apiBase, path) => `${apiBase.replace(/\/$/, "")}${path}`;
+
+export const validateKakaoReadyUrls = ({ secretKey, apiBase, approvalUrl, cancelUrl, failUrl }) => {
+  const normalizedSecretKey = text(secretKey);
+  const useOpenApi = String(apiBase || "").includes(OPEN_API_HOST);
+  if (!useOpenApi || !normalizedSecretKey || normalizedSecretKey.startsWith("DEV")) return "";
+
+  const urls = [approvalUrl, cancelUrl, failUrl].map((value) => text(value)).filter(Boolean);
+  if (urls.some(isLocalHostOrigin)) {
+    return "Production KakaoPay cannot use localhost approval/cancel/fail URLs. Set VITE_PUBLIC_APP_ORIGIN and KAKAOPAY_CLIENT_ORIGIN to your public HTTPS domain and test there.";
+  }
+
+  if (urls.some(hasNonHttpsOrigin)) {
+    return "Production KakaoPay approval/cancel/fail URLs must use HTTPS.";
+  }
+
+  return "";
+};
 
 export const parseApiResponse = async (response) => {
   const textBody = await response.text();
