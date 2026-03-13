@@ -26,6 +26,23 @@ export default async function handler(req, res) {
     return;
   }
 
+  if (req.method === "GET") {
+    res.writeHead(200, {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+      ...buildCorsHeaders(allowOrigin),
+    });
+    res.end(
+      [
+        "NICEPAYMENTS return endpoint is running.",
+        "This URL is a callback endpoint and expects a POST request from NICEPAYMENTS.",
+        `clientOrigin=${clientOrigin}`,
+        `apiBase=${apiBase}`,
+      ].join("\n")
+    );
+    return;
+  }
+
   if (req.method !== "POST") {
     sendJson(res, 405, { message: "Method not allowed." }, allowOrigin);
     return;

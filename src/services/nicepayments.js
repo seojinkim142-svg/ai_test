@@ -1,6 +1,26 @@
-const NICE_PAYMENTS_BASE_URL = (
-  import.meta.env.VITE_NICEPAYMENTS_API_BASE || "/api/nicepayments"
-).replace(/\/$/, "");
+import { resolvePublicAppOrigin } from "../utils/appOrigin";
+
+const DEFAULT_NICE_PAYMENTS_BASE_PATH = "/api/nicepayments";
+
+const normalizeBaseUrl = (value) => String(value || "").trim().replace(/\/$/, "");
+
+const resolveNicePaymentsBaseUrl = () => {
+  const configuredBase = normalizeBaseUrl(
+    import.meta.env.VITE_NICEPAYMENTS_API_BASE || DEFAULT_NICE_PAYMENTS_BASE_PATH
+  );
+
+  if (!configuredBase) return DEFAULT_NICE_PAYMENTS_BASE_PATH;
+  if (/^https?:\/\//i.test(configuredBase)) return configuredBase;
+
+  const publicOrigin = resolvePublicAppOrigin();
+  if (publicOrigin && configuredBase.startsWith("/")) {
+    return `${publicOrigin}${configuredBase}`;
+  }
+
+  return configuredBase;
+};
+
+const buildNicePaymentsUrl = (path) => `${resolveNicePaymentsBaseUrl()}${path}`;
 
 async function postJson(url, payload, options = {}) {
   const accessToken = String(options?.accessToken || "").trim();
@@ -35,5 +55,9 @@ async function postJson(url, payload, options = {}) {
 }
 
 export function confirmNicePayment(payload, options = {}) {
-  return postJson(`${NICE_PAYMENTS_BASE_URL}/confirm`, payload, options);
+  return postJson(buildNicePaymentsUrl("/confirm"), payload, options);
+}
+
+export function fetchNicePaymentsConfig() {
+  return postJson(buildNicePaymentsUrl("/config"), {});
 }
