@@ -104,6 +104,21 @@ Important:
 - After changing it in Vercel, you must **redeploy** for the change to take effect.
 - Set it for the correct target (`Production` / `Preview` / `Development`) in Vercel.
 
+## Start Flow
+
+The app now uses different first-entry behavior for web and APK builds when auth is enabled.
+
+- Web:
+  - Opens the intro/start page first.
+  - Login opens only after the user presses the start/login action, or when `/?auth=1` is used.
+- Android APK (Capacitor):
+  - Opens the login screen first on app launch.
+  - The intro/start page is not shown before login.
+
+Current implementation notes:
+- Path-based promo pages (`/start`, `/intro`, `/landing`) still render the intro-only page on the web.
+- Native app login-first behavior is handled in `src/App.jsx`.
+
 ## Tier Expiry (Pro/Premium)
 
 Paid tiers are now time-bound using `user_tiers.tier_expires_at`.

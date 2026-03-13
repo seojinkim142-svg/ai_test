@@ -1,6 +1,31 @@
 /* global process, Buffer */
 
 const text = (value) => String(value ?? "").trim();
+const NATIVE_APP_ORIGINS = new Set(["http://localhost", "https://localhost", "capacitor://localhost"]);
+
+const normalizeOrigin = (value) => {
+  const raw = text(value);
+  if (!raw) return "";
+  if (raw === "*") return "*";
+  try {
+    const parsed = new URL(raw);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return "";
+  }
+};
+
+const parseAllowedOrigins = (...values) => {
+  const origins = new Set();
+  values.forEach((value) => {
+    String(value || "")
+      .split(/[,\s]+/)
+      .map((entry) => normalizeOrigin(entry))
+      .filter(Boolean)
+      .forEach((origin) => origins.add(origin));
+  });
+  return origins;
+};
 
 const readRequestStream = (req) =>
   new Promise((resolve, reject) => {
@@ -45,8 +70,25 @@ const resolveRequestOrigin = (req) => {
   return `${protocol}://${resolvedHost}`;
 };
 
-const resolveAllowOrigin = (req) =>
-  text(process.env.OPENAI_ALLOW_ORIGIN || process.env.VITE_PUBLIC_APP_ORIGIN) || resolveRequestOrigin(req) || "*";
+const resolveAllowOrigin = (req) => {
+  const requestOrigin = normalizeOrigin(resolveRequestOrigin(req));
+  const allowedOrigins = parseAllowedOrigins(
+    process.env.OPENAI_ALLOW_ORIGIN,
+    process.env.VITE_PUBLIC_APP_ORIGIN,
+    "http://localhost",
+    "https://localhost",
+    "capacitor://localhost"
+  );
+
+  if (requestOrigin && (allowedOrigins.has(requestOrigin) || NATIVE_APP_ORIGINS.has(requestOrigin))) {
+    return requestOrigin;
+  }
+
+  if (allowedOrigins.has("*")) return "*";
+
+  const firstAllowed = [...allowedOrigins][0];
+  return firstAllowed || requestOrigin || "*";
+};
 
 const buildCorsHeaders = (allowOrigin) => ({
   "Access-Control-Allow-Origin": allowOrigin || "*",
