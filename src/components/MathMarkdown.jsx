@@ -2,12 +2,16 @@ import { useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import "katex/dist/katex.min.css";
+import rehypeMathjax from "rehype-mathjax/svg";
 
 const LATEX_ENV_BLOCK_RE = /\\begin\{([A-Za-z*]+)\}[\s\S]*?\\end\{\1\}/g;
 const BARE_LATEX_INLINE_RE =
   /(^|[\s(])((?:\\(?:frac|dfrac|tfrac|sum|prod|int|sqrt|left|right|cdot|times|to|infty|leq?|geq?|neq?|approx|mathbb|mathbf|mathrm|text|lim|alpha|beta|gamma|delta|theta|lambda|mu|nu|pi|sigma|omega)[^,\n)]{0,260}))/g;
+const BRACKETED_DISPLAY_MATH_RE = /\\\[\s*([\s\S]*?)\s*\\\]/g;
+const BRACKETED_INLINE_MATH_RE = /\\\(\s*([\s\S]*?)\s*\\\)/g;
+
+export const MARKDOWN_MATH_REMARK_PLUGINS = [remarkGfm, remarkMath];
+export const MARKDOWN_MATH_REHYPE_PLUGINS = [rehypeMathjax];
 
 function normalizeLatexSnippet(expr) {
   return String(expr || "")
@@ -56,8 +60,22 @@ function autoFixBrokenDisplayMathLine(line) {
   return working.replace(/\s{2,}/g, " ").trimEnd();
 }
 
+function normalizeBracketMathDelimiters(text) {
+  return String(text || "")
+    .replace(BRACKETED_DISPLAY_MATH_RE, (full, expr) => {
+      const normalized = normalizeLatexSnippet(expr);
+      if (!normalized) return full;
+      return `$$${normalized}$$`;
+    })
+    .replace(BRACKETED_INLINE_MATH_RE, (full, expr) => {
+      const normalized = normalizeLatexSnippet(expr);
+      if (!normalized) return full;
+      return `$${normalized}$`;
+    });
+}
+
 export function normalizeMathMarkdown(rawText) {
-  const source = String(rawText || "").replace(/\r\n/g, "\n").trim();
+  const source = normalizeBracketMathDelimiters(String(rawText || "").replace(/\r\n/g, "\n")).trim();
   if (!source) return "";
 
   const placeholders = [];
@@ -112,8 +130,8 @@ function MathMarkdown({ content, className = "", components }) {
   return (
     <div className={className}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[rehypeKatex]}
+        remarkPlugins={MARKDOWN_MATH_REMARK_PLUGINS}
+        rehypePlugins={MARKDOWN_MATH_REHYPE_PLUGINS}
         components={components || defaultComponents}
       >
         {normalized}

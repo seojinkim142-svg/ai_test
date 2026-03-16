@@ -1,10 +1,10 @@
-﻿import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import "katex/dist/katex.min.css";
-import { normalizeMathMarkdown } from "./MathMarkdown";
+import {
+  MARKDOWN_MATH_REHYPE_PLUGINS,
+  MARKDOWN_MATH_REMARK_PLUGINS,
+  normalizeMathMarkdown,
+} from "./MathMarkdown";
 
 const AUTO_MATH_TOKEN_RE = /(?:\\[a-zA-Z]+|[\^_\u221A\u221E\u2264\u2265\u2260\u2248\u2211\u222B\u220F]|->|\u2192|<=|>=|!=|~=)/;
 const DEFAULT_SECTION_PAGE_CHARS = 2600;
@@ -90,7 +90,6 @@ function normalizeLatexSnippet(expr) {
     .replace(/\\(?:tfrac|dfrac)\s*([0-9])\s*([0-9])/g, (full, a, b) =>
       full.startsWith("\\tfrac") ? `\\tfrac{${a}}{${b}}` : `\\dfrac{${a}}{${b}}`
     )
-    // LLM output often drops \\ before [4pt] in cases rows.
     .replace(/,\s*\[([0-9]+(?:\.[0-9]+)?(?:pt|em|ex))\]\s*/g, " \\\\[$1] ")
     .replace(/\s{2,}/g, " ")
     .trim();
@@ -154,13 +153,11 @@ function autoWrapBareLatexSegments(line, toPlaceholder) {
   output += source.slice(cursor);
   return output;
 }
+
 function sanitizeSummaryForMath(rawSummary) {
   const source = String(rawSummary || "").replace(/\r\n/g, "\n");
   if (!source) return "";
 
-  // Protect math that is already well-formed (including multiline blocks)
-  // before line-by-line normalization to avoid breaking environments like
-  // \begin{cases} ... \end{cases}.
   const globalMathPlaceholders = [];
   const toGlobalMathPlaceholder = (value) => {
     const token = `%%GLOBALMATH${globalMathPlaceholders.length}%%`;
@@ -187,8 +184,6 @@ function sanitizeSummaryForMath(rawSummary) {
         return line;
       }
       if (inCodeFence) return line;
-
-      // Keep inline code untouched.
       if (line.includes("`")) return line;
 
       let working = String(line || "").replace(/\\\$/g, "$");
@@ -199,27 +194,17 @@ function sanitizeSummaryForMath(rawSummary) {
         return token;
       };
 
-      // Protect already-valid math blocks first.
       working = working.replace(/\$\$[\s\S]*?\$\$|\$[^$\n]+\$/g, (match) => toPlaceholder(match));
-
-      // Repair malformed dollar markers left outside valid math segments.
       working = repairBrokenDollarSequences(working);
 
-      // [ ... ] blocks that look like formulas -> block math.
       working = working.replace(/\[\s*([^[\]\n]+?)\s*\]/g, (full, expr) => {
         if (!AUTO_MATH_TOKEN_RE.test(expr)) return full;
         return toPlaceholder(`$$${normalizeMathExpression(expr)}$$`);
       });
 
-      // Wrap common probability/statistics equations with inline math delimiters.
       working = convertFormulaLikeSegments(working, toPlaceholder);
-
-      // Auto-wrap bare LaTeX commands (e.g. \frac, \begin{cases}) in mixed prose lines.
       working = autoWrapBareLatexSegments(working, toPlaceholder);
 
-      // NOTE: keep auto-conversion conservative to avoid malformed $/$$ sequences.
-
-      // Recover both current and legacy placeholder formats.
       return working
         .replace(/%%MATH(\d+)%%/g, (full, idx) => placeholders[Number(idx)] || full)
         .replace(/@@MATH_?(\d+)@@/g, (full, idx) => placeholders[Number(idx)] || full);
@@ -242,8 +227,6 @@ function rebalanceTrailingPages(pages, { maxChars, minTailChars = MIN_TAIL_PAGE_
 
   const mergeLimit = Math.round(maxChars * SOFT_MERGE_LIMIT_RATIO);
 
-  // If the trailing page is too short, merge it back when the previous page
-  // can absorb it without becoming overly dense.
   while (chunks.length > 1) {
     const lastIndex = chunks.length - 1;
     const tail = chunks[lastIndex];
@@ -377,6 +360,7 @@ function SummaryCard({ summary, renderExportPages = false }) {
     [summary]
   );
   const hasSummary = normalizedSummary.length > 0;
+  const [isExpanded, setIsExpanded] = useState(false);
   const summaryKey = useMemo(
     () => `${normalizedSummary.length}:${normalizedSummary.slice(0, 120)}`,
     [normalizedSummary]
@@ -453,6 +437,7 @@ function SummaryCard({ summary, renderExportPages = false }) {
   const currentPage = pages[safePageIndex] || normalizedSummary;
   const canGoPrev = safePageIndex > 0;
   const canGoNext = safePageIndex < totalPages - 1;
+
   const goPrev = useCallback(() => {
     setPageIndexBySummary((prev) => {
       const current = prev[summaryKey] ?? 0;
@@ -462,6 +447,7 @@ function SummaryCard({ summary, renderExportPages = false }) {
       };
     });
   }, [summaryKey]);
+
   const goNext = useCallback(() => {
     setPageIndexBySummary((prev) => {
       const current = prev[summaryKey] ?? 0;
@@ -471,17 +457,20 @@ function SummaryCard({ summary, renderExportPages = false }) {
       };
     });
   }, [summaryKey, totalPages]);
+
   const handleNavPointerDown = useCallback((event, navigate) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
     navigate();
   }, []);
+
   const handleNavClick = useCallback((event, navigate) => {
     event.stopPropagation();
     if (event.detail !== 0) return;
     navigate();
   }, []);
+
   const handleCardKeyDown = useCallback(
     (event) => {
       if (event.key === "ArrowLeft") {
@@ -495,92 +484,199 @@ function SummaryCard({ summary, renderExportPages = false }) {
     [goNext, goPrev]
   );
 
+  useEffect(() => {
+    if (!isExpanded) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleWindowKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsExpanded(false);
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        goPrev();
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        goNext();
+      }
+    };
+
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleWindowKeyDown);
+    };
+  }, [goNext, goPrev, isExpanded]);
+
   if (!hasSummary) return null;
 
+  const renderMarkdownPage = (pageContent, components, tone = "dark") => {
+    const proseClass =
+      tone === "light"
+        ? "summary-prose prose max-w-none space-y-2 text-slate-900 prose-p:leading-relaxed prose-headings:text-slate-900 prose-strong:text-slate-900 prose-a:text-slate-900 caret-transparent"
+        : "summary-prose prose prose-invert max-w-none space-y-2 text-slate-100 prose-p:leading-relaxed prose-headings:text-slate-50 prose-strong:text-slate-50 prose-a:text-slate-50 caret-transparent";
+
+    return (
+      <div className={proseClass}>
+        <ReactMarkdown
+          remarkPlugins={MARKDOWN_MATH_REMARK_PLUGINS}
+          rehypePlugins={MARKDOWN_MATH_REHYPE_PLUGINS}
+          components={components}
+        >
+          {pageContent}
+        </ReactMarkdown>
+      </div>
+    );
+  };
+
   return (
-    <div
-      className="summary-card mt-4 rounded-2xl bg-gradient-to-br from-slate-900/60 via-slate-900/50 to-slate-900/40 p-4 ring-1 ring-white/10 caret-transparent"
-      tabIndex={0}
-      onKeyDown={handleCardKeyDown}
-    >
-      <div className="mb-3 flex items-center justify-between">
-        <p className="text-xs uppercase tracking-[0.2em] text-slate-300">요약</p>
-        <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-slate-100 ring-1 ring-white/20">
-          A4 Bundle {safePageIndex + 1}/{totalPages}
-        </span>
+    <>
+      <div
+        className="summary-card mt-4 rounded-2xl bg-gradient-to-br from-slate-900/60 via-slate-900/50 to-slate-900/40 p-4 ring-1 ring-white/10 caret-transparent"
+        tabIndex={0}
+        onKeyDown={handleCardKeyDown}
+      >
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs uppercase tracking-[0.2em] text-slate-300">요약</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsExpanded(true)}
+              className="ghost-button text-[11px] text-slate-200"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "148, 163, 184" }}
+            >
+              크게 보기
+            </button>
+            <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-slate-100 ring-1 ring-white/20">
+              요약 페이지 {safePageIndex + 1}/{totalPages}
+            </span>
+          </div>
+        </div>
+
+        <div className="relative flex items-center justify-center px-10 md:px-12">
+          <button
+            type="button"
+            onPointerDown={(event) => handleNavPointerDown(event, goPrev)}
+            onClick={(event) => handleNavClick(event, goPrev)}
+            disabled={!canGoPrev}
+            aria-label="이전 요약 페이지"
+            className="ghost-button absolute left-1 top-1/2 z-20 h-8 w-8 -translate-y-1/2 text-xs text-slate-100 pointer-events-auto sm:h-9 sm:w-9"
+            style={{ "--ghost-color": "148, 163, 184", touchAction: "manipulation", padding: 0 }}
+          >
+            {"<"}
+          </button>
+
+          <div className="w-full max-w-[980px]">
+            <div className="mx-auto aspect-[210/297] w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950/45 p-4 shadow-inner shadow-black/30 md:p-6">
+              <div className="show-scrollbar h-full overflow-auto pr-1">
+                {renderMarkdownPage(currentPage, markdownComponents)}
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onPointerDown={(event) => handleNavPointerDown(event, goNext)}
+            onClick={(event) => handleNavClick(event, goNext)}
+            disabled={!canGoNext}
+            aria-label="다음 요약 페이지"
+            className="ghost-button absolute right-1 top-1/2 z-20 h-8 w-8 -translate-y-1/2 text-xs text-slate-100 pointer-events-auto sm:h-9 sm:w-9"
+            style={{ "--ghost-color": "148, 163, 184", touchAction: "manipulation", padding: 0 }}
+          >
+            {">"}
+          </button>
+        </div>
+
+        {renderExportPages && (
+          <div aria-hidden="true" className="pointer-events-none fixed left-[-20000px] top-0 flex flex-col gap-6">
+            {pages.map((page, index) => (
+              <section
+                key={`summary-export-page-${index}`}
+                className="summary-export-page w-[794px] min-h-[1123px] bg-white px-16 py-16"
+              >
+                <div className="mb-5 flex items-center justify-between border-b border-slate-200 pb-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">요약</p>
+                  <span className="text-[11px] font-medium text-slate-500">
+                    페이지 {index + 1} / {totalPages}
+                  </span>
+                </div>
+                {renderMarkdownPage(page, exportMarkdownComponents, "light")}
+              </section>
+            ))}
+          </div>
+        )}
       </div>
 
-      <div className="relative flex items-center justify-center px-10 md:px-12">
-        <button
-          type="button"
-          onPointerDown={(event) => handleNavPointerDown(event, goPrev)}
-          onClick={(event) => handleNavClick(event, goPrev)}
-          disabled={!canGoPrev}
-          aria-label="이전 요약 페이지"
-          className="ghost-button absolute left-1 top-1/2 z-20 h-7 w-7 -translate-y-1/2 text-[11px] text-slate-100 pointer-events-auto sm:h-8 sm:w-8 sm:text-xs"
-          style={{ "--ghost-color": "148, 163, 184", touchAction: "manipulation", padding: 0 }}
+      {isExpanded && (
+        <div
+          className="fixed inset-0 z-[170] bg-slate-950/80 px-3 py-4 backdrop-blur-sm sm:px-5 sm:py-5"
+          role="dialog"
+          aria-modal="true"
+          aria-label="요약 확대 보기"
+          onClick={() => setIsExpanded(false)}
         >
-          {"<"}
-        </button>
-
-        <div className="w-full max-w-[860px]">
-          <div className="mx-auto aspect-[210/297] w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950/45 p-4 shadow-inner shadow-black/30 md:p-6">
-            <div className="show-scrollbar h-full overflow-auto pr-1">
-              <div className="summary-prose prose prose-invert max-w-none space-y-2 text-slate-100 prose-p:leading-relaxed prose-headings:text-slate-50 prose-strong:text-slate-50 prose-a:text-slate-50 caret-transparent">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkMath]}
-                  rehypePlugins={[rehypeKatex]}
-                  components={markdownComponents}
+          <div
+            className="mx-auto flex h-full w-full max-w-[1600px] flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/95 shadow-2xl shadow-black/60"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-6">
+              <div>
+                <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Expanded Summary</p>
+                <p className="mt-1 text-sm text-slate-200">웹과 태블릿에서 더 크게 읽을 수 있는 요약 뷰입니다.</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={goPrev}
+                  disabled={!canGoPrev}
+                  className="ghost-button text-xs text-slate-200"
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": "148, 163, 184" }}
                 >
-                  {currentPage}
-                </ReactMarkdown>
+                  이전
+                </button>
+                <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-slate-100 ring-1 ring-white/20">
+                  {safePageIndex + 1} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={goNext}
+                  disabled={!canGoNext}
+                  className="ghost-button text-xs text-slate-200"
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": "148, 163, 184" }}
+                >
+                  다음
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsExpanded(false)}
+                  className="ghost-button text-xs text-slate-200"
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": "226, 232, 240" }}
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 p-3 sm:p-5 lg:p-6">
+              <div className="show-scrollbar h-full overflow-auto rounded-[1.75rem] border border-white/10 bg-slate-900/50 p-4 sm:p-6 lg:p-8">
+                {renderMarkdownPage(currentPage, markdownComponents)}
               </div>
             </div>
           </div>
         </div>
-
-        <button
-          type="button"
-          onPointerDown={(event) => handleNavPointerDown(event, goNext)}
-          onClick={(event) => handleNavClick(event, goNext)}
-          disabled={!canGoNext}
-          aria-label="다음 요약 페이지"
-          className="ghost-button absolute right-1 top-1/2 z-20 h-7 w-7 -translate-y-1/2 text-[11px] text-slate-100 pointer-events-auto sm:h-8 sm:w-8 sm:text-xs"
-          style={{ "--ghost-color": "148, 163, 184", touchAction: "manipulation", padding: 0 }}
-        >
-          {">"}
-        </button>
-      </div>
-
-      {renderExportPages && (
-        <div aria-hidden="true" className="pointer-events-none fixed left-[-20000px] top-0 flex flex-col gap-6">
-          {pages.map((page, index) => (
-            <section
-              key={`summary-export-page-${index}`}
-              className="summary-export-page w-[794px] min-h-[1123px] bg-white px-16 py-16"
-            >
-              <div className="mb-5 flex items-center justify-between border-b border-slate-200 pb-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">요약</p>
-                <span className="text-[11px] font-medium text-slate-500">
-                  페이지 {index + 1} / {totalPages}
-                </span>
-              </div>
-              <div className="summary-prose prose max-w-none space-y-2 text-slate-900 prose-p:leading-relaxed prose-headings:text-slate-900 prose-strong:text-slate-900 prose-a:text-slate-900 caret-transparent">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm, remarkMath]}
-                  rehypePlugins={[rehypeKatex]}
-                  components={exportMarkdownComponents}
-                >
-                  {page}
-                </ReactMarkdown>
-              </div>
-            </section>
-          ))}
-        </div>
       )}
-    </div>
+    </>
   );
 }
 
 export default SummaryCard;
-

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import "katex/dist/katex.min.css";
 import ActionsPanel from "../components/ActionsPanel";
 import AiTutorPanel from "../components/AiTutorPanel";
 import FlashcardsPanel from "../components/FlashcardsPanel";
+import {
+  MARKDOWN_MATH_REHYPE_PLUGINS,
+  MARKDOWN_MATH_REMARK_PLUGINS,
+  normalizeMathMarkdown,
+} from "../components/MathMarkdown";
 import OxSection from "../components/OxSection";
 import PdfPreview from "../components/PdfPreview";
 import QuizSection from "../components/QuizSection";
@@ -293,14 +294,14 @@ export default function DetailPage({
       if (!normalized) return null;
       return (
         <div
-          className={`summary-prose max-w-none break-words [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto ${className}`}
+          className={`summary-prose max-w-none break-words ${className}`}
         >
           <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkMath]}
-            rehypePlugins={[rehypeKatex]}
+            remarkPlugins={MARKDOWN_MATH_REMARK_PLUGINS}
+            rehypePlugins={MARKDOWN_MATH_REHYPE_PLUGINS}
             components={mockMarkdownComponents}
           >
-            {normalized}
+            {normalizeMathMarkdown(normalized)}
           </ReactMarkdown>
         </div>
       );
@@ -490,7 +491,7 @@ export default function DetailPage({
       className="flex flex-col gap-4 lg:h-[clamp(70vh,calc(100vh-120px),90vh)] lg:flex-row lg:items-stretch lg:gap-0 lg:overflow-hidden"
     >
       <div
-        className="flex flex-col gap-3 lg:h-full lg:flex-[0_0_var(--split-basis)] lg:overflow-y-auto"
+        className="flex flex-col gap-3 lg:h-full lg:min-w-0 lg:flex-[0_0_var(--split-basis)] lg:overflow-y-auto"
         style={splitStyle}
       >
         <PdfPreview
@@ -502,13 +503,26 @@ export default function DetailPage({
         />
       </div>
 
-      <div className="hidden w-2 cursor-col-resize items-stretch justify-center lg:flex">
-        <div
-          className="h-full w-1 rounded-full bg-white/10 transition hover:bg-white/30"
+      <div className="hidden w-5 shrink-0 cursor-col-resize items-stretch justify-center lg:flex xl:w-6">
+        <button
+          type="button"
           onPointerDown={handleDragStart}
           role="separator"
           aria-label="Resize panel"
-        />
+          aria-orientation="vertical"
+          className="group relative flex h-full w-full items-center justify-center bg-transparent outline-none"
+          style={{ touchAction: "none" }}
+        >
+          <span className="pointer-events-none absolute inset-y-2 left-1/2 w-px -translate-x-1/2 rounded-full bg-white/10 transition group-hover:bg-emerald-300/60 group-focus-visible:bg-emerald-300/60" />
+          <span className="pointer-events-none relative z-10 flex h-16 w-4 items-center justify-center rounded-full border border-white/10 bg-slate-950/85 shadow-lg shadow-black/30 transition group-hover:border-emerald-300/40 group-hover:bg-slate-900/95 group-focus-visible:border-emerald-300/50 group-focus-visible:bg-slate-900/95">
+            <span className="grid grid-cols-2 gap-1">
+              <span className="h-1 w-1 rounded-full bg-slate-300/80" />
+              <span className="h-1 w-1 rounded-full bg-slate-300/80" />
+              <span className="h-1 w-1 rounded-full bg-slate-300/80" />
+              <span className="h-1 w-1 rounded-full bg-slate-300/80" />
+            </span>
+          </span>
+        </button>
       </div>
 
         <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
