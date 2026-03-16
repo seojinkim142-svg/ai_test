@@ -99,6 +99,8 @@ export function useCardPayment({
   const canPayWithCard = Boolean(selectedCardPlan) && currentPlan !== selectedPlan && !cardPaying;
 
   useEffect(() => {
+    const hasDirectRuntimeConfig = Boolean(envCardClientId && envReturnUrl);
+    if (hasDirectRuntimeConfig) return;
     if (runtimeConfigRequestedRef.current) return;
 
     runtimeConfigRequestedRef.current = true;
@@ -115,7 +117,7 @@ export function useCardPayment({
         runtimeConfigRequestedRef.current = false;
         console.warn("Failed to load NICEPAYMENTS runtime config:", error);
       });
-  }, []);
+  }, [envCardClientId, envReturnUrl]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
