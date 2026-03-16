@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, memo, useCallback, useEffect, useRef, useState } from "react";
 
 function SummaryIcon({ className = "h-10 w-10" }) {
   return (
@@ -135,12 +135,14 @@ const PLAN_ITEMS = [
     price: "무료",
     description: "가볍게 시작하는 개인 학습",
     features: ["PDF 최대 4개 업로드", "요약/퀴즈/OX 기본 기능", "기본 저장공간 제공"],
+    ctaLabel: "무료 선택",
   },
   {
     name: "프로",
     price: "월 4,900원",
     description: "꾸준히 공부하는 사용자에게 추천",
     features: ["업로드 무제한", "요약/퀴즈/OX/카드 무제한 생성", "우선 처리"],
+    ctaLabel: "프로 선택",
     featured: true,
   },
   {
@@ -148,6 +150,65 @@ const PLAN_ITEMS = [
     price: "월 16,000원",
     description: "최대 4명 동시 공유",
     features: ["공유 스페이스로 함께 학습", "멤버별 학습 흐름 분리", "협업으로 학습 효율 향상"],
+    ctaLabel: "프리미엄 선택",
+  },
+];
+const PLAN_COMPARISON_ROWS = [
+  {
+    label: "추천 대상",
+    values: {
+      무료: "입문",
+      프로: "개인 학습",
+      프리미엄: "공유 학습",
+    },
+  },
+  {
+    label: "월 요금",
+    values: {
+      무료: "무료",
+      프로: "4,900원 / 월",
+      프리미엄: "16,000원 / 월",
+    },
+  },
+  {
+    label: "PDF 업로드",
+    values: {
+      무료: "최대 4개",
+      프로: "업로드 무제한",
+      프리미엄: "업로드 무제한",
+    },
+  },
+  {
+    label: "핵심 기능",
+    values: {
+      무료: "요약 / 퀴즈 / OX 기본",
+      프로: "요약 / 퀴즈 / OX / 카드",
+      프리미엄: "프로 전체 + 공유 학습",
+    },
+  },
+  {
+    label: "학습 공간",
+    values: {
+      무료: "기본 저장 공간",
+      프로: "개인 학습 공간",
+      프리미엄: "공유 워크스페이스",
+    },
+  },
+  {
+    label: "사용 인원",
+    values: {
+      무료: "1명",
+      프로: "1명",
+      프리미엄: "최대 4명",
+    },
+  },
+  {
+    label: "처리 우선순위",
+    values: {
+      무료: "기본",
+      프로: "우선 처리",
+      프리미엄: "우선 처리",
+    },
   },
 ];
 
@@ -517,6 +578,101 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
                 </article>
               );
             })}
+          </div>
+
+          <div className="mt-10 overflow-hidden rounded-[2rem] border border-emerald-300/15 bg-[#06110e]/95 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+            <div className="flex flex-col gap-2 px-6 py-6 md:flex-row md:items-end md:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300/80">Compare</p>
+                <h3 className="mt-2 text-3xl font-bold text-white">구독권 비교</h3>
+              </div>
+              <p className="text-sm text-emerald-100/60">원하는 열을 누르면 위 요금제 카드와 함께 강조됩니다.</p>
+            </div>
+
+            <div className="overflow-x-auto">
+              <div className="grid min-w-[780px] grid-cols-[160px_repeat(3,minmax(0,1fr))] border-t border-emerald-300/10">
+                <div className="bg-white/[0.03] px-4 py-5 text-sm font-semibold text-emerald-50">비교 항목</div>
+                {PLAN_ITEMS.map((plan) => {
+                  const isActive = activePlanName === plan.name;
+
+                  return (
+                    <button
+                      key={`${plan.name}-compare-header`}
+                      type="button"
+                      onClick={() => handlePlanInteract(plan.name)}
+                      className={`flex flex-col items-start gap-1 border-l border-emerald-300/10 px-4 py-5 text-left transition ${
+                        isActive ? "bg-emerald-500/12" : "bg-transparent hover:bg-white/[0.03]"
+                      }`}
+                    >
+                      <span className="text-2xl font-bold text-white">{plan.name}</span>
+                      <span className="text-sm text-emerald-100/65">{plan.description}</span>
+                      <span className="mt-1 text-2xl font-extrabold text-emerald-200">{plan.price}</span>
+                      <span
+                        className={`mt-2 rounded-full px-3 py-1 text-xs font-semibold ${
+                          isActive
+                            ? "bg-emerald-300 text-emerald-950"
+                            : plan.featured
+                              ? "bg-emerald-300/15 text-emerald-200"
+                              : "bg-white/5 text-emerald-50/80"
+                        }`}
+                      >
+                        {isActive ? "선택됨" : plan.featured ? "추천" : "선택 가능"}
+                      </span>
+                    </button>
+                  );
+                })}
+
+                {PLAN_COMPARISON_ROWS.map((row) => (
+                  <Fragment key={row.label}>
+                    <div className="border-t border-emerald-300/10 px-4 py-4 text-sm font-semibold text-emerald-50">
+                      {row.label}
+                    </div>
+                    {PLAN_ITEMS.map((plan) => {
+                      const isActive = activePlanName === plan.name;
+
+                      return (
+                        <div
+                          key={`${row.label}-${plan.name}`}
+                          className={`border-l border-t border-emerald-300/10 px-4 py-4 text-sm leading-6 transition ${
+                            isActive ? "bg-emerald-500/7 text-emerald-50" : "text-emerald-100/78"
+                          }`}
+                        >
+                          {row.values[plan.name]}
+                        </div>
+                      );
+                    })}
+                  </Fragment>
+                ))}
+
+                <div className="border-t border-emerald-300/10 px-4 py-5 text-sm font-semibold text-emerald-50">
+                  빠른 선택
+                </div>
+                {PLAN_ITEMS.map((plan) => {
+                  const isActive = activePlanName === plan.name;
+
+                  return (
+                    <div
+                      key={`${plan.name}-compare-action`}
+                      className={`border-l border-t border-emerald-300/10 px-4 py-5 ${
+                        isActive ? "bg-emerald-500/10" : ""
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => handlePlanInteract(plan.name)}
+                        className={`w-full rounded-full border px-4 py-3 text-sm font-semibold transition ${
+                          isActive
+                            ? "border-emerald-300 bg-emerald-300 text-emerald-950"
+                            : "border-emerald-300/35 text-emerald-100 hover:border-emerald-200/60 hover:bg-white/[0.03]"
+                        }`}
+                      >
+                        {isActive ? "선택됨" : plan.ctaLabel}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
       </section>

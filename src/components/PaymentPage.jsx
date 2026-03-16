@@ -29,6 +29,35 @@ const REFUND_POLICY_SECONDARY_ITEMS = [
 ];
 const REFUND_POLICY_FOOTNOTE =
   "다만, 정보열람 기록이 없을 경우, 7일 이내 청역 철회가 가능합니다.";
+const PLAN_OPTIONS = [
+  {
+    name: "Free",
+    label: "Free",
+    price: "무료",
+    desc: "입문",
+    features: ["PDF 최대 4개", "요약 / 퀴즈 / OX 기본", "기본 저장 공간"],
+    cta: "Free 선택",
+    accent: "148, 163, 184",
+  },
+  {
+    name: "Pro",
+    label: "Pro",
+    price: "4,900원 / 월",
+    desc: "개인 학습",
+    features: ["업로드 무제한", "요약 / 퀴즈 / OX / 플래시카드", "우선 처리"],
+    cta: "Pro 업그레이드",
+    accent: "16, 185, 129",
+  },
+  {
+    name: "Premium",
+    label: "Premium",
+    price: "16,000원 / 월",
+    desc: "공유 학습",
+    features: ["최대 4명", "공유 워크스페이스", "팀 학습 플로우"],
+    cta: "Premium 업그레이드",
+    accent: "56, 189, 248",
+  },
+];
 const kakaoPayPlans = {
   Pro: {
     baseAmount: 4900,
@@ -139,6 +168,9 @@ function PaymentPage({
   const headerClass = isLight ? "border-slate-200/80 bg-white/80" : "border-white/5 bg-white/5";
   const pillClass = isLight ? "bg-slate-100 text-slate-700" : "bg-white/10 text-slate-100";
   const accentText = isLight ? "text-emerald-600" : "text-emerald-300";
+  const planSectionClass = isLight
+    ? "bg-gradient-to-br from-white via-slate-50 to-white"
+    : "bg-gradient-to-br from-slate-950/60 via-slate-900/50 to-slate-950/60";
   const currentPlan = tierMeta[currentTier] || "Free";
   const currentPlanLabel = planLabelKo[currentPlan] || currentPlan;
   const currentTierExpiryLabel = formatTierExpiryLabel(currentTierExpiresAt);
@@ -396,41 +428,9 @@ function PaymentPage({
         </div>
 
         <div
-          className={`grid gap-4 px-6 py-5 md:grid-cols-3 ${
-            isLight
-              ? "bg-gradient-to-br from-white via-slate-50 to-white"
-              : "bg-gradient-to-br from-slate-950/60 via-slate-900/50 to-slate-950/60"
-          }`}
+          className={`grid gap-4 px-6 py-5 md:grid-cols-3 ${planSectionClass}`}
         >
-          {[
-            {
-              name: "Free",
-              label: "Free",
-              price: "무료",
-              desc: "입문",
-              features: ["PDF 최대 4개", "요약 / 퀴즈 / OX 기본", "기본 저장 공간"],
-              cta: "현재 요금제",
-              accent: "148, 163, 184",
-            },
-            {
-              name: "Pro",
-              label: "Pro",
-              price: "4,900원 / 월",
-              desc: "개인 학습",
-              features: ["업로드 무제한", "요약 / 퀴즈 / OX / 플래시카드", "우선 처리"],
-              cta: "Pro 업그레이드",
-              accent: "16, 185, 129",
-            },
-            {
-              name: "Premium",
-              label: "Premium",
-              price: "16,000원 / 월",
-              desc: "공유 학습",
-              features: ["최대 4명", "공유 워크스페이스", "팀 학습 플로우"],
-              cta: "Premium 업그레이드",
-              accent: "56, 189, 248",
-            },
-          ].map((plan) => (
+          {PLAN_OPTIONS.map((plan) => (
             <div
               key={plan.name}
               onClick={() => setSelectedPlan(plan.name)}
