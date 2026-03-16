@@ -18,6 +18,17 @@ const planLabelKo = {
 const KAKAOPAY_STORAGE_KEY = "kakaopay_session";
 const MS_PER_HOUR = 1000 * 60 * 60;
 const MS_PER_DAY = MS_PER_HOUR * 24;
+const REFUND_POLICY_TITLE = "[서비스 제공 기간 및 환불 규정 안내]";
+const REFUND_POLICY_PRIMARY_ITEMS = [
+  "서비스는 구독권 혹은 체험권 구매 후 즉시 사이트에서 제공됩니다.",
+  "정기구독 상품의 경우, 정기구독 취소 시 결제된 이용일제 서비스가 제공되며, 그 이후 서비스 사용이 중단됩니다.",
+];
+const REFUND_POLICY_NOTICE = "다음과 같은 내용으로 환불 규정이 적용됩니다.";
+const REFUND_POLICY_SECONDARY_ITEMS = [
+  "\"소비자보호법 17조 2항의 5조,용역 또는 '문화산업진흥 기본법'제 2조 제 5호의 디지털 콘텐츠의 제공이 개시된 경우\"의 법률에 따라 정보열람 및 다운로드 상품으로 환불이 제한됨을 안내드립니다.",
+];
+const REFUND_POLICY_FOOTNOTE =
+  "다만, 정보열람 기록이 없을 경우, 7일 이내 청역 철회가 가능합니다.";
 const kakaoPayPlans = {
   Pro: {
     baseAmount: 4900,
@@ -366,7 +377,7 @@ function PaymentPage({
   return (
     <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/50 px-4 py-6 backdrop-blur">
       <div
-        className={`w-full max-w-4xl overflow-hidden rounded-3xl border shadow-2xl ring-1 ${surfaceClass}`}
+        className={`max-h-[calc(100vh-3rem)] w-full max-w-4xl overflow-x-hidden overflow-y-auto rounded-3xl border shadow-2xl ring-1 ${surfaceClass}`}
       >
         <div className={`flex items-center justify-between border-b px-5 py-4 ${headerClass}`}>
           <div>
@@ -578,6 +589,36 @@ function PaymentPage({
             </button>
           </div>
         </div>
+
+        {selectedPlan !== "Free" && (
+          <section
+            className={`mx-6 mb-4 rounded-2xl border px-4 py-4 text-xs leading-6 ${
+              isLight
+                ? "border-slate-200 bg-white text-slate-700"
+                : "border-white/10 bg-white/5 text-slate-200"
+            }`}
+          >
+            <p className={`font-semibold ${isLight ? "text-slate-900" : "text-white"}`}>{REFUND_POLICY_TITLE}</p>
+            <ul className="mt-2 space-y-1.5">
+              {REFUND_POLICY_PRIMARY_ITEMS.map((item) => (
+                <li key={item} className="flex items-start gap-2">
+                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+                  <span className="flex-1">{item}</span>
+                </li>
+              ))}
+            </ul>
+            <p className={isLight ? "mt-3 text-slate-600" : "mt-3 text-slate-300"}>{REFUND_POLICY_NOTICE}</p>
+            <ul className="mt-2 space-y-1.5">
+              {REFUND_POLICY_SECONDARY_ITEMS.map((item) => (
+                <li key={item} className="flex items-start gap-2">
+                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+                  <span className="flex-1">{item}</span>
+                </li>
+              ))}
+            </ul>
+            <p className={isLight ? "mt-3 text-slate-600" : "mt-3 text-slate-300"}>{REFUND_POLICY_FOOTNOTE}</p>
+          </section>
+        )}
 
         {isPaidTier && (
           <p
