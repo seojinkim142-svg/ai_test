@@ -110,6 +110,29 @@ textarea,
   min-width: min-content;
 }
 
+.summary-prose mjx-container[jax="SVG"] {
+  max-width: 100%;
+  color: inherit;
+  font-size: 1.06em;
+}
+
+.summary-prose mjx-container[jax="SVG"][display="true"] {
+  display: block;
+  margin: 0.7rem 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.15rem 0;
+}
+
+.summary-prose mjx-container[jax="SVG"] > svg {
+  overflow: visible;
+  max-width: none;
+}
+
+.summary-prose mjx-container[jax="SVG"][display="true"] > svg {
+  min-width: min-content;
+}
+
 .ghost-button {
   --ghost-color: 226, 232, 240;
   display: inline-flex;

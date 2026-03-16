@@ -226,6 +226,19 @@
   border-top: 1.2px solid #0f172a !important;
 }
 
+:root.theme-light .summary-prose mjx-container[jax="SVG"] {
+  color: #0f172a !important;
+}
+
+:root.theme-light .summary-prose mjx-container[jax="SVG"] svg {
+  color: inherit !important;
+}
+
+:root.theme-light .summary-prose mjx-container[jax="SVG"] svg * {
+  fill: currentColor !important;
+  stroke: currentColor !important;
+}
+
 :root.theme-light .prose-invert a {
   color: #0ea5e9 !important;
 }

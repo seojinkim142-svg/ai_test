@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import "katex/dist/katex.min.css";
+import {
+  MARKDOWN_MATH_REHYPE_PLUGINS,
+  MARKDOWN_MATH_REMARK_PLUGINS,
+  normalizeMathMarkdown,
+} from "./MathMarkdown";
 
 const TUTOR_BARE_LATEX_RE =
   /\\(?:begin|end|frac|dfrac|tfrac|sum|prod|int|sqrt|left|right|cdot|times|to|infty|leq?|geq?|neq?|approx|mathbb|mathbf|mathrm|text|quad|qquad|lim)\b/;
@@ -195,11 +196,11 @@ function AiTutorPanel({
                 ) : (
                   <div className="summary-prose prose prose-sm prose-invert mt-2 max-w-none min-w-0 break-all [&_.katex-display]:max-w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:pb-1">
                     <ReactMarkdown
-                      remarkPlugins={[remarkGfm, remarkMath]}
-                      rehypePlugins={[rehypeKatex]}
+                      remarkPlugins={MARKDOWN_MATH_REMARK_PLUGINS}
+                      rehypePlugins={MARKDOWN_MATH_REHYPE_PLUGINS}
                       components={markdownComponents}
                     >
-                      {normalizeTutorMathMarkdown(message.content)}
+                      {normalizeMathMarkdown(normalizeTutorMathMarkdown(message.content))}
                     </ReactMarkdown>
                   </div>
                 )}
