@@ -284,13 +284,13 @@ export function useCardPayment({
   const openCardWidget = () => {
     if (!user?.id) {
       setPaymentNotice("");
-      setPaymentError("카드 결제에는 로그인이 필요합니다.");
+      setPaymentError("신용카드 결제에는 로그인이 필요합니다.");
       return;
     }
 
     if (!selectedCardPlan) {
       setPaymentNotice("");
-      setPaymentError("카드 결제는 Pro/Premium 플랜에서만 지원합니다.");
+      setPaymentError("신용카드 결제는 Pro/Premium 플랜에서만 지원합니다.");
       return;
     }
 
@@ -322,7 +322,7 @@ export function useCardPayment({
     }
 
     if (!user?.id) {
-      setPaymentError("카드 결제에는 로그인이 필요합니다.");
+      setPaymentError("신용카드 결제에는 로그인이 필요합니다.");
       return;
     }
 
