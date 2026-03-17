@@ -809,7 +809,7 @@ function PaymentPage({
               >
                 {BILLING_MONTH_OPTIONS.map((months) => (
                   <option key={months} value={months}>
-                    {months === 1 ? "1개월" : "2개월 이상 (정기결제)"}
+                    {months === 1 ? "1개월" : "정기결제"}
                   </option>
                 ))}
               </select>
