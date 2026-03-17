@@ -4,8 +4,8 @@ import {
   parseRequestBody,
   sendJson,
   verifyPaymentToken,
-} from "./_shared.js";
-import { syncPaidTierFromAmount } from "../_shared/tier-sync.js";
+} from "../../lib/payments/nicepayments.js";
+import { syncPaidTierFromAmount } from "../../lib/billing/tier-sync.js";
 
 export default async function handler(req, res) {
   const { allowOrigin, secretKey } = getRuntimeConfig(req);

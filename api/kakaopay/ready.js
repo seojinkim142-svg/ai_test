@@ -9,8 +9,8 @@ import {
   validateKakaoRuntimeConfig,
   validateKakaoSubscriptionConfig,
   validateKakaoReadyUrls,
-} from "./_shared.js";
-import { authenticateSupabaseUserFromRequest } from "../_shared/tier-sync.js";
+} from "../../lib/payments/kakaopay.js";
+import { authenticateSupabaseUserFromRequest } from "../../lib/billing/tier-sync.js";
 
 const normalizePositiveInteger = (value, fallback = 0) => {
   const parsed = Number(value);

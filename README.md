@@ -104,6 +104,31 @@ Important:
 - After changing it in Vercel, you must **redeploy** for the change to take effect.
 - Set it for the correct target (`Production` / `Preview` / `Development`) in Vercel.
 
+## Vercel Function Limit
+
+This project is kept compatible with the Vercel Hobby plan's **12 Serverless Functions per deployment** limit.
+
+- Only real HTTP entrypoints should live under `api/`.
+- Shared server logic must live under `lib/`, not `api/`.
+- Subscription endpoints are consolidated behind dynamic route files so the public URLs stay the same while the function count stays low.
+
+Current server entrypoints under `api/`:
+
+- `/api/kakaopay/ready`
+- `/api/kakaopay/approve`
+- `/api/kakaopay/subscription/[action]`
+- `/api/nicepayments/config`
+- `/api/nicepayments/confirm`
+- `/api/nicepayments/return`
+- `/api/nicepayments/subscription/[action]`
+- `/api/openai/v1/chat/completions`
+
+Notes:
+
+- `api/kakaopay/subscription/[action].js` handles `status`, `charge`, and `inactive`.
+- `api/nicepayments/subscription/[action].js` handles `prepare`, `return`, `status`, `charge`, and `inactive`.
+- If you add new server code, prefer extending an existing grouped route or adding shared code in `lib/` before creating a new file under `api/`.
+
 ## Start Flow
 
 The app now uses different first-entry behavior for web and APK builds when auth is enabled.

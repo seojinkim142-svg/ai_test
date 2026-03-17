@@ -8,7 +8,7 @@ import {
   redirectToClient,
   safeEqual,
   sendJson,
-} from "./_shared.js";
+} from "../../lib/payments/nicepayments.js";
 
 const failAndRedirect = (res, clientOrigin, message) => {
   redirectToClient(res, clientOrigin, {
