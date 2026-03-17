@@ -1,4 +1,5 @@
 import { Fragment, memo, useCallback, useEffect, useRef, useState } from "react";
+import { COMPANY_INFO_ITEMS, LEGAL_LINKS } from "../legal/companyInfo";
 
 function SummaryIcon({ className = "h-10 w-10" }) {
   return (
@@ -692,14 +693,27 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
       </section>
 
       <footer className="border-t border-emerald-300/10 px-6 py-10">
-        <div className="mx-auto max-w-7xl text-center text-sm text-emerald-100/65">
-          <p className="uppercase tracking-[0.24em] text-emerald-300/75">회사 정보</p>
-          <div className="mt-3 space-y-1 leading-6">
-            <p>상호명: Hestra</p>
-            <p>사업자등록번호: 393-03-03517</p>
-            <p>대표자명: 김서진</p>
-            <p>사업장 주소: 부산광역시 금정구 금강로 335번길 125</p>
-            <p>전화번호: 010-5906-5692</p>
+        <div className="mx-auto flex max-w-7xl flex-col gap-6 text-sm text-emerald-100/65 md:flex-row md:items-start md:justify-between">
+          <div className="text-center md:text-left">
+            <p className="uppercase tracking-[0.24em] text-emerald-300/75">회사 정보</p>
+            <div className="mt-3 space-y-1 leading-6">
+              {COMPANY_INFO_ITEMS.map((item) => (
+                <p key={item.label}>
+                  {item.label}: {item.value}
+                </p>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-wrap justify-center gap-3 md:justify-end">
+            {LEGAL_LINKS.map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                className="rounded-full border border-emerald-300/20 px-4 py-2 font-semibold text-emerald-100 transition hover:border-emerald-200/45 hover:bg-emerald-300/10"
+              >
+                {link.label}
+              </a>
+            ))}
           </div>
         </div>
       </footer>

@@ -9,6 +9,7 @@
     "dev:kakaopay": "node server/kakaopay.js",
     "dev:nicepayments": "node server/nicepayments.js",
     "build": "vite build",
+    "export:legal-html": "node scripts/export-legal-html.mjs",
     "build:mobile": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",

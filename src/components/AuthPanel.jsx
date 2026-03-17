@@ -188,8 +188,14 @@ function AuthPanel({ user, onAuth }) {
 
       <p className="mt-1 text-center text-xs text-slate-400">
         로그인 시{" "}
-        <a className="font-semibold text-emerald-300 underline underline-offset-2">이용약관</a> 및{" "}
-        <a className="font-semibold text-emerald-300 underline underline-offset-2">개인정보 처리방침</a>에 동의합니다
+        <a href="/terms" className="font-semibold text-emerald-300 underline underline-offset-2">
+          이용약관
+        </a>{" "}
+        및{" "}
+        <a href="/privacy" className="font-semibold text-emerald-300 underline underline-offset-2">
+          개인정보처리방침
+        </a>
+        에 동의합니다
       </p>
 
       {error && (
