@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { confirmNicePayment, fetchNicePaymentsConfig } from "../services/nicepayments";
 import { getAccessToken } from "../services/supabase";
 import { resolvePublicAppOrigin } from "../utils/appOrigin";
+import { clearPaymentReturnPending, markPaymentReturnPending } from "../utils/paymentReturn";
 
 const CARD_PAYMENT_STORAGE_KEY = "nicepayments_session";
 const cardPayPlans = {
@@ -69,7 +70,6 @@ export function useCardPayment({
   user,
   selectedPlan,
   billingMonths = 1,
-  currentPlan,
   onTierUpdated,
   setPaymentError,
   setPaymentNotice,
@@ -96,7 +96,13 @@ export function useCardPayment({
       ? Math.floor(Number(billingMonths))
       : 1;
   const selectedCardAmount = selectedCardPlan ? selectedCardPlan.baseAmount * normalizedBillingMonths : 0;
-  const canPayWithCard = Boolean(selectedCardPlan) && currentPlan !== selectedPlan && !cardPaying;
+  const canPayWithCard = Boolean(selectedCardPlan) && !cardPaying;
+
+  useEffect(() => {
+    if (normalizedBillingMonths >= 2 || !selectedCardPlan) {
+      setShowCardWidget(false);
+    }
+  }, [normalizedBillingMonths, selectedCardPlan]);
 
   useEffect(() => {
     const hasDirectRuntimeConfig = Boolean(envCardClientId && envReturnUrl);
@@ -142,17 +148,20 @@ export function useCardPayment({
       setPaymentNotice("");
       setPaymentError(failMessage ? `나이스페이 결제 실패: ${failMessage}` : "나이스페이 결제가 실패했습니다.");
       localStorage.removeItem(CARD_PAYMENT_STORAGE_KEY);
+      clearPaymentReturnPending();
       clearUrl();
       return;
     }
 
     if (cardState !== "success") {
+      clearPaymentReturnPending();
       clearUrl();
       return;
     }
 
     if (!token || !orderId || !amountParam) {
       setPaymentError("결제 정보를 찾을 수 없습니다. 다시 시도해주세요.");
+      clearPaymentReturnPending();
       clearUrl();
       return;
     }
@@ -171,12 +180,14 @@ export function useCardPayment({
 
     if (!Number.isFinite(amount) || amount <= 0) {
       setPaymentError("결제 금액 정보가 올바르지 않습니다. 다시 시도해주세요.");
+      clearPaymentReturnPending();
       clearUrl();
       return;
     }
 
     if (storedAmount && storedAmount !== amount) {
       setPaymentError("결제 금액이 일치하지 않습니다. 다시 시도해주세요.");
+      clearPaymentReturnPending();
       clearUrl();
       return;
     }
@@ -230,6 +241,7 @@ export function useCardPayment({
         setPaymentError(`결제 확인 실패: ${err.message}`);
       } finally {
         localStorage.removeItem(CARD_PAYMENT_STORAGE_KEY);
+        clearPaymentReturnPending();
         setCardPaying(false);
         clearUrl();
       }
@@ -282,7 +294,7 @@ export function useCardPayment({
       return;
     }
 
-    if (currentPlan === selectedPlan) {
+    if (selectedPlan === "Free" && normalizedBillingMonths < 1) {
       setPaymentError("");
       setPaymentNotice("이미 사용 중인 요금제입니다.");
       return;
@@ -351,6 +363,10 @@ export function useCardPayment({
         billingMonths: normalizedBillingMonths,
       })
     );
+    markPaymentReturnPending({
+      provider: "nicepayments",
+      paymentMode: "one-time",
+    });
 
     try {
       window.AUTHNICE.requestPay({
@@ -365,11 +381,13 @@ export function useCardPayment({
         fnError: (err) => {
           const message = err?.errorMsg || err?.message || "결제 요청이 취소되었습니다.";
           setPaymentError(`나이스페이 결제 요청 실패: ${message}`);
+          clearPaymentReturnPending();
           setCardPaying(false);
         },
       });
     } catch (err) {
       setPaymentError(err?.message || "나이스페이 결제 요청을 진행할 수 없습니다.");
+      clearPaymentReturnPending();
       setCardPaying(false);
     }
   };

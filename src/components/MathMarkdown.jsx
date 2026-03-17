@@ -1,8 +1,9 @@
 import { useMemo } from "react";
+import "katex/dist/katex.min.css";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
-import rehypeMathjax from "rehype-mathjax/svg";
+import rehypeKatex from "rehype-katex";
 
 const LATEX_ENV_BLOCK_RE = /\\begin\{([A-Za-z*]+)\}[\s\S]*?\\end\{\1\}/g;
 const BARE_LATEX_INLINE_RE =
@@ -11,7 +12,7 @@ const BRACKETED_DISPLAY_MATH_RE = /\\\[\s*([\s\S]*?)\s*\\\]/g;
 const BRACKETED_INLINE_MATH_RE = /\\\(\s*([\s\S]*?)\s*\\\)/g;
 
 export const MARKDOWN_MATH_REMARK_PLUGINS = [remarkGfm, remarkMath];
-export const MARKDOWN_MATH_REHYPE_PLUGINS = [rehypeMathjax];
+export const MARKDOWN_MATH_REHYPE_PLUGINS = [rehypeKatex];
 
 function normalizeLatexSnippet(expr) {
   return String(expr || "")

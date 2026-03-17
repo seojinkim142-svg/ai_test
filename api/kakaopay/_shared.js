@@ -2,8 +2,11 @@
 const DEFAULT_API_BASE = "https://open-api.kakaopay.com";
 const DEFAULT_LOCAL_ORIGIN = "http://localhost:5173";
 const DEFAULT_CID = "TC0ONETIME";
+const DEFAULT_SUBSCRIPTION_CID = "TCSUBSCRIP";
 const DEFAULT_READY_PATH = "/online/v1/payment/ready";
 const DEFAULT_APPROVE_PATH = "/online/v1/payment/approve";
+const DEFAULT_SUBSCRIPTION_CHARGE_PATH = "/online/v1/payment/subscription";
+const DEFAULT_SUBSCRIPTION_INACTIVE_PATH = "/online/v1/payment/manage/subscription/inactive";
 const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
 const NATIVE_APP_ORIGINS = new Set(["http://localhost", "https://localhost", "capacitor://localhost"]);
 
@@ -63,6 +66,28 @@ export const validateKakaoRuntimeConfig = ({ secretKey, cid, apiBase }) => {
 
   if (isDevSecret && normalizedCid && normalizedCid !== DEFAULT_CID) {
     return "KAKAOPAY_SECRET_KEY looks like a dev key while KAKAOPAY_CID looks like a production CID.";
+  }
+
+  return "";
+};
+
+export const validateKakaoSubscriptionConfig = ({ secretKey, subscriptionCid, apiBase }) => {
+  const normalizedSecretKey = text(secretKey);
+  const normalizedCid = text(subscriptionCid);
+  const useOpenApi = String(apiBase || "").includes(OPEN_API_HOST);
+  if (!useOpenApi || !normalizedSecretKey) return "";
+
+  const isDevSecret = normalizedSecretKey.startsWith("DEV");
+  if (!normalizedCid) {
+    return "KAKAOPAY_SUBSCRIPTION_CID is not set. Set the recurring billing CID before using subscription registration.";
+  }
+
+  if (!isDevSecret && normalizedCid === DEFAULT_SUBSCRIPTION_CID) {
+    return "KAKAOPAY_SUBSCRIPTION_CID is still set to the test value TCSUBSCRIP. Set your production recurring CID.";
+  }
+
+  if (isDevSecret && normalizedCid && normalizedCid !== DEFAULT_SUBSCRIPTION_CID) {
+    return "KAKAOPAY_SECRET_KEY looks like a dev key while KAKAOPAY_SUBSCRIPTION_CID looks like a production CID.";
   }
 
   return "";
@@ -167,6 +192,8 @@ const readRequestStream = (req) =>
 export const getRuntimeConfig = (req) => {
   const secretKey = text(process.env.KAKAOPAY_SECRET_KEY || process.env.KAKAOPAY_ADMIN_KEY);
   const cid = text(process.env.KAKAOPAY_CID) || DEFAULT_CID;
+  const defaultSubscriptionCid = secretKey.startsWith("DEV") ? DEFAULT_SUBSCRIPTION_CID : "";
+  const subscriptionCid = text(process.env.KAKAOPAY_SUBSCRIPTION_CID) || defaultSubscriptionCid;
   const apiBase = text(process.env.KAKAOPAY_API_BASE) || DEFAULT_API_BASE;
   const explicitAuthScheme = process.env.KAKAOPAY_AUTH_SCHEME;
   const inferredAuthScheme = resolveAuthScheme({
@@ -180,6 +207,16 @@ export const getRuntimeConfig = (req) => {
   const approvePath =
     text(process.env.KAKAOPAY_APPROVE_PATH) ||
     (inferredAuthScheme === "KakaoAK" ? "/v1/payment/approve" : DEFAULT_APPROVE_PATH);
+  const subscriptionChargePath =
+    text(process.env.KAKAOPAY_SUBSCRIPTION_CHARGE_PATH) ||
+    (inferredAuthScheme === "KakaoAK"
+      ? "/v1/payment/subscription"
+      : DEFAULT_SUBSCRIPTION_CHARGE_PATH);
+  const subscriptionInactivePath =
+    text(process.env.KAKAOPAY_SUBSCRIPTION_INACTIVE_PATH) ||
+    (inferredAuthScheme === "KakaoAK"
+      ? "/v1/payment/manage/subscription/inactive"
+      : DEFAULT_SUBSCRIPTION_INACTIVE_PATH);
   const requestOrigin = normalizeOrigin(resolveRequestOrigin(req));
   const fallbackOrigin = normalizeOrigin(resolveVercelOrigin()) || requestOrigin || DEFAULT_LOCAL_ORIGIN;
   const clientOrigin = normalizeOrigin(process.env.KAKAOPAY_CLIENT_ORIGIN) || fallbackOrigin;
@@ -200,10 +237,13 @@ export const getRuntimeConfig = (req) => {
   return {
     secretKey,
     cid,
+    subscriptionCid,
     apiBase,
     authScheme: inferredAuthScheme,
     readyPath,
     approvePath,
+    subscriptionChargePath,
+    subscriptionInactivePath,
     clientOrigin,
     allowOrigin,
   };
@@ -244,6 +284,20 @@ export const parseRequestBody = async (req) => {
 };
 
 export const makeKakaoApiUrl = (apiBase, path) => `${apiBase.replace(/\/$/, "")}${path}`;
+
+export const buildKakaoRequest = ({ authScheme, secretKey, path, payload }) => {
+  const useJsonPayload = authScheme !== "KakaoAK" || String(path || "").includes("/online/");
+  const headers = {
+    Authorization: `${authScheme} ${secretKey}`,
+    "Content-Type": useJsonPayload
+      ? "application/json;charset=utf-8"
+      : "application/x-www-form-urlencoded;charset=utf-8",
+  };
+  const body = useJsonPayload
+    ? JSON.stringify(payload)
+    : new URLSearchParams(payload).toString();
+  return { headers, body };
+};
 
 export const validateKakaoReadyUrls = ({ secretKey, apiBase, approvalUrl, cancelUrl, failUrl }) => {
   const normalizedSecretKey = text(secretKey);

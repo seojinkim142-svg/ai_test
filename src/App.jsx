@@ -72,6 +72,7 @@ import {
   formatMockExamTitle,
   chunkMockExamPages,
 } from "./utils/appStateHelpers";
+import { clearPaymentReturnPending, readPaymentReturnPending } from "./utils/paymentReturn";
 import {
   resolveAnswerIndex,
   resolveShortAnswerText,
@@ -1741,8 +1742,19 @@ function App() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
-    if (params.get("pg_token") || params.get("kakaoPay") || params.get("nicePay") || params.get("np_token")) {
+    const hasPaymentReturnParams =
+      params.get("pg_token") ||
+      params.get("kakaoPay") ||
+      params.get("nicePay") ||
+      params.get("niceBilling") ||
+      params.get("np_token");
+    const pendingPaymentReturn = readPaymentReturnPending();
+
+    if (hasPaymentReturnParams || pendingPaymentReturn) {
       setShowPayment(true);
+      if (!hasPaymentReturnParams && pendingPaymentReturn) {
+        clearPaymentReturnPending();
+      }
     }
   }, []);
 
@@ -5190,7 +5202,10 @@ function App() {
       {showPayment && (
         <Suspense fallback={null}>
           <PaymentPage
-            onClose={() => setShowPayment(false)}
+            onClose={() => {
+              clearPaymentReturnPending();
+              setShowPayment(false);
+            }}
             currentTier={tier}
             currentTierExpiresAt={tierExpiresAt}
             currentTierRemainingDays={tierRemainingDays}

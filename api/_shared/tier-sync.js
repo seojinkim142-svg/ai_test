@@ -25,7 +25,7 @@ const isTierExpiryColumnError = (error) => {
   return message.includes(TIER_EXPIRY_COLUMN);
 };
 
-const addMonthsUtc = (dateInput, monthsInput = 1) => {
+export const addMonthsUtc = (dateInput, monthsInput = 1) => {
   const baseDate = dateInput instanceof Date ? new Date(dateInput) : new Date(dateInput);
   if (Number.isNaN(baseDate.getTime())) return new Date();
   const parsedMonths = Number(monthsInput);
@@ -43,7 +43,7 @@ const parseAuthBearerToken = (req) => {
   return text(token);
 };
 
-const resolveSupabaseConfig = () => {
+export const resolveSupabaseConfig = () => {
   const supabaseUrl = text(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL);
   const serviceRoleKey = text(process.env.SUPABASE_SERVICE_ROLE_KEY);
   const userTierTable = text(process.env.SUPABASE_USER_TIER_TABLE || process.env.VITE_SUPABASE_USER_TIER_TABLE);
@@ -54,7 +54,7 @@ const resolveSupabaseConfig = () => {
   };
 };
 
-const getSupabaseAdminClient = () => {
+export const getSupabaseAdminClient = () => {
   const { supabaseUrl, serviceRoleKey } = resolveSupabaseConfig();
   if (!supabaseUrl || !serviceRoleKey) return null;
 
@@ -214,8 +214,10 @@ const resolveNextExpiry = ({ tier, row, months }) => {
   return addMonthsUtc(baseDate, months || PAID_TIER_TERM_MONTHS[tier] || 1).toISOString();
 };
 
-export async function syncPaidTierFromAmount({
-  req,
+async function syncPaidTierByContext({
+  client,
+  userTierTable,
+  userId,
   amount,
   requestedTier = "",
   requestedMonths = null,
@@ -233,10 +235,6 @@ export async function syncPaidTierFromAmount({
       message: "Unsupported payment amount for tier update.",
     };
   }
-
-  const authResult = await authenticateSupabaseUserFromRequest(req);
-  if (!authResult.ok) return authResult;
-  const { client, userTierTable, userId } = authResult;
 
   try {
     const { row, hasExpiryColumn } = await fetchTierRow({
@@ -270,6 +268,61 @@ export async function syncPaidTierFromAmount({
       message: `Tier sync failed: ${error?.message || error}`,
     };
   }
+}
+
+export async function syncPaidTierForUserId({
+  userId,
+  amount,
+  requestedTier = "",
+  requestedMonths = null,
+}) {
+  const client = getSupabaseAdminClient();
+  const { userTierTable } = resolveSupabaseConfig();
+  if (!client) {
+    return {
+      ok: false,
+      status: 500,
+      code: "SUPABASE_CONFIG_MISSING",
+      message: "Server Supabase config is missing. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
+    };
+  }
+
+  if (!text(userId)) {
+    return {
+      ok: false,
+      status: 400,
+      code: "USER_ID_REQUIRED",
+      message: "User ID is required for tier sync.",
+    };
+  }
+
+  return syncPaidTierByContext({
+    client,
+    userTierTable,
+    userId: text(userId),
+    amount,
+    requestedTier,
+    requestedMonths,
+  });
+}
+
+export async function syncPaidTierFromAmount({
+  req,
+  amount,
+  requestedTier = "",
+  requestedMonths = null,
+}) {
+  const authResult = await authenticateSupabaseUserFromRequest(req);
+  if (!authResult.ok) return authResult;
+
+  return syncPaidTierByContext({
+    client: authResult.client,
+    userTierTable: authResult.userTierTable,
+    userId: authResult.userId,
+    amount,
+    requestedTier,
+    requestedMonths,
+  });
 }
 
 export async function authenticateSupabaseUserFromRequest(req) {

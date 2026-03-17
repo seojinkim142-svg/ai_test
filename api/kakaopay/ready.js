@@ -1,11 +1,13 @@
 import {
   buildCorsHeaders,
+  buildKakaoRequest,
   getRuntimeConfig,
   makeKakaoApiUrl,
   parseApiResponse,
   parseRequestBody,
   sendJson,
   validateKakaoRuntimeConfig,
+  validateKakaoSubscriptionConfig,
   validateKakaoReadyUrls,
 } from "./_shared.js";
 import { authenticateSupabaseUserFromRequest } from "../_shared/tier-sync.js";
@@ -17,7 +19,16 @@ const normalizePositiveInteger = (value, fallback = 0) => {
 };
 
 export default async function handler(req, res) {
-  const { secretKey, cid, apiBase, authScheme, readyPath, clientOrigin, allowOrigin } = getRuntimeConfig(req);
+  const {
+    secretKey,
+    cid,
+    subscriptionCid,
+    apiBase,
+    authScheme,
+    readyPath,
+    clientOrigin,
+    allowOrigin,
+  } = getRuntimeConfig(req);
 
   if (req.method === "OPTIONS") {
     res.writeHead(204, buildCorsHeaders(allowOrigin));
@@ -55,6 +66,8 @@ export default async function handler(req, res) {
   const quantity = normalizePositiveInteger(body?.quantity, 1) || 1;
   const vatAmount = normalizePositiveInteger(body?.vatAmount, Math.floor(amount / 11));
   const taxFreeAmount = normalizePositiveInteger(body?.taxFreeAmount, 0);
+  const registerSubscription =
+    body?.registerSubscription === true || String(body?.paymentMode || "").trim().toLowerCase() === "subscription";
   const approvalUrl = String(body?.approvalUrl || `${clientOrigin}/?kakaoPay=approve`).trim();
   const cancelUrl = String(body?.cancelUrl || `${clientOrigin}/?kakaoPay=cancel`).trim();
   const failUrl = String(body?.failUrl || `${clientOrigin}/?kakaoPay=fail`).trim();
@@ -76,6 +89,18 @@ export default async function handler(req, res) {
     return;
   }
 
+  if (registerSubscription) {
+    const subscriptionConfigError = validateKakaoSubscriptionConfig({
+      secretKey,
+      subscriptionCid,
+      apiBase,
+    });
+    if (subscriptionConfigError) {
+      sendJson(res, 500, { message: subscriptionConfigError }, allowOrigin);
+      return;
+    }
+  }
+
   const authResult = await authenticateSupabaseUserFromRequest(req);
   if (!authResult.ok) {
     sendJson(res, authResult.status, { message: authResult.message }, allowOrigin);
@@ -84,7 +109,7 @@ export default async function handler(req, res) {
   const authenticatedUserId = authResult.userId;
 
   const requestPayload = {
-    cid,
+    cid: registerSubscription ? subscriptionCid : cid,
     partner_order_id: orderId,
     partner_user_id: authenticatedUserId,
     item_name: itemName,
@@ -96,22 +121,18 @@ export default async function handler(req, res) {
     cancel_url: cancelUrl,
     fail_url: failUrl,
   };
-  const useJsonPayload = authScheme !== "KakaoAK" || readyPath.includes("/online/");
-  const headers = {
-    Authorization: `${authScheme} ${secretKey}`,
-    "Content-Type": useJsonPayload
-      ? "application/json;charset=utf-8"
-      : "application/x-www-form-urlencoded;charset=utf-8",
-  };
-  const bodyData = useJsonPayload
-    ? JSON.stringify(requestPayload)
-    : new URLSearchParams(requestPayload).toString();
+  const requestOptions = buildKakaoRequest({
+    authScheme,
+    secretKey,
+    path: readyPath,
+    payload: requestPayload,
+  });
 
   try {
     const response = await fetch(makeKakaoApiUrl(apiBase, readyPath), {
       method: "POST",
-      headers,
-      body: bodyData,
+      headers: requestOptions.headers,
+      body: requestOptions.body,
     });
 
     const data = await parseApiResponse(response);
@@ -124,7 +145,16 @@ export default async function handler(req, res) {
       return;
     }
 
-    sendJson(res, 200, data, allowOrigin);
+    sendJson(
+      res,
+      200,
+      {
+        ...data,
+        paymentMode: registerSubscription ? "subscription" : "one-time",
+        cid: requestPayload.cid,
+      },
+      allowOrigin
+    );
   } catch (error) {
     sendJson(res, 500, { message: `KakaoPay ready failed: ${error.message}` }, allowOrigin);
   }
