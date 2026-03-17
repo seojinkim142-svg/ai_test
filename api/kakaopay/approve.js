@@ -8,17 +8,17 @@ import {
   sendJson,
   validateKakaoRuntimeConfig,
   validateKakaoSubscriptionConfig,
-} from "./_shared.js";
+} from "../../lib/payments/kakaopay.js";
 import {
   authenticateSupabaseUserFromRequest,
   syncPaidTierFromAmount,
-} from "../_shared/tier-sync.js";
+} from "../../lib/billing/tier-sync.js";
 import {
   buildPublicSubscription,
   fetchKakaoSubscriptionByUserId,
   markKakaoSubscriptionInactive,
   upsertKakaoSubscriptionRegistration,
-} from "../_shared/subscription-store.js";
+} from "../../lib/billing/subscription-store.js";
 
 const requestSubscriptionInactive = async ({
   apiBase,

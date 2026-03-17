@@ -1,4 +1,4 @@
-import { buildCorsHeaders, getRuntimeConfig, sendJson } from "./_shared.js";
+import { buildCorsHeaders, getRuntimeConfig, sendJson } from "../../lib/payments/nicepayments.js";
 
 const DEFAULT_JS_URL = "https://pay.nicepay.co.kr/v1/js/";
 

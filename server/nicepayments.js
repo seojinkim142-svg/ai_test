@@ -4,11 +4,7 @@ import dotenv from "dotenv";
 import configHandler from "../api/nicepayments/config.js";
 import confirmHandler from "../api/nicepayments/confirm.js";
 import returnHandler from "../api/nicepayments/return.js";
-import subscriptionPrepareHandler from "../api/nicepayments/subscription/prepare.js";
-import subscriptionReturnHandler from "../api/nicepayments/subscription/return.js";
-import subscriptionStatusHandler from "../api/nicepayments/subscription/status.js";
-import subscriptionChargeHandler from "../api/nicepayments/subscription/charge.js";
-import subscriptionInactiveHandler from "../api/nicepayments/subscription/inactive.js";
+import subscriptionHandler from "../api/nicepayments/subscription/[action].js";
 
 dotenv.config();
 
@@ -18,11 +14,11 @@ const ROUTES = new Map([
   ["/api/nicepayments/config", configHandler],
   ["/api/nicepayments/confirm", confirmHandler],
   ["/api/nicepayments/return", returnHandler],
-  ["/api/nicepayments/subscription/prepare", subscriptionPrepareHandler],
-  ["/api/nicepayments/subscription/return", subscriptionReturnHandler],
-  ["/api/nicepayments/subscription/status", subscriptionStatusHandler],
-  ["/api/nicepayments/subscription/charge", subscriptionChargeHandler],
-  ["/api/nicepayments/subscription/inactive", subscriptionInactiveHandler],
+  ["/api/nicepayments/subscription/prepare", subscriptionHandler],
+  ["/api/nicepayments/subscription/return", subscriptionHandler],
+  ["/api/nicepayments/subscription/status", subscriptionHandler],
+  ["/api/nicepayments/subscription/charge", subscriptionHandler],
+  ["/api/nicepayments/subscription/inactive", subscriptionHandler],
 ]);
 
 const sendJson = (res, status, body) => {

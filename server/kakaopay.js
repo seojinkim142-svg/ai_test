@@ -3,9 +3,7 @@ import http from "http";
 import dotenv from "dotenv";
 import approveHandler from "../api/kakaopay/approve.js";
 import readyHandler from "../api/kakaopay/ready.js";
-import subscriptionChargeHandler from "../api/kakaopay/subscription/charge.js";
-import subscriptionInactiveHandler from "../api/kakaopay/subscription/inactive.js";
-import subscriptionStatusHandler from "../api/kakaopay/subscription/status.js";
+import subscriptionHandler from "../api/kakaopay/subscription/[action].js";
 
 dotenv.config();
 
@@ -14,9 +12,9 @@ const PORT = Number(process.env.KAKAOPAY_PORT || 8787);
 const ROUTES = new Map([
   ["/api/kakaopay/ready", readyHandler],
   ["/api/kakaopay/approve", approveHandler],
-  ["/api/kakaopay/subscription/status", subscriptionStatusHandler],
-  ["/api/kakaopay/subscription/charge", subscriptionChargeHandler],
-  ["/api/kakaopay/subscription/inactive", subscriptionInactiveHandler],
+  ["/api/kakaopay/subscription/status", subscriptionHandler],
+  ["/api/kakaopay/subscription/charge", subscriptionHandler],
+  ["/api/kakaopay/subscription/inactive", subscriptionHandler],
 ]);
 
 const sendJson = (res, status, body) => {
