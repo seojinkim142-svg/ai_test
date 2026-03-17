@@ -9,6 +9,7 @@ import {
 import { getAccessToken } from "../services/supabase";
 import { useCardPayment } from "../hooks/useCardPayment";
 import { useNiceSubscription } from "../hooks/useNiceSubscription";
+import { COMPANY_INFO, LEGAL_LINKS } from "../legal/companyInfo";
 import { resolvePublicAppOrigin } from "../utils/appOrigin";
 import { clearPaymentReturnPending, markPaymentReturnPending } from "../utils/paymentReturn";
 
@@ -37,6 +38,13 @@ const REFUND_POLICY_SECONDARY_ITEMS = [
 ];
 const REFUND_POLICY_FOOTNOTE =
   "다만, 정보열람 기록이 없을 경우, 7일 이내 청역 철회가 가능합니다.";
+const PAYMENT_DISCLOSURE_TITLE = "[서비스 제공 기간 및 이용 조건 안내]";
+const PAYMENT_DISCLOSURE_NOTICE = "결제 전 아래 이용 조건을 확인해 주세요.";
+const PAYMENT_REFUND_ITEMS = [
+  "본 서비스는 디지털 콘텐츠로서 실물 배송 및 교환 대상이 아닙니다.",
+  "환불은 관계 법령, 이용약관 및 결제 화면에 고지된 기준에 따라 처리됩니다.",
+  "서비스 제공이 개시된 이후의 환불은 약관 및 관계 법령상 제한될 수 있습니다.",
+];
 const PLAN_OPTIONS = [
   {
     name: "Free",
@@ -218,6 +226,44 @@ function PaymentPage({
   const selectedChargeMonths = isRecurringSelection ? 1 : normalizedBillingMonths;
   const selectedKakaoAmount = selectedKakaoPlan ? selectedKakaoPlan.baseAmount * selectedChargeMonths : 0;
   const selectedKakaoItemName = selectedKakaoPlan ? selectedKakaoPlan.itemName : "";
+  const paymentDisclosureSections = selectedPlan === "Free"
+    ? []
+    : [
+        {
+          title: "서비스 제공 및 결제 시기",
+          items: [
+            isRecurringSelection
+              ? "첫 결제 승인 후 즉시 이용이 시작되며, 이후 이용기간은 정기결제 상태에 따라 갱신됩니다."
+              : `결제 승인 후 즉시 이용이 시작되며, 결제 완료 시점부터 ${selectedChargeMonths}개월 동안 이용할 수 있습니다.`,
+            isRecurringSelection
+              ? `첫 결제금액은 ${selectedKakaoAmount.toLocaleString()}KRW이며, 이후 이용요금은 회사가 정한 결제주기에 따라 자동 청구됩니다.`
+              : `결제 승인 즉시 ${selectedKakaoAmount.toLocaleString()}KRW가 1회 청구됩니다.`,
+            "결제 완료 후 현재 페이지에서 요금제 상태와 만료일이 자동으로 갱신됩니다.",
+          ],
+        },
+        {
+          title: "정기결제 안내",
+          items: isRecurringSelection
+            ? [
+                "정기결제는 해지하지 않으면 다음 결제일부터 자동으로 갱신됩니다.",
+                "다음 결제일 이전까지 해지하면 다음 회차부터 자동 청구가 중단되며, 이미 결제된 이용기간은 만료일까지 이용할 수 있습니다.",
+                "결제수단 오류, 한도 초과, 잔액 부족 등으로 결제가 실패하면 재시도되거나 유료서비스 이용이 제한될 수 있습니다.",
+                "이용요금, 결제주기 또는 제공내용이 변경되는 경우 사전에 고지됩니다.",
+              ]
+            : [
+                "정기결제는 결제 개월에서 '정기결제'를 선택한 경우에만 적용됩니다.",
+                "1개월 선택은 자동갱신 없는 일반 결제입니다.",
+              ],
+        },
+        {
+          title: "취소 및 환불",
+          items: [
+            "정기결제 해지는 결제 이후에도 현재 이용 중인 기간 만료일까지는 서비스가 유지되고, 다음 회차부터 자동 청구가 중단됩니다.",
+            "서비스 이용내역이 없고 제공이 개시되지 않은 경우, 회사 귀책사유로 이용하지 못한 경우, 표시·광고와 현저히 다른 경우 등에는 약관 및 관계 법령에 따라 환불이 가능합니다.",
+            ...PAYMENT_REFUND_ITEMS,
+          ],
+        },
+      ];
   const activeKakaoSubscription = subscriptionState?.status === "active" ? subscriptionState : null;
   const isSameActiveKakaoSubscription =
     Boolean(activeKakaoSubscription) &&
@@ -1260,25 +1306,45 @@ function PaymentPage({
                 : "border-white/10 bg-white/5 text-slate-200"
             }`}
           >
-            <p className={`font-semibold ${isLight ? "text-slate-900" : "text-white"}`}>{REFUND_POLICY_TITLE}</p>
-            <ul className="mt-2 space-y-1.5">
-              {REFUND_POLICY_PRIMARY_ITEMS.map((item) => (
-                <li key={item} className="flex items-start gap-2">
-                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-                  <span className="flex-1">{item}</span>
-                </li>
+            <p className={`font-semibold ${isLight ? "text-slate-900" : "text-white"}`}>{PAYMENT_DISCLOSURE_TITLE}</p>
+            <p className={isLight ? "mt-2 text-slate-600" : "mt-2 text-slate-300"}>{PAYMENT_DISCLOSURE_NOTICE}</p>
+            <div className={`mt-4 overflow-hidden rounded-xl border ${isLight ? "border-slate-200" : "border-white/10"}`}>
+              {paymentDisclosureSections.map((section, index) => (
+                <div
+                  key={section.title}
+                  className={`px-4 py-4 ${index > 0 ? (isLight ? "border-t border-slate-200" : "border-t border-white/10") : ""}`}
+                >
+                  <p className={`font-semibold ${isLight ? "text-slate-900" : "text-white"}`}>{section.title}</p>
+                  <ul className="mt-2 space-y-1.5">
+                    {section.items.map((item) => (
+                      <li key={item} className="flex items-start gap-2">
+                        <span className="mt-1 h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+                        <span className="flex-1">{item}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ))}
-            </ul>
-            <p className={isLight ? "mt-3 text-slate-600" : "mt-3 text-slate-300"}>{REFUND_POLICY_NOTICE}</p>
-            <ul className="mt-2 space-y-1.5">
-              {REFUND_POLICY_SECONDARY_ITEMS.map((item) => (
-                <li key={item} className="flex items-start gap-2">
-                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-                  <span className="flex-1">{item}</span>
-                </li>
-              ))}
-            </ul>
-            <p className={isLight ? "mt-3 text-slate-600" : "mt-3 text-slate-300"}>{REFUND_POLICY_FOOTNOTE}</p>
+              <div className={`px-4 py-4 ${isLight ? "border-t border-slate-200 bg-slate-50/80" : "border-t border-white/10 bg-slate-950/30"}`}>
+                <p className={`font-semibold ${isLight ? "text-slate-900" : "text-white"}`}>문의 및 약관</p>
+                <ul className="mt-2 space-y-1.5">
+                  <li>문의 및 이의신청: {COMPANY_INFO.phone}</li>
+                  <li>사업자등록번호: {COMPANY_INFO.businessRegistrationNumber}</li>
+                  <li>사업장 주소: {COMPANY_INFO.address}</li>
+                </ul>
+                <div className="mt-3 flex flex-wrap gap-3">
+                  {LEGAL_LINKS.map((link) => (
+                    <a
+                      key={link.href}
+                      href={link.href}
+                      className={`underline underline-offset-2 ${isLight ? "text-slate-700" : "text-slate-100"}`}
+                    >
+                      {link.label}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            </div>
           </section>
         )}
 
