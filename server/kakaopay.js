@@ -1,285 +1,46 @@
 /* global process */
 import http from "http";
 import dotenv from "dotenv";
+import approveHandler from "../api/kakaopay/approve.js";
+import readyHandler from "../api/kakaopay/ready.js";
+import subscriptionChargeHandler from "../api/kakaopay/subscription/charge.js";
+import subscriptionInactiveHandler from "../api/kakaopay/subscription/inactive.js";
+import subscriptionStatusHandler from "../api/kakaopay/subscription/status.js";
 
 dotenv.config();
 
 const PORT = Number(process.env.KAKAOPAY_PORT || 8787);
-const SECRET_KEY = process.env.KAKAOPAY_SECRET_KEY;
-const CID = process.env.KAKAOPAY_CID || "TC0ONETIME";
-const API_BASE = process.env.KAKAOPAY_API_BASE || "https://open-api.kakaopay.com";
-const OPEN_API_HOST = "open-api.kakaopay.com";
-const LOCAL_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1"]);
-const normalizeOrigin = (value) => {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  try {
-    const parsed = new URL(raw);
-    return `${parsed.protocol}//${parsed.host}`;
-  } catch {
-    return "";
-  }
-};
-const normalizeAllowOrigin = (value) => {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  if (raw === "*") return "*";
-  return normalizeOrigin(raw);
-};
-const isLocalHostOrigin = (value) => {
-  const origin = normalizeOrigin(value);
-  if (!origin) return false;
-  try {
-    const parsed = new URL(origin);
-    return LOCAL_HOSTNAMES.has(parsed.hostname);
-  } catch {
-    return false;
-  }
-};
-const hasNonHttpsOrigin = (value) => {
-  const origin = normalizeOrigin(value);
-  if (!origin) return false;
-  try {
-    const parsed = new URL(origin);
-    return parsed.protocol !== "https:";
-  } catch {
-    return false;
-  }
-};
-const normalizeAuthScheme = (value) => {
-  const normalized = String(value || "").trim().toUpperCase();
-  if (!normalized) return "";
-  if (normalized === "KAKAOAK") return "KakaoAK";
-  if (normalized === "SECRET_KEY") return "SECRET_KEY";
-  if (normalized === "DEV_SECRET_KEY") return "DEV_SECRET_KEY";
-  return "";
-};
-const inferAuthScheme = (apiBase, secretKey) =>
-  String(apiBase || "").includes(OPEN_API_HOST)
-    ? String(secretKey || "").startsWith("DEV")
-      ? "DEV_SECRET_KEY"
-      : "SECRET_KEY"
-    : "KakaoAK";
-const resolveAuthScheme = (apiBase, secretKey, explicitAuthScheme) => {
-  const inferred = inferAuthScheme(apiBase, secretKey);
-  const normalizedExplicit = normalizeAuthScheme(explicitAuthScheme);
-  if (!normalizedExplicit) return inferred;
 
-  const useOpenApi = String(apiBase || "").includes(OPEN_API_HOST);
-  const explicitIsLegacy = normalizedExplicit === "KakaoAK";
-  const explicitIsOpenApi =
-    normalizedExplicit === "SECRET_KEY" || normalizedExplicit === "DEV_SECRET_KEY";
-  if ((useOpenApi && explicitIsLegacy) || (!useOpenApi && explicitIsOpenApi)) {
-    return inferred;
-  }
-  if (useOpenApi && explicitIsOpenApi && normalizedExplicit !== inferred) {
-    return inferred;
-  }
-  return normalizedExplicit;
-};
-const AUTH_SCHEME = resolveAuthScheme(
-  API_BASE,
-  SECRET_KEY,
-  process.env.KAKAOPAY_AUTH_SCHEME
-);
-const READY_PATH =
-  process.env.KAKAOPAY_READY_PATH || (AUTH_SCHEME === "KakaoAK" ? "/v1/payment/ready" : "/online/v1/payment/ready");
-const APPROVE_PATH =
-  process.env.KAKAOPAY_APPROVE_PATH ||
-  (AUTH_SCHEME === "KakaoAK" ? "/v1/payment/approve" : "/online/v1/payment/approve");
-const CLIENT_ORIGIN = normalizeOrigin(process.env.KAKAOPAY_CLIENT_ORIGIN) || "http://localhost:5173";
-const ALLOW_ORIGIN = normalizeAllowOrigin(process.env.KAKAOPAY_ALLOW_ORIGIN) || CLIENT_ORIGIN;
-const isProductionOpenApi = String(API_BASE || "").includes(OPEN_API_HOST) && !String(SECRET_KEY || "").startsWith("DEV");
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": ALLOW_ORIGIN,
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-};
+const ROUTES = new Map([
+  ["/api/kakaopay/ready", readyHandler],
+  ["/api/kakaopay/approve", approveHandler],
+  ["/api/kakaopay/subscription/status", subscriptionStatusHandler],
+  ["/api/kakaopay/subscription/charge", subscriptionChargeHandler],
+  ["/api/kakaopay/subscription/inactive", subscriptionInactiveHandler],
+]);
 
 const sendJson = (res, status, body) => {
-  res.writeHead(status, { ...corsHeaders, "Content-Type": "application/json" });
+  res.writeHead(status, {
+    "Content-Type": "application/json",
+    "Cache-Control": "no-store",
+  });
   res.end(JSON.stringify(body));
 };
 
-const readJson = (req) =>
-  new Promise((resolve, reject) => {
-    let data = "";
-    req.on("data", (chunk) => {
-      data += chunk;
-    });
-    req.on("end", () => {
-      if (!data) return resolve({});
-      try {
-        resolve(JSON.parse(data));
-      } catch (err) {
-        reject(err);
-      }
-    });
-  });
-
-const makeUrl = (path) => `${API_BASE.replace(/\/$/, "")}${path}`;
-const buildRequestOptions = (path, payload) => {
-  const useJsonPayload = AUTH_SCHEME !== "KakaoAK" || String(path || "").includes("/online/");
-  const headers = {
-    Authorization: `${AUTH_SCHEME} ${SECRET_KEY}`,
-    "Content-Type": useJsonPayload
-      ? "application/json;charset=utf-8"
-      : "application/x-www-form-urlencoded;charset=utf-8",
-  };
-  const body = useJsonPayload
-    ? JSON.stringify(payload)
-    : new URLSearchParams(payload).toString();
-  return { headers, body };
-};
-
 const handler = async (req, res) => {
-  if (req.method === "OPTIONS") {
-    res.writeHead(204, corsHeaders);
-    res.end();
-    return;
+  try {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const routeHandler = ROUTES.get(url.pathname);
+
+    if (!routeHandler) {
+      sendJson(res, 404, { message: "Not found" });
+      return;
+    }
+
+    await routeHandler(req, res);
+  } catch (error) {
+    sendJson(res, 500, { message: `KakaoPay dev server failed: ${error.message}` });
   }
-
-  const url = new URL(req.url, `http://${req.headers.host}`);
-
-  if (req.method === "POST" && url.pathname === "/api/kakaopay/ready") {
-    if (!SECRET_KEY) {
-      sendJson(res, 500, { message: "KAKAOPAY_SECRET_KEY is not set." });
-      return;
-    }
-
-    let body;
-    try {
-      body = await readJson(req);
-    } catch {
-      sendJson(res, 400, { message: "Request body is not valid JSON." });
-      return;
-    }
-
-    const amount = Number(body.amount);
-    const orderId = String(body.orderId || "");
-    const userId = String(body.userId || "");
-
-    if (!Number.isFinite(amount) || amount <= 0 || !orderId || !userId) {
-      sendJson(res, 400, { message: "amount, orderId, and userId are required." });
-      return;
-    }
-
-    const payload = {
-      cid: CID,
-      partner_order_id: orderId,
-      partner_user_id: userId,
-      item_name: body.itemName || body.plan || "KakaoPay Plan",
-      quantity: "1",
-      total_amount: String(amount),
-      vat_amount: String(Math.floor(amount / 11)),
-      tax_free_amount: "0",
-      approval_url: body.approvalUrl || `${CLIENT_ORIGIN}/?kakaoPay=approve`,
-      cancel_url: body.cancelUrl || `${CLIENT_ORIGIN}/?kakaoPay=cancel`,
-      fail_url: body.failUrl || `${CLIENT_ORIGIN}/?kakaoPay=fail`,
-    };
-    const redirectUrls = [payload.approval_url, payload.cancel_url, payload.fail_url];
-    if (isProductionOpenApi && redirectUrls.some(isLocalHostOrigin)) {
-      sendJson(res, 400, {
-        message:
-          "Production KakaoPay cannot use localhost approval/cancel/fail URLs. Set VITE_PUBLIC_APP_ORIGIN and KAKAOPAY_CLIENT_ORIGIN to your public HTTPS domain and test there.",
-      });
-      return;
-    }
-    if (isProductionOpenApi && redirectUrls.some(hasNonHttpsOrigin)) {
-      sendJson(res, 400, { message: "Production KakaoPay approval/cancel/fail URLs must use HTTPS." });
-      return;
-    }
-    const requestOptions = buildRequestOptions(READY_PATH, payload);
-
-    try {
-      const response = await fetch(makeUrl(READY_PATH), {
-        method: "POST",
-        headers: requestOptions.headers,
-        body: requestOptions.body,
-      });
-
-      const text = await response.text();
-      let data;
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { raw: text };
-      }
-
-      if (!response.ok) {
-        sendJson(res, response.status, data);
-        return;
-      }
-
-      sendJson(res, 200, data);
-    } catch (err) {
-      sendJson(res, 500, { message: `KakaoPay ready failed: ${err.message}` });
-    }
-    return;
-  }
-
-  if (req.method === "POST" && url.pathname === "/api/kakaopay/approve") {
-    if (!SECRET_KEY) {
-      sendJson(res, 500, { message: "KAKAOPAY_SECRET_KEY is not set." });
-      return;
-    }
-
-    let body;
-    try {
-      body = await readJson(req);
-    } catch {
-      sendJson(res, 400, { message: "Request body is not valid JSON." });
-      return;
-    }
-
-    const tid = String(body.tid || "");
-    const orderId = String(body.orderId || "");
-    const userId = String(body.userId || "");
-    const pgToken = String(body.pgToken || "");
-
-    if (!tid || !orderId || !userId || !pgToken) {
-      sendJson(res, 400, { message: "tid, orderId, userId, and pgToken are required." });
-      return;
-    }
-
-    const payload = {
-      cid: CID,
-      tid,
-      partner_order_id: orderId,
-      partner_user_id: userId,
-      pg_token: pgToken,
-    };
-    const requestOptions = buildRequestOptions(APPROVE_PATH, payload);
-
-    try {
-      const response = await fetch(makeUrl(APPROVE_PATH), {
-        method: "POST",
-        headers: requestOptions.headers,
-        body: requestOptions.body,
-      });
-
-      const text = await response.text();
-      let data;
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { raw: text };
-      }
-
-      if (!response.ok) {
-        sendJson(res, response.status, data);
-        return;
-      }
-
-      sendJson(res, 200, data);
-    } catch (err) {
-      sendJson(res, 500, { message: `KakaoPay approve failed: ${err.message}` });
-    }
-    return;
-  }
-
-  sendJson(res, 404, { message: "Not found" });
 };
 
 http.createServer(handler).listen(PORT, () => {

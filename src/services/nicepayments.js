@@ -61,3 +61,19 @@ export function confirmNicePayment(payload, options = {}) {
 export function fetchNicePaymentsConfig() {
   return postJson(buildNicePaymentsUrl("/config"), {});
 }
+
+export function prepareNicePaymentsSubscription(payload, options = {}) {
+  return postJson(buildNicePaymentsUrl("/subscription/prepare"), payload, options);
+}
+
+export function fetchNicePaymentsSubscriptionStatus(options = {}) {
+  return postJson(buildNicePaymentsUrl("/subscription/status"), {}, options);
+}
+
+export function chargeNicePaymentsSubscription(payload = {}, options = {}) {
+  return postJson(buildNicePaymentsUrl("/subscription/charge"), payload, options);
+}
+
+export function inactiveNicePaymentsSubscription(payload = {}, options = {}) {
+  return postJson(buildNicePaymentsUrl("/subscription/inactive"), payload, options);
+}

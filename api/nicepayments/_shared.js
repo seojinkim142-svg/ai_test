@@ -2,6 +2,8 @@
 import crypto from "node:crypto";
 
 const DEFAULT_API_BASE = "https://sandbox-api.nicepay.co.kr";
+const DEFAULT_BILLING_API_BASE = "https://webapi.nicepay.co.kr";
+const DEFAULT_BILLING_SCRIPT_URL = "https://pg-web.nicepay.co.kr/v3/common/js/nicepay-pgweb.js";
 const DEFAULT_LOCAL_ORIGIN = "http://localhost:5173";
 const TOKEN_TTL_MS = 15 * 60 * 1000;
 const NATIVE_APP_ORIGINS = new Set(["http://localhost", "https://localhost", "capacitor://localhost"]);
@@ -77,6 +79,10 @@ export const getRuntimeConfig = (req) => {
   const clientId = text(process.env.NICEPAYMENTS_CLIENT_ID || process.env.NICEPAYMENTS_CLIENT_KEY);
   const secretKey = text(process.env.NICEPAYMENTS_SECRET_KEY);
   const apiBase = text(process.env.NICEPAYMENTS_API_BASE) || DEFAULT_API_BASE;
+  const billingMid = text(process.env.NICEPAYMENTS_BILLING_MID || clientId);
+  const billingMerchantKey = text(process.env.NICEPAYMENTS_BILLING_MERCHANT_KEY || secretKey);
+  const billingApiBase = text(process.env.NICEPAYMENTS_BILLING_API_BASE) || DEFAULT_BILLING_API_BASE;
+  const billingScriptUrl = text(process.env.NICEPAYMENTS_BILLING_SCRIPT_URL) || DEFAULT_BILLING_SCRIPT_URL;
   const requestOrigin = normalizeOrigin(resolveRequestOrigin(req));
   const fallbackOrigin = normalizeOrigin(resolveVercelOrigin()) || requestOrigin || DEFAULT_LOCAL_ORIGIN;
   const clientOrigin = normalizeOrigin(process.env.NICEPAYMENTS_CLIENT_ORIGIN) || fallbackOrigin;
@@ -98,6 +104,10 @@ export const getRuntimeConfig = (req) => {
     clientId,
     secretKey,
     apiBase,
+    billingMid,
+    billingMerchantKey,
+    billingApiBase,
+    billingScriptUrl,
     clientOrigin,
     allowOrigin,
   };
@@ -140,7 +150,43 @@ export const parseRequestBody = async (req) => {
 export const buildNiceSignature = ({ authToken, clientId, amount, secretKey }) =>
   crypto.createHash("sha256").update(`${authToken}${clientId}${amount}${secretKey}`).digest("hex");
 
+export const sha256Hex = (...values) =>
+  crypto.createHash("sha256").update(values.map((value) => String(value ?? "")).join("")).digest("hex");
+
+export const formatNiceEdiDate = (dateInput = new Date()) => {
+  const date = dateInput instanceof Date ? new Date(dateInput) : new Date(dateInput);
+  if (Number.isNaN(date.getTime())) return "";
+  const yyyy = String(date.getFullYear());
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mi = String(date.getMinutes()).padStart(2, "0");
+  const ss = String(date.getSeconds()).padStart(2, "0");
+  return `${yyyy}${mm}${dd}${hh}${mi}${ss}`;
+};
+
 export const makeNiceApiUrl = (apiBase, path) => `${apiBase.replace(/\/$/, "")}${path}`;
+
+export const parseNiceJsonResponse = async (response) => {
+  const textBody = await response.text();
+  try {
+    return textBody ? JSON.parse(textBody) : {};
+  } catch {
+    return { raw: textBody };
+  }
+};
+
+export const requestNiceBillingApi = async ({ apiBase, path, payload }) => {
+  const response = await fetch(makeNiceApiUrl(apiBase, path), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded;charset=utf-8",
+    },
+    body: new URLSearchParams(payload).toString(),
+  });
+  const data = await parseNiceJsonResponse(response);
+  return { ok: response.ok, status: response.status, data };
+};
 
 export const safeEqual = (left, right) => {
   const leftBuffer = Buffer.from(String(left));
@@ -207,4 +253,17 @@ export const redirectToClient = (res, clientOrigin, params) => {
     "Cache-Control": "no-store",
   });
   res.end();
+};
+
+export const validateNiceBillingConfig = ({ billingMid, billingMerchantKey, billingApiBase }) => {
+  if (!text(billingMid)) {
+    return "NICEPAYMENTS_BILLING_MID is not set.";
+  }
+  if (!text(billingMerchantKey)) {
+    return "NICEPAYMENTS_BILLING_MERCHANT_KEY is not set.";
+  }
+  if (!text(billingApiBase)) {
+    return "NICEPAYMENTS_BILLING_API_BASE is not set.";
+  }
+  return "";
 };
