@@ -1,3 +1,4 @@
+import { Capacitor } from "@capacitor/core";
 import { resolvePublicAppOrigin } from "../utils/appOrigin";
 
 const DEFAULT_NICE_PAYMENTS_BASE_PATH = "/api/nicepayments";
@@ -12,7 +13,13 @@ const resolveNicePaymentsBaseUrl = () => {
   if (!configuredBase) return DEFAULT_NICE_PAYMENTS_BASE_PATH;
   if (/^https?:\/\//i.test(configuredBase)) return configuredBase;
 
-  const publicOrigin = resolvePublicAppOrigin();
+  // Keep same-origin relative paths on web so preview/custom domains do not
+  // accidentally turn into cross-origin API calls that fail with "Failed to fetch".
+  if (configuredBase.startsWith("/") && !Capacitor.isNativePlatform()) {
+    return configuredBase;
+  }
+
+  const publicOrigin = normalizeBaseUrl(resolvePublicAppOrigin());
   if (publicOrigin && configuredBase.startsWith("/")) {
     return `${publicOrigin}${configuredBase}`;
   }
