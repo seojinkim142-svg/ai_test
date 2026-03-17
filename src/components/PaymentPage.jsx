@@ -853,7 +853,7 @@ function PaymentPage({
               className={`ghost-button text-sm ${isLight ? "text-emerald-700" : "text-emerald-100"}`}
               style={{ "--ghost-color": "16, 185, 129" }}
             >
-              {cardPaying ? "카드 처리 중..." : "카드 결제"}
+              {cardPaying ? "신용카드 처리 중..." : "신용카드"}
             </button>
             <button hidden
               type="button"
@@ -1038,7 +1038,7 @@ function PaymentPage({
           <div className={`mt-6 border-t pt-6 ${isLight ? "border-slate-200" : "border-white/10"}`}>
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <p className="font-semibold">나이스페이 카드 정기결제 상태</p>
+                <p className="font-semibold">나이스페이 신용카드 정기결제 상태</p>
                 <p className={isLight ? "text-slate-600" : "text-slate-300"}>
                   등록된 BID 상태를 확인하고 테스트 재청구 또는 해지를 처리할 수 있습니다.
                 </p>
@@ -1056,7 +1056,7 @@ function PaymentPage({
 
             {isLoadingNiceSubscription ? (
               <p className={isLight ? "mt-4 text-xs text-slate-500" : "mt-4 text-xs text-slate-300"}>
-                카드 정기결제 상태를 불러오는 중입니다.
+                신용카드 정기결제 상태를 불러오는 중입니다.
               </p>
             ) : niceSubscriptionData ? (
               <>
@@ -1184,7 +1184,7 @@ function PaymentPage({
               </>
             ) : (
               <p className={isLight ? "mt-4 text-xs text-slate-500" : "mt-4 text-xs text-slate-300"}>
-                등록된 나이스페이 카드 정기결제가 없습니다.
+                등록된 나이스페이 신용카드 정기결제가 없습니다.
               </p>
             )}
           </div>
@@ -1209,7 +1209,7 @@ function PaymentPage({
         >
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <p className="font-semibold">카드 결제</p>
+              <p className="font-semibold">신용카드 결제</p>
               <p className={isLight ? "text-slate-600" : "text-slate-300"}>
                 선택 플랜: {selectedPlanLabel}
                 {selectedCardPlan ? ` / ${selectedCardAmount.toLocaleString()} KRW` : ""}
@@ -1229,7 +1229,7 @@ function PaymentPage({
               isLight ? "border-slate-200 bg-white" : "border-white/10 bg-white/5"
             }`}
           >
-            <p className="text-sm font-semibold">카드 결제 진행</p>
+            <p className="text-sm font-semibold">신용카드 결제 진행</p>
             <p className={isLight ? "mt-2 text-xs text-slate-500" : "mt-2 text-xs text-slate-300"}>
               결제 창이 준비되면 아래 버튼으로 결제를 확정하세요.
             </p>
@@ -1247,7 +1247,7 @@ function PaymentPage({
               className={`ghost-button text-sm ${isLight ? "text-emerald-700" : "text-emerald-100"}`}
               style={{ "--ghost-color": "16, 185, 129" }}
             >
-              {cardPaying ? "처리 중..." : "카드 결제 확정"}
+              {cardPaying ? "처리 중..." : "신용카드 결제 확정"}
             </button>
           </div>
         </div>
