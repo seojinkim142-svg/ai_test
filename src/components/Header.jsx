@@ -35,26 +35,20 @@ const Header = memo(function Header({
 
   const showPremiumButtons = Boolean(user && !loadingTier && isPremiumTier && activeProfile);
   const tierBadgeLabel = loadingTier ? "Sync" : isPremiumTier ? "Premium" : "Free";
-
   return (
     <header className="app-safe-top sticky top-0 z-40 flex w-full items-center border-b border-white/10 bg-slate-950/72 px-3 pb-3 backdrop-blur-xl sm:px-6 lg:px-10">
-      <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-end justify-between gap-3">
+      <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:flex sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <div>
             <p className="text-[11px] uppercase tracking-[0.24em] text-emerald-200/75 sm:text-sm sm:tracking-[0.2em]">
               {"\uD034\uC988\uC640 \uC694\uC57D"}
             </p>
             <h1 className="mt-1 text-2xl font-bold leading-none text-white sm:text-3xl">Zeusian</h1>
           </div>
-          {user && (
-            <span className="inline-flex rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-100 sm:hidden">
-              {tierBadgeLabel}
-            </span>
-          )}
         </div>
 
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
-          <div className="mobile-chip-row flex items-center gap-2 sm:flex-wrap sm:justify-end">
+        <div className="flex min-w-0 flex-col items-end gap-2 sm:w-auto">
+          <div className="flex w-[14.75rem] max-w-full flex-wrap justify-end gap-2 sm:w-auto sm:max-w-none sm:justify-end">
             {onGoHome && (
               <button
                 type="button"
@@ -180,7 +174,7 @@ const Header = memo(function Header({
           </div>
 
           {user && (
-            <div className="flex w-full items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 shadow-inner shadow-black/30 sm:w-auto sm:rounded-full sm:py-1.5">
+            <div className="flex w-[14.75rem] max-w-full items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 shadow-inner shadow-black/30 sm:w-auto sm:rounded-full sm:py-1.5">
               <div className="min-w-0 flex flex-col">
                 <span className="text-[11px] uppercase tracking-[0.15em] text-slate-400">
                   {"\uACC4\uC815"}
@@ -197,7 +191,7 @@ const Header = memo(function Header({
                   type="button"
                   onClick={onSignOut}
                   disabled={signingOut}
-                  className="ghost-button text-xs text-emerald-100"
+                  className="ghost-button shrink-0 text-xs text-emerald-100"
                   data-ghost-size="sm"
                   style={{ "--ghost-color": "52, 211, 153" }}
                 >

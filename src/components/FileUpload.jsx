@@ -194,8 +194,8 @@ const FileUpload = memo(function FileUpload({
         </div>
       </div>
 
-      <div className="mobile-card-rail relative mt-1 flex gap-3 sm:mt-2 sm:flex-wrap">
-        <div className="relative" ref={addMenuRef}>
+      <div className="relative mt-1 grid grid-cols-2 gap-3 sm:mt-2 sm:flex sm:flex-wrap">
+        <div className="relative h-full" ref={addMenuRef}>
           <UploadTile
             onFileChange={handleFileSelect}
             onOpenMenu={handleOpenAddMenu}
@@ -248,7 +248,7 @@ const FileUpload = memo(function FileUpload({
           })}
 
         {showEmptyState && (
-          <div className="flex min-h-[170px] w-[84vw] max-w-[320px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 text-center text-sm text-slate-300 ring-1 ring-white/5 sm:w-[260px] sm:flex-shrink-0">
+          <div className="col-span-2 flex min-h-[170px] w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 text-center text-sm text-slate-300 ring-1 ring-white/5 sm:w-[260px] sm:flex-shrink-0">
             {selectedFolderId === "all"
               ? "파일이 없습니다."
               : "이 폴더에 파일이 없습니다."}

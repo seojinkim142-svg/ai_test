@@ -3,7 +3,7 @@ import { SUPPORTED_UPLOAD_ACCEPT } from "../utils/document";
 
 function UploadTile({ onFileChange, onOpenMenu, inputRef }) {
   return (
-    <div className="relative flex h-full min-h-[158px] w-[84vw] max-w-[320px] shrink-0 sm:min-h-[170px] sm:w-[260px] sm:flex-shrink-0">
+    <div className="relative flex h-full min-h-[208px] w-full min-w-0 aspect-[4/5] sm:min-h-[170px] sm:w-[260px] sm:max-w-none sm:aspect-auto sm:flex-shrink-0">
       <button
         type="button"
         onClick={onOpenMenu}
