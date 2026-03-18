@@ -185,22 +185,12 @@ const FileUpload = memo(function FileUpload({
 
   return (
     <div className="col-span-2 flex flex-col gap-4">
-      <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 text-sm text-slate-100 shadow-lg shadow-black/20">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-300/75">
-              Library
-            </p>
-            <p className="mt-1 text-sm text-slate-200">{uploadLimitText}</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold text-slate-200">
-              {uploadedFiles.length} docs
-            </span>
-            {!isFolderFeatureEnabled && (
-              <p className="text-xs text-slate-300">폴더 기능은 Pro/Premium에서 제공됩니다.</p>
-            )}
-          </div>
+      <div className="px-1 text-sm text-slate-100">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs text-slate-300">{uploadLimitText}</p>
+          {!isFolderFeatureEnabled && (
+            <p className="text-xs text-slate-400">폴더 기능은 Pro/Premium에서 제공됩니다.</p>
+          )}
         </div>
       </div>
 
