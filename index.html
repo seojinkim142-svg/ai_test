@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="ko">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/zeusian_logo.png" />
@@ -8,17 +8,51 @@
     <link rel="preload" as="image" href="/zeusian_logo-Photoroom.png" fetchpriority="high" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#06080f" />
+    <meta name="robots" content="index,follow" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Zeusian" />
+    <link rel="canonical" href="https://zeusian.ai.kr/" />
     <meta
       name="description"
       content="Zeusian helps you study PDFs with summaries, quizzes, flashcards, and AI tutoring."
     />
-    <title>Zeusian</title>
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Zeusian | AI PDF Study Assistant" />
+    <meta
+      property="og:description"
+      content="Zeusian helps you study PDFs with summaries, quizzes, flashcards, and AI tutoring."
+    />
+    <meta property="og:url" content="https://zeusian.ai.kr/" />
+    <meta property="og:site_name" content="Zeusian" />
+    <meta property="og:image" content="https://zeusian.ai.kr/zeusian_logo.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Zeusian | AI PDF Study Assistant" />
+    <meta
+      name="twitter:description"
+      content="Zeusian helps you study PDFs with summaries, quizzes, flashcards, and AI tutoring."
+    />
+    <meta name="twitter:image" content="https://zeusian.ai.kr/zeusian_logo.png" />
+    <title>Zeusian | AI PDF Study Assistant</title>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "Zeusian",
+        "url": "https://zeusian.ai.kr/",
+        "description": "Zeusian helps you study PDFs with summaries, quizzes, flashcards, and AI tutoring."
+      }
+    </script>
   </head>
   <body>
+    <noscript>
+      <main style="padding:24px;font-family:system-ui,sans-serif;line-height:1.6">
+        <h1>Zeusian</h1>
+        <p>Study PDFs with summaries, quizzes, flashcards, and AI tutoring.</p>
+        <p><a href="/terms">Terms of Service</a> | <a href="/privacy">Privacy Policy</a></p>
+      </main>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
