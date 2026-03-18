@@ -5406,7 +5406,7 @@ function App() {
         </div>
       )}
 
-      <main className="relative z-10 mx-auto flex w-full max-w-none flex-col gap-4 py-4">
+      <main className="relative z-10 mx-auto flex w-full max-w-none flex-col gap-4 px-3 py-3 sm:px-4 sm:py-4 lg:px-6">
         {showHeader && (
           <Suspense fallback={null}>
             <Header

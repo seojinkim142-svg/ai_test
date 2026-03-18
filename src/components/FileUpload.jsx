@@ -185,14 +185,26 @@ const FileUpload = memo(function FileUpload({
 
   return (
     <div className="col-span-2 flex flex-col gap-4">
-      <div className="rounded-2xl bg-transparent px-0 py-0 text-sm text-slate-100">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-xs text-slate-300">{uploadLimitText}</p>
-          {!isFolderFeatureEnabled && <p className="text-xs text-slate-300">폴더 기능은 Pro/Premium에서 제공됩니다.</p>}
+      <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-4 text-sm text-slate-100 shadow-lg shadow-black/20">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-300/75">
+              Library
+            </p>
+            <p className="mt-1 text-sm text-slate-200">{uploadLimitText}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-semibold text-slate-200">
+              {uploadedFiles.length} docs
+            </span>
+            {!isFolderFeatureEnabled && (
+              <p className="text-xs text-slate-300">폴더 기능은 Pro/Premium에서 제공됩니다.</p>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="relative mt-2 flex flex-wrap gap-3">
+      <div className="mobile-card-rail relative mt-1 flex gap-3 sm:mt-2 sm:flex-wrap">
         <div className="relative" ref={addMenuRef}>
           <UploadTile
             onFileChange={handleFileSelect}
@@ -246,7 +258,7 @@ const FileUpload = memo(function FileUpload({
           })}
 
         {showEmptyState && (
-          <div className="flex min-h-[170px] w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sm text-slate-300 ring-1 ring-white/5 sm:w-[260px] sm:flex-shrink-0">
+          <div className="flex min-h-[170px] w-[84vw] max-w-[320px] items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 text-center text-sm text-slate-300 ring-1 ring-white/5 sm:w-[260px] sm:flex-shrink-0">
             {selectedFolderId === "all"
               ? "파일이 없습니다."
               : "이 폴더에 파일이 없습니다."}
@@ -291,14 +303,14 @@ const FileUpload = memo(function FileUpload({
       />
 
       {folderModalId && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/60 px-4 py-8 backdrop-blur-sm">
-          <div className="relative flex w-full max-w-6xl flex-col rounded-3xl border border-white/10 bg-slate-900/95 p-6 text-slate-100 shadow-2xl shadow-black/40 max-h-[80vh] min-h-[320px]">
-            <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/60 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-4 sm:py-8">
+          <div className="relative flex w-full max-w-6xl flex-col rounded-[1.75rem] border border-white/10 bg-slate-900/95 p-4 text-slate-100 shadow-2xl shadow-black/40 max-h-[88svh] min-h-[320px] sm:rounded-3xl sm:p-6">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-xs uppercase tracking-wide text-emerald-300/80">폴더</p>
                 <h3 className="text-xl font-semibold">{folderModalName}</h3>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => {

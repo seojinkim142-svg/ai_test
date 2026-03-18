@@ -3,11 +3,11 @@ import { SUPPORTED_UPLOAD_ACCEPT } from "../utils/document";
 
 function UploadTile({ onFileChange, onOpenMenu, inputRef }) {
   return (
-    <div className="relative flex h-full min-h-[170px] w-full sm:w-[260px] sm:flex-shrink-0">
+    <div className="relative flex h-full min-h-[158px] w-[84vw] max-w-[320px] shrink-0 sm:min-h-[170px] sm:w-[260px] sm:flex-shrink-0">
       <button
         type="button"
         onClick={onOpenMenu}
-        className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-white/20 bg-white/5 text-center transition hover:-translate-y-1 hover:border-emerald-300/60 hover:bg-emerald-400/5"
+        className="flex h-full w-full flex-col items-center justify-center gap-3 rounded-[1.4rem] border border-dashed border-white/20 bg-white/5 px-5 text-center transition hover:-translate-y-1 hover:border-emerald-300/60 hover:bg-emerald-400/5 sm:rounded-2xl"
       >
         <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500/15 text-2xl font-bold text-emerald-200">
           +

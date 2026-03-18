@@ -83,6 +83,61 @@ textarea,
   background: var(--scrollbar-thumb-hover);
 }
 
+.app-safe-top {
+  padding-top: max(0.75rem, env(safe-area-inset-top, 0px));
+}
+
+.app-safe-bottom {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
+}
+
+.mobile-chip-row,
+.mobile-tab-row,
+.mobile-card-rail {
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 639px) {
+  .mobile-chip-row,
+  .mobile-tab-row,
+  .mobile-card-rail {
+    margin-inline: -0.25rem;
+    overflow-x: auto;
+    padding-inline: 0.25rem;
+  }
+
+  .mobile-chip-row {
+    flex-wrap: nowrap;
+    padding-bottom: 0.25rem;
+    scroll-snap-type: x proximity;
+  }
+
+  .mobile-chip-row > * {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+  }
+
+  .mobile-tab-row {
+    scroll-snap-type: x mandatory;
+  }
+
+  .mobile-tab-row > * {
+    flex: 0 0 auto;
+    scroll-snap-align: center;
+  }
+
+  .mobile-card-rail {
+    flex-wrap: nowrap;
+    padding-bottom: 0.5rem;
+    scroll-snap-type: x mandatory;
+  }
+
+  .mobile-card-rail > * {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+  }
+}
+
 .katex-error {
   color: #e5e7eb !important;
   background: transparent !important;

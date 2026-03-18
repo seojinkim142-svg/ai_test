@@ -16,7 +16,7 @@ function FolderTile({
 }) {
   return (
     <div
-      className={`group flex h-full min-h-[190px] w-full flex-col overflow-hidden rounded-2xl border bg-slate-900/70 text-left shadow-lg shadow-black/30 ring-1 transition hover:-translate-y-1 hover:border-emerald-300/50 hover:ring-emerald-300/40 sm:w-[260px] sm:flex-shrink-0 ${
+      className={`group flex h-full min-h-[182px] w-[84vw] max-w-[320px] shrink-0 flex-col overflow-hidden rounded-[1.4rem] border bg-slate-900/70 text-left shadow-lg shadow-black/30 ring-1 transition hover:-translate-y-1 hover:border-emerald-300/50 hover:ring-emerald-300/40 sm:min-h-[190px] sm:w-[260px] sm:max-w-none sm:flex-shrink-0 sm:rounded-2xl ${
         active ? "border-emerald-300/60 ring-emerald-300/50" : "border-white/10 ring-white/5"
       } ${canDrop ? "cursor-pointer" : ""}`}
       onClick={onClick}
