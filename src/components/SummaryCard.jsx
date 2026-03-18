@@ -400,6 +400,38 @@ function SummaryCard({ summary, renderExportPages = false }) {
     }),
     []
   );
+  const mobileMarkdownComponents = useMemo(
+    () => ({
+      h1: (props) => <h1 className="mt-5 text-[1.6rem] font-bold leading-tight text-white" {...props} />,
+      h2: (props) => <h2 className="mt-4 text-[1.35rem] font-semibold leading-tight text-white" {...props} />,
+      h3: (props) => <h3 className="mt-3 text-[1.15rem] font-semibold leading-snug text-emerald-100" {...props} />,
+      p: (props) => <p className="text-[1.02rem] leading-[1.9] text-slate-100" {...props} />,
+      strong: (props) => <strong className="font-semibold text-slate-50" {...props} />,
+      ul: (props) => <ul className="list-disc space-y-2 pl-6 text-[1.02rem] text-slate-100" {...props} />,
+      ol: (props) => <ol className="list-decimal space-y-2 pl-6 text-[1.02rem] text-slate-100" {...props} />,
+      li: (props) => <li className="leading-[1.85]" {...props} />,
+      code: ({ inline, className, children, ...props }) =>
+        inline ? (
+          <code className="rounded bg-slate-800/80 px-1.5 py-0.5 text-[0.92rem] text-emerald-100" {...props}>
+            {children}
+          </code>
+        ) : (
+          <pre className="overflow-auto rounded-xl bg-slate-900/80 p-4 text-[0.92rem] text-slate-100" {...props}>
+            <code className={className}>{children}</code>
+          </pre>
+        ),
+      table: (props) => (
+        <div className="overflow-auto">
+          <table className="min-w-full text-left text-[0.98rem] text-slate-100" {...props} />
+        </div>
+      ),
+      th: (props) => (
+        <th className="border-b border-white/10 px-3 py-2 font-semibold text-emerald-100" {...props} />
+      ),
+      td: (props) => <td className="border-b border-white/5 px-3 py-2 text-slate-100" {...props} />,
+    }),
+    []
+  );
   const exportMarkdownComponents = useMemo(
     () => ({
       h1: (props) => <h1 className="mt-4 text-[22px] font-bold text-slate-900" {...props} />,
@@ -542,6 +574,30 @@ function SummaryCard({ summary, renderExportPages = false }) {
         tabIndex={0}
         onKeyDown={handleCardKeyDown}
       >
+        <div className="sm:hidden">
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-300">요약</p>
+              {totalPages > 1 && (
+                <p className="mt-1 text-[11px] text-slate-400">모바일에서는 전체 요약을 한 번에 크게 보여줍니다.</p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsExpanded(true)}
+              className="ghost-button shrink-0 text-[11px] text-slate-200"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "148, 163, 184" }}
+            >
+              크게 보기
+            </button>
+          </div>
+          <div className="rounded-[1.5rem] border border-white/10 bg-slate-950/45 p-5 shadow-inner shadow-black/30">
+            {renderMarkdownPage(normalizedSummary, mobileMarkdownComponents)}
+          </div>
+        </div>
+
+        <div className="hidden sm:block">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs uppercase tracking-[0.2em] text-slate-300">요약</p>
           <div className="flex flex-wrap items-center gap-2">
@@ -592,6 +648,7 @@ function SummaryCard({ summary, renderExportPages = false }) {
           >
             {">"}
           </button>
+        </div>
         </div>
 
         {renderExportPages && (

@@ -505,16 +505,40 @@ export default function DetailPage({
         style={splitStyle}
       >
         <div className="rounded-3xl border border-white/10 bg-white/[0.04] px-4 py-3 shadow-lg shadow-black/20 lg:hidden">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-300/75">
-                Document
-              </p>
-              <p className="truncate text-sm font-semibold text-white">{file?.name || "Preview"}</p>
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-300/75">
+                  Document
+                </p>
+                <p className="truncate text-sm font-semibold text-white">{file?.name || "Preview"}</p>
+              </div>
+              <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">
+                {currentPage} / {totalPageCount || "-"}
+              </span>
             </div>
-            <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">
-              {currentPage} / {totalPageCount || "-"}
-            </span>
+            <div className="flex items-center justify-end gap-2 sm:hidden">
+              <button
+                type="button"
+                onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
+                disabled={currentPage <= 1}
+                className="ghost-button text-[11px] text-slate-200"
+                data-ghost-size="sm"
+                style={{ "--ghost-color": "148, 163, 184" }}
+              >
+                이전
+              </button>
+              <button
+                type="button"
+                onClick={() => handlePageChange(Math.min(totalPageCount || currentPage, currentPage + 1))}
+                disabled={currentPage >= totalPageCount}
+                className="ghost-button text-[11px] text-emerald-100"
+                data-ghost-size="sm"
+                style={{ "--ghost-color": "52, 211, 153" }}
+              >
+                다음
+              </button>
+            </div>
           </div>
         </div>
         <PdfPreview
@@ -789,7 +813,7 @@ export default function DetailPage({
                         선택 삭제
                       </button>
                     </div>
-                    <div className="mt-2 flex items-center gap-2">
+                    <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
                       <div className="relative flex-1">
                         <div
                           className="pointer-events-none absolute inset-x-1 top-1/2 z-20 -translate-y-1/2 rounded-lg border border-emerald-300/45 bg-emerald-400/10 shadow-[0_0_18px_rgba(52,211,153,0.18)]"
@@ -847,7 +871,7 @@ export default function DetailPage({
                           </div>
                         </div>
                       </div>
-                      <div className="flex h-[190px] shrink-0 flex-col items-center justify-center gap-1">
+                      <div className="flex w-full justify-end gap-1 sm:h-[190px] sm:w-auto sm:shrink-0 sm:flex-col sm:items-center sm:justify-center">
                         <button
                           type="button"
                           onClick={() => cycleActiveInstructorEmphasis(-1)}
