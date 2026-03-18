@@ -573,7 +573,7 @@ export default function DetailPage({
       </div>
 
       <div className="flex min-w-0 flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
-        <div className="mobile-tab-row flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-1.5 shadow-lg shadow-black/30 md:grid md:grid-cols-6 md:px-3 md:py-2 lg:sticky lg:top-24 lg:z-10 lg:backdrop-blur">
+        <div className="mobile-tab-row flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-1.5 shadow-lg shadow-black/30 md:grid md:grid-cols-6 md:px-3 md:py-2">
           {panelItems.map((item) => {
             const active = panelTab === item.id;
             return (
