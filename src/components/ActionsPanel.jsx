@@ -12,7 +12,7 @@ function ActionsPanel({
   stepLabel = "2단계",
 }) {
   return (
-    <div className="rounded-3xl border border-white/5 bg-slate-900/60 p-6 shadow-lg shadow-black/30 backdrop-blur">
+    <div className="rounded-3xl border border-white/5 bg-slate-900/60 p-4 shadow-lg shadow-black/30 backdrop-blur sm:p-6">
       <p className="text-sm text-slate-300">{stepLabel}</p>
       <h2 className="text-xl font-semibold text-white">{title}</h2>
       <p className="mt-2 text-sm text-slate-400">퀴즈를 생성중입니다.</p>

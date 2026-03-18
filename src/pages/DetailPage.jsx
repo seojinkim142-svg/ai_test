@@ -484,16 +484,39 @@ export default function DetailPage({
     partialSummaryListRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [isSavedPartialSummaryOpen]);
 
+  const panelItems = [
+    { id: "summary", label: "\uC694\uC57D" },
+    { id: "quiz", label: "\uD034\uC988" },
+    { id: "ox", label: "O/X" },
+    { id: "mockExam", label: "\uBAA8\uC758\uACE0\uC0AC" },
+    { id: "flashcards", label: "\uCE74\uB4DC" },
+    { id: "tutor", label: "AI \uD29C\uD130" },
+  ];
+  const totalPageCount = Number(pageInfo?.total || pageInfo?.used || 0);
+
 
   return (
     <section
       ref={detailContainerRef}
-      className="flex flex-col gap-4 lg:h-[clamp(70vh,calc(100vh-120px),90vh)] lg:flex-row lg:items-stretch lg:gap-0 lg:overflow-hidden"
+      className="app-safe-bottom flex flex-col gap-4 lg:h-[clamp(70vh,calc(100vh-120px),90vh)] lg:flex-row lg:items-stretch lg:gap-0 lg:overflow-hidden"
     >
       <div
         className="flex flex-col gap-3 lg:h-full lg:min-w-0 lg:flex-[0_0_var(--split-basis)] lg:overflow-y-auto"
         style={splitStyle}
       >
+        <div className="rounded-3xl border border-white/10 bg-white/[0.04] px-4 py-3 shadow-lg shadow-black/20 lg:hidden">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-300/75">
+                Document
+              </p>
+              <p className="truncate text-sm font-semibold text-white">{file?.name || "Preview"}</p>
+            </div>
+            <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">
+              {currentPage} / {totalPageCount || "-"}
+            </span>
+          </div>
+        </div>
         <PdfPreview
           pdfUrl={pdfUrl}
           file={file}
@@ -525,23 +548,17 @@ export default function DetailPage({
         </button>
       </div>
 
-        <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
-        <div className="grid grid-cols-6 items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
-          {[
-            { id: "summary", label: "\uC694\uC57D", type: "tab" },
-            { id: "quiz", label: "\uD034\uC988", type: "tab" },
-            { id: "ox", label: "O/X", type: "tab" },
-            { id: "mockExam", label: "\uBAA8\uC758\uACE0\uC0AC", type: "tab" },
-            { id: "flashcards", label: "\uCE74\uB4DC", type: "tab" },
+      <div className="flex min-w-0 flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
+        <div className="mobile-tab-row flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-1.5 shadow-lg shadow-black/30 md:grid md:grid-cols-6 md:px-3 md:py-2 lg:sticky lg:top-24 lg:z-10 lg:backdrop-blur">
+          {panelItems.map((item) => { /*
             { id: "tutor", label: "AI 튜터", type: "tab" },
-          ].map((item) => {
-            const active = panelTab === item.id;
+            */ const active = panelTab === item.id;
             return (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => setPanelTab(item.id)}
-                className="ghost-button w-full text-sm text-slate-200"
+                className="ghost-button min-w-[92px] shrink-0 text-xs text-slate-200 md:min-w-0 md:w-full md:text-sm"
                 data-ghost-size="sm"
                 data-ghost-active={active}
                 style={{ "--ghost-color": active ? "52, 211, 153" : "148, 163, 184" }}
@@ -552,7 +569,7 @@ export default function DetailPage({
           })}
         </div>
 
-        <div className="flex-1 overflow-auto pr-1 pb-1">
+        <div className="flex-1 overflow-auto pb-20 pr-0 md:pb-2 md:pr-1">
           {panelTab === "summary" && (
             <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
               <div className="flex items-center justify-between gap-3">

@@ -290,8 +290,8 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
   }, [currentPage, pdfUrl]);
 
   const pageController = (
-    <div className="pointer-events-none absolute inset-x-0 bottom-3 z-30 flex justify-center">
-      <div className="pointer-events-auto inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-slate-900/90 px-2 py-1 text-xs text-slate-100 shadow-lg shadow-black/40">
+    <div className="pointer-events-none absolute inset-x-0 bottom-2 z-30 flex justify-center px-2 sm:bottom-3 sm:px-3">
+      <div className="pointer-events-auto inline-flex w-full max-w-[22rem] items-center justify-between gap-1 rounded-[1.35rem] border border-white/15 bg-slate-900/92 px-2 py-1.5 text-[11px] text-slate-100 shadow-lg shadow-black/40 sm:w-auto sm:max-w-none sm:gap-2 sm:rounded-2xl sm:px-2 sm:py-1 sm:text-xs">
         <button
           type="button"
           onClick={goToPreviousPage}
@@ -514,10 +514,10 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
 
   if (isNativePlatform) {
     return (
-      <div className="relative flex h-full min-h-[72vh] flex-1 overflow-hidden rounded-3xl border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/40 lg:min-h-0">
+      <div className="relative flex h-[58svh] min-h-[24rem] flex-1 overflow-hidden rounded-3xl border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/40 sm:min-h-[72vh] lg:h-full lg:min-h-0">
         <div
           ref={nativeScrollRef}
-          className="h-full w-full overflow-y-auto overflow-x-hidden p-2 sm:p-3"
+          className="h-full w-full overflow-y-auto overflow-x-hidden p-1.5 sm:p-3"
           onWheel={handleNativeWheel}
           onTouchStart={handleNativeTouchStart}
           onTouchEnd={handleNativeTouchEnd}
@@ -554,7 +554,7 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
   const isLoading = hasViewer && loadedSrc !== viewerSrc && failedSrc !== viewerSrc;
 
   return (
-    <div className="relative flex h-full min-h-[72vh] flex-1 overflow-hidden rounded-3xl border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/40 lg:min-h-0">
+    <div className="relative flex h-[58svh] min-h-[24rem] flex-1 overflow-hidden rounded-3xl border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/40 sm:min-h-[72vh] lg:h-full lg:min-h-0">
       {!hasLoadError && (
         <iframe
           key={viewerSrc}
