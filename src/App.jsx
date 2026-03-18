@@ -5406,7 +5406,13 @@ function App() {
         </div>
       )}
 
-      <main className="relative z-10 mx-auto flex w-full max-w-none flex-col gap-4 px-3 py-3 sm:px-4 sm:py-4 lg:px-6">
+      <main
+        className={`relative z-10 mx-auto flex w-full max-w-none flex-col gap-4 ${
+          showHeader
+            ? "px-3 pb-3 pt-2 sm:px-4 sm:pb-4 sm:pt-3 lg:px-6"
+            : "px-3 py-3 sm:px-4 sm:py-4 lg:px-6"
+        }`}
+      >
         {showHeader && (
           <Suspense fallback={null}>
             <Header

@@ -36,8 +36,9 @@ const Header = memo(function Header({
   const showPremiumButtons = Boolean(user && !loadingTier && isPremiumTier && activeProfile);
   const tierBadgeLabel = loadingTier ? "Sync" : isPremiumTier ? "Premium" : "Free";
   return (
-    <header className="app-safe-top sticky top-0 z-40 flex w-full items-center border-b border-white/10 bg-slate-950/72 px-3 pb-3 backdrop-blur-xl sm:px-6 lg:px-10">
-      <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:flex sm:flex-row sm:items-start sm:justify-between">
+    <header className="app-safe-top sticky top-0 z-40">
+      <div className="flex w-full items-center rounded-[1.75rem] border border-white/10 bg-slate-950/72 px-3 py-3 shadow-lg shadow-black/20 backdrop-blur-xl sm:px-6 sm:py-3.5 lg:px-8">
+        <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:flex sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <div>
             <p className="text-[11px] uppercase tracking-[0.24em] text-emerald-200/75 sm:text-sm sm:tracking-[0.2em]">
@@ -201,6 +202,7 @@ const Header = memo(function Header({
             </div>
           )}
         </div>
+      </div>
       </div>
     </header>
   );
