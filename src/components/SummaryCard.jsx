@@ -572,7 +572,7 @@ function SummaryCard({ summary, renderExportPages = false }) {
             <button
               type="button"
               onClick={() => setIsExpanded(true)}
-              className="ghost-button text-[11px] text-slate-200"
+              className="ghost-button text-[11px] text-slate-200 sm:hidden"
               data-ghost-size="sm"
               style={{ "--ghost-color": "148, 163, 184" }}
             >
