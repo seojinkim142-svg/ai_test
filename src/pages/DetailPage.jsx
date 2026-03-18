@@ -592,7 +592,7 @@ export default function DetailPage({
           })}
         </div>
 
-        <div className="pb-20 pr-0 lg:flex-1 lg:overflow-auto lg:pb-2 lg:pr-1">
+        <div className="pb-20 pr-0 sm:flex-1 sm:overflow-auto sm:pb-2 sm:pr-1">
           {panelTab === "summary" && (
             <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
               <div className="flex items-center justify-between gap-3">
