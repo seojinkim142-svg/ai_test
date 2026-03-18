@@ -18,3 +18,11 @@ const legalPages = {
 const rootElement = legalPages[normalizedPath] ?? (promoOnlyPaths.has(normalizedPath) ? <PromoPage /> : <App />);
 
 createRoot(document.getElementById("root")).render(rootElement);
+
+if (import.meta.env.PROD && typeof window !== "undefined" && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/service-worker.js").catch((error) => {
+      console.warn("Service worker registration failed:", error);
+    });
+  });
+}

@@ -15,9 +15,13 @@
     "preview": "vite preview",
     "cap:sync": "npx cap sync",
     "cap:add:android": "npx cap add android",
+    "cap:add:ios": "npx cap add ios",
     "cap:open:android": "npx cap open android",
+    "cap:open:ios": "npx cap open ios",
     "android:open": "npm run build:mobile && npx cap sync android && npx cap open android",
     "android:run": "npm run build:mobile && npx cap sync android && npx cap run android",
+    "ios:open": "npm run build:mobile && npx cap sync ios && npx cap open ios",
+    "ios:run": "npm run build:mobile && npx cap sync ios && npx cap run ios",
     "android:live": "npx cap run android -l --host localhost --port 3000 --forwardPorts 3000:3000",
     "android:live:target": "npx cap run android --target R54N601PJEJ -l --host localhost --port 3000 --forwardPorts 3000:3000"
   },
