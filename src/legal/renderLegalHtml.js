@@ -7,9 +7,26 @@ const HTML_ESCAPE_MAP = {
   '"': "&quot;",
   "'": "&#39;",
 };
+const SITE_ORIGIN = "https://zeusian.ai.kr";
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => HTML_ESCAPE_MAP[char]);
+}
+
+function buildAbsoluteUrl(pathname = "/") {
+  const normalizedPath = String(pathname || "/").startsWith("/") ? pathname : `/${pathname}`;
+  return new URL(normalizedPath, SITE_ORIGIN).toString();
+}
+
+function buildLegalPageUrl(content) {
+  const slug = String(content?.slug || "")
+    .trim()
+    .replace(/^\/+|\/+$/g, "");
+  return buildAbsoluteUrl(slug ? `/${slug}` : "/");
+}
+
+function serializeJsonLd(data) {
+  return JSON.stringify(data).replace(/</g, "\\u003c");
 }
 
 function renderList(items, ordered = false) {
@@ -93,13 +110,43 @@ export function renderLegalDocumentFragment(content) {
 }
 
 export function renderLegalDocumentHtml(content) {
+  const canonicalUrl = buildLegalPageUrl(content);
+  const title = `${content.title} | Zeusian`;
+  const description = String(content.description || "");
+  const ogImageUrl = buildAbsoluteUrl("/zeusian_logo.png");
+  const jsonLd = serializeJsonLd({
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    name: title,
+    url: canonicalUrl,
+    description,
+    isPartOf: {
+      "@type": "WebSite",
+      name: "Zeusian",
+      url: buildAbsoluteUrl("/"),
+    },
+  });
+
   return `<!doctype html>
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${escapeHtml(content.title)} | Zeusian</title>
-    <meta name="description" content="${escapeHtml(content.description)}" />
+    <title>${escapeHtml(title)}</title>
+    <meta name="description" content="${escapeHtml(description)}" />
+    <meta name="robots" content="index,follow" />
+    <link rel="canonical" href="${escapeHtml(canonicalUrl)}" />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="${escapeHtml(title)}" />
+    <meta property="og:description" content="${escapeHtml(description)}" />
+    <meta property="og:url" content="${escapeHtml(canonicalUrl)}" />
+    <meta property="og:site_name" content="Zeusian" />
+    <meta property="og:image" content="${escapeHtml(ogImageUrl)}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="${escapeHtml(title)}" />
+    <meta name="twitter:description" content="${escapeHtml(description)}" />
+    <meta name="twitter:image" content="${escapeHtml(ogImageUrl)}" />
+    <script type="application/ld+json">${jsonLd}</script>
     <style>
       :root {
         color-scheme: dark;
