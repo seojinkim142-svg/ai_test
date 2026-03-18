@@ -47,6 +47,85 @@ npm run android:open
 npm run android:run
 ```
 
+### iOS (Capacitor + Xcode)
+
+iOS builds require macOS and Xcode. You can prepare the project from this repo, but the final app build/archive must be done on a Mac.
+
+1. Install the iOS platform package once:
+
+```bash
+npm install @capacitor/ios
+```
+
+2. Add the iOS platform once:
+
+```bash
+npm run cap:add:ios
+```
+
+3. Build, sync, and open Xcode:
+
+```bash
+npm run ios:open
+```
+
+Useful shortcuts:
+
+```bash
+# open the iOS project in Xcode after rebuilding web assets
+npm run ios:open
+
+# build + sync + run on the selected iOS simulator/device from Xcode tooling
+npm run ios:run
+```
+
+After opening Xcode:
+
+1. Select your Apple Team in Signing & Capabilities.
+2. Confirm the bundle identifier matches your Apple setup.
+3. Run on a simulator/device, or use Product > Archive for TestFlight/App Store builds.
+
+### iOS Environment Checklist
+
+For iOS, these values should all point at the same public HTTPS app domain, not `localhost`:
+
+- `VITE_PUBLIC_APP_ORIGIN`
+- `VITE_SUPABASE_REDIRECT_URL`
+- `KAKAOPAY_CLIENT_ORIGIN`
+- `KAKAOPAY_ALLOW_ORIGIN`
+- `NICEPAYMENTS_CLIENT_ORIGIN`
+- `VITE_NICEPAYMENTS_RETURN_URL`
+
+Notes:
+
+- Supabase OAuth redirect allowlists must include the same HTTPS redirect URL you build into the app.
+- KakaoPay production approval/cancel/fail URLs cannot use `localhost`.
+- NICE Payments return URLs should resolve back to the same deployed HTTPS origin that serves `/api/nicepayments/return`.
+
+## iPhone PWA (No Mac Required)
+
+If you do not have a Mac, the most practical iPhone path is to ship the web app as a PWA and install it from Safari.
+
+Current project support:
+
+- `manifest.webmanifest`
+- `service-worker.js`
+- iPhone home screen metadata in `index.html`
+
+How to use it on iPhone:
+
+1. Deploy the site over HTTPS.
+2. Open the site in Safari on iPhone.
+3. Tap Share.
+4. Tap Add to Home Screen.
+5. If shown, enable Open as Web App.
+
+Notes:
+
+- This gives an app-like fullscreen launch experience without Xcode.
+- Login/payment redirects should still use the same public HTTPS domain configured in `.env`.
+- This is not an App Store binary and does not produce an `.ipa`.
+
 ### Android Live Reload (instant updates on device)
 
 Use this during UI/logic development so changes are reflected immediately without rebuilding `dist`.
