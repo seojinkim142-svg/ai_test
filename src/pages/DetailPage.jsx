@@ -574,9 +574,8 @@ export default function DetailPage({
 
       <div className="flex min-w-0 flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
         <div className="mobile-tab-row flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-1.5 shadow-lg shadow-black/30 md:grid md:grid-cols-6 md:px-3 md:py-2 lg:sticky lg:top-24 lg:z-10 lg:backdrop-blur">
-          {panelItems.map((item) => { /*
-            { id: "tutor", label: "AI 튜터", type: "tab" },
-            */ const active = panelTab === item.id;
+          {panelItems.map((item) => {
+            const active = panelTab === item.id;
             return (
               <button
                 key={item.id}
@@ -593,7 +592,7 @@ export default function DetailPage({
           })}
         </div>
 
-        <div className="flex-1 overflow-auto pb-20 pr-0 md:pb-2 md:pr-1">
+        <div className="pb-20 pr-0 lg:flex-1 lg:overflow-auto lg:pb-2 lg:pr-1">
           {panelTab === "summary" && (
             <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
               <div className="flex items-center justify-between gap-3">

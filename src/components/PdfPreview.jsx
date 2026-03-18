@@ -85,6 +85,7 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
   const nativeScrollRef = useRef(null);
   const pdfDocRef = useRef(null);
   const renderTaskRef = useRef(null);
+  const renderRequestRef = useRef(0);
   const wheelLockRef = useRef(0);
   const touchStartRef = useRef(null);
   const sourceKey = useMemo(
@@ -418,11 +419,14 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
     const canvas = canvasRef.current;
     if (!doc || !canvas) return undefined;
 
+    const requestId = renderRequestRef.current + 1;
+    renderRequestRef.current = requestId;
     let cancelled = false;
 
     const renderCurrentPage = async () => {
       setNativeError("");
       setIsNativeLoading(true);
+      let renderTask = null;
 
       try {
         if (renderTaskRef.current) {
@@ -431,11 +435,14 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
         }
 
         const maxPage = Math.max(1, Number(doc.numPages) || 1);
-        const targetPage = Math.min(Math.max(1, normalizePageNumber(currentPage)), maxPage);
-        if (targetPage !== normalizePageNumber(currentPage) && typeof onPageChange === "function") {
+        const requestedPage = normalizePageNumber(currentPage);
+        const targetPage = Math.min(Math.max(1, requestedPage), maxPage);
+        if (targetPage !== requestedPage && typeof onPageChange === "function") {
           onPageChange(targetPage);
+          return;
         }
         const page = await doc.getPage(targetPage);
+        if (cancelled || renderRequestRef.current !== requestId) return;
         const context = canvas.getContext("2d", { alpha: false });
         if (!context) throw new Error("Canvas context is unavailable.");
 
@@ -454,7 +461,9 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
         context.fillStyle = "#ffffff";
         context.fillRect(0, 0, canvas.width, canvas.height);
 
-        const renderTask = page.render({
+        if (cancelled || renderRequestRef.current !== requestId) return;
+
+        renderTask = page.render({
           canvasContext: context,
           viewport,
           intent: "display",
@@ -462,12 +471,15 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
         renderTaskRef.current = renderTask;
         await renderTask.promise;
 
-        if (cancelled) return;
+        if (cancelled || renderRequestRef.current !== requestId) return;
       } catch (err) {
         if (cancelled || err?.name === "RenderingCancelledException") return;
         setNativeError(err?.message || "PDF 페이지 렌더링에 실패했습니다.");
       } finally {
-        if (!cancelled) {
+        if (renderTask && renderTaskRef.current === renderTask) {
+          renderTaskRef.current = null;
+        }
+        if (!cancelled && renderRequestRef.current === requestId) {
           setIsNativeLoading(false);
         }
       }
@@ -482,6 +494,9 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
 
     return () => {
       cancelled = true;
+      if (renderRequestRef.current === requestId) {
+        renderRequestRef.current += 1;
+      }
       window.removeEventListener("resize", handleResize);
       if (renderTaskRef.current) {
         try {
