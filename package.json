@@ -26,6 +26,7 @@
     "android:live:target": "npx cap run android --target R54N601PJEJ -l --host localhost --port 3000 --forwardPorts 3000:3000"
   },
   "dependencies": {
+    "@capacitor-community/admob": "^7.2.0",
     "@capacitor/android": "^7.5.0",
     "@capacitor/core": "^7.5.0",
     "@supabase/supabase-js": "^2.89.0",

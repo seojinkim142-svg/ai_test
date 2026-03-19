@@ -1,6 +1,7 @@
 ﻿import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import StartPage from "./pages/StartPage";
+import { useAdMobBanner } from "./hooks/useAdMobBanner";
 import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
 import { useUserTier } from "./hooks/useUserTier";
 import { usePageProgressCache } from "./hooks/usePageProgressCache";
@@ -879,6 +880,9 @@ function App() {
   const shouldForceNativeAuthEntry = AUTH_ENABLED && isNativePlatform && authReady && !user;
   const shouldRenderAuthScreen = AUTH_ENABLED && !user && (showAuth || shouldForceNativeAuthEntry);
   const canReturnHomeFromAuth = showAuth && !shouldForceNativeAuthEntry;
+  const shouldShowFreeBannerAd = isFreeTier && isNativePlatform && !shouldRenderAuthScreen && !showPayment;
+  const { bannerHeight } = useAdMobBanner({ enabled: shouldShowFreeBannerAd });
+  const appBannerOffset = shouldShowFreeBannerAd ? bannerHeight : 0;
   const buildHistoryState = useCallback(
     (override = null) => {
       if (override && typeof override === "object") {
@@ -5406,7 +5410,10 @@ function App() {
         </div>
       )}
 
-      <main className="relative z-10 mx-auto flex w-full max-w-none flex-col gap-4 px-3 py-3 sm:px-4 sm:py-4 lg:px-6">
+      <main
+        className="app-banner-offset relative z-10 mx-auto flex w-full max-w-none flex-col gap-4 px-3 py-3 sm:px-4 sm:py-4 lg:px-6"
+        style={{ "--app-banner-offset": `${appBannerOffset}px` }}
+      >
         {showHeader && (
           <Suspense fallback={null}>
             <Header

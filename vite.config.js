@@ -34,12 +34,45 @@ export default defineConfig(({ mode }) => {
   // (e.g. Vercel Project Settings -> Environment Variables).
   const authEnabledFromBuildEnv =
     process.env.VITE_AUTH_ENABLED == null ? "" : String(process.env.VITE_AUTH_ENABLED);
+  const adSensePublisherId =
+    process.env.VITE_ADSENSE_PUBLISHER_ID == null ? "" : String(process.env.VITE_ADSENSE_PUBLISHER_ID).trim();
+  const hasValidAdSensePublisherId = /^ca-pub-\d{16}$/.test(adSensePublisherId);
+
+  const adSenseHtmlPlugin = {
+    name: "inject-adsense-auto-ads",
+    transformIndexHtml(html) {
+      if (!hasValidAdSensePublisherId) return html;
+
+      return {
+        html,
+        tags: [
+          {
+            tag: "meta",
+            injectTo: "head",
+            attrs: {
+              name: "google-adsense-account",
+              content: adSensePublisherId,
+            },
+          },
+          {
+            tag: "script",
+            injectTo: "head",
+            attrs: {
+              async: true,
+              src: `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${adSensePublisherId}`,
+              crossorigin: "anonymous",
+            },
+          },
+        ],
+      };
+    },
+  };
 
   return {
     define: {
       __APP_AUTH_ENABLED__: JSON.stringify(authEnabledFromBuildEnv),
     },
-    plugins: [react({ jsxRuntime: "automatic" })],
+    plugins: [react({ jsxRuntime: "automatic" }), adSenseHtmlPlugin],
     esbuild: {
       jsx: "automatic",
     },

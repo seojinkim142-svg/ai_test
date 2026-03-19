@@ -91,6 +91,16 @@ textarea,
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
 }
 
+.app-banner-offset {
+  padding-bottom: calc(var(--app-banner-offset, 0px) + 0.75rem);
+}
+
+@media (min-width: 640px) {
+  .app-banner-offset {
+    padding-bottom: calc(var(--app-banner-offset, 0px) + 1rem);
+  }
+}
+
 .mobile-chip-row,
 .mobile-tab-row,
 .mobile-card-rail {
