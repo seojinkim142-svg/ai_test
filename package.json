@@ -8,6 +8,8 @@
     "dev:mobile": "vite --host 0.0.0.0 --port 3000 --strictPort",
     "dev:kakaopay": "node server/kakaopay.js",
     "dev:feedback": "node server/feedback.js",
+    "dev:resend": "node server/feedback.js",
+    "dev:resends": "node server/feedback.js",
     "dev:nicepayments": "node server/nicepayments.js",
     "build": "vite build",
     "export:legal-html": "node scripts/export-legal-html.mjs",
