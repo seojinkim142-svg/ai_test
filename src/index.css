@@ -198,6 +198,22 @@ textarea,
   min-width: min-content;
 }
 
+.mock-exam-rich-text,
+.mock-exam-rich-text :where(p, li, strong, em) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.mock-exam-rich-text .katex {
+  max-width: 100%;
+  font-size: 1em;
+}
+
+.mock-exam-choice > span:first-child {
+  flex: 0 0 1rem;
+}
+
 .ghost-button {
   --ghost-color: 226, 232, 240;
   display: inline-flex;

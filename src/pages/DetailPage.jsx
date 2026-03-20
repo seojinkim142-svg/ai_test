@@ -296,7 +296,7 @@ export default function DetailPage({
       if (!normalized) return null;
       return (
         <div
-          className={`summary-prose max-w-none break-words ${className}`}
+          className={`mock-exam-rich-text summary-prose max-w-none min-w-0 break-words ${className}`}
         >
           <ReactMarkdown
             remarkPlugins={MARKDOWN_MATH_REMARK_PLUGINS}
@@ -318,7 +318,7 @@ export default function DetailPage({
       const isMultiple = !isOx && !isShort;
 
       return (
-        <div key={`mock-exam-q-${number}`} className="space-y-2">
+        <div key={`mock-exam-q-${number}`} className="min-w-0 space-y-2 overflow-hidden">
           <p className="text-[13px] font-semibold text-black">{number}.</p>
           {renderMockRichText(item?.prompt, "text-[13px] text-black")}
           {isOx && <p className="text-[12px] text-black/80">1) O  2) X</p>}
@@ -326,7 +326,7 @@ export default function DetailPage({
           {isMultiple && choices.length > 0 && (
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[12px] text-black/85">
               {choices.slice(0, 4).map((choice, idx) => (
-                <div key={`choice-${number}-${idx}`} className="flex gap-2">
+                <div key={`choice-${number}-${idx}`} className="mock-exam-choice min-w-0 flex gap-2 overflow-hidden">
                   <span className="w-4">{idx + 1})</span>
                   {renderMockRichText(choice, "min-w-0 flex-1 text-[12px] text-black/85")}
                 </div>
@@ -578,7 +578,7 @@ export default function DetailPage({
       </div>
 
       <div className="flex min-w-0 flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
-        <div className="mobile-tab-row flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-1.5 shadow-lg shadow-black/30 md:grid md:grid-cols-6 md:px-3 md:py-2">
+        <div className="detail-tab-strip mobile-tab-row flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-1.5 shadow-lg shadow-black/30 md:grid md:grid-cols-6 md:px-3 md:py-2">
           {panelItems.map((item) => {
             const active = panelTab === item.id;
             return (
@@ -810,7 +810,7 @@ export default function DetailPage({
                   {String(instructorEmphasisInput || "").length}/2000
                 </p>
                 {normalizedSavedInstructorEmphases.length > 0 && (
-                  <div className="mt-3 rounded-xl border border-white/10 bg-slate-900/35 p-2">
+                  <div className="instructor-emphasis-wheel-shell mt-3 rounded-xl border border-white/10 bg-slate-900/35 p-2">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-[11px] text-slate-300">
                         {`\uC800\uC7A5\uB41C \uAC15\uC870 \uD3EC\uC778\uD2B8 ${normalizedSavedInstructorEmphases.length}\uAC1C`}
@@ -829,11 +829,11 @@ export default function DetailPage({
                     <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
                       <div className="relative flex-1">
                         <div
-                          className="pointer-events-none absolute inset-x-1 top-1/2 z-20 -translate-y-1/2 rounded-lg border border-emerald-300/45 bg-emerald-400/10 shadow-[0_0_18px_rgba(52,211,153,0.18)]"
+                          className="instructor-emphasis-wheel-focus pointer-events-none absolute inset-x-1 top-1/2 z-20 -translate-y-1/2 rounded-lg border border-emerald-300/45 bg-emerald-400/10 shadow-[0_0_18px_rgba(52,211,153,0.18)]"
                           style={{ height: `${emphasisWheelRowHeight}px` }}
                         />
-                        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-10 rounded-t-lg bg-gradient-to-b from-slate-950/95 to-transparent" />
-                        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-10 rounded-b-lg bg-gradient-to-t from-slate-950/95 to-transparent" />
+                        <div className="instructor-emphasis-wheel-fade instructor-emphasis-wheel-fade-top pointer-events-none absolute inset-x-0 top-0 z-20 h-10 rounded-t-lg bg-gradient-to-b from-slate-950/95 to-transparent" />
+                        <div className="instructor-emphasis-wheel-fade instructor-emphasis-wheel-fade-bottom pointer-events-none absolute inset-x-0 bottom-0 z-20 h-10 rounded-b-lg bg-gradient-to-t from-slate-950/95 to-transparent" />
                         <div
                           ref={savedInstructorScrollRef}
                           onScroll={handleSavedInstructorWheelScroll}
@@ -862,9 +862,9 @@ export default function DetailPage({
                                   type="button"
                                   data-emphasis-id={item.id}
                                   onClick={() => handleSavedInstructorClick(item.id)}
-                                  className={`mx-1 flex w-[calc(100%-0.5rem)] snap-center items-center gap-2 rounded-lg px-3 text-left text-xs transition ${
+                                  className={`instructor-emphasis-wheel-item mx-1 flex w-[calc(100%-0.5rem)] snap-center items-center gap-2 rounded-lg px-3 text-left text-xs transition ${
                                     isActive
-                                      ? "bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-300/60"
+                                      ? "is-active bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-300/60"
                                       : "text-slate-300 hover:bg-white/5"
                                   } ${distance >= 2 ? "opacity-35" : distance === 1 ? "opacity-70" : "opacity-100"}`}
                                   style={{ height: `${emphasisWheelRowHeight}px` }}
@@ -1209,7 +1209,7 @@ export default function DetailPage({
                                     const columnIndex = isFourGrid ? Math.floor(idx / 2) : idx % 2;
                                     const paddingClass = columnIndex === 0 ? "pr-6" : "pl-6";
                                     return (
-                                      <div key={`mock-exam-cell-${pageIndex}-${idx}`} className={paddingClass}>
+                                      <div key={`mock-exam-cell-${pageIndex}-${idx}`} className={`${paddingClass} min-w-0`}>
                                         {renderMockExamItem(item, pageStart + idx)}
                                       </div>
                                     );
