@@ -22,7 +22,6 @@ The latest refactor intentionally moved large pure-helper blocks out of `src/App
   - chapter-range storage key generation
 - `src/utils/studyArtifacts.js`
   - partial summary serialization
-  - instructor emphasis state normalization
   - mojibake-safe UI text sanitation
 - `src/utils/tutorHelpers.js`
   - tutor page/section detection

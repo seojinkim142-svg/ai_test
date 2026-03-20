@@ -37,21 +37,6 @@ const TUTOR_FALLBACK_MODELS = [
   .filter(Boolean)
   .filter((name, index, arr) => arr.indexOf(name) === index);
 
-function normalizeInstructorEmphasisInput(value) {
-  return String(value || "").replace(/\r\n/g, "\n").trim().slice(0, 2000);
-}
-
-function buildInstructorEmphasisBlock(instructorEmphasis) {
-  const normalized = normalizeInstructorEmphasisInput(instructorEmphasis);
-  if (!normalized) return "";
-  return `
-[Instructor emphasis notes]
-- Prioritize these topics when selecting summary/quiz focus.
-- Treat this as weighting guidance only; never invent facts outside the document.
-${normalized}
-  `.trim();
-}
-
 function buildAvoidReuseBlock(items, { title = "Do not reuse these prompts", maxItems = 40, maxLength = 120 } = {}) {
   const normalized = [];
   const seen = new Set();
@@ -86,11 +71,7 @@ function isLowValueStudyPrompt(text) {
   return LOW_VALUE_STUDY_PROMPT_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
-function buildQuizPrompt(
-  extractedText,
-  { multipleChoiceCount, shortAnswerCount, instructorEmphasis = "", avoidQuestions = [] }
-) {
-  const emphasisBlock = buildInstructorEmphasisBlock(instructorEmphasis);
+function buildQuizPrompt(extractedText, { multipleChoiceCount, shortAnswerCount, avoidQuestions = [] }) {
   const avoidBlock = buildAvoidReuseBlock(avoidQuestions, { title: "Do not reuse these previously asked questions" });
   return `
 You are a professor creating quiz questions from lecture material.
@@ -119,9 +100,6 @@ You are a professor creating quiz questions from lecture material.
 
 [Language]
 - Write all question/explanation text in Korean.
-
-[Priority]
-${emphasisBlock || "- No extra instructor emphasis notes provided."}
 ${avoidBlock ? `\n\n${avoidBlock}` : ""}
 
 [Document]
@@ -161,8 +139,7 @@ ${avoidBlock ? `\n\n${avoidBlock}` : ""}
 ${extractedText}
   `.trim();
 }
-function buildOxPrompt(contextText, highlightText = "", instructorEmphasis = "", avoidStatements = []) {
-  const emphasisBlock = buildInstructorEmphasisBlock(instructorEmphasis);
+function buildOxPrompt(contextText, highlightText = "", avoidStatements = []) {
   const avoidBlock = buildAvoidReuseBlock(avoidStatements, { title: "Do not reuse these previously asked statements" });
   return `
 You create O/X (true/false) quiz items from PDF content.
@@ -171,7 +148,6 @@ Follow all rules and return JSON only.
 [Input]
 - PDF summary/body excerpt
 ${highlightText ? `- Highlight sentences:\n${highlightText}` : ""}
-${emphasisBlock ? `- Instructor emphasis notes:\n${emphasisBlock}` : ""}
 ${avoidBlock ? `- ${avoidBlock.replace(/\n/g, "\n  ")}` : ""}
 
 [Rules]
@@ -201,8 +177,7 @@ ${avoidBlock ? `- ${avoidBlock.replace(/\n/g, "\n  ")}` : ""}
 ${contextText}
   `.trim();
 }
-function buildSummaryPrompt(extractedText, { instructorEmphasis = "" } = {}) {
-  const emphasisBlock = buildInstructorEmphasisBlock(instructorEmphasis);
+function buildSummaryPrompt(extractedText) {
   return `
 You are a teaching assistant who writes a detailed Korean markdown summary.
 
@@ -233,9 +208,6 @@ You are a teaching assistant who writes a detailed Korean markdown summary.
 [Output]
 - Markdown only.
 - Language: Korean.
-
-[Priority]
-${emphasisBlock || "- No extra instructor emphasis notes provided."}
 
 [Document]
 ${extractedText}
@@ -1132,13 +1104,9 @@ function formatChapterSummaryMarkdown(parsed, summaryInput) {
   return markdown.join("\n").trim();
 }
 
-async function generateChapterSummary(
-  extractedText,
-  { scope, chapterSections, instructorEmphasis = "" } = {}
-) {
+async function generateChapterSummary(extractedText, { scope, chapterSections } = {}) {
   const summaryInput = buildChapterSummaryInput(extractedText, { scope, chapterSections });
   if (!summaryInput.chapters.length) return "";
-  const emphasisBlock = buildInstructorEmphasisBlock(instructorEmphasis);
 
   const payload = {
     scope: summaryInput.scope,
@@ -1206,9 +1174,6 @@ Rules:
 - Keep overview focused on lecture topic and learning goals only.
 - Preserve chapter ids exactly as input.
 - Return strict JSON only.
-${emphasisBlock ? `- Follow the instructor emphasis notes when evidence exists.\n` : ""}
-
-${emphasisBlock ? `${emphasisBlock}\n\n` : ""}
 
 Input:
 ${JSON.stringify(payload)}
@@ -1381,14 +1346,13 @@ async function postChatRequest(body, { retries = 1 } = {}) {
 }
 export async function generateQuiz(
   extractedText,
-  { multipleChoiceCount = 4, shortAnswerCount = 1, instructorEmphasis = "", avoidQuestions = [] } = {}
+  { multipleChoiceCount = 4, shortAnswerCount = 1, avoidQuestions = [] } = {}
 ) {
   const mcCount = Math.max(0, Math.min(5, Number(multipleChoiceCount) || 0));
   const saCount = Math.max(0, Math.min(5, Number(shortAnswerCount) || 0));
   const prompt = buildQuizPrompt(extractedText, {
     multipleChoiceCount: mcCount,
     shortAnswerCount: saCount,
-    instructorEmphasis,
     avoidQuestions,
   });
 
@@ -1452,14 +1416,11 @@ export async function generateHardQuiz(extractedText, { count = 3, avoidQuestion
   return { items };
 }
 
-export async function generateOxQuiz(extractedText, { instructorEmphasis = "", avoidStatements = [] } = {}) {
+export async function generateOxQuiz(extractedText, { avoidStatements = [] } = {}) {
   const chunked = chunkText(extractedText, { maxChunks: 5, maxChunkLength: 1400 });
   let summaryForOx = "";
   try {
-    summaryForOx = await generateSummary(extractedText, {
-      chapterized: false,
-      instructorEmphasis,
-    });
+    summaryForOx = await generateSummary(extractedText, { chapterized: false });
   } catch {
     // Fallback to chunked context when summary generation fails.
   }
@@ -1486,7 +1447,7 @@ export async function generateOxQuiz(extractedText, { instructorEmphasis = "", a
     };
   }
 
-  const prompt = buildOxPrompt(contextForOx, highlightText, instructorEmphasis, avoidStatements);
+  const prompt = buildOxPrompt(contextForOx, highlightText, avoidStatements);
 
   const data = await postChatRequest(
     {
@@ -1531,7 +1492,7 @@ export async function generateOxQuiz(extractedText, { instructorEmphasis = "", a
 
 export async function generateSummary(
   extractedText,
-  { scope, chapterized = true, chapterSections = null, instructorEmphasis = "" } = {}
+  { scope, chapterized = true, chapterSections = null } = {}
 ) {
   const normalized = String(extractedText || "").trim();
   const hasManualChapters = Array.isArray(chapterSections) && chapterSections.length > 0;
@@ -1541,11 +1502,7 @@ export async function generateSummary(
 
   if (chapterized) {
     try {
-      const chapterSummary = await generateChapterSummary(normalized, {
-        scope,
-        chapterSections,
-        instructorEmphasis,
-      });
+      const chapterSummary = await generateChapterSummary(normalized, { scope, chapterSections });
       if (chapterSummary) return chapterSummary;
     } catch {
       // fallback to legacy summary
@@ -1556,7 +1513,7 @@ export async function generateSummary(
     throw new Error("Summary source text is empty.");
   }
 
-  const prompt = buildSummaryPrompt(extractedText, { instructorEmphasis });
+  const prompt = buildSummaryPrompt(extractedText);
   const scopeGuard = scope
     ? {
         role: "system",

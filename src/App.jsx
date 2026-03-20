@@ -115,8 +115,6 @@ import {
 } from "./utils/appShared";
 import {
   formatPartialSummaryDefaultName,
-  normalizeInstructorEmphasisInput,
-  normalizeSavedInstructorEmphasisEntries,
   normalizeSavedPartialSummaryEntries,
   readPartialSummaryBundleFromHighlights,
   sanitizeUiText,
@@ -216,9 +214,6 @@ function App() {
   const [partialSummary, setPartialSummary] = useState("");
   const [partialSummaryRange, setPartialSummaryRange] = useState("");
   const [savedPartialSummaries, setSavedPartialSummaries] = useState([]);
-  const [instructorEmphasisInput, setInstructorEmphasisInput] = useState("");
-  const [savedInstructorEmphases, setSavedInstructorEmphases] = useState([]);
-  const [activeInstructorEmphasisId, setActiveInstructorEmphasisId] = useState("");
   const [isSavedPartialSummaryOpen, setIsSavedPartialSummaryOpen] = useState(false);
   const [quizChapterSelectionInput, setQuizChapterSelectionInput] = useState("");
   const [oxChapterSelectionInput, setOxChapterSelectionInput] = useState("");
@@ -505,9 +500,6 @@ function App() {
     setPartialSummary("");
     setPartialSummaryRange("");
     setSavedPartialSummaries([]);
-    setInstructorEmphasisInput("");
-    setSavedInstructorEmphases([]);
-    setActiveInstructorEmphasisId("");
     setIsSavedPartialSummaryOpen(false);
     setQuizChapterSelectionInput("");
     setOxChapterSelectionInput("");
@@ -1480,18 +1472,10 @@ function App() {
         };
         docArtifactsCacheRef.current.set(normalizedDocId, mapped);
         const partialBundle = readPartialSummaryBundleFromHighlights(mapped.highlights);
-        const activeInstructorText = normalizeInstructorEmphasisInput(
-          partialBundle.instructorEmphasisLibrary.find(
-            (item) => item.id === partialBundle.activeInstructorEmphasisId
-          )?.text
-        );
         setArtifacts(mapped);
         setPartialSummary(partialBundle.summary);
         setPartialSummaryRange(partialBundle.range);
         setSavedPartialSummaries(partialBundle.library);
-        setInstructorEmphasisInput(activeInstructorText);
-        setSavedInstructorEmphases(partialBundle.instructorEmphasisLibrary);
-        setActiveInstructorEmphasisId(partialBundle.activeInstructorEmphasisId);
         setIsSavedPartialSummaryOpen(false);
         if (mapped.summary) {
           setSummary(mapped.summary);
@@ -1797,9 +1781,6 @@ function App() {
       setPartialSummary("");
       setPartialSummaryRange("");
       setSavedPartialSummaries([]);
-      setInstructorEmphasisInput("");
-      setSavedInstructorEmphases([]);
-      setActiveInstructorEmphasisId("");
       setIsSavedPartialSummaryOpen(false);
       setQuizChapterSelectionInput("");
       setOxChapterSelectionInput("");
@@ -2160,9 +2141,6 @@ function App() {
     setPartialSummary("");
     setPartialSummaryRange("");
     setSavedPartialSummaries([]);
-    setInstructorEmphasisInput("");
-    setSavedInstructorEmphases([]);
-    setActiveInstructorEmphasisId("");
     setIsSavedPartialSummaryOpen(false);
     setQuizChapterSelectionInput("");
     setOxChapterSelectionInput("");
@@ -2698,116 +2676,6 @@ function App() {
     [artifacts?.highlights, persistArtifacts, savedPartialSummaries]
   );
 
-  const persistInstructorEmphasisState = useCallback(
-    ({ library = savedInstructorEmphases, activeId = activeInstructorEmphasisId } = {}) => {
-      const nextHighlights = writePartialSummaryBundleToHighlights(artifacts?.highlights, {
-        instructorEmphasisLibrary: library,
-        activeInstructorEmphasisId: activeId,
-      });
-      persistArtifacts({ highlights: nextHighlights });
-    },
-    [activeInstructorEmphasisId, artifacts?.highlights, persistArtifacts, savedInstructorEmphases]
-  );
-
-  const handleSaveInstructorEmphasis = useCallback(
-    ({ value } = {}) => {
-      const nextValue =
-        value === undefined
-          ? normalizeInstructorEmphasisInput(instructorEmphasisInput)
-          : normalizeInstructorEmphasisInput(value);
-      if (!nextValue) {
-        setStatus("\uC800\uC7A5\uD560 \uAC15\uC870 \uD3EC\uC778\uD2B8\uB97C \uC785\uB825\uD574\uC8FC\uC138\uC694.");
-        return;
-      }
-
-      const existing = savedInstructorEmphases.find((item) => item.text === nextValue);
-      if (existing) {
-        setActiveInstructorEmphasisId(existing.id);
-        setInstructorEmphasisInput("");
-        persistInstructorEmphasisState({
-          library: savedInstructorEmphases,
-          activeId: existing.id,
-        });
-        setStatus("\uC774\uBBF8 \uC800\uC7A5\uB41C \uAC15\uC870 \uD3EC\uC778\uD2B8\uB97C \uC120\uD0DD\uD588\uC2B5\uB2C8\uB2E4.");
-        return;
-      }
-
-      const nowIso = new Date().toISOString();
-      const newItem = {
-        id: createPremiumProfileId(),
-        text: nextValue,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-      };
-      const nextLibrary = normalizeSavedInstructorEmphasisEntries([
-        newItem,
-        ...(Array.isArray(savedInstructorEmphases) ? savedInstructorEmphases : []),
-      ]);
-      setSavedInstructorEmphases(nextLibrary);
-      setActiveInstructorEmphasisId(newItem.id);
-      setInstructorEmphasisInput("");
-      persistInstructorEmphasisState({ library: nextLibrary, activeId: newItem.id });
-      setStatus("\uAC15\uC870 \uD3EC\uC778\uD2B8\uB97C \uBCC4\uB3C4 \uD56D\uBAA9\uC73C\uB85C \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.");
-    },
-    [instructorEmphasisInput, persistInstructorEmphasisState, savedInstructorEmphases]
-  );
-
-  const handleSelectInstructorEmphasis = useCallback(
-    (itemId) => {
-      const targetId = String(itemId || "").trim();
-      if (!targetId) return;
-      const found = savedInstructorEmphases.find((item) => item.id === targetId);
-      if (!found) return;
-      setActiveInstructorEmphasisId(targetId);
-      setInstructorEmphasisInput(found.text);
-      persistInstructorEmphasisState({ library: savedInstructorEmphases, activeId: targetId });
-    },
-    [persistInstructorEmphasisState, savedInstructorEmphases]
-  );
-
-  const handleDeleteInstructorEmphasis = useCallback(
-    (itemId) => {
-      const targetId = String(itemId || "").trim();
-      if (!targetId) return;
-      const nextLibrary = (Array.isArray(savedInstructorEmphases) ? savedInstructorEmphases : []).filter(
-        (item) => item.id !== targetId
-      );
-      const nextActiveId =
-        targetId === activeInstructorEmphasisId ? nextLibrary[0]?.id || "" : activeInstructorEmphasisId;
-      const nextActiveItem = nextLibrary.find((item) => item.id === nextActiveId) || null;
-      setSavedInstructorEmphases(nextLibrary);
-      setActiveInstructorEmphasisId(nextActiveId);
-      setInstructorEmphasisInput(nextActiveItem?.text || "");
-      persistInstructorEmphasisState({ library: nextLibrary, activeId: nextActiveId });
-      setStatus("\uAC15\uC870 \uD3EC\uC778\uD2B8 \uD56D\uBAA9\uC744 \uC0AD\uC81C\uD588\uC2B5\uB2C8\uB2E4.");
-    },
-    [activeInstructorEmphasisId, persistInstructorEmphasisState, savedInstructorEmphases]
-  );
-
-  const cycleActiveInstructorEmphasis = useCallback(
-    (direction = 1) => {
-      const list = Array.isArray(savedInstructorEmphases) ? savedInstructorEmphases : [];
-      if (list.length <= 1) return;
-      const currentIndex = list.findIndex((item) => item.id === activeInstructorEmphasisId);
-      const start = currentIndex >= 0 ? currentIndex : 0;
-      const step = Number(direction) >= 0 ? 1 : -1;
-      const nextIndex = (start + step + list.length) % list.length;
-      const nextId = list[nextIndex]?.id || "";
-      if (!nextId) return;
-      handleSelectInstructorEmphasis(nextId);
-    },
-    [activeInstructorEmphasisId, handleSelectInstructorEmphasis, savedInstructorEmphases]
-  );
-
-  const getEffectiveInstructorEmphasisText = useCallback(() => {
-    const draft = normalizeInstructorEmphasisInput(instructorEmphasisInput);
-    if (draft) return draft;
-    const active = (Array.isArray(savedInstructorEmphases) ? savedInstructorEmphases : []).find(
-      (item) => item.id === activeInstructorEmphasisId
-    );
-    return normalizeInstructorEmphasisInput(active?.text);
-  }, [activeInstructorEmphasisId, instructorEmphasisInput, savedInstructorEmphases]);
-
   useEffect(() => {
     uploadedFilesRef.current = uploadedFiles;
   }, [uploadedFiles]);
@@ -3171,7 +3039,6 @@ function App() {
     }
     const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
     const isPdfSource = isCurrentPdfDocument;
-    const instructorEmphasisText = getEffectiveInstructorEmphasisText();
 
     if (!extractedText && !chapterSelectionRaw && !isPdfSource) {
       setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
@@ -3219,7 +3086,6 @@ function App() {
           await generateQuiz(quizSourceText, {
             multipleChoiceCount: requestMcCount,
             shortAnswerCount: requestSaCount,
-            instructorEmphasis: instructorEmphasisText,
             avoidQuestions: avoidQuestionTexts,
           })
         );
@@ -3728,7 +3594,6 @@ function App() {
     const shouldReplaceExisting = replaceExisting && hasExistingSummary;
     if (isLoadingSummary || (!force && summaryRequestedRef.current && !shouldReplaceExisting)) return;
     const hasManualChapterConfig = Boolean(String(chapterRangeInput || "").trim());
-    const instructorEmphasisText = getEffectiveInstructorEmphasisText();
     const isPdfSource = isCurrentPdfDocument;
     if (!file) {
       setError("먼저 PDF를 열어주세요.");
@@ -3842,11 +3707,8 @@ function App() {
             scope: "사용자 지정 챕터 범위",
             chapterized: true,
             chapterSections: customChapterSections,
-            instructorEmphasis: instructorEmphasisText,
           })
-        : await generateSummary(summarySourceText, {
-            instructorEmphasis: instructorEmphasisText,
-          });
+        : await generateSummary(summarySourceText);
       setSummary(summarized);
       setUsageCounts((prev) => ({ ...prev, summary: prev.summary + 1 }));
       setStatus("요약이 생성되었습니다.");
@@ -4008,7 +3870,6 @@ function App() {
       const summarized = await generateSummary(extracted.text, {
         scope: "선택 범위에서 추출한 텍스트",
         chapterized: false,
-        instructorEmphasis: getEffectiveInstructorEmphasisText(),
       });
       setPartialSummary(summarized);
       setPartialSummaryRange(selectionLabel);
@@ -4064,7 +3925,6 @@ function App() {
     pageInfo.total,
     pageInfo.used,
     pageSummaryInput,
-    getEffectiveInstructorEmphasisText,
     persistPartialSummaryBundle,
     savedPartialSummaries,
     selectedFileId,
@@ -4234,7 +4094,6 @@ function App() {
     }
     const chapterSelectionRaw = String(oxChapterSelectionInput || "").trim();
     const isPdfSource = isCurrentPdfDocument;
-    const instructorEmphasisText = getEffectiveInstructorEmphasisText();
     if (!extractedText && !chapterSelectionRaw && !isPdfSource) {
       setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
       return;
@@ -4265,7 +4124,6 @@ function App() {
 
       const { generateOxQuiz } = await getOpenAiService();
       const ox = await generateOxQuiz(oxSourceText, {
-        instructorEmphasis: instructorEmphasisText,
         avoidStatements: avoidStatementTexts,
       });
       const rawItems = Array.isArray(ox?.items) ? ox.items : [];
@@ -4785,17 +4643,14 @@ function App() {
         if (scopeLabel) {
           setMockExamStatus(`모의고사 생성 중 (${scopeLabel})...`);
         }
-        const instructorEmphasisText = getEffectiveInstructorEmphasisText();
 
         const [oxResult, quizResult] = await Promise.all([
           ai.generateOxQuiz(sourceText, {
-            instructorEmphasis: instructorEmphasisText,
             avoidStatements: avoidMockQuestionTexts,
           }),
           ai.generateQuiz(sourceText, {
             multipleChoiceCount: 4,
             shortAnswerCount: 1,
-            instructorEmphasis: instructorEmphasisText,
             avoidQuestions: avoidMockQuestionTexts,
           }),
         ]);
@@ -5026,7 +4881,6 @@ function App() {
     mockExamChapterSelectionInput,
     selectedFileId,
     getOpenAiService,
-    getEffectiveInstructorEmphasisText,
     resolveQuestionSourceText,
     user,
   ]);
@@ -5284,14 +5138,6 @@ function App() {
     isFreeTier,
     isPdfDocument: isCurrentPdfDocument,
     summary,
-    instructorEmphasisInput,
-    setInstructorEmphasisInput,
-    savedInstructorEmphases,
-    activeInstructorEmphasisId,
-    handleSaveInstructorEmphasis,
-    handleSelectInstructorEmphasis,
-    handleDeleteInstructorEmphasis,
-    cycleActiveInstructorEmphasis,
     partialSummary,
     partialSummaryRange,
     savedPartialSummaries,
