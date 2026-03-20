@@ -48,7 +48,12 @@ import {
   isSupportedUploadFile,
   normalizeSupportedDocumentFile,
 } from "./utils/document";
-import { createTextPdfFile, exportMockAnswerSheetToPdf, exportPagedElementToPdf } from "./utils/pdfExport";
+import {
+  createRichTextPdfFile,
+  createTextPdfFile,
+  exportMockAnswerSheetToPdf,
+  exportPagedElementToPdf,
+} from "./utils/pdfExport";
 import {
   PDF_MAX_SIZE_BY_TIER,
   DEFAULT_PREMIUM_PROFILE_PIN,
@@ -2546,10 +2551,21 @@ function App() {
           }
         }
 
-        const { file: aggregateFile, pageCount: aggregatePageCount } = await createTextPdfFile(aggregateText, {
-          filename: `${aggregateTitle}.pdf`,
-          title: aggregateTitle,
-        });
+        let aggregatePdfResult;
+        try {
+          aggregatePdfResult = await createRichTextPdfFile(aggregateText, {
+            filename: `${aggregateTitle}.pdf`,
+            title: aggregateTitle,
+          });
+        } catch (richPdfError) {
+          console.warn("rich summary PDF export failed, falling back to plain text PDF", richPdfError);
+          aggregatePdfResult = await createTextPdfFile(aggregateText, {
+            filename: `${aggregateTitle}.pdf`,
+            title: aggregateTitle,
+          });
+        }
+
+        const { file: aggregateFile, pageCount: aggregatePageCount } = aggregatePdfResult;
         const aggregateThumbnail = await generateDocumentThumbnail(aggregateFile);
         const aggregateItem = {
           id: aggregateDocId,
