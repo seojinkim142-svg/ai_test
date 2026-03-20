@@ -5,6 +5,7 @@ function PdfTile({
   thumbnailUrl,
   pageInfo,
   isLoadingText,
+  metaText,
   onProceed,
   active = false,
   selectable = false,
@@ -76,7 +77,9 @@ function PdfTile({
       </div>
       <div className="flex flex-1 flex-col gap-1 px-4 py-3">
         <p className="truncate text-sm font-semibold text-white">{file?.name}</p>
-        <p className="text-xs text-slate-400">{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB · PDF` : "PDF"}</p>
+        <p className="text-xs text-slate-400">
+          {metaText || (file ? `${(file.size / 1024 / 1024).toFixed(2)} MB · PDF` : "PDF")}
+        </p>
         {pageInfo?.total > 0 && (
           <p className="text-xs text-emerald-200">
             {pageInfo.used} / {pageInfo.total} 페이지 사용
@@ -99,6 +102,7 @@ PdfTile.propTypes = {
     total: PropTypes.number,
   }),
   isLoadingText: PropTypes.bool,
+  metaText: PropTypes.string,
   onProceed: PropTypes.func,
   active: PropTypes.bool,
   selectable: PropTypes.bool,

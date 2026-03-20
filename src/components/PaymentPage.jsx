@@ -88,6 +88,35 @@ const kakaoPayPlans = {
 };
 const BILLING_MONTH_OPTIONS = [1, 2];
 
+function shouldUseMobileKakaoRedirect() {
+  if (typeof window === "undefined") return false;
+
+  const ua = String(window.navigator?.userAgent || "");
+  const platform = String(window.navigator?.platform || "");
+  const maxTouchPoints = Number(window.navigator?.maxTouchPoints || 0);
+  const hasTouch = "ontouchstart" in window || maxTouchPoints > 0;
+  const isIpad =
+    /iPad/i.test(ua) ||
+    (/Macintosh/i.test(ua) && maxTouchPoints > 1) ||
+    (platform === "MacIntel" && maxTouchPoints > 1);
+  const isAndroidTablet = /Android/i.test(ua) && !/Mobile/i.test(ua);
+  const isMobilePhone = /iPhone|iPod|Android.+Mobile|Windows Phone/i.test(ua);
+
+  return isMobilePhone || isIpad || isAndroidTablet || (hasTouch && /Mobile/i.test(ua));
+}
+
+function resolveKakaoRedirectUrl(data) {
+  const pcUrl = String(data?.next_redirect_pc_url || "").trim();
+  const mobileUrl = String(data?.next_redirect_mobile_url || "").trim();
+  const appUrl = String(data?.next_redirect_app_url || "").trim();
+
+  if (shouldUseMobileKakaoRedirect()) {
+    return mobileUrl || appUrl || pcUrl;
+  }
+
+  return pcUrl || mobileUrl || appUrl;
+}
+
 function formatTierExpiryLabel(value) {
   if (!value) return "";
   const date = new Date(value);
@@ -189,6 +218,7 @@ function PaymentPage({
   const [isChargingSubscription, setIsChargingSubscription] = useState(false);
   const [countdownNowMs, setCountdownNowMs] = useState(() => Date.now());
   const handledKakaoReturnRef = useRef(false);
+  const cardWidgetSectionRef = useRef(null);
   const isLight = theme === "light";
   const surfaceClass = isLight
     ? "border-slate-200 bg-white/95 text-slate-900 ring-slate-200/80 shadow-black/10"
@@ -371,6 +401,17 @@ function PaymentPage({
     const intervalId = window.setInterval(tick, 60 * 1000);
     return () => window.clearInterval(intervalId);
   }, [isPaidTier, currentTierExpiresAt]);
+
+  useEffect(() => {
+    if (!showCardWidget) return;
+
+    window.requestAnimationFrame(() => {
+      cardWidgetSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    });
+  }, [showCardWidget]);
 
   useEffect(() => {
     loadKakaoSubscriptionStatus({ showLoading: true });
@@ -581,7 +622,7 @@ function PaymentPage({
       const redirectUrl =
         data?.next_redirect_pc_url || data?.next_redirect_mobile_url || data?.next_redirect_app_url;
 
-      if (!data?.tid || !redirectUrl) {
+      if (!data?.tid || !(resolveKakaoRedirectUrl(data) || redirectUrl)) {
         throw new Error("카카오페이 결제 준비에 실패했습니다. 잠시 후 다시 시도해주세요.");
       }
 
@@ -604,7 +645,7 @@ function PaymentPage({
         paymentMode: "subscription",
       });
 
-      window.location.href = redirectUrl;
+      window.location.href = resolveKakaoRedirectUrl(data) || redirectUrl;
     } catch (err) {
       setPaymentError(err?.message || "카카오페이 결제 준비에 실패했습니다.");
       setPaying(false);
@@ -667,7 +708,7 @@ function PaymentPage({
       const redirectUrl =
         data?.next_redirect_pc_url || data?.next_redirect_mobile_url || data?.next_redirect_app_url;
 
-      if (!data?.tid || !redirectUrl) {
+      if (!data?.tid || !(resolveKakaoRedirectUrl(data) || redirectUrl)) {
         throw new Error("카카오페이 결제 준비에 실패했습니다. 잠시 후 다시 시도해주세요.");
       }
 
@@ -690,7 +731,7 @@ function PaymentPage({
         paymentMode: "one-time",
       });
 
-      window.location.href = redirectUrl;
+      window.location.href = resolveKakaoRedirectUrl(data) || redirectUrl;
     } catch (err) {
       setPaymentError(err?.message || "카카오페이 결제 준비에 실패했습니다.");
       setPaying(false);
@@ -782,9 +823,7 @@ function PaymentPage({
           </button>
         </div>
 
-        <div
-          className={`grid gap-4 px-6 py-5 md:grid-cols-3 ${planSectionClass}`}
-        >
+        <div className={`grid gap-4 px-6 py-5 md:grid-cols-2 xl:grid-cols-3 ${planSectionClass}`}>
           {PLAN_OPTIONS.map((plan) => (
             <div
               key={plan.name}
@@ -873,7 +912,7 @@ function PaymentPage({
               </>
             )}
           </div>
-          <div className="grid grid-cols-2 gap-2 [&>*:nth-child(2)]:hidden [&>*:nth-child(4)]:hidden [&>*:nth-child(5)]:hidden">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 [&>*:nth-child(2)]:hidden [&>*:nth-child(4)]:hidden [&>*:nth-child(5)]:hidden">
             <button
               type="button"
               onClick={isRecurringSelection ? handleKakaoPay : handleKakaoOneTimePay}
@@ -1249,6 +1288,7 @@ function PaymentPage({
         )}
 
         <div
+          ref={cardWidgetSectionRef}
           className={`${showCardWidget ? "block" : "hidden"} border-t px-6 py-4 text-sm ${
             isLight ? "border-slate-200/80 bg-slate-50 text-slate-700" : "border-white/5 bg-white/5 text-slate-200"
           }`}

@@ -1,5 +1,6 @@
 ﻿import { Capacitor } from "@capacitor/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { detectSupportedDocumentKind, isPdfDocumentKind } from "../utils/document";
 
 let pdfRuntimePromise = null;
 
@@ -28,6 +29,12 @@ function buildViewerSrc(pdfUrl, currentPage) {
   const [baseUrl] = String(pdfUrl || "").split("#");
   const page = normalizePageNumber(currentPage);
   return `${baseUrl}#page=${page}&zoom=page-fit`;
+}
+
+function buildOfficeViewerSrc(documentUrl) {
+  const normalized = String(documentUrl || "").trim();
+  if (!normalized) return "";
+  return `https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(normalized)}`;
 }
 
 function buildFileSignature(file) {
@@ -70,10 +77,22 @@ function detectTabletDevice() {
   return isIpad || isAndroidTablet || isLargeTouchDevice;
 }
 
-function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onPageChange = null }) {
+function PdfPreview({
+  pdfUrl,
+  documentUrl = "",
+  file = null,
+  pageInfo = null,
+  currentPage = 1,
+  onPageChange = null,
+  previewText = "",
+  isLoadingText = false,
+}) {
   const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
   const [loadedSrc, setLoadedSrc] = useState("");
   const [failedSrc, setFailedSrc] = useState("");
+  const [officeViewMode, setOfficeViewMode] = useState("original");
+  const [loadedOfficeSrc, setLoadedOfficeSrc] = useState("");
+  const [failedOfficeSrc, setFailedOfficeSrc] = useState("");
   const [nativeError, setNativeError] = useState("");
   const [isNativeLoading, setIsNativeLoading] = useState(false);
   const [isTabletDevice, setIsTabletDevice] = useState(() => detectTabletDevice());
@@ -92,13 +111,66 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
     () => (file ? buildFileSignature(file) : String(pdfUrl || "")),
     [file, pdfUrl]
   );
-  const canPreviewPdf = useMemo(() => Boolean(pdfUrl) || isPdfLikeFile(file), [file, pdfUrl]);
+  const documentKind = useMemo(() => detectSupportedDocumentKind(file), [file]);
+  const canPreviewPdf = useMemo(
+    () => Boolean(pdfUrl) || isPdfLikeFile(file) || isPdfDocumentKind(documentKind),
+    [documentKind, file, pdfUrl]
+  );
+  const officePreviewLabel = useMemo(() => {
+    if (documentKind === "pptx") return "슬라이드 텍스트 미리보기";
+    if (documentKind === "docx") return "본문 텍스트 미리보기";
+    return "";
+  }, [documentKind]);
+  const officePreviewMeta = useMemo(() => {
+    if (documentKind === "pptx") {
+      const totalSlides = Number(pageInfo?.total || pageInfo?.used || 0);
+      if (totalSlides > 0) return `${totalSlides}개 슬라이드 텍스트`;
+      return "슬라이드 텍스트 기반 미리보기";
+    }
+    if (documentKind === "docx") {
+      return "문서에서 추출한 텍스트 기반 미리보기";
+    }
+    return "";
+  }, [documentKind, pageInfo?.total, pageInfo?.used]);
+  const hasOfficePreviewText = useMemo(() => Boolean(String(previewText || "").trim()), [previewText]);
+  const hasOfficeViewerUrl = useMemo(
+    () => Boolean(documentUrl) && (documentKind === "docx" || documentKind === "pptx"),
+    [documentKind, documentUrl]
+  );
+  const officeViewerSrc = useMemo(
+    () => (hasOfficeViewerUrl ? buildOfficeViewerSrc(documentUrl) : ""),
+    [documentUrl, hasOfficeViewerUrl]
+  );
   const normalizedCurrentPage = normalizePageNumber(currentPage);
   const totalPages = useMemo(() => {
     const fromInfo = Number(pageInfo?.total || pageInfo?.used || 0);
     const fromDoc = Number(pdfDocRef.current?.numPages || 0);
     return Math.max(1, fromInfo, fromDoc);
   }, [docVersion, pageInfo?.total, pageInfo?.used]);
+  const isOfficeDocument = documentKind === "docx" || documentKind === "pptx";
+  const canDownloadFile = file instanceof File || Boolean(pdfUrl) || Boolean(documentUrl);
+
+  const handleDownloadFile = useCallback(() => {
+    const targetUrl =
+      file instanceof File ? URL.createObjectURL(file) : String(pdfUrl || documentUrl || "").trim();
+    if (!targetUrl) return;
+
+    const downloadName =
+      String(file?.name || "").trim() ||
+      (documentKind === "pptx" ? "document.pptx" : documentKind === "docx" ? "document.docx" : "document.pdf");
+
+    const link = document.createElement("a");
+    link.href = targetUrl;
+    link.download = downloadName;
+    link.rel = "noopener";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    if (file instanceof File) {
+      setTimeout(() => URL.revokeObjectURL(targetUrl), 60_000);
+    }
+  }, [documentKind, documentUrl, file, pdfUrl]);
 
   const goToPage = useCallback(
     (pageNumber) => {
@@ -127,6 +199,18 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
   useEffect(() => {
     setPageJumpInput(String(normalizedCurrentPage));
   }, [normalizedCurrentPage, sourceKey]);
+
+  useEffect(() => {
+    if (!isOfficeDocument) {
+      setOfficeViewMode("original");
+      setLoadedOfficeSrc("");
+      setFailedOfficeSrc("");
+      return;
+    }
+    setLoadedOfficeSrc("");
+    setFailedOfficeSrc("");
+    setOfficeViewMode(hasOfficeViewerUrl ? "original" : "text");
+  }, [hasOfficeViewerUrl, isOfficeDocument, sourceKey, officeViewerSrc]);
 
   const goToNextPage = useCallback(() => {
     if (normalizedCurrentPage >= totalPages) return;
@@ -509,10 +593,162 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
     };
   }, [canPreviewPdf, currentPage, docVersion, isNativePlatform, onPageChange]);
 
+  const isOfficeOriginalMode =
+    isOfficeDocument && officeViewMode === "original" && Boolean(officeViewerSrc);
+  const officeHasLoadError = isOfficeOriginalMode && failedOfficeSrc === officeViewerSrc;
+  const isOfficeLoading =
+    isOfficeOriginalMode && loadedOfficeSrc !== officeViewerSrc && failedOfficeSrc !== officeViewerSrc;
+
   if (!pdfUrl && !file) {
     return (
       <div className="flex h-full flex-1 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-sm text-slate-300">
         PDF를 업로드하면 미리보기가 표시됩니다.
+      </div>
+    );
+  }
+
+  if (isOfficeDocument) {
+    return (
+      <div className="relative flex h-[58svh] min-h-[24rem] flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/40 sm:min-h-[72vh] lg:h-full lg:min-h-0">
+        <div className="border-b border-white/10 bg-slate-900/90 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold tracking-wide ${
+                  documentKind === "pptx"
+                    ? "border-orange-300/30 bg-orange-400/10 text-orange-100"
+                    : "border-emerald-300/30 bg-emerald-400/10 text-emerald-100"
+                }`}
+              >
+                {String(documentKind || "").toUpperCase()}
+              </span>
+              <p className="text-sm font-semibold text-slate-100">
+                {isOfficeOriginalMode ? "원본 보기" : officePreviewLabel}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleDownloadFile}
+                disabled={!canDownloadFile}
+                className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-slate-200 transition hover:border-white/30 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                다운로드
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!hasOfficeViewerUrl) return;
+                  setLoadedOfficeSrc("");
+                  setFailedOfficeSrc("");
+                  setOfficeViewMode("original");
+                }}
+                disabled={!hasOfficeViewerUrl}
+                className={`rounded-full border px-3 py-1 text-xs transition ${
+                  isOfficeOriginalMode
+                    ? "border-emerald-300/50 bg-emerald-400/10 text-emerald-100"
+                    : "border-white/15 bg-white/5 text-slate-200 hover:border-white/30 hover:bg-white/10"
+                } disabled:cursor-not-allowed disabled:opacity-40`}
+              >
+                원본 보기
+              </button>
+              <button
+                type="button"
+                onClick={() => setOfficeViewMode("text")}
+                className={`rounded-full border px-3 py-1 text-xs transition ${
+                  !isOfficeOriginalMode
+                    ? "border-emerald-300/50 bg-emerald-400/10 text-emerald-100"
+                    : "border-white/15 bg-white/5 text-slate-200 hover:border-white/30 hover:bg-white/10"
+                }`}
+              >
+                텍스트 보기
+              </button>
+              {officeViewerSrc && (
+                <a
+                  href={officeViewerSrc}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-slate-200 transition hover:border-white/30 hover:bg-white/10"
+                >
+                  새 탭
+                </a>
+              )}
+            </div>
+          </div>
+          <p className="mt-1 text-xs text-slate-400">
+            {isOfficeOriginalMode
+              ? "마이크로소프트 뷰어로 원본 레이아웃을 표시합니다."
+              : `${officePreviewMeta}${hasOfficePreviewText ? " 이미지, 표, 도형 레이아웃은 제외되고 텍스트 위주로 표시됩니다." : ""}`}
+          </p>
+          {!hasOfficeViewerUrl && (
+            <p className="mt-1 text-xs text-amber-200/90">
+              원격 URL이 없어 원본 보기를 열 수 없습니다. 텍스트 보기로 표시합니다.
+            </p>
+          )}
+        </div>
+
+        {isOfficeOriginalMode ? (
+          <div className="relative flex-1 bg-white">
+            {!officeHasLoadError && (
+              <iframe
+                key={officeViewerSrc}
+                src={officeViewerSrc}
+                title="Microsoft Office Preview"
+                className="absolute inset-0 h-full w-full bg-white"
+                loading="eager"
+                onLoad={() => {
+                  setLoadedOfficeSrc(officeViewerSrc);
+                  setFailedOfficeSrc("");
+                }}
+                onError={() => {
+                  setFailedOfficeSrc(officeViewerSrc);
+                }}
+              />
+            )}
+
+            {isOfficeLoading && !officeHasLoadError && (
+              <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-slate-950/20 text-sm text-slate-700">
+                마이크로소프트 뷰어를 불러오는 중입니다.
+              </div>
+            )}
+
+            {officeHasLoadError && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 px-5 text-center text-sm text-slate-700">
+                <p>원본 보기를 불러오지 못했습니다.</p>
+                <button
+                  type="button"
+                  onClick={() => setOfficeViewMode("text")}
+                  className="rounded-full border border-slate-300/70 px-3 py-1.5 text-xs text-slate-700 transition hover:bg-slate-100"
+                >
+                  텍스트 보기로 전환
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="relative flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
+            {hasOfficePreviewText ? (
+              <div className="mx-auto max-w-4xl rounded-2xl border border-white/10 bg-slate-900/55 p-4 shadow-lg shadow-black/20 sm:p-5">
+                <div className="whitespace-pre-wrap break-words text-sm leading-7 text-slate-100">
+                  {String(previewText || "").trim()}
+                </div>
+              </div>
+            ) : (
+              <div className="flex h-full min-h-[16rem] items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/5 px-5 text-center text-sm text-slate-300">
+                {isLoadingText
+                  ? `${String(documentKind || "").toUpperCase()} 본문을 준비 중입니다.`
+                  : "추출된 본문 텍스트가 없어 미리보기를 표시할 수 없습니다."}
+              </div>
+            )}
+          </div>
+        )}
+
+        {isLoadingText && !hasOfficePreviewText && !isOfficeOriginalMode && (
+          <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-slate-950/40 text-sm text-slate-100">
+            문서 텍스트를 추출 중입니다.
+          </div>
+        )}
       </div>
     );
   }
@@ -530,6 +766,17 @@ function PdfPreview({ pdfUrl, file = null, pageInfo = null, currentPage = 1, onP
   if (isNativePlatform) {
     return (
       <div className="relative flex h-[58svh] min-h-[24rem] flex-1 overflow-hidden rounded-3xl border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/40 sm:min-h-[72vh] lg:h-full lg:min-h-0">
+        {canDownloadFile && (
+          <div className="absolute right-3 top-3 z-30">
+            <button
+              type="button"
+              onClick={handleDownloadFile}
+              className="rounded-full border border-white/20 bg-slate-900/88 px-3 py-1.5 text-xs text-slate-100 shadow-lg shadow-black/30 transition hover:border-emerald-300/50 hover:bg-slate-800"
+            >
+              다운로드
+            </button>
+          </div>
+        )}
         <div
           ref={nativeScrollRef}
           className="h-full w-full overflow-y-auto overflow-x-hidden p-1.5 sm:p-3"

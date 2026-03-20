@@ -1,5 +1,7 @@
 ﻿import { memo, useEffect, useMemo, useRef, useState } from "react";
 import FolderDialog from "./FolderDialog";
+import { SUPPORTED_UPLOAD_ACCEPT } from "../utils/document";
+import { buildFolderAggregateDocId, buildFolderAggregateThumbnail } from "../utils/appShared";
 import UploadTile from "./UploadTile";
 import PdfTile from "./PdfTile";
 import FolderTile from "./FolderTile";
@@ -29,7 +31,9 @@ const FileUpload = memo(function FileUpload({
   folders = [],
   selectedFolderId = "all",
   onSelectFolder,
+  onSelectFolderSummary,
   onCreateFolder,
+  onRenameFolder,
   onDeleteFolder,
   selectedUploadIds = [],
   onToggleUploadSelect,
@@ -45,7 +49,9 @@ const FileUpload = memo(function FileUpload({
   const [showAddMenu, setShowAddMenu] = useState(false);
   const addMenuRef = useRef(null);
   const fileInputRef = useRef(null);
+  const folderFileInputRef = useRef(null);
   const [showFolderDialog, setShowFolderDialog] = useState(false);
+  const [folderDialogMode, setFolderDialogMode] = useState("create");
   const [folderModalId, setFolderModalId] = useState(null);
   const [uploadTargetFolderId, setUploadTargetFolderId] = useState(null); // 업로드 시 적용할 폴더 ID
   const [contextMenu, setContextMenu] = useState(null); // { x, y, uploadId }
@@ -60,6 +66,22 @@ const FileUpload = memo(function FileUpload({
 
   const handleOpenFolderModal = (folderId) => {
     setFolderModalId(folderId);
+  };
+
+  const handleOpenCreateFolderDialog = () => {
+    setFolderDialogMode("create");
+    setShowFolderDialog(true);
+  };
+
+  const handleOpenRenameFolderDialog = () => {
+    if (!folderModalId) return;
+    setFolderDialogMode("rename");
+    setShowFolderDialog(true);
+  };
+
+  const handleCloseFolderDialog = () => {
+    setShowFolderDialog(false);
+    setFolderDialogMode("create");
   };
 
   const handleCloseFolderModal = () => {
@@ -93,6 +115,23 @@ const FileUpload = memo(function FileUpload({
     () => folderItems.find((f) => f.id === folderModalId)?.label || folderModalId,
     [folderItems, folderModalId]
   );
+  const folderAggregateDocId = useMemo(
+    () => (folderModalId ? buildFolderAggregateDocId(folderModalId) : ""),
+    [folderModalId]
+  );
+  const folderAggregateSize = useMemo(
+    () => folderItemsList.reduce((sum, item) => sum + (Number(item?.size) || 0), 0),
+    [folderItemsList]
+  );
+  const folderAggregateThumbnail = useMemo(
+    () => buildFolderAggregateThumbnail(folderModalName),
+    [folderModalName]
+  );
+  const folderDialogTitle = folderDialogMode === "rename" ? "폴더 이름 변경" : "폴더 만들기";
+  const folderDialogDescription =
+    folderDialogMode === "rename" ? "새 폴더 이름을 입력해 주세요." : "폴더 이름을 입력해 주세요.";
+  const folderDialogSubmitLabel = folderDialogMode === "rename" ? "변경" : "생성";
+  const folderDialogInitialValue = folderDialogMode === "rename" ? String(folderModalName || "") : "";
 
   const folderCounts = useMemo(() => {
     const map = new Map();
@@ -127,7 +166,10 @@ const FileUpload = memo(function FileUpload({
       return;
     }
     setShowAddMenu(false);
-    const target = uploadTargetFolderId && uploadTargetFolderId !== "all" ? uploadTargetFolderId : null;
+    const fallbackFolderId =
+      folderModalId && folderModalId !== "all" && uploadTargetFolderId == null ? folderModalId : null;
+    const resolvedFolderId = uploadTargetFolderId || fallbackFolderId;
+    const target = resolvedFolderId && resolvedFolderId !== "all" ? resolvedFolderId : null;
     setUploadTargetFolderId(null);
     onFileChange?.(event, target);
   };
@@ -138,6 +180,14 @@ const FileUpload = memo(function FileUpload({
       return;
     }
     fileInputRef.current?.click();
+  };
+
+  const handleTriggerFolderFileInput = () => {
+    if (isGuest) {
+      requestAuth();
+      return;
+    }
+    folderFileInputRef.current?.click();
   };
 
   useEffect(() => {
@@ -219,7 +269,7 @@ const FileUpload = memo(function FileUpload({
                 disabled={!isFolderFeatureEnabled}
                 onClick={() => {
                   if (!isFolderFeatureEnabled) return;
-                  setShowFolderDialog(true);
+                  handleOpenCreateFolderDialog();
                   setUploadTargetFolderId(null);
                   setShowAddMenu(false);
                 }}
@@ -281,31 +331,73 @@ const FileUpload = memo(function FileUpload({
       </div>
       <FolderDialog
         open={showFolderDialog}
-        onClose={() => setShowFolderDialog(false)}
+        onClose={handleCloseFolderDialog}
+        title={folderDialogTitle}
+        description={folderDialogDescription}
+        submitLabel={folderDialogSubmitLabel}
+        initialValue={folderDialogInitialValue}
         onSubmit={(name) => {
           try {
-            onCreateFolder?.(name);
-            onSelectFolder?.("all");
+            if (folderDialogMode === "rename" && folderModalId) {
+              onRenameFolder?.(folderModalId, name);
+            } else {
+              onCreateFolder?.(name);
+              onSelectFolder?.("all");
+            }
           } finally {
-            setShowFolderDialog(false);
+            handleCloseFolderDialog();
           }
         }}
       />
+      <input
+        ref={folderFileInputRef}
+        id="folder-document-upload"
+        name="folder-document-upload"
+        type="file"
+        accept={SUPPORTED_UPLOAD_ACCEPT}
+        multiple
+        onChange={handleFileSelect}
+        className="hidden"
+      />
 
       {folderModalId && (
-        <div className="fixed inset-0 z-30 flex items-end justify-center bg-black/60 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-4 sm:py-8">
-          <div className="relative flex w-full max-w-6xl flex-col rounded-[1.75rem] border border-white/10 bg-slate-900/95 p-4 text-slate-100 shadow-2xl shadow-black/40 max-h-[88svh] min-h-[320px] sm:rounded-3xl sm:p-6">
+        <div
+          className="fixed inset-0 z-[120] flex items-end justify-center bg-black/60 px-3 py-4 backdrop-blur-sm sm:items-center sm:px-4 sm:py-8"
+          onClick={handleCloseFolderModal}
+        >
+          <div
+            className="relative flex w-full max-w-6xl flex-col rounded-[1.75rem] border border-white/10 bg-slate-900/95 p-4 text-slate-100 shadow-2xl shadow-black/40 max-h-[88svh] min-h-[320px] sm:rounded-3xl sm:p-6"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              onClick={handleCloseFolderModal}
+              className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/30 text-lg text-slate-100 transition hover:border-white/30 hover:bg-white/10 hover:text-white sm:right-6 sm:top-6"
+              aria-label="폴더 닫기"
+              title="닫기"
+            >
+              ×
+            </button>
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <p className="text-xs uppercase tracking-wide text-emerald-300/80">폴더</p>
                 <h3 className="text-xl font-semibold">{folderModalName}</h3>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 pr-12 sm:pr-14">
+                <button
+                  type="button"
+                  onClick={handleOpenRenameFolderDialog}
+                  className="ghost-button text-sm text-slate-200"
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": "148, 163, 184" }}
+                >
+                  이름 변경
+                </button>
                 <button
                   type="button"
                   onClick={() => {
                     setUploadTargetFolderId(folderModalId);
-                    handleTriggerFileInput();
+                    handleTriggerFolderFileInput();
                   }}
                   className="ghost-button text-sm text-emerald-100"
                   data-ghost-size="sm"
@@ -328,9 +420,46 @@ const FileUpload = memo(function FileUpload({
             <div className="flex-1 overflow-auto pr-1">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {!hasFolderItems && (
-                  <div className="col-span-full flex w-full items-start justify-start rounded-2xl border border-dashed border-white/10 bg-white/5 p-4 text-sm text-slate-300 aspect-[4/3]">
-                    이 폴더에 파일이 없습니다.
-                  </div>
+                  <button
+                    type="button"
+                    className="col-span-full flex aspect-[4/3] w-full flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-emerald-300/20 bg-white/5 p-6 text-center text-sm text-slate-300 transition hover:border-emerald-300/60 hover:bg-emerald-400/5"
+                    onClick={() => {
+                      setUploadTargetFolderId(folderModalId);
+                      handleTriggerFolderFileInput();
+                    }}
+                  >
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15 text-2xl font-bold text-emerald-200">
+                      +
+                    </div>
+                    <p className="text-base font-semibold text-white">이 폴더에 파일 추가</p>
+                    <p className="max-w-md text-sm text-slate-300">
+                      아직 문서가 없습니다. PDF, DOCX, PPTX 파일을 바로 업로드하세요.
+                    </p>
+                  </button>
+                )}
+                {hasFolderItems && (
+                  <PdfTile
+                    key={folderAggregateDocId}
+                    file={{
+                      id: folderAggregateDocId,
+                      name: `${folderModalName} 전체 요약본`,
+                      size: folderAggregateSize,
+                    }}
+                    thumbnailUrl={folderAggregateThumbnail}
+                    active={selectedFileId === folderAggregateDocId}
+                    selectable={false}
+                    selected={false}
+                    onToggleSelect={undefined}
+                    draggable={false}
+                    onDragStart={undefined}
+                    onDragEnd={undefined}
+                    onProceed={() => {
+                      handleCloseFolderModal();
+                      onSelectFolderSummary?.(folderModalId);
+                    }}
+                    fullWidth
+                    metaText={`${folderItemsList.length}개 파일 요약 기반`}
+                  />
                 )}
                 {folderItemsList.map((item) => {
                     const isSelected = selectedUploadIds.includes(item.id);
@@ -350,7 +479,10 @@ const FileUpload = memo(function FileUpload({
                         draggable={isFolderFeatureEnabled}
                         onDragStart={undefined}
                         onDragEnd={undefined}
-                      onProceed={() => onSelectFile?.(item)}
+                      onProceed={() => {
+                        handleCloseFolderModal();
+                        onSelectFile?.(item);
+                      }}
                       onContextMenu={(e) => handleContextMenuUpload(e, item)}
                       onDelete={() => onDeleteUpload?.(item)}
                       fullWidth

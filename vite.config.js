@@ -91,6 +91,10 @@ export default defineConfig(({ mode }) => {
           target: "http://localhost:8791",
           changeOrigin: true,
         },
+        "/api/feedback": {
+          target: "http://localhost:8792",
+          changeOrigin: true,
+        },
       },
     },
   };

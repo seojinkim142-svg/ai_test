@@ -1,11 +1,55 @@
-# React + Vite
+# Zeusian
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Zeusian is an AI-powered PDF study assistant built with React + Vite. The app supports document upload, summary generation, quiz/OX/mock-exam creation, flashcards, AI tutor interactions, premium profile spaces, and folder-level combined study documents.
 
-Currently, two official plugins are available:
+## Modularization And Deployment Notes
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+This project is modularized with Vercel deployment constraints in mind.
+
+- Do not split everything into many tiny files.
+- Prefer a small number of domain-based utility modules over one-function-per-file.
+- Keep heavy UI boundaries lazy-loaded where they already map to real screens or overlays.
+- Reuse shared helpers across features instead of duplicating logic in components.
+
+### Current low-file-count modularization strategy
+
+The latest refactor intentionally moved large pure-helper blocks out of `src/App.jsx` into only a few consolidated modules:
+
+- `src/utils/appShared.js`
+  - shared app/document helpers
+  - folder aggregate document helpers
+  - local ID generation
+  - chapter-range storage key generation
+- `src/utils/studyArtifacts.js`
+  - partial summary serialization
+  - instructor emphasis state normalization
+  - mojibake-safe UI text sanitation
+- `src/utils/tutorHelpers.js`
+  - tutor page/section detection
+  - tutor fallback answer handling
+  - chapter number selection parsing
+
+This keeps the codebase more maintainable without creating an excessive number of files that could bloat deployment packaging.
+
+### Practical rule for future refactors
+
+If you want to modularize more:
+
+1. First extend an existing domain module.
+2. Create a new file only when the logic represents a real feature boundary.
+3. Avoid micro-modules that add file count but do not create a meaningful lazy-load or ownership boundary.
+
+## Build Verification
+
+Use this before deploying:
+
+```bash
+npm run build
+```
+
+The current refactor was verified with a successful production build.
+
+## Vite / React Notes
 
 ## React Compiler
 
@@ -102,6 +146,84 @@ Notes:
 - KakaoPay production approval/cancel/fail URLs cannot use `localhost`.
 - NICE Payments return URLs should resolve back to the same deployed HTTPS origin that serves `/api/nicepayments/return`.
 
+## Advertising
+
+The project currently uses two separate ad paths:
+
+- Android app: `AdMob`
+- Website: `AdSense Auto ads`
+
+### Android App Ads (AdMob)
+
+Android native ads are integrated with `@capacitor-community/admob`.
+
+- Current format: bottom banner only
+- Current targeting: free tier users only
+- Current runtime: Android native app only
+- Hidden on auth and payment overlays
+
+Relevant files:
+
+- `src/services/admob.js`
+- `src/hooks/useAdMobBanner.js`
+- `src/App.jsx`
+- `android/app/build.gradle`
+- `android/app/src/main/AndroidManifest.xml`
+
+Required values:
+
+- `ADMOB_APP_ID`
+  - Set in `android/gradle.properties` or environment
+- `VITE_ADMOB_BANNER_ID_ANDROID`
+  - Set in `.env.production` or build environment
+- `VITE_ADMOB_TEST_DEVICE_IDS`
+  - Optional, comma-separated test device IDs for AdMob debugging
+
+Notes:
+
+- If `VITE_ADMOB_BANNER_ID_ANDROID` is empty, the app falls back to Google's test banner unit.
+- The Android build injects `admob_app_id` through Gradle `resValue`.
+- After changing app ad settings, rebuild and sync Android:
+
+```bash
+npm run build
+npm run cap:sync android
+cd android
+.\gradlew.bat assembleDebug
+```
+
+### Web Ads (AdSense Auto Ads)
+
+The website uses AdSense Auto ads instead of AdMob.
+
+- The AdSense script is injected into `index.html` at build time from `vite.config.js`
+- The site publisher ID is read from `VITE_ADSENSE_PUBLISHER_ID`
+- `ads.txt` is served from `public/ads.txt`
+
+Relevant files:
+
+- `vite.config.js`
+- `.env.production`
+- `public/ads.txt`
+
+Required value:
+
+- `VITE_ADSENSE_PUBLISHER_ID`
+  - Example format: `ca-pub-xxxxxxxxxxxxxxxx`
+
+Verification checklist:
+
+1. Deploy the latest web build.
+2. Confirm page source includes the AdSense script in `<head>`.
+3. Confirm `https://your-domain/ads.txt` is reachable.
+4. Complete site review and CMP setup in AdSense.
+
+Notes:
+
+- Auto ads may not display immediately after code insertion.
+- Actual ad serving depends on AdSense site review and policy approval.
+- For EEA/UK/Switzerland traffic, a Google-certified CMP should remain enabled.
+
 ## iPhone PWA (No Mac Required)
 
 If you do not have a Mac, the most practical iPhone path is to ship the web app as a PWA and install it from Safari.
@@ -147,6 +269,46 @@ npm run android:live:target
 ```
 
 After this, saving code in `src/` should update the app on the tablet right away.
+
+## Current Mobile Phone UI Notes
+
+Current phone-specific behavior is mainly defined for screens narrower than `640px` (`sm` breakpoint).
+
+- Phone-only responsive rules:
+  - `.mobile-chip-row`, `.mobile-tab-row`, `.mobile-card-rail` use horizontal scrolling under `@media (max-width: 639px)` in `src/index.css`.
+  - Tablet and desktop keep the regular `sm`/`md`/`lg` layouts unless a component explicitly uses native-device detection.
+
+- Upload / library screen:
+  - The top action area is compacted for phones.
+  - Upload tiles and document tiles use a tighter phone layout with a 2-column grid in the main upload area.
+
+- Detail screen:
+  - On phones, a compact document info card is shown above the PDF preview.
+  - Phone-only previous/next page buttons are shown in that document info card.
+  - The `요약 / 퀴즈 / OX / 모의고사 / 카드 / AI 튜터` row becomes a horizontally scrollable tab row on phones.
+  - Phone detail content uses normal page scrolling; tablet/desktop keep the inner panel scroll layout.
+
+- Summary UI:
+  - The default summary view is the paged card layout.
+  - `크게 보기` is intentionally shown only on phones and hidden on web/tablet.
+
+- PDF preview in APK / native runtime:
+  - Native builds use the PDF.js canvas renderer in `src/components/PdfPreview.jsx`.
+  - Phone navigation supports previous/next buttons, page jump, and swipe/wheel-assisted page movement.
+  - A render-request guard is applied so moving to the next page does not redraw the previous page over the new one.
+
+- Desktop / tablet expectations:
+  - Header and detail tabs follow the desktop/tablet layout.
+  - The current phone-specific styling should not be treated as the default web layout.
+
+Key files related to current phone behavior:
+
+- `src/index.css`
+- `src/components/FileUpload.jsx`
+- `src/components/Header.jsx`
+- `src/components/PdfPreview.jsx`
+- `src/components/SummaryCard.jsx`
+- `src/pages/DetailPage.jsx`
 
 ## Auth Toggle
 

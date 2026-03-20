@@ -143,6 +143,7 @@ export default function DetailPage({
   detailContainerRef,
   splitStyle,
   pdfUrl,
+  documentRemoteUrl,
   file,
   pageInfo,
   currentPage,
@@ -154,6 +155,7 @@ export default function DetailPage({
   isLoadingSummary,
   isLoadingText,
   isFreeTier,
+  isPdfDocument = true,
   summary,
   instructorEmphasisInput,
   setInstructorEmphasisInput,
@@ -543,10 +545,13 @@ export default function DetailPage({
         </div>
         <PdfPreview
           pdfUrl={pdfUrl}
+          documentUrl={documentRemoteUrl}
           file={file}
           pageInfo={pageInfo}
           currentPage={currentPage}
           onPageChange={handlePageChange}
+          previewText={extractedText}
+          isLoadingText={isLoadingText}
         />
       </div>
 
@@ -610,9 +615,12 @@ export default function DetailPage({
                   <button
                     type="button"
                     onClick={() => {
+                      if (!isPdfDocument) return;
                       setIsPageSummaryOpen((prev) => !prev);
                       setPageSummaryError("");
                     }}
+                    disabled={!isPdfDocument}
+                    title={!isPdfDocument ? "PDF 문서에서만 사용할 수 있습니다." : undefined}
                     className="ghost-button text-xs text-slate-200"
                     style={{ "--ghost-color": "148, 163, 184" }}
                   >
@@ -730,7 +738,8 @@ export default function DetailPage({
                       <button
                         type="button"
                         onClick={handleAutoDetectChapterRanges}
-                        disabled={isLoadingSummary || isLoadingText || isDetectingChapterRanges}
+                        disabled={!isPdfDocument || isLoadingSummary || isLoadingText || isDetectingChapterRanges}
+                        title={!isPdfDocument ? "자동 목차 추출은 PDF에서만 지원됩니다." : undefined}
                         className="ghost-button text-xs text-slate-200"
                         data-ghost-size="sm"
                         style={{ "--ghost-color": "100, 116, 139" }}
@@ -751,6 +760,11 @@ export default function DetailPage({
                     <p className="text-xs text-slate-400">
                       목차 자동 추출 또는 직접 입력한 범위는 요약 생성 시 챕터 분할 기준으로 적용됩니다.
                     </p>
+                    {!isPdfDocument && (
+                      <p className="text-xs text-slate-400">
+                        비PDF 문서는 자동 목차 추출 없이, 입력한 범위를 기준으로 텍스트를 논리적으로 나눠 사용합니다.
+                      </p>
+                    )}
                   </div>
                   {chapterRangeError && (
                     <p className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-200 ring-1 ring-red-400/30">

@@ -66,6 +66,143 @@ async function savePdfDocument(pdf, filename) {
   await saveBlobAsFile(blob, filename);
 }
 
+function ensurePdfFilename(filename) {
+  const normalized = String(filename || "").trim() || "document.pdf";
+  return /\.pdf$/i.test(normalized) ? normalized : `${normalized}.pdf`;
+}
+
+function wrapCanvasText(ctx, text, maxWidth) {
+  const source = String(text || "");
+  if (!source) return [""];
+
+  const lines = [];
+  let current = "";
+
+  for (const char of source) {
+    const next = `${current}${char}`;
+    if (current && ctx.measureText(next).width > maxWidth) {
+      lines.push(current.trimEnd());
+      current = /\s/.test(char) ? "" : char;
+      continue;
+    }
+    current = next;
+  }
+
+  if (current) {
+    lines.push(current.trimEnd());
+  }
+
+  return lines.length > 0 ? lines : [""];
+}
+
+export async function createTextPdfFile(
+  content,
+  { filename = "document.pdf", title = "", background = "#ffffff" } = {}
+) {
+  const normalized = String(content || "").replace(/\r\n/g, "\n").trim();
+  if (!normalized) {
+    throw new Error("No text to export.");
+  }
+  if (typeof document === "undefined") {
+    throw new Error("PDF export requires a browser environment.");
+  }
+
+  const { jsPDF } = await loadExportRuntime();
+  const pdf = new jsPDF("p", "mm", "a4");
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const canvasWidth = 1240;
+  const canvasHeight = 1754;
+  const marginX = 88;
+  const marginTop = 96;
+  const marginBottom = 96;
+  const maxTextWidth = canvasWidth - marginX * 2;
+  const bodyFontSize = 24;
+  const bodyLineHeight = 40;
+  const paragraphGap = 18;
+  const blankLineGap = 24;
+  const titleFontSize = 34;
+  const titleGap = 34;
+  const pages = [];
+
+  const createPage = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvasWidth;
+    canvas.height = canvasHeight;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      throw new Error("Canvas context is unavailable.");
+    }
+    ctx.fillStyle = background;
+    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+    ctx.textBaseline = "top";
+    ctx.fillStyle = "#0f172a";
+    ctx.font = `${bodyFontSize}px "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`;
+    return { canvas, ctx, y: marginTop };
+  };
+
+  let page = createPage();
+  const maxY = canvasHeight - marginBottom;
+
+  const pushNewPage = () => {
+    pages.push(page.canvas);
+    page = createPage();
+  };
+
+  const ensureSpace = (heightNeeded) => {
+    if (page.y + heightNeeded <= maxY) return;
+    pushNewPage();
+  };
+
+  if (title) {
+    page.ctx.font = `700 ${titleFontSize}px "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`;
+    const titleLines = wrapCanvasText(page.ctx, title, maxTextWidth);
+    titleLines.forEach((line) => {
+      ensureSpace(titleFontSize + 10);
+      page.ctx.fillText(line, marginX, page.y);
+      page.y += titleFontSize + 10;
+    });
+    page.y += titleGap;
+    page.ctx.font = `${bodyFontSize}px "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`;
+  }
+
+  normalized.split("\n").forEach((paragraph) => {
+    const line = String(paragraph || "").trimEnd();
+    if (!line.trim()) {
+      ensureSpace(blankLineGap);
+      page.y += blankLineGap;
+      return;
+    }
+
+    const wrappedLines = wrapCanvasText(page.ctx, line, maxTextWidth);
+    wrappedLines.forEach((wrappedLine) => {
+      ensureSpace(bodyLineHeight);
+      page.ctx.fillText(wrappedLine || " ", marginX, page.y);
+      page.y += bodyLineHeight;
+    });
+    page.y += paragraphGap;
+  });
+
+  pages.push(page.canvas);
+
+  pages.forEach((canvas, index) => {
+    const imgData = canvas.toDataURL("image/png");
+    if (index > 0) {
+      pdf.addPage();
+    }
+    pdf.addImage(imgData, "PNG", 0, 0, pageWidth, pageHeight);
+  });
+
+  const blob = pdf.output("blob");
+  return {
+    file: new File([blob], ensurePdfFilename(filename), {
+      type: "application/pdf",
+      lastModified: Date.now(),
+    }),
+    pageCount: pages.length,
+  };
+}
+
 export async function exportElementToPdf(element, { filename = "summary.pdf", margin = 10 } = {}) {
   if (!element) throw new Error("Element not found.");
 
