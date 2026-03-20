@@ -1,4 +1,5 @@
 let exportRuntimePromise = null;
+let richExportRuntimePromise = null;
 
 async function loadExportRuntime() {
   if (!exportRuntimePromise) {
@@ -13,6 +14,62 @@ async function loadExportRuntime() {
     })();
   }
   return exportRuntimePromise;
+}
+
+async function loadRichExportRuntime() {
+  if (!richExportRuntimePromise) {
+    richExportRuntimePromise = (async () => {
+      const [reactModule, reactDomClientModule, summaryCardModule] = await Promise.all([
+        import("react"),
+        import("react-dom/client"),
+        import("../components/SummaryCard.jsx"),
+      ]);
+      const React = reactModule?.default || reactModule;
+      const SummaryCard = summaryCardModule?.default || summaryCardModule;
+      return {
+        React,
+        SummaryCard,
+        createRoot: reactDomClientModule.createRoot,
+      };
+    })();
+  }
+  return richExportRuntimePromise;
+}
+
+function waitForNextPaint() {
+  return new Promise((resolve) => {
+    if (typeof window !== "undefined" && typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(() => resolve());
+      return;
+    }
+    setTimeout(resolve, 16);
+  });
+}
+
+async function waitForExportPages(host, selector, timeoutMs = 3000) {
+  const startedAt = Date.now();
+
+  if (typeof document !== "undefined" && document.fonts?.ready) {
+    try {
+      await Promise.race([
+        document.fonts.ready,
+        new Promise((resolve) => setTimeout(resolve, 1200)),
+      ]);
+    } catch {
+      // Ignore font readiness failures and continue with best-effort rendering.
+    }
+  }
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const pages = Array.from(host.querySelectorAll(selector));
+    if (pages.length > 0) {
+      await waitForNextPaint();
+      return pages;
+    }
+    await waitForNextPaint();
+  }
+
+  return [];
 }
 
 async function saveBlobAsFile(blob, filename) {
@@ -201,6 +258,80 @@ export async function createTextPdfFile(
     }),
     pageCount: pages.length,
   };
+}
+
+export async function createRichTextPdfFile(
+  content,
+  { filename = "document.pdf", title = "", background = "#ffffff" } = {}
+) {
+  const normalized = String(content || "").replace(/\r\n/g, "\n").trim();
+  const normalizedTitle = String(title || "").trim();
+  if (!normalized) {
+    throw new Error("No text to export.");
+  }
+  if (typeof document === "undefined") {
+    throw new Error("PDF export requires a browser environment.");
+  }
+
+  const { html2canvas, jsPDF } = await loadExportRuntime();
+  const { React, SummaryCard, createRoot } = await loadRichExportRuntime();
+  const pdf = new jsPDF("p", "mm", "a4");
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const host = document.createElement("div");
+  host.style.position = "fixed";
+  host.style.left = "-32000px";
+  host.style.top = "0";
+  host.style.width = "0";
+  host.style.height = "0";
+  host.style.pointerEvents = "none";
+  host.style.opacity = "1";
+  host.style.zIndex = "-1";
+  document.body.appendChild(host);
+
+  const root = createRoot(host);
+  const richContent = normalizedTitle ? `# ${normalizedTitle}\n\n${normalized}` : normalized;
+
+  try {
+    root.render(React.createElement(SummaryCard, { summary: richContent, renderExportPages: true }));
+
+    const pages = await waitForExportPages(host, ".summary-export-page");
+    if (pages.length === 0) {
+      throw new Error("Rich export pages did not render.");
+    }
+
+    for (let i = 0; i < pages.length; i += 1) {
+      const page = pages[i];
+      const canvas = await html2canvas(page, {
+        scale: 2,
+        backgroundColor: background,
+        useCORS: true,
+        windowWidth: page.scrollWidth || page.clientWidth || 794,
+        windowHeight: page.scrollHeight || page.clientHeight || 1123,
+      });
+      const imgData = canvas.toDataURL("image/png");
+      if (i > 0) {
+        pdf.addPage();
+      }
+      pdf.addImage(imgData, "PNG", 0, 0, pageWidth, pageHeight);
+    }
+
+    const blob = pdf.output("blob");
+    return {
+      file: new File([blob], ensurePdfFilename(filename), {
+        type: "application/pdf",
+        lastModified: Date.now(),
+      }),
+      pageCount: pages.length,
+    };
+  } finally {
+    try {
+      root.unmount();
+    } catch {
+      // Ignore unmount errors during cleanup.
+    }
+    host.remove();
+  }
 }
 
 export async function exportElementToPdf(element, { filename = "summary.pdf", margin = 10 } = {}) {

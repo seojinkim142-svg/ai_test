@@ -406,9 +406,15 @@ function SummaryCard({ summary, renderExportPages = false }) {
       h2: (props) => <h2 className="mt-3 text-[19px] font-semibold text-slate-900" {...props} />,
       h3: (props) => <h3 className="mt-2 text-[16px] font-semibold text-slate-800" {...props} />,
       p: (props) => <p className="text-[13px] leading-[1.75] text-slate-800" {...props} />,
-      strong: (props) => <strong className="font-semibold text-slate-900" {...props} />,
-      ul: (props) => <ul className="list-disc space-y-1 pl-5 text-[13px] text-slate-800" {...props} />,
-      ol: (props) => <ol className="list-decimal space-y-1 pl-5 text-[13px] text-slate-800" {...props} />,
+      strong: (props) => (
+        <strong className="rounded bg-amber-100 px-[3px] py-[1px] font-semibold text-slate-950" {...props} />
+      ),
+      ul: (props) => (
+        <ul className="list-disc space-y-1 pl-5 text-[13px] leading-[1.75] text-slate-800 marker:text-slate-500" {...props} />
+      ),
+      ol: (props) => (
+        <ol className="list-decimal space-y-1 pl-6 text-[13px] leading-[1.75] text-slate-800 marker:font-semibold marker:text-slate-700" {...props} />
+      ),
       li: (props) => <li className="leading-[1.7]" {...props} />,
       code: ({ inline, className, children, ...props }) =>
         inline ? (
@@ -625,6 +631,7 @@ function SummaryCard({ summary, renderExportPages = false }) {
               <section
                 key={`summary-export-page-${index}`}
                 className="summary-export-page w-[794px] min-h-[1123px] bg-white px-16 py-16"
+                style={{ fontVariantNumeric: "lining-nums tabular-nums" }}
               >
                 <div className="mb-5 flex items-center justify-between border-b border-slate-200 pb-3">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">요약</p>
