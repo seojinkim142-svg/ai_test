@@ -19,6 +19,7 @@ import {
   createFolder,
   listFolders,
   deleteFolder,
+  renameFolder,
   deleteUpload,
   saveUploadMetadata,
   listUploads,
@@ -31,6 +32,7 @@ import {
   getPremiumProfileStateFromUser,
   savePremiumProfileState,
 } from "./services/supabase";
+import { notifyFeedbackEmail } from "./services/feedback";
 import {
   extractPdfText,
   extractPdfTextByRanges,
@@ -46,7 +48,7 @@ import {
   isSupportedUploadFile,
   normalizeSupportedDocumentFile,
 } from "./utils/document";
-import { exportMockAnswerSheetToPdf, exportPagedElementToPdf } from "./utils/pdfExport";
+import { createTextPdfFile, exportMockAnswerSheetToPdf, exportPagedElementToPdf } from "./utils/pdfExport";
 import {
   PDF_MAX_SIZE_BY_TIER,
   DEFAULT_PREMIUM_PROFILE_PIN,
@@ -93,6 +95,36 @@ import {
   pushUniqueByQuestionKey,
   pickRandomUniqueByQuestionKey,
 } from "./utils/questionDedupe";
+import {
+  buildChapterRangeStorageKey,
+  buildFolderAggregateDocId,
+  buildFolderAggregateThumbnail,
+  buildStoragePathCandidates,
+  createPlaceholderPdfFile,
+  createLocalEntityId,
+  FOLDER_AGGREGATE_MAX_LENGTH,
+  FOLDER_AGGREGATE_MAX_LENGTH_PER_FILE,
+  isFolderAggregateDocId,
+  isSafeStoragePathForReuse,
+  parseFolderAggregateDocId,
+} from "./utils/appShared";
+import {
+  formatPartialSummaryDefaultName,
+  normalizeInstructorEmphasisInput,
+  normalizeSavedInstructorEmphasisEntries,
+  normalizeSavedPartialSummaryEntries,
+  readPartialSummaryBundleFromHighlights,
+  sanitizeUiText,
+  writePartialSummaryBundleToHighlights,
+} from "./utils/studyArtifacts";
+import {
+  buildTutorPageCandidates,
+  detectTutorSectionPageRange,
+  extractTutorProblemTokenCandidates,
+  extractTutorSectionCandidates,
+  parseChapterNumberSelectionInput,
+  resolveTutorReplyText,
+} from "./utils/tutorHelpers";
 
 const AuthPanel = lazy(() => import("./components/AuthPanel"));
 const Header = lazy(() => import("./components/Header"));
@@ -100,627 +132,22 @@ const LoginBackground = lazy(() => import("./components/LoginBackground"));
 const PaymentPage = lazy(() => import("./components/PaymentPage"));
 const DetailPage = lazy(() => import("./pages/DetailPage"));
 const PremiumProfilePicker = lazy(() => import("./components/PremiumProfilePicker"));
-
-function buildStoragePathCandidates(rawPath) {
-  const source = String(rawPath || "").trim();
-  if (!source) return [];
-
-  const seen = new Set();
-  const candidates = [];
-  const addCandidate = (value) => {
-    const normalized = String(value || "")
-      .trim()
-      .replace(/\\/g, "/")
-      .replace(/^\/+/, "");
-    if (!normalized || seen.has(normalized)) return;
-    seen.add(normalized);
-    candidates.push(normalized);
-  };
-
-  addCandidate(source);
-
-  if (/%[0-9A-Fa-f]{2}/.test(source)) {
-    try {
-      addCandidate(decodeURIComponent(source));
-    } catch {
-      // Ignore malformed escape sequences.
-    }
-  }
-
-  try {
-    const decoded = decodeURI(source);
-    addCandidate(decoded);
-    addCandidate(encodeURI(decoded));
-  } catch {
-    // Ignore malformed URI sequences.
-  }
-
-  addCandidate(encodeURI(source));
-  return candidates;
-}
-
-function isSafeStoragePathForReuse(rawPath) {
-  const value = String(rawPath || "").trim();
-  if (!value) return false;
-  if (value.includes("%")) return false;
-  return /^[\x20-\x7E]+$/.test(value);
-}
-
-const CHAPTER_RANGE_STORAGE_PREFIX = "zeusian:chapter-ranges:v1";
-const PARTIAL_SUMMARY_ARTIFACT_KEY = "__partial_summary_state_v1";
-const PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY = "__partial_summary_library_v1";
-const INSTRUCTOR_EMPHASIS_ARTIFACT_KEY = "__instructor_emphasis_v1";
-const INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY = "__instructor_emphasis_library_v1";
-const INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY = "__instructor_emphasis_active_id_v1";
-const LEGACY_HIGHLIGHTS_WRAP_KEY = "__legacy_highlights_payload_v1";
-const INSTRUCTOR_EMPHASIS_MAX_LENGTH = 2000;
-const MOJIBAKE_COMPAT_CHAR_RE = /[\uF900-\uFAFF]/;
-
-function normalizeInstructorEmphasisInput(value) {
-  const normalized = String(value || "")
-    .replace(/\r\n/g, "\n")
-    .split("\0")
-    .join("")
-    .trim();
-  if (!normalized) return "";
-  if (normalized.length <= INSTRUCTOR_EMPHASIS_MAX_LENGTH) return normalized;
-  return normalized.slice(0, INSTRUCTOR_EMPHASIS_MAX_LENGTH).trim();
-}
-
-function hasMojibakeText(value) {
-  const text = String(value || "");
-  if (!text) return false;
-  if (text.includes("\uFFFD")) return true;
-  if (MOJIBAKE_COMPAT_CHAR_RE.test(text)) return true;
-  if (/[?]{2,}/.test(text) && /[\u3131-\uD79D]/.test(text)) return true;
-  return false;
-}
-
-function sanitizeUiText(value, fallback = "") {
-  const text = String(value || "").trim();
-  if (!text) return "";
-  if (!hasMojibakeText(text)) return text;
-  return String(fallback || "").trim();
-}
-
-function createLocalEntityId(prefix) {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `${prefix}-${crypto.randomUUID()}`;
-  }
-  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function buildChapterRangeStorageKey({ userId, scopeId, docId }) {
-  const normalizedDocId = String(docId || "").trim();
-  if (!normalizedDocId) return "";
-  const normalizedUserId = String(userId || "guest").trim() || "guest";
-  const normalizedScopeId = String(scopeId || "default").trim() || "default";
-  return `${CHAPTER_RANGE_STORAGE_PREFIX}:${normalizedUserId}:${normalizedScopeId}:${normalizedDocId}`;
-}
-
-function formatPartialSummaryDefaultName(dateInput) {
-  const date = dateInput ? new Date(dateInput) : new Date();
-  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 16).replace("T", " ");
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const hh = String(date.getHours()).padStart(2, "0");
-  const min = String(date.getMinutes()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
-}
-
-function normalizeSavedPartialSummaryEntries(input) {
-  const list = Array.isArray(input) ? input : [];
-  const normalized = [];
-  for (const entry of list) {
-    const summaryText = String(entry?.summary || "").trim();
-    if (!summaryText) continue;
-
-    const createdAtSource = String(entry?.createdAt || "").trim();
-    const updatedAtSource = String(entry?.updatedAt || "").trim();
-    const createdAtDate = new Date(createdAtSource || Date.now());
-    const updatedAtDate = new Date(updatedAtSource || createdAtDate.getTime());
-    const createdAt = Number.isNaN(createdAtDate.getTime())
-      ? new Date().toISOString()
-      : createdAtDate.toISOString();
-    const updatedAt = Number.isNaN(updatedAtDate.getTime())
-      ? createdAt
-      : updatedAtDate.toISOString();
-    const id =
-      typeof entry?.id === "string" && entry.id.trim() ? entry.id.trim() : createPremiumProfileId();
-    const nameRaw = String(entry?.name || "");
-    const name = nameRaw.trim() || formatPartialSummaryDefaultName(createdAt);
-    const range = String(entry?.range || "").trim();
-
-    normalized.push({
-      id,
-      name,
-      summary: summaryText,
-      range,
-      createdAt,
-      updatedAt,
-    });
-  }
-
-  normalized.sort((left, right) => {
-    const l = new Date(left.updatedAt).getTime() || 0;
-    const r = new Date(right.updatedAt).getTime() || 0;
-    return r - l;
-  });
-  return normalized;
-}
-
-function normalizeSavedInstructorEmphasisEntries(input) {
-  const list = Array.isArray(input) ? input : [];
-  const normalized = [];
-  for (const entry of list) {
-    const text = normalizeInstructorEmphasisInput(entry?.text);
-    if (!text) continue;
-
-    const createdAtSource = String(entry?.createdAt || "").trim();
-    const updatedAtSource = String(entry?.updatedAt || "").trim();
-    const createdAtDate = new Date(createdAtSource || Date.now());
-    const updatedAtDate = new Date(updatedAtSource || createdAtDate.getTime());
-    const createdAt = Number.isNaN(createdAtDate.getTime())
-      ? new Date().toISOString()
-      : createdAtDate.toISOString();
-    const updatedAt = Number.isNaN(updatedAtDate.getTime())
-      ? createdAt
-      : updatedAtDate.toISOString();
-    const id =
-      typeof entry?.id === "string" && entry.id.trim() ? entry.id.trim() : createPremiumProfileId();
-    normalized.push({
-      id,
-      text,
-      createdAt,
-      updatedAt,
-    });
-  }
-
-  normalized.sort((left, right) => {
-    const l = new Date(left.updatedAt).getTime() || 0;
-    const r = new Date(right.updatedAt).getTime() || 0;
-    return r - l;
-  });
-  return normalized;
-}
-
-function buildTutorPageCandidates(prompt, totalPages) {
-  const text = String(prompt || "");
-  const maxPages = Number.parseInt(totalPages, 10);
-  if (!text || !Number.isFinite(maxPages) || maxPages <= 0) return [];
-
-  const pages = new Set();
-  const addPage = (page) => {
-    const parsed = Number.parseInt(page, 10);
-    if (!Number.isFinite(parsed)) return;
-    if (parsed < 1 || parsed > maxPages) return;
-    pages.add(parsed);
-  };
-  const addRange = (start, end, cap = 18) => {
-    const parsedStart = Number.parseInt(start, 10);
-    const parsedEnd = Number.parseInt(end, 10);
-    if (!Number.isFinite(parsedStart) || !Number.isFinite(parsedEnd)) return;
-    const lo = Math.max(1, Math.min(parsedStart, parsedEnd));
-    const hi = Math.min(maxPages, Math.max(parsedStart, parsedEnd));
-    let count = 0;
-    for (let page = lo; page <= hi; page += 1) {
-      addPage(page);
-      count += 1;
-      if (count >= cap) break;
-    }
-  };
-  const addWindow = (center, before = 1, after = 2) => {
-    const parsed = Number.parseInt(center, 10);
-    if (!Number.isFinite(parsed)) return;
-    for (let page = parsed - before; page <= parsed + after; page += 1) {
-      addPage(page);
-    }
-  };
-
-  const pageRangeRe = /(\d{1,4})\s*(?:-|~|to|부터)\s*(\d{1,4})\s*(?:p|page|페이지|쪽)?/gi;
-  for (const match of text.matchAll(pageRangeRe)) {
-    addRange(match[1], match[2]);
-  }
-
-  const pageFromRe = /(\d{1,4})\s*(?:p|page|페이지|쪽)\s*(?:부터|이후)?/gi;
-  for (const match of text.matchAll(pageFromRe)) {
-    const base = Number.parseInt(match[1], 10);
-    if (!Number.isFinite(base)) continue;
-    addRange(base, Math.min(maxPages, base + 10), 12);
-  }
-
-  const pageSuffixRe = /(\d{1,4})\s*(?:p|page|페이지|쪽)/gi;
-  for (const match of text.matchAll(pageSuffixRe)) {
-    addWindow(match[1], 1, 2);
-  }
-
-  const pagePrefixRe = /(?:p|page|페이지|쪽)\s*(\d{1,4})/gi;
-  for (const match of text.matchAll(pagePrefixRe)) {
-    addWindow(match[1], 1, 2);
-  }
-
-  return [...pages].sort((a, b) => a - b).slice(0, 24);
-}
-
-function escapeRegex(source) {
-  return String(source || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function extractTutorSectionCandidates(prompt) {
-  const text = String(prompt || "");
-  if (!text) return [];
-  const found = text.match(/\b\d+(?:\.\d+){1,3}\b/g) || [];
-  const unique = [];
-  const seen = new Set();
-  for (const token of found) {
-    const normalized = String(token || "").trim();
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    unique.push(normalized);
-    if (unique.length >= 4) break;
-  }
-  return unique;
-}
-
-function extractTutorProblemTokenCandidates(prompt) {
-  const text = String(prompt || "");
-  if (!text) return [];
-
-  const found = [];
-  const add = (value) => {
-    const token = String(value || "").trim();
-    if (!token) return;
-    if (!found.includes(token)) found.push(token);
-  };
-
-  const patterns = [
-    /(?:문제|question|q\.?)\s*(\d{1,3}(?:\.\d{1,3})?)/gi,
-    /(\d{1,3}(?:\.\d{1,3})?)\s*번\s*(?:문제|question)?/gi,
-  ];
-  for (const re of patterns) {
-    for (const match of text.matchAll(re)) {
-      add(match?.[1]);
-      if (found.length >= 4) return found;
-    }
-  }
-  return found;
-}
-
-function incrementSectionToken(sectionToken) {
-  const parts = String(sectionToken || "")
-    .split(".")
-    .map((part) => Number.parseInt(part, 10));
-  if (!parts.length || parts.some((value) => !Number.isFinite(value) || value < 0)) return "";
-  parts[parts.length - 1] += 1;
-  return parts.join(".");
-}
-
-function buildTutorSectionBoundaryPatterns(sectionToken) {
-  const token = String(sectionToken || "").trim();
-  if (!token) return [];
-  const patterns = [];
-
-  const nextSibling = incrementSectionToken(token);
-  if (nextSibling) {
-    patterns.push(new RegExp(`(?:^|[^0-9])${escapeRegex(nextSibling)}(?:[^0-9]|$)`, "i"));
-  }
-
-  const parts = token.split(".").map((part) => Number.parseInt(part, 10));
-  if (parts.length >= 2 && Number.isFinite(parts[0])) {
-    const nextMajor = parts[0] + 1;
-    patterns.push(
-      new RegExp(
-        [
-          `\\b${nextMajor}\\.\\d+\\b`,
-          `\\bchapter\\s*${nextMajor}\\b`,
-          `\\bchap\\.?\\s*${nextMajor}\\b`,
-          `\\bch\\.?\\s*${nextMajor}\\b`,
-          `\\bsection\\s*${nextMajor}\\b`,
-          `\\bsec\\.?\\s*${nextMajor}\\b`,
-          `제\\s*${nextMajor}\\s*장`,
-          `${nextMajor}\\s*장`,
-        ].join("|"),
-        "i"
-      )
-    );
-  }
-
-  return patterns;
-}
-
-function detectTutorSectionPageRange(pageEntries, sectionToken) {
-  const pages = Array.isArray(pageEntries) ? pageEntries : [];
-  const token = String(sectionToken || "").trim();
-  if (!pages.length || !token) return null;
-
-  const targetRe = new RegExp(`(?:^|[^0-9])${escapeRegex(token)}(?:[^0-9]|$)`, "i");
-  const startIndex = pages.findIndex((entry) => targetRe.test(String(entry?.text || "")));
-  if (startIndex < 0) return null;
-
-  const boundaryPatterns = buildTutorSectionBoundaryPatterns(token);
-  let endIndex = pages.length - 1;
-  for (let idx = startIndex + 1; idx < pages.length; idx += 1) {
-    const text = String(pages[idx]?.text || "");
-    if (!text) continue;
-    if (boundaryPatterns.some((pattern) => pattern.test(text))) {
-      endIndex = Math.max(startIndex, idx - 1);
-      break;
-    }
-  }
-
-  const startPage = Number.parseInt(pages[startIndex]?.pageNumber, 10);
-  const endPage = Number.parseInt(pages[endIndex]?.pageNumber, 10);
-  if (!Number.isFinite(startPage) || !Number.isFinite(endPage)) return null;
-  return {
-    section: token,
-    startPage,
-    endPage: Math.max(startPage, endPage),
-  };
-}
-
-function extractTutorEvidenceEntries(rawEvidenceText) {
-  const source = String(rawEvidenceText || "");
-  if (!source) return [];
-  const entries = [];
-  const re = /\[p\.(\d+)\]\s*\n([\s\S]*?)(?=\n\s*\[p\.\d+\]\s*\n|$)/gi;
-  for (const match of source.matchAll(re)) {
-    const pageNumber = Number.parseInt(match?.[1], 10);
-    const text = String(match?.[2] || "").replace(/\s+/g, " ").trim();
-    if (!Number.isFinite(pageNumber) || !text) continue;
-    entries.push({ pageNumber, text });
-  }
-  return entries;
-}
-
-function buildTutorForcedFallbackAnswer(question, rawEvidenceText) {
-  const entries = extractTutorEvidenceEntries(rawEvidenceText);
-  if (!entries.length) {
-    return "\uB2F5\uBCC0 \uC0DD\uC131\uC774 \uBD88\uC548\uC815\uD574 \uBB38\uC11C \uBCF8\uBB38 \uADFC\uAC70\uB97C \uBC14\uB85C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uAC19\uC740 \uC9C8\uBB38\uC744 \uB2E4\uC2DC \uBCF4\uB0B4\uC8FC\uC2DC\uBA74 \uC989\uC2DC \uC7AC\uC2DC\uB3C4\uD558\uACA0\uC2B5\uB2C8\uB2E4.";
-  }
-
-  const terms = String(question || "")
-    .toLowerCase()
-    .match(/[0-9a-z\uAC00-\uD7A3.]+/g);
-  const keywords = (terms || []).filter((token) => token.length >= 2).slice(0, 12);
-
-  const scored = entries
-    .map((entry, index) => {
-      const lower = entry.text.toLowerCase();
-      let score = 0;
-      for (const token of keywords) {
-        if (lower.includes(token)) score += token.includes(".") ? 3 : 1;
-      }
-      return { ...entry, index, score };
-    })
-    .sort((a, b) => b.score - a.score || a.index - b.index);
-
-  const selected = scored.slice(0, Math.min(3, scored.length));
-  const lines = [
-    "\uBAA8\uB378 \uC751\uB2F5\uC774 \uBE44\uC5B4 \uBB38\uC11C \uBCF8\uBB38 \uADFC\uAC70 \uAE30\uC900\uC73C\uB85C \uD575\uC2EC \uB0B4\uC6A9\uC744 \uBA3C\uC800 \uC815\uB9AC\uD569\uB2C8\uB2E4.",
-  ];
-  for (const item of selected) {
-    const snippet = item.text.length > 280 ? `${item.text.slice(0, 280)}...` : item.text;
-    lines.push(`- p.${item.pageNumber}: ${snippet}`);
-  }
-  lines.push(
-    "\uC6D0\uD558\uC2DC\uBA74 \uC704 \uADFC\uAC70 \uD398\uC774\uC9C0\uB97C \uAE30\uC900\uC73C\uB85C \uC9C8\uBB38\uD558\uC2E0 \uD56D\uBAA9\uC744 \uB2E8\uACC4\uBCC4\uB85C \uC774\uC5B4\uC11C \uC790\uC138\uD788 \uC124\uBA85\uD558\uACA0\uC2B5\uB2C8\uB2E4."
+const FOLDER_AGGREGATE_META_KEY = "__folder_aggregate_meta_v1";
+const FEEDBACK_CATEGORY_OPTIONS = [
+  { value: "general", label: "\uC77C\uBC18" },
+  { value: "bug", label: "\uBC84\uADF8 \uC81C\uBCF4" },
+  { value: "feature", label: "\uAE30\uB2A5 \uC81C\uC548" },
+  { value: "ux", label: "\uC0AC\uC6A9\uC131 \uC758\uACAC" },
+];
+const isMissingFeedbackTableError = (error) => {
+  const code = String(error?.code || "").trim().toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    code === "PGRST205" ||
+    (message.includes("could not find the table") && message.includes("user_feedback")) ||
+    (message.includes("relation") && message.includes("user_feedback"))
   );
-  return lines.join("\n");
-}
-
-function resolveTutorReplyText(rawReply, { question, rawEvidenceText }) {
-  const reply = String(rawReply || "").trim();
-  const invalidPatterns = [
-    /\uBAA8\uB378(?:\uC774)?\s*\uBE48\s*\uC751\uB2F5/iu,
-    /\uAC19\uC740\s*\uC9C8\uBB38\uC744\s*\uD55C\s*\uBC88\s*\uB354/iu,
-    /\uC9C8\uBB38\uC744\s*\uC870\uAE08\s*\uB354\s*\uAD6C\uCCB4/iu,
-    /\uC9C0\uAE08\uC740\s*\uB2F5\uBCC0\uC744\s*\uC0DD\uC131\uD558\uC9C0\s*\uBABB/iu,
-    /\uC694\uCCAD\s*\uAD6C\uAC04.*\uB2E4\uC2DC\s*\uC77D/iu,
-  ];
-  if (!reply || invalidPatterns.some((pattern) => pattern.test(reply))) {
-    return buildTutorForcedFallbackAnswer(question, rawEvidenceText);
-  }
-  return reply;
-}
-
-function parseChapterNumberSelectionInput(rawInput, chapters) {
-  const available = Array.isArray(chapters) ? chapters : [];
-  const chapterNumbers = available
-    .map((chapter) => Number.parseInt(chapter?.chapterNumber, 10))
-    .filter((num) => Number.isFinite(num) && num > 0);
-  const chapterNumberSet = new Set(chapterNumbers);
-  if (!chapterNumbers.length) {
-    return { chapterNumbers: [], error: "?ㅼ젙??踰붿쐞?먯꽌 ?ъ슜?????덈뒗 梨뺥꽣媛 ?놁뒿?덈떎." };
-  }
-
-  const cleaned = String(rawInput || "").replace(/\s+/g, "");
-  if (!cleaned) {
-    return { chapterNumbers, error: "" };
-  }
-
-  const selected = new Set();
-  const tokens = cleaned.split(",").filter(Boolean);
-  for (const token of tokens) {
-    if (token.includes("-")) {
-      const [startRaw, endRaw] = token.split("-");
-      const start = Number.parseInt(startRaw, 10);
-      const end = Number.parseInt(endRaw, 10);
-      if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0 || start > end) {
-        return { chapterNumbers: [], error: `?섎せ??梨뺥꽣 踰붿쐞?낅땲?? "${token}"` };
-      }
-      for (let chapterNumber = start; chapterNumber <= end; chapterNumber += 1) {
-        selected.add(chapterNumber);
-      }
-    } else {
-      const chapterNumber = Number.parseInt(token, 10);
-      if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) {
-        return { chapterNumbers: [], error: `?섎せ??梨뺥꽣 踰덊샇?낅땲?? "${token}"` };
-      }
-      selected.add(chapterNumber);
-    }
-  }
-
-  const filtered = [...selected]
-    .filter((num) => chapterNumberSet.has(num))
-    .sort((left, right) => left - right);
-
-  if (!filtered.length) {
-    return {
-      chapterNumbers: [],
-      error: `No matching chapters found in configured range. Available: ${chapterNumbers.join(", ")}`,
-    };
-  }
-  return { chapterNumbers: filtered, error: "" };
-}
-
-function isPlainObject(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function readPartialSummaryBundleFromHighlights(highlightsValue) {
-  const base = isPlainObject(highlightsValue) ? highlightsValue : null;
-  const rawState = isPlainObject(base?.[PARTIAL_SUMMARY_ARTIFACT_KEY])
-    ? base[PARTIAL_SUMMARY_ARTIFACT_KEY]
-    : null;
-  const summary = String(rawState?.summary || "").trim();
-  const range = String(rawState?.range || "").trim();
-  const libraryRaw = base?.[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY];
-  const library = normalizeSavedPartialSummaryEntries(libraryRaw);
-  const instructorLibraryRaw = base?.[INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY];
-  const instructorEmphasisLibrary = normalizeSavedInstructorEmphasisEntries(instructorLibraryRaw);
-  const rawInstructorEmphasis = base?.[INSTRUCTOR_EMPHASIS_ARTIFACT_KEY];
-  const legacyInstructorText = normalizeInstructorEmphasisInput(
-    typeof rawInstructorEmphasis === "string" ? rawInstructorEmphasis : rawInstructorEmphasis?.text
-  );
-  let mergedInstructorLibrary = instructorEmphasisLibrary;
-  if (!mergedInstructorLibrary.length && legacyInstructorText) {
-    const nowIso = new Date().toISOString();
-    mergedInstructorLibrary = [
-      {
-        id: createPremiumProfileId(),
-        text: legacyInstructorText,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-      },
-    ];
-  }
-  const requestedActiveId = String(base?.[INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY] || "").trim();
-  const activeInstructorEmphasisId =
-    mergedInstructorLibrary.find((item) => item.id === requestedActiveId)?.id ||
-    mergedInstructorLibrary[0]?.id ||
-    "";
-  const instructorEmphasis =
-    mergedInstructorLibrary.find((item) => item.id === activeInstructorEmphasisId)?.text || "";
-  return {
-    summary,
-    range,
-    library,
-    instructorEmphasisLibrary: mergedInstructorLibrary,
-    activeInstructorEmphasisId,
-    instructorEmphasis,
-  };
-}
-
-function writePartialSummaryBundleToHighlights(
-  highlightsValue,
-  {
-    summary,
-    range,
-    library,
-    instructorEmphasis,
-    instructorEmphasisLibrary,
-    activeInstructorEmphasisId,
-  } = {}
-) {
-  const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
-  if (!isPlainObject(highlightsValue) && highlightsValue != null) {
-    base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
-  }
-
-  const existingSummaryState = isPlainObject(base?.[PARTIAL_SUMMARY_ARTIFACT_KEY])
-    ? base[PARTIAL_SUMMARY_ARTIFACT_KEY]
-    : null;
-  const normalizedSummary =
-    summary === undefined
-      ? String(existingSummaryState?.summary || "").trim()
-      : String(summary || "").trim();
-  const normalizedRange =
-    range === undefined ? String(existingSummaryState?.range || "").trim() : String(range || "").trim();
-  const normalizedLibrary = normalizeSavedPartialSummaryEntries(
-    library === undefined ? base?.[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY] : library
-  );
-  const currentInstructorLibrary = normalizeSavedInstructorEmphasisEntries(
-    base?.[INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY]
-  );
-  const explicitInstructorLibrary = normalizeSavedInstructorEmphasisEntries(instructorEmphasisLibrary);
-  let normalizedInstructorLibrary =
-    instructorEmphasisLibrary === undefined ? currentInstructorLibrary : explicitInstructorLibrary;
-  const normalizedInstructorEmphasis = normalizeInstructorEmphasisInput(instructorEmphasis);
-  if (instructorEmphasis !== undefined) {
-    if (normalizedInstructorEmphasis) {
-      const nowIso = new Date().toISOString();
-      const newItem = {
-        id: createPremiumProfileId(),
-        text: normalizedInstructorEmphasis,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-      };
-      normalizedInstructorLibrary = normalizeSavedInstructorEmphasisEntries([
-        newItem,
-        ...normalizedInstructorLibrary,
-      ]);
-    } else {
-      normalizedInstructorLibrary = [];
-    }
-  }
-  const requestedActiveId = String(activeInstructorEmphasisId || "").trim();
-  const normalizedActiveInstructorEmphasisId =
-    normalizedInstructorLibrary.find((item) => item.id === requestedActiveId)?.id ||
-    normalizedInstructorLibrary[0]?.id ||
-    "";
-  const activeInstructorText =
-    normalizedInstructorLibrary.find((item) => item.id === normalizedActiveInstructorEmphasisId)?.text || "";
-
-  if (normalizedSummary) {
-    base[PARTIAL_SUMMARY_ARTIFACT_KEY] = {
-      summary: normalizedSummary,
-      range: normalizedRange,
-      updatedAt: new Date().toISOString(),
-    };
-  } else {
-    delete base[PARTIAL_SUMMARY_ARTIFACT_KEY];
-  }
-
-  if (normalizedLibrary.length > 0) {
-    base[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY] = normalizedLibrary;
-  } else {
-    delete base[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY];
-  }
-
-  if (normalizedInstructorLibrary.length > 0) {
-    base[INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY] = normalizedInstructorLibrary;
-  } else {
-    delete base[INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY];
-  }
-
-  if (normalizedActiveInstructorEmphasisId) {
-    base[INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY] = normalizedActiveInstructorEmphasisId;
-  } else {
-    delete base[INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY];
-  }
-
-  if (activeInstructorText) {
-    base[INSTRUCTOR_EMPHASIS_ARTIFACT_KEY] = {
-      text: activeInstructorText,
-      updatedAt: new Date().toISOString(),
-    };
-  } else {
-    delete base[INSTRUCTOR_EMPHASIS_ARTIFACT_KEY];
-  }
-
-  return Object.keys(base).length > 0 ? base : null;
-}
+};
 
 function App() {
   const [file, setFile] = useState(null);
@@ -728,6 +155,7 @@ function App() {
   const [previewText, setPreviewText] = useState("");
   const [pageInfo, setPageInfo] = useState({ used: 0, total: 0 });
   const [pdfUrl, setPdfUrl] = useState(null);
+  const [documentRemoteUrl, setDocumentRemoteUrl] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [isLoadingText, setIsLoadingText] = useState(false);
@@ -806,6 +234,9 @@ function App() {
   const extractTextForChapterSelectionRef = useRef(null);
   const chapterOneStartPageCacheRef = useRef(new Map()); // docId -> chapter 1 start page
   const questionSourceTextCacheRef = useRef(new Map()); // docId:chapter1 -> source text
+  const docArtifactsCacheRef = useRef(new Map()); // docId -> artifacts snapshot
+  const folderAggregateCacheRef = useRef(new Map()); // folderId -> { signature, item }
+  const folderAggregateBuildRef = useRef(new Map()); // folderId -> Promise<item>
   const quizAutoRequestedRef = useRef(false);
   const oxAutoRequestedRef = useRef(false);
   const isDraggingRef = useRef(false);
@@ -868,6 +299,13 @@ function App() {
     () => sanitizeUiText(flashcardError, "플래시카드 처리 중 오류가 발생했습니다."),
     [flashcardError]
   );
+  const activeDocumentKind = useMemo(() => detectSupportedDocumentKind(file), [file]);
+  const isCurrentPdfDocument = useMemo(() => {
+    if (isPdfDocumentKind(activeDocumentKind)) return true;
+    const fileType = String(file?.type || "").trim().toLowerCase();
+    const fileName = String(file?.name || "").trim().toLowerCase();
+    return Boolean(pdfUrl) || fileType.includes("pdf") || fileName.endsWith(".pdf");
+  }, [activeDocumentKind, file, pdfUrl]);
   const safeTutorError = useMemo(
     () => sanitizeUiText(tutorError, "튜터 응답 처리 중 오류가 발생했습니다."),
     [tutorError]
@@ -1558,6 +996,71 @@ function App() {
     [isFolderFeatureEnabled, user, folders, isPremiumTier, premiumScopeProfileId, premiumOwnerProfileId]
   );
 
+  const handleRenameFolder = useCallback(
+    async (folderId, name) => {
+      if (!isFolderFeatureEnabled) return;
+      if (!folderId || folderId === "all") return;
+      if (!user) {
+        setError("먼저 로그인해 주세요.");
+        return;
+      }
+
+      const trimmedFolderId = String(folderId || "").trim();
+      const trimmedName = String(name || "").trim();
+      if (!trimmedName) return;
+      if (isPremiumTier && !premiumScopeProfileId) {
+        setError("폴더 이름을 바꾸기 전에 프리미엄 프로필을 선택해 주세요.");
+        return;
+      }
+
+      const targetFolder = folders.find((folder) => folder.id?.toString() === trimmedFolderId);
+      if (!targetFolder) {
+        setError("변경할 폴더를 찾지 못했습니다.");
+        return;
+      }
+      if (targetFolder.name === trimmedName) {
+        setStatus("폴더 이름이 이미 같습니다.");
+        return;
+      }
+      if (folders.some((folder) => folder.id?.toString() !== trimmedFolderId && folder.name === trimmedName)) {
+        setStatus("같은 이름의 폴더가 이미 있습니다.");
+        return;
+      }
+
+      try {
+        const storedName =
+          isPremiumTier && premiumScopeProfileId
+            ? encodePremiumScopeValue(trimmedName, premiumScopeProfileId)
+            : trimmedName;
+        const updated = await renameFolder({
+          userId: user.id,
+          folderId: trimmedFolderId,
+          name: storedName,
+        });
+        const decoded = decodePremiumScopeValue(updated?.name || storedName);
+        const ownerProfileId = isPremiumTier
+          ? decoded.ownerProfileId || premiumOwnerProfileId || premiumScopeProfileId
+          : null;
+        setFolders((prev) =>
+          prev.map((folder) =>
+            folder.id?.toString() === trimmedFolderId
+              ? {
+                  ...folder,
+                  ...updated,
+                  name: decoded.value || trimmedName,
+                  ownerProfileId,
+                }
+              : folder
+          )
+        );
+        setStatus("폴더 이름을 변경했습니다.");
+      } catch (err) {
+        setError(`폴더 이름 변경에 실패했습니다: ${err.message}`);
+      }
+    },
+    [folders, isFolderFeatureEnabled, isPremiumTier, premiumOwnerProfileId, premiumScopeProfileId, user]
+  );
+
   const handleDeleteFolder = useCallback(
     async (folderId) => {
       if (!isFolderFeatureEnabled) return;
@@ -1957,18 +1460,20 @@ function App() {
 
   const loadArtifacts = useCallback(
     async (docId) => {
-      if (!supabase || !user || !docId) {
+      const normalizedDocId = String(docId || "").trim();
+      if (!supabase || !user || !normalizedDocId) {
         setArtifacts(null);
         return null;
       }
       try {
-        const data = await fetchDocArtifacts({ userId: user.id, docId });
+        const data = await fetchDocArtifacts({ userId: user.id, docId: normalizedDocId });
         const mapped = {
           summary: data?.summary || null,
           quiz: data?.quiz_json || null,
           ox: data?.ox_json || null,
           highlights: data?.highlights_json || null,
         };
+        docArtifactsCacheRef.current.set(normalizedDocId, mapped);
         const partialBundle = readPartialSummaryBundleFromHighlights(mapped.highlights);
         const activeInstructorText = normalizeInstructorEmphasisInput(
           partialBundle.instructorEmphasisLibrary.find(
@@ -1990,7 +1495,7 @@ function App() {
         if (mapped.quiz) {
           const normalizedQuiz = normalizeQuizPayload(mapped.quiz);
           const cachedSet = {
-            id: `quiz-cached-${docId}`,
+            id: `quiz-cached-${normalizedDocId}`,
             questions: normalizedQuiz,
             selectedChoices: {},
             revealedChoices: {},
@@ -2227,7 +1732,8 @@ function App() {
     async (item, { pushState = true } = {}) => {
       if (!item) return;
       let resolvedItem = item;
-      if (!resolvedItem.file) {
+      const isFolderAggregate = Boolean(resolvedItem?.folderAggregate);
+      if (!isFolderAggregate && !resolvedItem.file) {
         try {
           resolvedItem = await ensureFileForItem(resolvedItem);
         } catch (err) {
@@ -2237,7 +1743,7 @@ function App() {
       }
       if (!resolvedItem?.file) return;
 
-      const targetFile = normalizeSupportedFile(resolvedItem.file);
+      const targetFile = isFolderAggregate ? resolvedItem.file : normalizeSupportedFile(resolvedItem.file);
       if (!(targetFile instanceof File)) return;
       const targetFileKind = detectSupportedDocumentKind(targetFile);
       if (!targetFileKind) {
@@ -2274,6 +1780,7 @@ function App() {
         URL.revokeObjectURL(pdfUrl);
       }
       setPdfUrl(isPdfDocumentKind(targetFileKind) ? URL.createObjectURL(targetFile) : null);
+      setDocumentRemoteUrl(isFolderAggregate ? "" : String(resolvedItem.remoteUrl || "").trim());
       setFile(targetFile);
       setSelectedFileId(nextDocId);
       setPanelTab("summary");
@@ -2329,35 +1836,62 @@ function App() {
       const artifactsPromise = loadArtifacts(nextDocId);
 
       try {
-        const [textResult, thumb, loaded] = await Promise.all([
-          extractDocumentText(targetFile, {
-            pageLimit: 30,
-            maxLength: 12000,
-            useOcr: isPdfDocumentKind(targetFileKind),
-            ocrLang: "kor+eng",
-            onOcrProgress: (message) => setStatus(message),
-          }),
-          generateDocumentThumbnail(targetFile),
-          artifactsPromise,
-        ]);
-        const { text, pagesUsed, totalPages } = textResult;
-        setExtractedText(text);
-        setPreviewText(text);
-        setPageInfo({ used: pagesUsed, total: totalPages });
-        setThumbnailUrl(thumb);
+        let loaded = null;
+        if (isFolderAggregate) {
+          loaded = await artifactsPromise;
+          const aggregateText = String(resolvedItem.aggregateText || "").trim();
+          const aggregatePageInfo = resolvedItem.aggregatePageInfo || { used: 0, total: 0 };
+          const aggregateThumbnail = resolvedItem.aggregateThumbnail || resolvedItem.thumbnail || null;
+          setExtractedText(aggregateText);
+          setPreviewText(aggregateText);
+          setSummary(aggregateText);
+          summaryRequestedRef.current = Boolean(aggregateText);
+          setPageInfo({
+            used: Number(aggregatePageInfo.used) || 0,
+            total: Number(aggregatePageInfo.total) || 0,
+          });
+          setThumbnailUrl(aggregateThumbnail);
+        } else {
+          const [loadedArtifacts, textResult, thumb] = await Promise.all([
+            artifactsPromise,
+            extractDocumentText(targetFile, {
+              pageLimit: 30,
+              maxLength: 12000,
+              useOcr: isPdfDocumentKind(targetFileKind),
+              ocrLang: "kor+eng",
+              onOcrProgress: (message) => setStatus(message),
+            }),
+            generateDocumentThumbnail(targetFile),
+          ]);
+          loaded = loadedArtifacts;
+          const { text, pagesUsed, totalPages } = textResult;
+          setExtractedText(text);
+          setPreviewText(text);
+          setPageInfo({ used: pagesUsed, total: totalPages });
+          setThumbnailUrl(thumb);
+        }
         const extractEnd =
           typeof performance !== "undefined" && typeof performance.now === "function"
             ? performance.now()
             : Date.now();
         const elapsedSeconds = Math.max(0, (extractEnd - extractStart) / 1000);
-        setStatus(`텍스트 추출 완료 (${elapsedSeconds.toFixed(1)}s)`);
+        setStatus(
+          isFolderAggregate
+            ? `폴더 전체 요약본 준비 완료 (${elapsedSeconds.toFixed(1)}s)`
+            : `텍스트 추출 완료 (${elapsedSeconds.toFixed(1)}s)`
+        );
         setError("");
         await Promise.all([loadMockExams(nextDocId), loadFlashcards(nextDocId)]);
         if (loaded?.summary) {
-          setStatus("Loaded saved summary.");
+          setStatus(isFolderAggregate ? "저장된 폴더 요약을 불러왔습니다." : "Loaded saved summary.");
         }
       } catch (err) {
-        setError(`문서 처리에 실패했습니다: ${err.message}`);
+        setError(
+          isFolderAggregate
+            ? `폴더 전체 요약본을 준비하지 못했습니다: ${err.message}`
+            : `문서 처리에 실패했습니다: ${err.message}`
+        );
+        setDocumentRemoteUrl("");
         setExtractedText("");
         setPreviewText("");
         setPageInfo({ used: 0, total: 0 });
@@ -2556,6 +2090,18 @@ function App() {
       }
 
       fileInput.value = "";
+      if (successfulUploads.length > 0 && activeFolderId) {
+        if (AUTH_ENABLED && user) {
+          await loadUploadsRef.current?.();
+        }
+        setStatus(
+          successfulUploads.length === 1
+            ? "폴더에 파일을 추가했습니다."
+            : `폴더에 ${successfulUploads.length}개 파일을 추가했습니다.`
+        );
+        return;
+      }
+
       const firstReadyUpload = successfulUploads.find((item) => item?.file);
       if (firstReadyUpload) {
         await processSelectedFile(firstReadyUpload);
@@ -2601,6 +2147,7 @@ function App() {
     setSelectedFileId(null);
     setFile(null);
       setPdfUrl(null);
+      setDocumentRemoteUrl("");
       setExtractedText("");
     setPreviewText("");
     setPageInfo({ used: 0, total: 0 });
@@ -2720,6 +2267,329 @@ function App() {
   const goBackToListRef = useRef(goBackToList);
   const processSelectedFileRef = useRef(processSelectedFile);
   const ensureFileForItemRef = useRef(ensureFileForItem);
+  const selectedFileIdRef = useRef(selectedFileId);
+
+  const buildFolderAggregatePreviewItem = useCallback(
+    async (folderId) => {
+      const normalizedFolderId = String(folderId || "").trim();
+      if (!normalizedFolderId) {
+        throw new Error("폴더 ID가 없습니다.");
+      }
+
+      const cached = folderAggregateCacheRef.current.get(normalizedFolderId);
+      if (cached?.item) {
+        return cached.item;
+      }
+
+      const targetFolder = folders.find((folder) => folder.id?.toString() === normalizedFolderId);
+      if (!targetFolder) {
+        throw new Error("선택한 폴더를 찾지 못했습니다.");
+      }
+
+      const folderItems = (uploadedFilesRef.current || []).filter(
+        (item) => item.folderId?.toString() === normalizedFolderId
+      );
+      if (!folderItems.length) {
+        throw new Error("이 폴더에 문서가 없습니다.");
+      }
+
+      const folderName = String(targetFolder.name || "폴더").trim() || "폴더";
+      const aggregateTitle = `${folderName} 전체 요약본`;
+      const aggregateDocId = buildFolderAggregateDocId(normalizedFolderId);
+      const totalSize = folderItems.reduce((sum, item) => sum + (Number(item?.size) || 0), 0);
+      let savedArtifacts = docArtifactsCacheRef.current.get(aggregateDocId) || null;
+
+      if (!savedArtifacts && user?.id) {
+        try {
+          const fetched = await fetchDocArtifacts({ userId: user.id, docId: aggregateDocId });
+          savedArtifacts = {
+            summary: fetched?.summary || null,
+            quiz: fetched?.quiz_json || null,
+            ox: fetched?.ox_json || null,
+            highlights: fetched?.highlights_json || null,
+          };
+          docArtifactsCacheRef.current.set(aggregateDocId, savedArtifacts);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn("folder aggregate preview artifact skipped", err);
+        }
+      }
+
+      const savedSummary = String(savedArtifacts?.summary || "").trim();
+      const placeholderFile = createPlaceholderPdfFile(`${aggregateTitle}.pdf`, [
+        "Folder summary",
+        savedSummary ? "Opening saved summary..." : "Preparing summary...",
+      ]);
+      return {
+        id: aggregateDocId,
+        file: placeholderFile,
+        name: aggregateTitle,
+        size: totalSize,
+        thumbnail: buildFolderAggregateThumbnail(folderName),
+        folderAggregate: true,
+        folderId: normalizedFolderId,
+        folderName,
+        aggregateText: savedSummary || "폴더 전체 요약본을 준비 중입니다. 잠시만 기다려주세요.",
+        aggregatePageInfo: { used: 1, total: 1 },
+        aggregateThumbnail: buildFolderAggregateThumbnail(folderName),
+        aggregateSourceCount: 0,
+        aggregateTotalCount: folderItems.length,
+        aggregateMissingSummaryCount: 0,
+        aggregateTruncated: false,
+      };
+    },
+    [folders, user?.id]
+  );
+
+  const buildFolderAggregateSelectionItem = useCallback(
+    async (folderId) => {
+      const normalizedFolderId = String(folderId || "").trim();
+      if (!normalizedFolderId) {
+        throw new Error("폴더 ID가 없습니다.");
+      }
+
+      const existingBuild = folderAggregateBuildRef.current.get(normalizedFolderId);
+      if (existingBuild) {
+        return existingBuild;
+      }
+
+      const buildPromise = (async () => {
+        const targetFolder = folders.find((folder) => folder.id?.toString() === normalizedFolderId);
+        if (!targetFolder) {
+          throw new Error("선택한 폴더를 찾지 못했습니다.");
+        }
+
+        const folderItems = (uploadedFilesRef.current || []).filter(
+          (item) => item.folderId?.toString() === normalizedFolderId
+        );
+        if (!folderItems.length) {
+          throw new Error("이 폴더에 문서가 없습니다.");
+        }
+
+        const folderName = String(targetFolder.name || "폴더").trim() || "폴더";
+        const aggregateTitle = `${folderName} 전체 요약본`;
+        const aggregateDocId = buildFolderAggregateDocId(normalizedFolderId);
+        const totalSize = folderItems.reduce((sum, item) => sum + (Number(item?.size) || 0), 0);
+        const summarySections = [];
+        const missingSummaryNames = [];
+        let consumedLength = 0;
+        let truncated = false;
+
+        setStatus("파일별 요약을 불러오는 중...");
+        const perFileArtifacts = await Promise.all(
+          folderItems.map(async (sourceItem) => {
+            const sourceDocId = String(sourceItem?.id || "").trim();
+            if (!sourceDocId) return null;
+
+            const cachedArtifacts = docArtifactsCacheRef.current.get(sourceDocId);
+            if (cachedArtifacts) {
+              return cachedArtifacts;
+            }
+
+            if (!user?.id) return null;
+            try {
+              const fetched = await fetchDocArtifacts({ userId: user.id, docId: sourceDocId });
+              const mapped = {
+                summary: fetched?.summary || null,
+                quiz: fetched?.quiz_json || null,
+                ox: fetched?.ox_json || null,
+                highlights: fetched?.highlights_json || null,
+              };
+              docArtifactsCacheRef.current.set(sourceDocId, mapped);
+              return mapped;
+            } catch (err) {
+              // eslint-disable-next-line no-console
+              console.warn("folder aggregate summary artifact skipped", err);
+              return null;
+            }
+          })
+        );
+
+        for (let index = 0; index < folderItems.length; index += 1) {
+          const sourceItem = folderItems[index];
+          const savedSummary = String(perFileArtifacts[index]?.summary || "").trim();
+          if (!savedSummary) {
+            missingSummaryNames.push(sourceItem?.name || `문서 ${index + 1}`);
+            continue;
+          }
+
+          const remaining = FOLDER_AGGREGATE_MAX_LENGTH - consumedLength;
+          if (remaining <= 0) {
+            truncated = true;
+            break;
+          }
+
+          let summaryText = savedSummary;
+          if (summaryText.length > FOLDER_AGGREGATE_MAX_LENGTH_PER_FILE) {
+            summaryText = `${summaryText.slice(0, FOLDER_AGGREGATE_MAX_LENGTH_PER_FILE).trim()}\n\n(이하 생략)`;
+          }
+          if (summaryText.length > remaining) {
+            summaryText = summaryText.slice(0, remaining).trim();
+            truncated = true;
+          }
+          if (!summaryText) continue;
+
+          summarySections.push({
+            id: sourceItem.id || `folder-summary-${index + 1}`,
+            chapterNumber: summarySections.length + 1,
+            chapterTitle: sourceItem.name || `문서 ${index + 1}`,
+            pageStart: summarySections.length + 1,
+            pageEnd: summarySections.length + 1,
+            pagesPerChunk: 1,
+            text: summaryText,
+          });
+          consumedLength += summaryText.length;
+        }
+
+        if (!summarySections.length) {
+          throw new Error("폴더 전체 요약본을 만들려면 먼저 폴더 안 문서들에서 개별 요약을 생성해주세요.");
+        }
+
+        const signature = JSON.stringify({
+          folderName,
+          sections: summarySections.map((section) => ({
+            id: section.id,
+            title: section.chapterTitle,
+            text: section.text,
+          })),
+          missingSummaryNames,
+          truncated,
+        });
+        const cached = folderAggregateCacheRef.current.get(normalizedFolderId);
+        if (cached?.signature === signature && cached?.item) {
+          return cached.item;
+        }
+
+        let savedAggregateArtifacts = docArtifactsCacheRef.current.get(aggregateDocId) || null;
+        if (!savedAggregateArtifacts && user?.id) {
+          try {
+            const fetched = await fetchDocArtifacts({
+              userId: user.id,
+              docId: aggregateDocId,
+            });
+            savedAggregateArtifacts = {
+              summary: fetched?.summary || null,
+              quiz: fetched?.quiz_json || null,
+              ox: fetched?.ox_json || null,
+              highlights: fetched?.highlights_json || null,
+            };
+            docArtifactsCacheRef.current.set(aggregateDocId, savedAggregateArtifacts);
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.warn("folder aggregate artifact skipped", err);
+          }
+        }
+
+        const savedFolderSummary = String(savedAggregateArtifacts?.summary || "").trim();
+        const savedAggregateMeta =
+          savedAggregateArtifacts?.highlights &&
+          typeof savedAggregateArtifacts.highlights === "object" &&
+          !Array.isArray(savedAggregateArtifacts.highlights)
+            ? savedAggregateArtifacts.highlights?.[FOLDER_AGGREGATE_META_KEY]
+            : null;
+        const canReuseSavedFolderSummary =
+          savedFolderSummary &&
+          savedAggregateMeta &&
+          String(savedAggregateMeta?.sourceSignature || "").trim() === signature;
+
+        let aggregateText = savedFolderSummary;
+        if (!canReuseSavedFolderSummary) {
+          setStatus("파일별 요약을 바탕으로 폴더 전체 요약을 생성 중...");
+          const { generateSummary } = await getOpenAiService();
+          aggregateText = await generateSummary("", {
+            scope: `${folderName} 폴더 전체`,
+            chapterized: true,
+            chapterSections: summarySections,
+          });
+
+          const coverageNotes = [];
+          if (missingSummaryNames.length > 0) {
+            const previewNames = missingSummaryNames.slice(0, 5).join(", ");
+            const suffix = missingSummaryNames.length > 5 ? " 외" : "";
+            coverageNotes.push(
+              `이번 폴더 통합 요약에서는 저장된 개별 요약이 없는 파일 ${missingSummaryNames.length}개를 제외했습니다: ${previewNames}${suffix}`
+            );
+          }
+          if (truncated) {
+            coverageNotes.push("파일별 요약 길이가 길어 일부 내용은 축약해 반영했습니다.");
+          }
+          if (coverageNotes.length > 0) {
+            aggregateText = `${String(aggregateText || "").trim()}\n\n---\n${coverageNotes.join("\n")}`.trim();
+          }
+
+          if (user?.id) {
+            const preservedHighlights =
+              savedAggregateArtifacts?.highlights &&
+              typeof savedAggregateArtifacts.highlights === "object" &&
+              !Array.isArray(savedAggregateArtifacts.highlights)
+                ? { ...savedAggregateArtifacts.highlights }
+                : {};
+            preservedHighlights[FOLDER_AGGREGATE_META_KEY] = {
+              sourceSignature: signature,
+              sourceCount: summarySections.length,
+              totalCount: folderItems.length,
+              missingSummaryCount: missingSummaryNames.length,
+              truncated,
+              updatedAt: new Date().toISOString(),
+            };
+            await saveDocArtifacts({
+              userId: user.id,
+              docId: aggregateDocId,
+              summary: aggregateText,
+              highlights: preservedHighlights,
+            });
+            docArtifactsCacheRef.current.set(aggregateDocId, {
+              ...(savedAggregateArtifacts || {}),
+              summary: aggregateText,
+              highlights: preservedHighlights,
+            });
+          }
+        }
+
+        const { file: aggregateFile, pageCount: aggregatePageCount } = await createTextPdfFile(aggregateText, {
+          filename: `${aggregateTitle}.pdf`,
+          title: aggregateTitle,
+        });
+        const aggregateThumbnail = await generateDocumentThumbnail(aggregateFile);
+        const aggregateItem = {
+          id: aggregateDocId,
+          file: aggregateFile,
+          name: aggregateTitle,
+          size: totalSize,
+          thumbnail: aggregateThumbnail,
+          folderAggregate: true,
+          folderId: normalizedFolderId,
+          folderName,
+          aggregateText,
+          aggregatePageInfo: {
+            used: Number(aggregatePageCount) || 1,
+            total: Number(aggregatePageCount) || 1,
+          },
+          aggregateThumbnail,
+          aggregateSourceCount: summarySections.length,
+          aggregateTotalCount: folderItems.length,
+          aggregateMissingSummaryCount: missingSummaryNames.length,
+          aggregateTruncated: truncated,
+        };
+
+        folderAggregateCacheRef.current.set(normalizedFolderId, {
+          signature,
+          item: aggregateItem,
+        });
+        return aggregateItem;
+      })();
+
+      folderAggregateBuildRef.current.set(normalizedFolderId, buildPromise);
+      try {
+        return await buildPromise;
+      } finally {
+        if (folderAggregateBuildRef.current.get(normalizedFolderId) === buildPromise) {
+          folderAggregateBuildRef.current.delete(normalizedFolderId);
+        }
+      }
+    },
+    [folders, getOpenAiService, user?.id]
+  );
 
   const handleSelectFile = useCallback(
     async (item) => {
@@ -2733,19 +2603,60 @@ function App() {
     [ensureFileForItemRef, processSelectedFileRef]
   );
 
+  const handleSelectFolderSummary = useCallback(
+    async (folderId, { pushState = true } = {}) => {
+      try {
+        setError("");
+        setStatus("폴더 전체 요약본을 여는 중...");
+        const normalizedFolderId = String(folderId || "").trim();
+        const aggregateDocId = buildFolderAggregateDocId(normalizedFolderId);
+        const previewItem = await buildFolderAggregatePreviewItem(normalizedFolderId);
+        await processSelectedFileRef.current(previewItem, { pushState });
+
+        buildFolderAggregateSelectionItem(normalizedFolderId)
+          .then(async (aggregateItem) => {
+            if (!aggregateItem) return;
+            if (selectedFileIdRef.current !== aggregateDocId) return;
+            const isSameFile =
+              aggregateItem.file === previewItem.file &&
+              String(aggregateItem.aggregateText || "").trim() ===
+                String(previewItem.aggregateText || "").trim();
+            if (isSameFile) return;
+            await processSelectedFileRef.current(aggregateItem, { pushState: false });
+          })
+          .catch((err) => {
+            if (selectedFileIdRef.current === aggregateDocId) {
+              setError(`폴더 전체 요약본을 준비하지 못했습니다: ${err.message}`);
+            }
+          });
+      } catch (err) {
+        setError(`폴더 전체 요약본을 여는 데 실패했습니다: ${err.message}`);
+      }
+    },
+    [buildFolderAggregatePreviewItem, buildFolderAggregateSelectionItem]
+  );
+
 
   const persistArtifacts = useCallback(
     async (partial) => {
       if (!user || !selectedFileId) return;
+      const normalizedDocId = String(selectedFileId || "").trim();
       const merged = {
         ...(artifacts || {}),
         ...partial,
       };
       setArtifacts(merged);
+      if (normalizedDocId) {
+        docArtifactsCacheRef.current.set(normalizedDocId, merged);
+      }
+      if (Object.prototype.hasOwnProperty.call(partial || {}, "summary")) {
+        folderAggregateCacheRef.current.clear();
+        folderAggregateBuildRef.current.clear();
+      }
       try {
         await saveDocArtifacts({
           userId: user.id,
-          docId: selectedFileId,
+          docId: normalizedDocId,
           summary: merged.summary,
           quiz: merged.quiz,
           ox: merged.ox,
@@ -2886,8 +2797,17 @@ function App() {
   }, [uploadedFiles]);
 
   useEffect(() => {
+    folderAggregateCacheRef.current.clear();
+    folderAggregateBuildRef.current.clear();
+  }, [folders, uploadedFiles]);
+
+  useEffect(() => {
     goBackToListRef.current = goBackToList;
   }, [goBackToList]);
+
+  useEffect(() => {
+    selectedFileIdRef.current = selectedFileId;
+  }, [selectedFileId]);
 
   useEffect(() => {
     processSelectedFileRef.current = processSelectedFile;
@@ -2996,6 +2916,13 @@ function App() {
       }
 
       if (state?.view === "detail" && state.fileId) {
+        if (isFolderAggregateDocId(state.fileId)) {
+          const folderId = parseFolderAggregateDocId(state.fileId);
+          if (folderId) {
+            handleSelectFolderSummary(folderId, { pushState: false });
+            return;
+          }
+        }
         const target = uploadedFilesRef.current.find((f) => f.id === state.fileId);
         if (target) {
           processSelectedFileRef.current(target, { pushState: false });
@@ -3020,7 +2947,7 @@ function App() {
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [consumeOverlayBack, isNativePlatform, showDetail, updateHistoryState]);
+  }, [consumeOverlayBack, handleSelectFolderSummary, isNativePlatform, showDetail, updateHistoryState]);
 
   const handleDragStart = useCallback((event) => {
     if (typeof event?.button === "number" && event.button !== 0) return;
@@ -3083,7 +3010,7 @@ function App() {
   };
 
   const resolveChapterOneStartPage = useCallback(async () => {
-    if (!file || !isPdfDocumentKind(detectSupportedDocumentKind(file))) return 1;
+    if (!file || !isCurrentPdfDocument) return 1;
     const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
     if (!Number.isFinite(totalPages) || totalPages <= 0) return 1;
 
@@ -3133,7 +3060,7 @@ function App() {
 
     chapterOneStartPageCacheRef.current.set(docKey, 1);
     return 1;
-  }, [chapterRangeInput, file, pageInfo?.total, pageInfo?.used, selectedFileId]);
+  }, [chapterRangeInput, file, isCurrentPdfDocument, pageInfo?.total, pageInfo?.used, selectedFileId]);
 
   const resolveQuestionSourceText = useCallback(
     async ({ featureLabel, chapterSelectionInput, baseText }) => {
@@ -3154,7 +3081,7 @@ function App() {
       }
 
       let sourceText = String(baseText || "").trim();
-      if (!file || !isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+      if (!file || !isCurrentPdfDocument) {
         return { text: sourceText, scopeLabel: "" };
       }
 
@@ -3209,7 +3136,7 @@ function App() {
         scopeLabel: filteredApplied ? `chapter 1+ (p.${chapterOneStartPage}~)` : "",
       };
     },
-    [file, pageInfo?.total, pageInfo?.used, resolveChapterOneStartPage, selectedFileId]
+    [file, isCurrentPdfDocument, pageInfo?.total, pageInfo?.used, resolveChapterOneStartPage, selectedFileId]
   );
 
   const requestQuestions = async ({ force = false } = {}) => {
@@ -3227,7 +3154,7 @@ function App() {
       return;
     }
     const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
-    const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
+    const isPdfSource = isCurrentPdfDocument;
     const instructorEmphasisText = getEffectiveInstructorEmphasisText();
 
     if (!extractedText && !chapterSelectionRaw && !isPdfSource) {
@@ -3346,7 +3273,7 @@ function App() {
       return;
     }
     const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
-    if (!extractedText && !chapterSelectionRaw && !isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+    if (!extractedText && !chapterSelectionRaw && !isCurrentPdfDocument) {
       setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
       return;
     }
@@ -3443,55 +3370,254 @@ function App() {
     return expanded;
   };
 
+  const resolveChapterRangeLimit = useCallback(
+    (rawInput) => {
+      const pageLimit = Number(pageInfo.total || pageInfo.used || 0);
+      if (isCurrentPdfDocument) {
+        return pageLimit;
+      }
+      let inferredLimit = 0;
+
+      String(rawInput || "")
+        .split(/[\n,;]+/)
+        .map((token) => token.trim())
+        .filter(Boolean)
+        .forEach((token) => {
+          const compact = token.replace(/\s+/g, "");
+          let matched =
+            compact.match(/^(\d+)[:=](\d+)-(\d+)$/i) ||
+            compact.match(/^ch(?:apter)?(\d+)[:=](\d+)-(\d+)$/i);
+          if (matched) {
+            inferredLimit = Math.max(inferredLimit, Number.parseInt(matched[3], 10) || 0);
+            return;
+          }
+
+          matched = compact.match(/^(\d+)-(\d+)$/);
+          if (matched) {
+            inferredLimit = Math.max(inferredLimit, Number.parseInt(matched[2], 10) || 0);
+          }
+        });
+
+      return Math.max(pageLimit, inferredLimit);
+    },
+    [isCurrentPdfDocument, pageInfo.total, pageInfo.used]
+  );
+
+  const extractNonPdfSlideSections = useCallback((sourceText) => {
+    const normalizedText = String(sourceText || "").replace(/\r\n/g, "\n").trim();
+    if (!normalizedText) return [];
+
+    const matches = [...normalizedText.matchAll(/^\[Slide\s+(\d+)\]\s*$/gim)];
+    if (!matches.length) return [];
+
+    return matches
+      .map((match, index) => {
+        const slideNumber = Number.parseInt(match[1], 10);
+        if (!Number.isFinite(slideNumber) || slideNumber <= 0) return null;
+        const contentStart = (match.index || 0) + match[0].length;
+        const nextMatchIndex = index + 1 < matches.length ? matches[index + 1].index : normalizedText.length;
+        const contentEnd = Number.isFinite(nextMatchIndex) ? nextMatchIndex : normalizedText.length;
+        const text = normalizedText.slice(contentStart, contentEnd).trim();
+        if (!text) return null;
+        return {
+          slideNumber,
+          text,
+        };
+      })
+      .filter(Boolean);
+  }, []);
+
+  const loadExtendedNonPdfSourceText = useCallback(
+    async ({ featureLabel = "문서", targetUnitCount = 0 } = {}) => {
+      const baseText = String(extractedText || "").trim();
+      if (!file || isCurrentPdfDocument) {
+        return baseText;
+      }
+
+      const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
+      const cachedText = String(summaryContextCacheRef.current.get(docKey) || "").trim();
+      const currentText = cachedText.length > baseText.length ? cachedText : baseText;
+      const hasExpandedCache = cachedText.length > baseText.length + 256;
+      const slideSections = extractNonPdfSlideSections(currentText);
+      const maxSlideNumber = slideSections.reduce(
+        (maxNumber, section) => Math.max(maxNumber, Number(section?.slideNumber) || 0),
+        0
+      );
+      const likelyInitialCap = !hasExpandedCache && baseText.length >= 11500;
+      const needsMoreSlideCoverage =
+        activeDocumentKind === "pptx" &&
+        Number(targetUnitCount) > 0 &&
+        maxSlideNumber > 0 &&
+        maxSlideNumber < Number(targetUnitCount);
+
+      if (!likelyInitialCap && !needsMoreSlideCoverage) {
+        return currentText;
+      }
+
+      const normalizedTargetUnitCount = Math.max(
+        1,
+        Number(targetUnitCount) || 0,
+        Number(pageInfo.total || pageInfo.used || 0)
+      );
+      const targetMaxLength =
+        activeDocumentKind === "pptx"
+          ? Math.min(240000, Math.max(24000, normalizedTargetUnitCount * 1800, currentText.length * 3))
+          : Math.min(180000, Math.max(24000, normalizedTargetUnitCount * 1600, currentText.length * 3));
+
+      setStatus(`${featureLabel}: 문서 전체 텍스트를 준비 중...`);
+      try {
+        const extended = await extractDocumentText(file, {
+          maxLength: targetMaxLength,
+        });
+        const extendedText = String(extended?.text || "").trim();
+        if (extendedText.length > currentText.length) {
+          summaryContextCacheRef.current.set(docKey, extendedText);
+          return extendedText;
+        }
+      } catch {
+        // Fall back to the already extracted non-PDF text.
+      }
+
+      if (currentText && currentText.length > cachedText.length) {
+        summaryContextCacheRef.current.set(docKey, currentText);
+      }
+      return currentText;
+    },
+    [
+      activeDocumentKind,
+      extractNonPdfSlideSections,
+      extractedText,
+      file,
+      isCurrentPdfDocument,
+      pageInfo.total,
+      pageInfo.used,
+      selectedFileId,
+    ]
+  );
+
+  const buildNonPdfChapterSectionsFromText = useCallback((sourceText, ranges, totalUnits) => {
+    const normalizedText = String(sourceText || "").replace(/\r\n/g, "\n").trim();
+    if (!normalizedText) return [];
+
+    const slideSections = extractNonPdfSlideSections(normalizedText);
+    const list = Array.isArray(ranges) ? [...ranges] : [];
+    list.sort((left, right) => (Number(left?.pageStart) || 0) - (Number(right?.pageStart) || 0));
+    if (!list.length) return [];
+
+    if (slideSections.length) {
+      return list
+        .map((range, index) => {
+          const pageStart = Math.max(1, Number.parseInt(range?.pageStart, 10) || 1);
+          const pageEnd = Math.max(pageStart, Number.parseInt(range?.pageEnd, 10) || pageStart);
+          const text = slideSections
+            .filter((section) => section.slideNumber >= pageStart && section.slideNumber <= pageEnd)
+            .map((section) => `[Slide ${section.slideNumber}]\n${section.text}`)
+            .join("\n\n")
+            .trim();
+          if (!text) return null;
+
+          const chapterNumber = Number.parseInt(range?.chapterNumber, 10) || index + 1;
+          return {
+            ...range,
+            chapterNumber,
+            chapterTitle: String(range?.chapterTitle || `챕터 ${chapterNumber}`).trim(),
+            pageStart,
+            pageEnd,
+            text,
+          };
+        })
+        .filter(Boolean);
+    }
+
+    const safeTotalUnits = Math.max(
+      1,
+      Number(totalUnits) || 0,
+      ...list.map((range) => Number.parseInt(range?.pageEnd, 10) || 0)
+    );
+    let previousEndOffset = 0;
+    return list
+      .map((range, index) => {
+        const pageStart = Math.max(1, Number.parseInt(range?.pageStart, 10) || 1);
+        const pageEnd = Math.max(pageStart, Number.parseInt(range?.pageEnd, 10) || pageStart);
+        let startOffset = Math.floor(((pageStart - 1) / safeTotalUnits) * normalizedText.length);
+        let endOffset = Math.ceil((pageEnd / safeTotalUnits) * normalizedText.length);
+
+        startOffset = Math.max(previousEndOffset, Math.min(startOffset, Math.max(normalizedText.length - 1, 0)));
+        endOffset = Math.max(startOffset + 1, Math.min(normalizedText.length, endOffset));
+
+        if (index === list.length - 1) {
+          endOffset = normalizedText.length;
+        }
+
+        const text = normalizedText.slice(startOffset, endOffset).trim();
+        previousEndOffset = endOffset;
+        if (!text) return null;
+
+        const chapterNumber = Number.parseInt(range?.chapterNumber, 10) || index + 1;
+        return {
+          ...range,
+          chapterNumber,
+          chapterTitle: String(range?.chapterTitle || `챕터 ${chapterNumber}`).trim(),
+          pageStart,
+          pageEnd,
+          text,
+        };
+      })
+      .filter(Boolean);
+  }, [extractNonPdfSlideSections]);
+
   const extractTextForChapterSelection = useCallback(
     async ({ featureLabel, chapterSelectionInput }) => {
       if (!file) {
-        throw new Error("먼저 PDF를 열어주세요.");
-      }
-      if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) {
-        throw new Error("챕터/페이지 범위 기능은 PDF에서만 지원됩니다.");
+        throw new Error("먼저 문서를 열어주세요.");
       }
 
       let chapterConfigRaw = String(chapterRangeInput || "").trim();
       if (!chapterConfigRaw) {
-        const totalPages = pageInfo.total || pageInfo.used || 0;
         let autoChapterInput = "";
-        try {
-          setStatus(`${featureLabel}: 챕터 범위를 자동 탐색 중...`);
-          const detected = await extractChapterRangesFromToc(file, {
-            maxScanPages: totalPages ? Math.min(totalPages, 30) : 24,
-          });
-          const chapters = Array.isArray(detected?.chapters) ? detected.chapters : [];
-          autoChapterInput = chapters
-            .map((chapter, index) => {
-              const start = Number.parseInt(chapter?.pageStart, 10);
-              const end = Number.parseInt(chapter?.pageEnd, 10);
-              if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end < start) return "";
-              return `${index + 1}:${start}-${end}`;
-            })
-            .filter(Boolean)
-            .join("\n");
+        if (isCurrentPdfDocument) {
+          const totalPages = pageInfo.total || pageInfo.used || 0;
+          try {
+            setStatus(`${featureLabel}: 챕터 범위를 자동 탐색 중...`);
+            const detected = await extractChapterRangesFromToc(file, {
+              maxScanPages: totalPages ? Math.min(totalPages, 30) : 24,
+            });
+            const chapters = Array.isArray(detected?.chapters) ? detected.chapters : [];
+            autoChapterInput = chapters
+              .map((chapter, index) => {
+                const start = Number.parseInt(chapter?.pageStart, 10);
+                const end = Number.parseInt(chapter?.pageEnd, 10);
+                if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end < start) return "";
+                return `${index + 1}:${start}-${end}`;
+              })
+              .filter(Boolean)
+              .join("\n");
 
-          if (autoChapterInput) {
-            const limit = totalPages || Number(detected?.totalPages) || 0;
-            const parsedAuto = parseChapterRangeSelectionInput(autoChapterInput, limit);
-            if (!parsedAuto.error && parsedAuto.chapters.length > 0) {
-              setChapterRangeInput(autoChapterInput);
-              setChapterRangeError("");
-              const targetDocId = selectedFileId || file?.name || "";
-              if (targetDocId) {
-                persistChapterRangeInput(targetDocId, autoChapterInput);
+            if (autoChapterInput) {
+              const limit = totalPages || Number(detected?.totalPages) || 0;
+              const parsedAuto = parseChapterRangeSelectionInput(autoChapterInput, limit);
+              if (!parsedAuto.error && parsedAuto.chapters.length > 0) {
+                setChapterRangeInput(autoChapterInput);
+                setChapterRangeError("");
+                const targetDocId = selectedFileId || file?.name || "";
+                if (targetDocId) {
+                  persistChapterRangeInput(targetDocId, autoChapterInput);
+                }
+              } else {
+                autoChapterInput = "";
               }
-            } else {
-              autoChapterInput = "";
             }
+          } catch {
+            autoChapterInput = "";
           }
-        } catch {
-          autoChapterInput = "";
         }
 
         if (!autoChapterInput) {
-          throw new Error("먼저 챕터 범위를 설정해주세요. 요약 탭의 챕터 범위 설정에서 다시 시도해주세요.");
+          throw new Error(
+            isCurrentPdfDocument
+              ? "먼저 챕터 범위를 설정해주세요. 요약 탭의 챕터 범위 설정에서 다시 시도해주세요."
+              : "비PDF 문서는 자동 목차 추출이 없어 직접 챕터 범위를 입력해야 합니다."
+          );
         }
         chapterConfigRaw = autoChapterInput;
       }
@@ -3500,7 +3626,7 @@ function App() {
         throw new Error("먼저 챕터 범위를 설정해주세요.");
       }
 
-      const totalPages = pageInfo.total || pageInfo.used || 0;
+      const totalPages = resolveChapterRangeLimit(chapterConfigRaw);
       const parsedChapters = parseChapterRangeSelectionInput(chapterConfigRaw, totalPages);
       if (parsedChapters.error) {
         setChapterRangeError(parsedChapters.error);
@@ -3532,13 +3658,21 @@ function App() {
       }
 
       setStatus(`${featureLabel}: 챕터 범위 텍스트 추출 중...`);
-      const chapterExtraction = await extractPdfTextByRanges(file, targetChapters, {
-        maxLengthPerRange: 14000,
-        useOcr: true,
-        ocrLang: "kor+eng",
-        onOcrProgress: (message) => setStatus(message),
-      });
-      const scopedText = (chapterExtraction?.chapters || [])
+      const nonPdfSourceText = isCurrentPdfDocument
+        ? ""
+        : await loadExtendedNonPdfSourceText({
+            featureLabel,
+            targetUnitCount: totalPages,
+          });
+      const scopedSections = isCurrentPdfDocument
+        ? (await extractPdfTextByRanges(file, targetChapters, {
+            maxLengthPerRange: 14000,
+            useOcr: true,
+            ocrLang: "kor+eng",
+            onOcrProgress: (message) => setStatus(message),
+          }))?.chapters || []
+        : buildNonPdfChapterSectionsFromText(nonPdfSourceText, targetChapters, totalPages);
+      const scopedText = scopedSections
         .map((chapter) => {
           const chapterNumber = Number.parseInt(chapter?.chapterNumber, 10);
           const title = chapterNumber > 0 ? `챕터 ${chapterNumber}` : "챕터";
@@ -3557,10 +3691,15 @@ function App() {
     },
     [
       chapterRangeInput,
+      buildNonPdfChapterSectionsFromText,
+      extractedText,
       file,
+      isCurrentPdfDocument,
+      loadExtendedNonPdfSourceText,
       pageInfo.total,
       pageInfo.used,
       persistChapterRangeInput,
+      resolveChapterRangeLimit,
       selectedFileId,
     ]
   );
@@ -3574,7 +3713,7 @@ function App() {
     if (isLoadingSummary || (!force && summaryRequestedRef.current && !shouldReplaceExisting)) return;
     const hasManualChapterConfig = Boolean(String(chapterRangeInput || "").trim());
     const instructorEmphasisText = getEffectiveInstructorEmphasisText();
-    const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
+    const isPdfSource = isCurrentPdfDocument;
     if (!file) {
       setError("먼저 PDF를 열어주세요.");
       return;
@@ -3604,30 +3743,41 @@ function App() {
       const chapterConfigRaw = String(chapterRangeInput || "").trim();
       let customChapterSections = null;
       if (chapterConfigRaw) {
-        if (!isPdfSource) {
-          throw new Error("챕터 범위 요약은 PDF에서만 지원됩니다. 챕터 범위를 비우고 다시 시도해주세요.");
-        }
-        const totalPages = pageInfo.total || pageInfo.used || 0;
+        const totalPages = resolveChapterRangeLimit(chapterConfigRaw);
         const parsedChapters = parseChapterRangeSelectionInput(chapterConfigRaw, totalPages);
         if (parsedChapters.error) {
           setChapterRangeError(parsedChapters.error);
           throw new Error(parsedChapters.error);
         }
-        const adaptiveChapterRanges = buildAdaptiveChapterSummaryRanges(parsedChapters.chapters);
-        if (!adaptiveChapterRanges.length) {
-          throw new Error("적응형 분할에 사용할 수 있는 챕터 범위가 없습니다.");
+        const chapterRangesForSummary = isPdfSource
+          ? buildAdaptiveChapterSummaryRanges(parsedChapters.chapters)
+          : parsedChapters.chapters;
+        if (!chapterRangesForSummary.length) {
+          throw new Error("요약에 사용할 수 있는 챕터 범위가 없습니다.");
         }
         const pagesPerChunkById = new Map(
-          adaptiveChapterRanges.map((range) => [String(range.id), Number(range.pagesPerChunk) || 1])
+          chapterRangesForSummary.map((range) => [
+            String(range.id),
+            Number(range.pagesPerChunk) ||
+              Math.max(1, (Number(range?.pageEnd) || 0) - (Number(range?.pageStart) || 0) + 1),
+          ])
         );
         setStatus("설정한 챕터 범위의 텍스트를 추출하는 중...");
-        const chapterExtraction = await extractPdfTextByRanges(file, adaptiveChapterRanges, {
-          maxLengthPerRange: 14000,
-          useOcr: true,
-          ocrLang: "kor+eng",
-          onOcrProgress: (message) => setStatus(message),
-        });
-        customChapterSections = (chapterExtraction?.chapters || [])
+        const nonPdfSourceText = isPdfSource
+          ? ""
+          : await loadExtendedNonPdfSourceText({
+              featureLabel: "요약",
+              targetUnitCount: totalPages,
+            });
+        const extractedChapters = isPdfSource
+          ? (await extractPdfTextByRanges(file, chapterRangesForSummary, {
+              maxLengthPerRange: 14000,
+              useOcr: true,
+              ocrLang: "kor+eng",
+              onOcrProgress: (message) => setStatus(message),
+            }))?.chapters || []
+          : buildNonPdfChapterSectionsFromText(nonPdfSourceText, chapterRangesForSummary, totalPages);
+        customChapterSections = extractedChapters
           .map((chapter) => ({
             id: chapter.id,
             chapterNumber: chapter.chapterNumber,
@@ -3698,11 +3848,11 @@ function App() {
   const handleAutoDetectChapterRanges = useCallback(async () => {
     if (isDetectingChapterRanges || isLoadingSummary || isLoadingText) return;
     if (!file) {
-      setChapterRangeError("먼저 PDF를 열어주세요.");
+      setChapterRangeError("먼저 문서를 열어주세요.");
       return;
     }
-    if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) {
-      setChapterRangeError("목차 자동 감지는 PDF에서만 지원됩니다.");
+    if (!isCurrentPdfDocument) {
+      setChapterRangeError("목차 자동 감지는 PDF에서만 지원됩니다. 비PDF 문서는 직접 범위를 입력해주세요.");
       return;
     }
 
@@ -3755,6 +3905,7 @@ function App() {
     }
   }, [
     file,
+    isCurrentPdfDocument,
     isDetectingChapterRanges,
     isLoadingSummary,
     isLoadingText,
@@ -3763,16 +3914,12 @@ function App() {
   ]);
 
   const handleConfirmChapterRanges = useCallback(() => {
-    if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) {
-      setChapterRangeError("챕터 범위 설정은 PDF에서만 지원됩니다.");
-      return;
-    }
     const raw = String(chapterRangeInput || "").trim();
     if (!raw) {
       setChapterRangeError("먼저 챕터 범위를 입력해주세요.");
       return;
     }
-    const totalPages = pageInfo.total || pageInfo.used || 0;
+    const totalPages = resolveChapterRangeLimit(raw);
     const parsed = parseChapterRangeSelectionInput(raw, totalPages);
     if (parsed.error) {
       setChapterRangeError(parsed.error);
@@ -3780,7 +3927,7 @@ function App() {
     }
     const targetDocId = selectedFileId || file?.name || "";
     if (!targetDocId) {
-      setChapterRangeError("먼저 PDF를 열어주세요.");
+      setChapterRangeError("먼저 문서를 열어주세요.");
       return;
     }
     persistChapterRangeInput(targetDocId, raw);
@@ -3790,15 +3937,17 @@ function App() {
   }, [
     chapterRangeInput,
     file,
+    isCurrentPdfDocument,
     pageInfo.total,
     pageInfo.used,
     persistChapterRangeInput,
+    resolveChapterRangeLimit,
     selectedFileId,
   ]);
 
   const handleSummaryByPages = useCallback(async () => {
     if (isPageSummaryLoading || isLoadingSummary) return;
-    if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+    if (!isCurrentPdfDocument) {
       setPageSummaryError("페이지 범위 요약은 PDF에서만 지원됩니다.");
       return;
     }
@@ -3893,6 +4042,7 @@ function App() {
   }, [
     file,
     getOpenAiService,
+    isCurrentPdfDocument,
     isLoadingSummary,
     isPageSummaryLoading,
     pageInfo.total,
@@ -4067,7 +4217,7 @@ function App() {
       return;
     }
     const chapterSelectionRaw = String(oxChapterSelectionInput || "").trim();
-    const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
+    const isPdfSource = isCurrentPdfDocument;
     const instructorEmphasisText = getEffectiveInstructorEmphasisText();
     if (!extractedText && !chapterSelectionRaw && !isPdfSource) {
       setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
@@ -4145,7 +4295,7 @@ function App() {
       return;
     }
     const chapterSelectionRaw = String(oxChapterSelectionInput || "").trim();
-    if (!extractedText && !chapterSelectionRaw && !isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+    if (!extractedText && !chapterSelectionRaw && !isCurrentPdfDocument) {
       setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
       return;
     }
@@ -4331,7 +4481,7 @@ function App() {
         setTutorError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
         return;
       }
-      if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+      if (!isCurrentPdfDocument) {
         setTutorError("AI 튜터의 페이지 근거 모드는 PDF에서만 지원됩니다.");
         return;
       }
@@ -4551,6 +4701,7 @@ function App() {
       file,
       getOpenAiService,
       isLoadingText,
+      isCurrentPdfDocument,
       isTutorLoading,
       pageInfo?.total,
       selectedFileId,
@@ -4575,7 +4726,7 @@ function App() {
 
     const chapterSelectionRaw = String(mockExamChapterSelectionInput || "").trim();
     const hasChapterScope = Boolean(chapterSelectionRaw);
-    const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
+    const isPdfSource = isCurrentPdfDocument;
     let sourceText = "";
     let scopeLabel = "";
     try {
@@ -4613,7 +4764,7 @@ function App() {
       const avoidMockQuestionTexts = dedupeQuestionTexts(historicalMockTexts).slice(0, 120);
       const usedMockQuestionKeys = createQuestionKeySet(avoidMockQuestionTexts);
 
-      const shouldGeneratePoolsFromSource = hasChapterScope || isPdfSource;
+      const shouldGeneratePoolsFromSource = hasChapterScope || isPdfSource || Boolean(sourceText);
       if (shouldGeneratePoolsFromSource) {
         if (scopeLabel) {
           setMockExamStatus(`모의고사 생성 중 (${scopeLabel})...`);
@@ -4850,6 +5001,7 @@ function App() {
   }, [
     extractedText,
     file,
+    isCurrentPdfDocument,
     isGeneratingMockExam,
     isLoadingText,
     oxItems,
@@ -4946,7 +5098,7 @@ function App() {
       setIsSubmittingFeedback(true);
       setFeedbackError("");
       try {
-        await saveUserFeedback({
+        const feedbackPayload = {
           userId: user.id,
           category: feedbackCategory,
           content: trimmedFeedback,
@@ -4958,11 +5110,64 @@ function App() {
             totalPages: pageInfo?.total || pageInfo?.used || null,
             tier,
           },
-        });
+        };
+        let savedFeedback = false;
+        let emailedFeedback = false;
+        let skippedEmail = false;
+        let saveError = null;
+        let notifyError = null;
+
+        try {
+          await saveUserFeedback(feedbackPayload);
+          savedFeedback = true;
+        } catch (error) {
+          saveError = error;
+          console.warn("Feedback database save failed:", error);
+        }
+
+        try {
+          const notifyResult = await notifyFeedbackEmail({
+            userId: user.id,
+            userEmail: user.email || "",
+            category: feedbackCategory,
+            content: trimmedFeedback,
+            docId: selectedFileId || null,
+            docName: file?.name || "",
+            panel: panelTab || "",
+            metadata: {
+              currentPage,
+              totalPages: pageInfo?.total || pageInfo?.used || null,
+              tier,
+            },
+          });
+          emailedFeedback = Boolean(notifyResult?.ok);
+          skippedEmail = Boolean(notifyResult?.skipped);
+        } catch (error) {
+          notifyError = error;
+          console.warn("Feedback email notification failed:", error);
+        }
+
+        if (!savedFeedback && !emailedFeedback) {
+          if (isMissingFeedbackTableError(saveError) && skippedEmail) {
+            throw new Error(
+              "Supabase에 user_feedback 테이블이 아직 없습니다. 테이블을 먼저 만들거나 메일 알림을 설정해주세요."
+            );
+          }
+          throw saveError || notifyError || new Error("피드백 저장 또는 메일 전송에 실패했습니다.");
+        }
+
         setIsFeedbackDialogOpen(false);
         setFeedbackCategory("general");
         setFeedbackInput("");
-        setStatus("\uD53C\uB4DC\uBC31\uC774 \uC804\uC1A1\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uAC10\uC0AC\uD569\uB2C8\uB2E4.");
+        if (savedFeedback && emailedFeedback) {
+          setStatus("\uD53C\uB4DC\uBC31\uC774 \uC800\uC7A5\uB418\uACE0 \uBA54\uC77C\uB85C \uC804\uB2EC\uB418\uC5C8\uC2B5\uB2C8\uB2E4.");
+        } else if (savedFeedback) {
+          setStatus("\uD53C\uB4DC\uBC31\uC774 \uC800\uC7A5\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uAC10\uC0AC\uD569\uB2C8\uB2E4.");
+        } else {
+          setStatus(
+            "\uD53C\uB4DC\uBC31\uC774 \uBA54\uC77C\uB85C \uC804\uB2EC\uB418\uC5C8\uC2B5\uB2C8\uB2E4. DB \uC800\uC7A5\uC740 \uAC74\uB108\uB6F0\uC5C8\uC2B5\uB2C8\uB2E4."
+          );
+        }
       } catch (err) {
         setFeedbackError(`\uD53C\uB4DC\uBC31 \uC804\uC1A1\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: ${err.message}`);
       } finally {
@@ -5028,7 +5233,9 @@ function App() {
     folders,
     selectedFolderId,
     onSelectFolder: handleSelectFolder,
+    onSelectFolderSummary: handleSelectFolderSummary,
     onCreateFolder: handleCreateFolder,
+    onRenameFolder: handleRenameFolder,
     onDeleteFolder: handleDeleteFolder,
     selectedUploadIds,
     onToggleUploadSelect: handleToggleUploadSelect,
@@ -5047,6 +5254,7 @@ function App() {
     detailContainerRef,
     splitStyle,
     pdfUrl,
+    documentRemoteUrl,
     file,
     pageInfo,
     currentPage,
@@ -5058,6 +5266,7 @@ function App() {
     isLoadingSummary,
     isLoadingText,
     isFreeTier,
+    isPdfDocument: isCurrentPdfDocument,
     summary,
     instructorEmphasisInput,
     setInstructorEmphasisInput,
@@ -5336,22 +5545,38 @@ function App() {
             <p className={`mt-1 text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
               {"\uBC84\uADF8, \uAE30\uB2A5 \uC81C\uC548, \uC0AC\uC6A9\uC131 \uAC1C\uC120 \uC758\uACAC\uC744 \uC790\uC720\uB86D\uAC8C \uB0A8\uACA8 \uC8FC\uC138\uC694."}
             </p>
+            <p className={`mt-2 text-[11px] leading-5 ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
+              {"\uD53C\uB4DC\uBC31\uC740 \uD604\uC7AC \uB0B4\uBD80 \uC218\uC9D1\uD568\uC5D0 \uC800\uC7A5\uB418\uACE0, \uAD00\uB9AC\uC790 \uBA54\uC77C \uC54C\uB9BC\uC774 \uC124\uC815\uB41C \uACBD\uC6B0 \uBA54\uC77C\uB85C\uB3C4 \uC804\uB2EC\uB429\uB2C8\uB2E4."}
+            </p>
             <div className="mt-4 space-y-3">
-              <select
-                name="feedback-category"
-                value={feedbackCategory}
-                onChange={(event) => setFeedbackCategory(event.target.value)}
-                className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                  theme === "light"
-                    ? "border-slate-300 bg-white text-slate-900"
-                    : "border-white/15 bg-white/5 text-slate-100"
-                }`}
+              <div
+                className="grid grid-cols-2 gap-2"
+                role="group"
+                aria-label={"\uD53C\uB4DC\uBC31 \uBD84\uB958"}
               >
-                <option value="general">{"\uC77C\uBC18"}</option>
-                <option value="bug">{"\uBC84\uADF8 \uC81C\uBCF4"}</option>
-                <option value="feature">{"\uAE30\uB2A5 \uC81C\uC548"}</option>
-                <option value="ux">{"\uC0AC\uC6A9\uC131 \uC758\uACAC"}</option>
-              </select>
+                {FEEDBACK_CATEGORY_OPTIONS.map((option) => {
+                  const isActive = feedbackCategory === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setFeedbackCategory(option.value)}
+                      aria-pressed={isActive}
+                      className={`rounded-xl border px-3 py-2 text-left text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/45 ${
+                        isActive
+                          ? theme === "light"
+                            ? "border-emerald-500 bg-emerald-50 text-emerald-950"
+                            : "border-emerald-300/70 bg-emerald-400/12 text-emerald-100"
+                          : theme === "light"
+                            ? "border-slate-300 bg-white text-slate-700 hover:border-emerald-300 hover:text-slate-900"
+                            : "border-white/15 bg-white/5 text-slate-200 hover:border-emerald-300/35 hover:text-white"
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
               <textarea
                 name="feedback-message"
                 value={feedbackInput}

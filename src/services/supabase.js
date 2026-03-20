@@ -312,6 +312,24 @@ export async function deleteFolder({ userId, folderId }) {
   if (error) throw error;
 }
 
+export async function renameFolder({ userId, folderId, name }) {
+  const client = requireSupabase();
+  requireUser(userId);
+  const trimmedFolderId = String(folderId || "").trim();
+  const trimmedName = String(name || "").trim();
+  if (!trimmedFolderId) throw new Error("Folder ID is required.");
+  if (!trimmedName) throw new Error("Folder name is required.");
+  const { data, error } = await client
+    .from("folders")
+    .update({ name: trimmedName })
+    .eq("id", trimmedFolderId)
+    .eq("user_id", userId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 export async function saveUploadMetadata({ userId, fileName, fileSize, storagePath, bucket, thumbnail, fileHash, folderId }) {
   const client = requireSupabase();
   requireUser(userId);

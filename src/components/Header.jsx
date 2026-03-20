@@ -34,33 +34,51 @@ const Header = memo(function Header({
   };
 
   const showPremiumButtons = Boolean(user && !loadingTier && isPremiumTier && activeProfile);
-  const tierBadgeLabel = loadingTier ? "Sync" : isPremiumTier ? "Premium" : "Free";
+  const brandTierLabel = !loadingTier && isPremiumTier ? "Premium" : null;
   return (
     <header className="app-safe-top sticky top-0 z-40 flex w-full items-center border-b border-white/10 bg-slate-950/72 px-3 pb-3 backdrop-blur-xl sm:px-6 lg:px-10">
       <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:flex sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.24em] text-emerald-200/75 sm:text-sm sm:tracking-[0.2em]">
-              {"\uD034\uC988\uC640 \uC694\uC57D"}
-            </p>
-            <h1 className="mt-1 text-2xl font-bold leading-none text-white sm:text-3xl">Zeusian</h1>
-          </div>
+          {onGoHome ? (
+            <button
+              type="button"
+              onClick={onGoHome}
+              aria-label={"\uD648\uC73C\uB85C \uC774\uB3D9"}
+              className="group rounded-xl px-1 py-0.5 text-left transition hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/55"
+            >
+              <p className="text-[11px] uppercase tracking-[0.24em] text-emerald-200/75 transition group-hover:text-emerald-100 sm:text-sm sm:tracking-[0.2em]">
+                {"\uD034\uC988\uC640 \uC694\uC57D"}
+              </p>
+              <div className="mt-1 flex items-end gap-2 sm:gap-3">
+                <h1 className="text-2xl font-bold leading-none text-white transition group-hover:text-emerald-50 sm:text-3xl">
+                  Zeusian
+                </h1>
+                {brandTierLabel && (
+                  <span className="pb-0.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-200/80 transition group-hover:text-emerald-100 sm:text-sm">
+                    {brandTierLabel}
+                  </span>
+                )}
+              </div>
+            </button>
+          ) : (
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.24em] text-emerald-200/75 sm:text-sm sm:tracking-[0.2em]">
+                {"\uD034\uC988\uC640 \uC694\uC57D"}
+              </p>
+              <div className="mt-1 flex items-end gap-2 sm:gap-3">
+                <h1 className="text-2xl font-bold leading-none text-white sm:text-3xl">Zeusian</h1>
+                {brandTierLabel && (
+                  <span className="pb-0.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-200/80 sm:text-sm">
+                    {brandTierLabel}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex min-w-0 flex-col items-end gap-2 sm:w-auto">
           <div className="flex w-[14.75rem] max-w-full flex-wrap justify-end gap-2 sm:w-auto sm:max-w-none sm:justify-end">
-            {onGoHome && (
-              <button
-                type="button"
-                onClick={onGoHome}
-                className="ghost-button text-xs text-emerald-100"
-                data-ghost-size="sm"
-                style={{ "--ghost-color": "52, 211, 153" }}
-              >
-                {"\uD648\uC73C\uB85C"}
-              </button>
-            )}
-
             {user && onRefresh && (
               <button
                 type="button"
@@ -184,9 +202,6 @@ const Header = memo(function Header({
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="hidden rounded-full border border-emerald-300/20 bg-emerald-400/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-100 sm:inline-flex">
-                  {tierBadgeLabel}
-                </span>
                 <button
                   type="button"
                   onClick={onSignOut}

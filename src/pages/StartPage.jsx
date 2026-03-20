@@ -15,7 +15,9 @@ const StartPage = memo(function StartPage({
   folders,
   selectedFolderId,
   onSelectFolder,
+  onSelectFolderSummary,
   onCreateFolder,
+  onRenameFolder,
   onDeleteFolder,
   selectedUploadIds,
   onToggleUploadSelect,
@@ -60,7 +62,9 @@ const StartPage = memo(function StartPage({
               folders={folders}
               selectedFolderId={selectedFolderId}
               onSelectFolder={onSelectFolder}
+              onSelectFolderSummary={onSelectFolderSummary}
               onCreateFolder={onCreateFolder}
+              onRenameFolder={onRenameFolder}
               onDeleteFolder={onDeleteFolder}
               selectedUploadIds={selectedUploadIds}
               onToggleUploadSelect={onToggleUploadSelect}
