@@ -157,14 +157,6 @@ export default function DetailPage({
   isFreeTier,
   isPdfDocument = true,
   summary,
-  instructorEmphasisInput,
-  setInstructorEmphasisInput,
-  savedInstructorEmphases,
-  activeInstructorEmphasisId,
-  handleSaveInstructorEmphasis,
-  handleSelectInstructorEmphasis,
-  handleDeleteInstructorEmphasis,
-  cycleActiveInstructorEmphasis,
   partialSummary,
   partialSummaryRange,
   savedPartialSummaries,
@@ -276,11 +268,6 @@ export default function DetailPage({
     setQuizMix,
   });
   const normalizeChapterSelectionInput = (value) => String(value || "").replace(/\s+/g, "");
-  const truncateText = (value, maxLength = 30) => {
-    const normalized = String(value || "").trim();
-    if (normalized.length <= maxLength) return normalized;
-    return `${normalized.slice(0, maxLength)}...`;
-  };
   const mockMarkdownComponents = useMemo(
     () => ({
       p: ({ children }) => <p className="my-0 leading-relaxed">{children}</p>,
@@ -379,107 +366,15 @@ export default function DetailPage({
       };
     });
   }, [activeMockExam?.payload?.answerSheet, mockExamOrderedItems]);
-  const emphasisTextareaRef = useRef(null);
-  const savedInstructorScrollRef = useRef(null);
-  const savedInstructorScrollTimerRef = useRef(null);
   const partialSummaryListRef = useRef(null);
-  const emphasisWheelRowHeight = 38;
-  const emphasisWheelViewportHeight = emphasisWheelRowHeight * 5;
-  const emphasisWheelCenterOffset = (emphasisWheelViewportHeight - emphasisWheelRowHeight) / 2;
-  const normalizedSavedInstructorEmphases = useMemo(
-    () => (Array.isArray(savedInstructorEmphases) ? savedInstructorEmphases : []),
-    [savedInstructorEmphases]
-  );
   const normalizedSavedPartialSummaries = useMemo(
     () => (Array.isArray(savedPartialSummaries) ? savedPartialSummaries : []),
     [savedPartialSummaries]
-  );
-  const activeInstructorEmphasis = useMemo(
-    () =>
-      normalizedSavedInstructorEmphases.find((item) => item.id === activeInstructorEmphasisId) ||
-      normalizedSavedInstructorEmphases[0] ||
-      null,
-    [activeInstructorEmphasisId, normalizedSavedInstructorEmphases]
-  );
-  const activeInstructorEmphasisIndex = useMemo(
-    () =>
-      activeInstructorEmphasis
-        ? normalizedSavedInstructorEmphases.findIndex((item) => item.id === activeInstructorEmphasis.id)
-        : -1,
-    [activeInstructorEmphasis, normalizedSavedInstructorEmphases]
   );
   const handleRequestSummary = useCallback(
     () => requestSummary({ force: true, replaceExisting: true }),
     [requestSummary]
   );
-
-  useEffect(() => {
-    const target = emphasisTextareaRef.current;
-    if (!target) return;
-    target.style.height = "auto";
-    const next = Math.max(44, Math.min(240, target.scrollHeight));
-    target.style.height = `${next}px`;
-    target.style.overflowY = target.scrollHeight > 240 ? "auto" : "hidden";
-  }, [instructorEmphasisInput]);
-
-  useEffect(() => {
-    return () => {
-      if (savedInstructorScrollTimerRef.current) {
-        clearTimeout(savedInstructorScrollTimerRef.current);
-      }
-    };
-  }, []);
-
-  const handleSavedInstructorWheelSelect = useCallback(() => {
-    const container = savedInstructorScrollRef.current;
-    if (!container || normalizedSavedInstructorEmphases.length === 0) return;
-    const nearestIndex = Math.max(
-      0,
-      Math.min(
-        normalizedSavedInstructorEmphases.length - 1,
-        Math.round(container.scrollTop / emphasisWheelRowHeight)
-      )
-    );
-    const nearest = normalizedSavedInstructorEmphases[nearestIndex];
-    if (!nearest || nearest.id === activeInstructorEmphasis?.id) return;
-    handleSelectInstructorEmphasis(nearest.id);
-  }, [
-    activeInstructorEmphasis?.id,
-    emphasisWheelRowHeight,
-    handleSelectInstructorEmphasis,
-    normalizedSavedInstructorEmphases,
-  ]);
-
-  const handleSavedInstructorWheelScroll = useCallback(() => {
-    if (savedInstructorScrollTimerRef.current) {
-      clearTimeout(savedInstructorScrollTimerRef.current);
-    }
-    savedInstructorScrollTimerRef.current = setTimeout(() => {
-      handleSavedInstructorWheelSelect();
-      savedInstructorScrollTimerRef.current = null;
-    }, 90);
-  }, [handleSavedInstructorWheelSelect]);
-
-  const handleSavedInstructorClick = useCallback(
-    (itemId) => {
-      handleSelectInstructorEmphasis(itemId);
-      emphasisTextareaRef.current?.focus();
-    },
-    [handleSelectInstructorEmphasis]
-  );
-
-  useEffect(() => {
-    const container = savedInstructorScrollRef.current;
-    if (!container || normalizedSavedInstructorEmphases.length === 0) return;
-    const targetIndex = activeInstructorEmphasisIndex >= 0 ? activeInstructorEmphasisIndex : 0;
-    const targetTop = Math.max(0, targetIndex * emphasisWheelRowHeight);
-    if (Math.abs(container.scrollTop - targetTop) < 1) return;
-    container.scrollTo({ top: targetTop, behavior: "smooth" });
-  }, [
-    activeInstructorEmphasisIndex,
-    emphasisWheelRowHeight,
-    normalizedSavedInstructorEmphases.length,
-  ]);
 
   useEffect(() => {
     if (!isSavedPartialSummaryOpen) return;
@@ -773,43 +668,8 @@ export default function DetailPage({
                   )}
                 </div>
               )}
-              <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-100">
-                      {"\uAD50\uC218\uB2D8/\uAC15\uC0AC \uAC15\uC870 \uD3EC\uC778\uD2B8"}
-                    </p>
-                    <p className="text-xs text-slate-400">
-                      {
-                        "\uD559\uC2B5 \uC911 \uBC18\uB4DC\uC2DC \uD655\uC778\uD558\uB77C\uACE0 \uD55C \uD3EC\uC778\uD2B8\uB97C \uBA54\uBAA8\uD558\uC138\uC694."
-                      }
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleSaveInstructorEmphasis()}
-                    className="ghost-button text-xs text-emerald-100"
-                    data-ghost-size="sm"
-                    style={{ "--ghost-color": "52, 211, 153" }}
-                  >
-                    {"\uC800\uC7A5"}
-                  </button>
-                </div>
-                <textarea
-                  ref={emphasisTextareaRef}
-                  value={instructorEmphasisInput}
-                  onChange={(event) => setInstructorEmphasisInput(event.target.value)}
-                  rows={1}
-                  maxLength={2000}
-                  placeholder={
-                    "\uC608) 3\uC7A5 \uC815\uB9AC \uBB38\uC81C\uB294 \uAE30\uCD9C \uD45C\uD604\uC744 \uADF8\uB300\uB85C \uBB3B\uB294\uB2E4. \uAD6C\uBD84 \uAC1C\uB150(A vs B)\uC744 \uBE44\uAD50\uD558\uB294 \uC720\uD615\uC774 \uC790\uC8FC \uB098\uC628\uB2E4."
-                  }
-                  className="mt-3 w-full resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm leading-relaxed text-slate-100 outline-none ring-1 ring-transparent transition focus:border-emerald-300/50 focus:ring-emerald-300/40"
-                />
-                <p className="mt-1 text-right text-[11px] text-slate-400">
-                  {String(instructorEmphasisInput || "").length}/2000
-                </p>
-                {normalizedSavedInstructorEmphases.length > 0 && (
+              {/*
+                {false && (
                   <div className="instructor-emphasis-wheel-shell mt-3 rounded-xl border border-white/10 bg-slate-900/35 p-2">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-[11px] text-slate-300">
@@ -884,7 +744,6 @@ export default function DetailPage({
                           </div>
                         </div>
                       </div>
-                      <div className="flex w-full justify-end gap-1 sm:h-[190px] sm:w-auto sm:shrink-0 sm:flex-col sm:items-center sm:justify-center">
                         <button
                           type="button"
                           onClick={() => cycleActiveInstructorEmphasis(-1)}
@@ -909,14 +768,8 @@ export default function DetailPage({
                         </button>
                       </div>
                     </div>
-                    {activeInstructorEmphasis && (
-                      <p className="mt-2 text-[11px] text-emerald-200">
-                        {`\uD604\uC7AC \uC120\uD0DD: ${activeInstructorEmphasisIndex + 1}\uBC88`}
-                      </p>
-                    )}
-                  </div>
                 )}
-              </div>
+              */}
               {isLoadingSummary && <p className="mt-2 text-sm text-slate-300">{"\uC694\uC57D \uC0DD\uC131 \uC911..."}</p>}
               {!isLoadingSummary && summary && (
                 <div ref={summaryRef}>
