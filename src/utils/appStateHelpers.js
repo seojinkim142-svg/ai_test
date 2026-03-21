@@ -420,5 +420,9 @@ export const formatMockExamTitle = (exam, index) => {
 export const chunkMockExamPages = (orderedItems) => {
   const list = Array.isArray(orderedItems) ? orderedItems : [];
   if (!list.length) return [];
-  return [list.slice(0, 4), list.slice(4, 8), list.slice(8, 10)];
+  const pages = [];
+  for (let index = 0; index < list.length; index += 2) {
+    pages.push(list.slice(index, index + 2));
+  }
+  return pages;
 };

@@ -1,6 +1,7 @@
 ﻿import { Capacitor } from "@capacitor/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { detectSupportedDocumentKind, isPdfDocumentKind } from "../utils/document";
+import { findHighlightRects } from "../utils/pdfHighlight";
 
 let pdfRuntimePromise = null;
 
@@ -83,6 +84,7 @@ function PdfPreview({
   file = null,
   pageInfo = null,
   currentPage = 1,
+  evidenceHighlight = null,
   onPageChange = null,
   previewText = "",
   isLoadingText = false,
@@ -96,13 +98,16 @@ function PdfPreview({
   const [nativeError, setNativeError] = useState("");
   const [isNativeLoading, setIsNativeLoading] = useState(false);
   const [isTabletDevice, setIsTabletDevice] = useState(() => detectTabletDevice());
+  const [highlightRects, setHighlightRects] = useState([]);
   const [pageJumpInput, setPageJumpInput] = useState(() =>
     String(normalizePageNumber(currentPage))
   );
   const [docVersion, setDocVersion] = useState(0);
   const canvasRef = useRef(null);
+  const canvasShellRef = useRef(null);
   const nativeScrollRef = useRef(null);
   const pdfDocRef = useRef(null);
+  const pageLayoutCacheRef = useRef(new Map());
   const renderTaskRef = useRef(null);
   const renderRequestRef = useRef(0);
   const wheelLockRef = useRef(0);
@@ -142,6 +147,21 @@ function PdfPreview({
     [documentUrl, hasOfficeViewerUrl]
   );
   const normalizedCurrentPage = normalizePageNumber(currentPage);
+  const activeHighlightTarget = useMemo(() => {
+    if (!evidenceHighlight) return null;
+    const pageNumber = normalizePageNumber(evidenceHighlight?.pageNumber);
+    const snippet = String(evidenceHighlight?.snippet || "").trim();
+    const label = String(evidenceHighlight?.label || "").trim();
+    if (!pageNumber || (!snippet && !label)) return null;
+    return {
+      pageNumber,
+      snippet,
+      label,
+      requestId: String(
+        evidenceHighlight?.requestId || `${pageNumber}:${snippet}:${label}`
+      ),
+    };
+  }, [evidenceHighlight]);
   const totalPages = useMemo(() => {
     const fromInfo = Number(pageInfo?.total || pageInfo?.used || 0);
     const fromDoc = Number(pdfDocRef.current?.numPages || 0);
@@ -199,6 +219,11 @@ function PdfPreview({
   useEffect(() => {
     setPageJumpInput(String(normalizedCurrentPage));
   }, [normalizedCurrentPage, sourceKey]);
+
+  useEffect(() => {
+    pageLayoutCacheRef.current.clear();
+    setHighlightRects([]);
+  }, [sourceKey]);
 
   useEffect(() => {
     if (!isOfficeDocument) {
@@ -368,6 +393,109 @@ function PdfPreview({
     },
     [goToNextPage, goToPreviousPage, isTabletDevice]
   );
+
+  const buildNativePageLayout = useCallback(
+    async (pageNumber) => {
+      const doc = pdfDocRef.current;
+      if (!doc) return null;
+
+      const normalizedPage = normalizePageNumber(pageNumber);
+      const cacheKey = `${sourceKey}:${normalizedPage}`;
+      const cached = pageLayoutCacheRef.current.get(cacheKey);
+      if (cached) return cached;
+
+      const pdfjsLib = await loadPdfRuntime();
+      const page = await doc.getPage(normalizedPage);
+      const viewport = page.getViewport({ scale: 1 });
+      const content = await page.getTextContent();
+
+      let pageText = "";
+      const items = [];
+      for (const item of content.items || []) {
+        const text = String(item?.str || "").trim();
+        if (!text) continue;
+
+        const withSpace = pageText ? " " : "";
+        const start = pageText.length + withSpace.length;
+        pageText += withSpace + text;
+        const end = pageText.length;
+
+        const transformed = pdfjsLib.Util.transform(viewport.transform, item.transform);
+        const x = transformed[4];
+        const y = transformed[5];
+        const scaleX = Math.hypot(transformed[0], transformed[1]);
+        const scaleY = Math.hypot(transformed[2], transformed[3]);
+        const widthPx = scaleX * item.width;
+        const heightPx = scaleY * (item.height || Math.abs(transformed[3]));
+        const highlightHeight = heightPx * 0.6;
+        const topY = y - highlightHeight * 0.9;
+
+        items.push({
+          text,
+          start,
+          end,
+          rect: {
+            x: Math.min(1, Math.max(0, x / viewport.width)),
+            y: Math.min(1, Math.max(0, topY / viewport.height)),
+            width: Math.min(1, widthPx / viewport.width),
+            height: Math.min(1, Math.max(0.01, highlightHeight / viewport.height)),
+          },
+        });
+      }
+
+      const layout = {
+        pageNumber: normalizedPage,
+        width: viewport.width,
+        height: viewport.height,
+        text: pageText,
+        items,
+      };
+      pageLayoutCacheRef.current.set(cacheKey, layout);
+      return layout;
+    },
+    [sourceKey]
+  );
+
+  useEffect(() => {
+    if (!isNativePlatform || !canPreviewPdf || !activeHighlightTarget) {
+      setHighlightRects([]);
+      return undefined;
+    }
+    if (activeHighlightTarget.pageNumber !== normalizedCurrentPage) {
+      setHighlightRects([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+    const queryText = [activeHighlightTarget.snippet, activeHighlightTarget.label]
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join(" ");
+
+    const loadHighlight = async () => {
+      try {
+        const layout = await buildNativePageLayout(activeHighlightTarget.pageNumber);
+        if (cancelled || !layout) return;
+        const rects = findHighlightRects(layout, queryText);
+        setHighlightRects(rects);
+      } catch {
+        if (!cancelled) {
+          setHighlightRects([]);
+        }
+      }
+    };
+
+    loadHighlight();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeHighlightTarget,
+    buildNativePageLayout,
+    canPreviewPdf,
+    isNativePlatform,
+    normalizedCurrentPage,
+  ]);
 
   const viewerSrc = useMemo(() => {
     if (!pdfUrl) return "";
@@ -784,13 +912,34 @@ function PdfPreview({
           onTouchStart={handleNativeTouchStart}
           onTouchEnd={handleNativeTouchEnd}
         >
-          <canvas
-            ref={canvasRef}
-            onClick={handleNativeCanvasClick}
-            className={`mx-auto block rounded-xl bg-white shadow-lg shadow-black/30 ${
-              isTabletDevice ? "cursor-pointer" : ""
-            }`}
-          />
+          <div ref={canvasShellRef} className="relative mx-auto w-fit">
+            <canvas
+              ref={canvasRef}
+              onClick={handleNativeCanvasClick}
+              className={`mx-auto block rounded-xl bg-white shadow-lg shadow-black/30 ${
+                isTabletDevice ? "cursor-pointer" : ""
+              }`}
+            />
+            {highlightRects.length > 0 && (
+              <div className="pointer-events-none absolute inset-0">
+                {highlightRects.map((rect, index) => (
+                  <span
+                    key={`pdf-highlight-${index}`}
+                    className="absolute rounded-[6px] border border-emerald-400/80 bg-emerald-300/28 shadow-[0_0_0_1px_rgba(16,185,129,0.12),0_0_18px_rgba(52,211,153,0.18)]"
+                    style={{
+                      left: `${rect.x * 100}%`,
+                      top: `${rect.y * 100}%`,
+                      width: `${rect.width * 100}%`,
+                      height: `${rect.height * 100}%`,
+                    }}
+                  />
+                ))}
+                <div className="absolute left-3 top-3 rounded-full border border-emerald-300/55 bg-slate-950/78 px-3 py-1 text-[11px] font-semibold text-emerald-100 shadow-lg shadow-black/30">
+                  근거 하이라이트
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {isNativeLoading && (

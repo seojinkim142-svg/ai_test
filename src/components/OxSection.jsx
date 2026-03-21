@@ -1,6 +1,16 @@
+import EvidencePageLinks from "./EvidencePageLinks";
 import MathMarkdown from "./MathMarkdown";
 
-function OxCard({ item, idx, selection, onSelect, showExplanation, onToggleExplanation }) {
+function OxCard({
+  item,
+  idx,
+  selection,
+  onSelect,
+  showExplanation,
+  onToggleExplanation,
+  onResolveEvidence,
+  onJumpToEvidencePage,
+}) {
   const revealed = selection === "o" || selection === "x";
   const isCorrect =
     revealed && ((selection === "o" && item.answer === true) || (selection === "x" && item.answer === false));
@@ -15,31 +25,39 @@ function OxCard({ item, idx, selection, onSelect, showExplanation, onToggleExpla
             className="summary-prose mt-1 max-w-none break-words text-sm text-slate-100 [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto"
           />
         </div>
-        <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-100">O/X</span>
+        <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-100">
+          O/X
+        </span>
       </div>
 
       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
         {[
           { id: "o", label: "O (참)", color: "52, 211, 153", textClass: "text-emerald-100" },
           { id: "x", label: "X (거짓)", color: "248, 113, 113", textClass: "text-red-100" },
-          { id: "skip", label: "문제가 별로에요", color: "226, 232, 240", textClass: "text-slate-200" },
-        ].map((btn) => {
-          const active = selection === btn.id;
+          { id: "skip", label: "문제가 애매해요", color: "226, 232, 240", textClass: "text-slate-200" },
+        ].map((button) => {
+          const active = selection === button.id;
           return (
             <button
-              key={btn.id}
+              key={button.id}
               type="button"
-              onClick={() => onSelect(btn.id)}
-              className={`ghost-button w-full text-sm font-semibold ${btn.textClass}`}
+              onClick={() => onSelect(button.id)}
+              className={`ghost-button w-full text-sm font-semibold ${button.textClass}`}
               data-ghost-active={active}
               data-ghost-size="lg"
-              style={{ "--ghost-color": btn.color }}
+              style={{ "--ghost-color": button.color }}
             >
-              {btn.label}
+              {button.label}
             </button>
           );
         })}
       </div>
+
+      <EvidencePageLinks
+        requestKey={`ox:${idx}:${String(item?.statement || "").trim()}`}
+        onResolveEvidence={() => onResolveEvidence?.(item)}
+        onJumpToPage={onJumpToEvidencePage}
+      />
 
       {revealed && (
         <div
@@ -49,7 +67,7 @@ function OxCard({ item, idx, selection, onSelect, showExplanation, onToggleExpla
               : "bg-red-500/10 text-red-100 ring-red-400/40"
           }`}
         >
-          {isCorrect ? "정답입니다!" : `오답입니다. 정답: ${item.answer ? "O (참)" : "X (거짓)"}`}
+          {isCorrect ? "정답입니다." : `오답입니다. 정답: ${item.answer ? "O (참)" : "X (거짓)"}`}
         </div>
       )}
 
@@ -79,7 +97,16 @@ function OxCard({ item, idx, selection, onSelect, showExplanation, onToggleExpla
   );
 }
 
-function OxSection({ title = "O/X 퀴즈", items, selections, onSelect, explanationsOpen, onToggleExplanation }) {
+function OxSection({
+  title = "O/X 퀴즈",
+  items,
+  selections,
+  onSelect,
+  explanationsOpen,
+  onToggleExplanation,
+  onResolveEvidence,
+  onJumpToEvidencePage,
+}) {
   const list = items || [];
 
   return (
@@ -104,6 +131,8 @@ function OxSection({ title = "O/X 퀴즈", items, selections, onSelect, explanat
             onSelect={(choice) => onSelect?.(idx, choice)}
             showExplanation={explanationsOpen?.[idx]}
             onToggleExplanation={() => onToggleExplanation?.(idx)}
+            onResolveEvidence={onResolveEvidence}
+            onJumpToEvidencePage={onJumpToEvidencePage}
           />
         ))}
       </div>

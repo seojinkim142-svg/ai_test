@@ -95,8 +95,12 @@ export function buildMockExamAnswerSheet(items, persistedAnswerSheet = []) {
       number: Number.isFinite(entry?.number) ? entry.number : idx + 1,
       type: String(entry?.type || "").trim(),
       answer: String(entry?.answer || "-").trim() || "-",
+      prompt: String(entry?.prompt || "").trim(),
       explanation: String(entry?.explanation || "").trim(),
       evidence: String(entry?.evidence || "").trim(),
+      evidencePages: Array.isArray(entry?.evidencePages) ? entry.evidencePages : [],
+      evidenceSnippet: String(entry?.evidenceSnippet || "").trim(),
+      evidenceLabel: String(entry?.evidenceLabel || "").trim(),
     }));
   }
 
@@ -110,8 +114,20 @@ export function buildMockExamAnswerSheet(items, persistedAnswerSheet = []) {
       number: Number.isFinite(persisted?.number) ? persisted.number : idx + 1,
       type: String(item?.type || persisted?.type || "").trim(),
       answer: answer || "-",
+      prompt: String(item?.prompt || persisted?.prompt || "").trim(),
       explanation: String(persisted?.explanation || item?.explanation || "").trim(),
       evidence: String(persisted?.evidence || item?.evidence || "").trim(),
+      evidencePages: Array.isArray(persisted?.evidencePages)
+        ? persisted.evidencePages
+        : Array.isArray(item?.evidencePages)
+          ? item.evidencePages
+          : [],
+      evidenceSnippet: String(
+        persisted?.evidenceSnippet || item?.evidenceSnippet || ""
+      ).trim(),
+      evidenceLabel: String(
+        persisted?.evidenceLabel || item?.evidenceLabel || ""
+      ).trim(),
     };
   });
 }

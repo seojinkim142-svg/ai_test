@@ -71,6 +71,77 @@ function isLowValueStudyPrompt(text) {
   return LOW_VALUE_STUDY_PROMPT_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
+function toSortedUniquePages(pages) {
+  return [
+    ...new Set(
+      (Array.isArray(pages) ? pages : [])
+        .map((page) => Number.parseInt(page, 10))
+        .filter((page) => Number.isFinite(page) && page > 0)
+    ),
+  ].sort((a, b) => a - b);
+}
+
+function extractEvidencePagesFromText(value) {
+  const pages = [];
+  const source = String(value || "");
+  for (const match of source.matchAll(/(?:p\.?\s*|page\s*|페이지\s*|쪽\s*)(\d{1,4})/gi)) {
+    const pageNumber = Number.parseInt(match?.[1], 10);
+    if (Number.isFinite(pageNumber) && pageNumber > 0) {
+      pages.push(pageNumber);
+    }
+  }
+  return toSortedUniquePages(pages);
+}
+
+function normalizeEvidenceText(value, maxLength = 180) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
+}
+
+function normalizeEvidenceFields(item) {
+  const evidenceObject =
+    item?.evidence && typeof item.evidence === "object" && !Array.isArray(item.evidence)
+      ? item.evidence
+      : null;
+  const rawEvidenceText = typeof item?.evidence === "string" ? item.evidence : "";
+  const evidencePages = toSortedUniquePages([
+    ...(Array.isArray(item?.evidencePages) ? item.evidencePages : []),
+    ...(Array.isArray(evidenceObject?.pages) ? evidenceObject.pages : []),
+    ...extractEvidencePagesFromText(item?.evidenceLabel),
+    ...extractEvidencePagesFromText(item?.evidenceSnippet),
+    ...extractEvidencePagesFromText(rawEvidenceText),
+    ...extractEvidencePagesFromText(evidenceObject?.label),
+    ...extractEvidencePagesFromText(evidenceObject?.snippet),
+  ]);
+  const evidenceSnippet = normalizeEvidenceText(
+    item?.evidenceSnippet || evidenceObject?.snippet || rawEvidenceText
+  );
+  const evidenceLabel = normalizeEvidenceText(
+    item?.evidenceLabel || evidenceObject?.label || (evidencePages.length ? `p.${evidencePages.join(", ")}` : ""),
+    120
+  );
+  const evidenceText = normalizeEvidenceText(
+    rawEvidenceText || [evidenceLabel, evidenceSnippet].filter(Boolean).join(" - "),
+    220
+  );
+
+  return {
+    evidencePages,
+    evidenceSnippet,
+    evidenceLabel,
+    evidence: evidenceText,
+  };
+}
+
+function normalizeGeneratedItem(item) {
+  return {
+    ...item,
+    ...normalizeEvidenceFields(item),
+  };
+}
+
 function buildQuizPrompt(extractedText, { multipleChoiceCount, shortAnswerCount, avoidQuestions = [] }) {
   const avoidBlock = buildAvoidReuseBlock(avoidQuestions, { title: "Do not reuse these previously asked questions" });
   return `
@@ -80,21 +151,40 @@ You are a professor creating quiz questions from lecture material.
 - Use document facts only as context; do not ask verbatim recall questions.
 - Questions must test understanding, comparison, application, misconception checks, or interpretation.
 - Avoid pure memorization prompts (raw URLs, names, single numbers).
+- If the document contains page tags like [p.12], first choose 1-2 tagged evidence passages and then write the question from that evidence only.
+- evidencePages must use only page numbers that actually appear in the provided page tags.
+- evidenceSnippet should be a short Korean source phrase copied or lightly normalized from the document so it can be highlighted later.
 
 [Output format]
 - Multiple-choice: ${multipleChoiceCount} questions, 4 options each.
 - Short-answer: ${shortAnswerCount} questions (calculation/explanation style).
 - Include answerIndex and explanation for multiple-choice.
 - Include answer and explanation for short-answer.
+- Include evidencePages, evidenceSnippet, and evidenceLabel for every item.
 - Return JSON only.
 
 [JSON schema]
 {
   "multipleChoice": [
-    { "question": "...", "choices": ["...","...","...","..."], "answerIndex": 1, "explanation": "..." }
+    {
+      "question": "...",
+      "choices": ["...","...","...","..."],
+      "answerIndex": 1,
+      "explanation": "...",
+      "evidencePages": [12],
+      "evidenceSnippet": "...",
+      "evidenceLabel": "p.12 정의 문단"
+    }
   ],
   "shortAnswer": [
-    { "question": "...", "answer": "...", "explanation": "..." }
+    {
+      "question": "...",
+      "answer": "...",
+      "explanation": "...",
+      "evidencePages": [12],
+      "evidenceSnippet": "...",
+      "evidenceLabel": "p.12 계산 예시"
+    }
   ]
 }
 
@@ -115,6 +205,9 @@ You are creating high-difficulty mock exam items from the document.
 - Ban rote-memory/direct-recall items.
 - Require reasoning, application, and concept-level discrimination.
 - Include plausible distractors but keep one clear correct answer.
+- If the document contains page tags like [p.12], select the supporting tagged evidence first and write the question from that evidence only.
+- evidencePages must reference only visible tagged pages.
+- evidenceSnippet should be a short source phrase copied or lightly normalized from the document.
 - Never ask textbook/preface metadata:
   target audience, whether exercises/cyber materials/code are included,
   author/publisher info, TOC/chapter-structure trivia.
@@ -122,12 +215,21 @@ You are creating high-difficulty mock exam items from the document.
 [Output format]
 - ${count} multiple-choice questions, 4 options each.
 - Include answerIndex and explanation.
+- Include evidencePages, evidenceSnippet, and evidenceLabel.
 - Return JSON only.
 
 [JSON schema]
 {
   "items": [
-    { "question": "...", "choices": ["...","...","...","..."], "answerIndex": 1, "explanation": "..." }
+    {
+      "question": "...",
+      "choices": ["...","...","...","..."],
+      "answerIndex": 1,
+      "explanation": "...",
+      "evidencePages": [12],
+      "evidenceSnippet": "...",
+      "evidenceLabel": "p.12 핵심 조건"
+    }
   ]
 }
 
@@ -158,15 +260,25 @@ ${avoidBlock ? `- ${avoidBlock.replace(/\n/g, "\n  ")}` : ""}
 5. Include at least 4 false items when feasible.
 6. Use concrete details (numbers/conditions/directions) to improve discrimination.
 7. Avoid duplicates.
-8. evidence should briefly cite source clue/location when available.
-9. Exclude low-value metadata/trivia items:
+8. If the document contains page tags like [p.12], choose the evidence first and cite only those visible pages.
+9. evidence should briefly cite source clue/location when available.
+10. Include evidencePages and evidenceSnippet for every item.
+11. evidenceSnippet should be a short source phrase copied or lightly normalized from the document.
+12. Exclude low-value metadata/trivia items:
    textbook target audience, supplement/material availability,
    author/publisher/contact, TOC/chapter structure.
 
 [JSON schema]
 {
   "items": [
-    { "statement": "...", "answer": true, "explanation": "...", "evidence": "..." }
+    {
+      "statement": "...",
+      "answer": true,
+      "explanation": "...",
+      "evidence": "p.12 정의 문단",
+      "evidencePages": [12],
+      "evidenceSnippet": "..."
+    }
   ]
 }
 
@@ -1247,6 +1359,9 @@ function fallbackOxItems(extractedText) {
         statement: "Use evidence from the PDF text before deciding O/X.",
         answer: true,
         explanation: "Without textual evidence, the statement cannot be trusted.",
+        evidence: "",
+        evidencePages: [],
+        evidenceSnippet: "",
       },
     ];
   }
@@ -1255,6 +1370,9 @@ function fallbackOxItems(extractedText) {
     statement: `Judge O/X using text evidence: ${s}`,
     answer: idx % 2 === 0, // true/false alternation
     explanation: "Compare the statement with nearby context in the provided text.",
+    evidence: "",
+    evidencePages: [],
+    evidenceSnippet: "",
   }));
 }
 function sleep(ms) {
@@ -1367,6 +1485,7 @@ export async function generateQuiz(
         { role: "user", content: prompt },
       ],
       temperature: 1, // gpt-5-mini default temperature
+      response_format: { type: "json_object" },
     },
     { retries: 0 }
   );
@@ -1374,12 +1493,12 @@ export async function generateQuiz(
   const content = data.choices?.[0]?.message?.content?.trim() || "";
   const sanitized = sanitizeJson(content);
   const parsed = parseJsonSafe(sanitized, "quiz JSON");
-  const multipleChoice = (Array.isArray(parsed?.multipleChoice) ? parsed.multipleChoice : []).filter(
-    (item) => !isLowValueStudyPrompt(String(item?.question || item?.prompt || "").trim())
-  );
-  const shortAnswer = (Array.isArray(parsed?.shortAnswer) ? parsed.shortAnswer : []).filter(
-    (item) => !isLowValueStudyPrompt(String(item?.question || item?.prompt || "").trim())
-  );
+  const multipleChoice = (Array.isArray(parsed?.multipleChoice) ? parsed.multipleChoice : [])
+    .map(normalizeGeneratedItem)
+    .filter((item) => !isLowValueStudyPrompt(String(item?.question || item?.prompt || "").trim()));
+  const shortAnswer = (Array.isArray(parsed?.shortAnswer) ? parsed.shortAnswer : [])
+    .map(normalizeGeneratedItem)
+    .filter((item) => !isLowValueStudyPrompt(String(item?.question || item?.prompt || "").trim()));
   return {
     ...parsed,
     multipleChoice,
@@ -1410,32 +1529,39 @@ export async function generateHardQuiz(extractedText, { count = 3, avoidQuestion
   const content = data.choices?.[0]?.message?.content?.trim() || "";
   const sanitized = sanitizeJson(content);
   const parsed = parseJsonSafe(sanitized, "hard quiz JSON");
-  const items = (Array.isArray(parsed?.items) ? parsed.items : []).filter(
-    (item) => !isLowValueStudyPrompt(String(item?.question || item?.prompt || "").trim())
-  );
+  const items = (Array.isArray(parsed?.items) ? parsed.items : [])
+    .map(normalizeGeneratedItem)
+    .filter((item) => !isLowValueStudyPrompt(String(item?.question || item?.prompt || "").trim()));
   return { items };
 }
 
 export async function generateOxQuiz(extractedText, { avoidStatements = [] } = {}) {
-  const chunked = chunkText(extractedText, { maxChunks: 5, maxChunkLength: 1400 });
+  const hasPageTaggedContext = /\[p\.\d+\]/i.test(String(extractedText || ""));
+  const chunked = hasPageTaggedContext
+    ? limitText(extractedText, 12000)
+    : chunkText(extractedText, { maxChunks: 5, maxChunkLength: 1400 });
   let summaryForOx = "";
-  try {
-    summaryForOx = await generateSummary(extractedText, { chapterized: false });
-  } catch {
-    // Fallback to chunked context when summary generation fails.
+  if (!hasPageTaggedContext) {
+    try {
+      summaryForOx = await generateSummary(extractedText, { chapterized: false });
+    } catch {
+      // Fallback to chunked context when summary generation fails.
+    }
   }
 
   let highlightText = "";
-  try {
-    const hl = await generateHighlights(extractedText);
-    const hs = Array.isArray(hl?.highlights) ? hl.highlights : [];
-    if (hs.length > 0) {
-      highlightText = hs
-        .map((h, idx) => `${idx + 1}. ${h.sentence}${h.reason ? ` (reason: ${h.reason})` : ""}`)
-        .join("\n");
+  if (!hasPageTaggedContext) {
+    try {
+      const hl = await generateHighlights(extractedText);
+      const hs = Array.isArray(hl?.highlights) ? hl.highlights : [];
+      if (hs.length > 0) {
+        highlightText = hs
+          .map((h, idx) => `${idx + 1}. ${h.sentence}${h.reason ? ` (reason: ${h.reason})` : ""}`)
+          .join("\n");
+      }
+    } catch {
+      // Skip highlight enrichment when highlight generation fails.
     }
-  } catch {
-    // Skip highlight enrichment when highlight generation fails.
   }
 
   const contextForOx = summaryForOx && summaryForOx.length >= 60 ? summaryForOx : chunked;
@@ -1470,9 +1596,9 @@ export async function generateOxQuiz(extractedText, { avoidStatements = [] } = {
   const sanitized = sanitizeJson(content);
   try {
     const parsed = parseJsonSafe(sanitized, "O/X JSON");
-    const items = (Array.isArray(parsed?.items) ? parsed.items : []).filter(
-      (item) => !isLowValueStudyPrompt(String(item?.statement || item?.question || item?.prompt || "").trim())
-    );
+    const items = (Array.isArray(parsed?.items) ? parsed.items : [])
+      .map(normalizeGeneratedItem)
+      .filter((item) => !isLowValueStudyPrompt(String(item?.statement || item?.question || item?.prompt || "").trim()));
     if (items.length > 0) {
       return {
         ...parsed,

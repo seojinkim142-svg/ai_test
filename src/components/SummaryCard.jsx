@@ -5,6 +5,7 @@ import {
   MARKDOWN_MATH_REMARK_PLUGINS,
   normalizeMathMarkdown,
 } from "./MathMarkdown";
+import EvidencePageLinks from "./EvidencePageLinks";
 
 const AUTO_MATH_TOKEN_RE = /(?:\\[a-zA-Z]+|[\^_\u221A\u221E\u2264\u2265\u2260\u2248\u2211\u222B\u220F]|->|\u2192|<=|>=|!=|~=)/;
 const DEFAULT_SECTION_PAGE_CHARS = 2600;
@@ -354,7 +355,12 @@ function splitSummaryIntoPages(summary) {
   return packSectionChunksIntoPages(sectionChunks);
 }
 
-function SummaryCard({ summary, renderExportPages = false }) {
+function SummaryCard({
+  summary,
+  renderExportPages = false,
+  onResolveEvidence,
+  onJumpToEvidencePage,
+}) {
   const normalizedSummary = useMemo(
     () => normalizeMathMarkdown(sanitizeSummaryForMath(summary)).trim(),
     [summary]
@@ -443,6 +449,9 @@ function SummaryCard({ summary, renderExportPages = false }) {
   const currentPage = pages[safePageIndex] || normalizedSummary;
   const canGoPrev = safePageIndex > 0;
   const canGoNext = safePageIndex < totalPages - 1;
+  const canResolveEvidence =
+    typeof onResolveEvidence === "function" && typeof onJumpToEvidencePage === "function";
+  const evidenceRequestKey = `${summaryKey}:${safePageIndex}`;
 
   const goPrev = useCallback(() => {
     setPageIndexBySummary((prev) => {
@@ -589,6 +598,15 @@ function SummaryCard({ summary, renderExportPages = false }) {
             </span>
           </div>
         </div>
+
+        {canResolveEvidence && (
+          <EvidencePageLinks
+            requestKey={evidenceRequestKey}
+            onResolveEvidence={() => onResolveEvidence(currentPage)}
+            onJumpToPage={onJumpToEvidencePage}
+            className="mb-3"
+          />
+        )}
 
         <div className="relative flex items-center justify-center px-10 md:px-12">
           <button
