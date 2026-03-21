@@ -421,8 +421,8 @@ export const chunkMockExamPages = (orderedItems) => {
   const list = Array.isArray(orderedItems) ? orderedItems : [];
   if (!list.length) return [];
   const pages = [];
-  for (let index = 0; index < list.length; index += 2) {
-    pages.push(list.slice(index, index + 2));
+  for (let index = 0; index < list.length; index += 4) {
+    pages.push(list.slice(index, index + 4));
   }
   return pages;
 };

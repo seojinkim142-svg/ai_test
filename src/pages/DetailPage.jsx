@@ -1066,7 +1066,7 @@ export default function DetailPage({
                       {mockExamOrderedItems.length > 0 && (
                         <div ref={mockExamPrintRef} className="space-y-10 flex flex-col items-center">
                           {mockExamPages.map((pageItems, pageIndex) => {
-                            const pageStart = pageIndex * 2 + 1;
+                            const pageStart = pageIndex * 4 + 1;
                             return (
                               <section
                                 key={`mock-exam-page-${pageIndex}`}
