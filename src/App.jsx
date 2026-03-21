@@ -79,6 +79,8 @@ import {
   sanitizePremiumProfilePin,
   formatMockExamTitle,
   chunkMockExamPages,
+  toSortedUniquePages,
+  areNumberArraysEqual,
 } from "./utils/appStateHelpers";
 import { clearPaymentReturnPending, readPaymentReturnPending } from "./utils/paymentReturn";
 import {
@@ -96,10 +98,12 @@ import {
   collectQuestionTextsFromOxItems,
   collectQuestionTextsFromMockExams,
   createQuestionKeySet,
+  normalizeQuestionKey,
   isLowValueStudyPrompt,
   pushUniqueByQuestionKey,
   pickRandomUniqueByQuestionKey,
 } from "./utils/questionDedupe";
+import { findEvidenceMatches } from "./utils/evidenceMatcher";
 import {
   buildChapterRangeStorageKey,
   buildFolderAggregateDocId,
@@ -115,10 +119,13 @@ import {
 } from "./utils/appShared";
 import {
   formatPartialSummaryDefaultName,
+  normalizeReviewNoteEntries,
+  readReviewNotesFromHighlights,
   normalizeSavedPartialSummaryEntries,
   readPartialSummaryBundleFromHighlights,
   sanitizeUiText,
   writePartialSummaryBundleToHighlights,
+  writeReviewNotesToHighlights,
 } from "./utils/studyArtifacts";
 import {
   buildTutorPageCandidates,
@@ -142,6 +149,21 @@ const FEEDBACK_CATEGORY_OPTIONS = [
   { value: "feature", label: "\uAE30\uB2A5 \uC81C\uC548" },
   { value: "ux", label: "\uC0AC\uC6A9\uC131 \uC758\uACAC" },
 ];
+const REVIEW_NOTE_MOCK_EXAM_LIMIT = 10;
+const EXAM_CRAM_PREVIEW_LIMIT = 8;
+
+const getReviewNoteRecentTimestamp = (item) =>
+  new Date(item?.lastWrongAt || item?.updatedAt || item?.createdAt || 0).getTime() || 0;
+
+const sortReviewNotesByRecentWrong = (items) =>
+  [...(Array.isArray(items) ? items : [])].sort((left, right) => {
+    const timeDiff = getReviewNoteRecentTimestamp(right) - getReviewNoteRecentTimestamp(left);
+    if (timeDiff !== 0) return timeDiff;
+    const wrongDiff = Number(right?.wrongCount || 0) - Number(left?.wrongCount || 0);
+    if (wrongDiff !== 0) return wrongDiff;
+    return String(left?.prompt || "").localeCompare(String(right?.prompt || ""));
+  });
+
 const isMissingFeedbackTableError = (error) => {
   const code = String(error?.code || "").trim().toUpperCase();
   const message = String(error?.message || "").toLowerCase();
@@ -214,7 +236,9 @@ function App() {
   const [partialSummary, setPartialSummary] = useState("");
   const [partialSummaryRange, setPartialSummaryRange] = useState("");
   const [savedPartialSummaries, setSavedPartialSummaries] = useState([]);
+  const [reviewNotes, setReviewNotes] = useState([]);
   const [isSavedPartialSummaryOpen, setIsSavedPartialSummaryOpen] = useState(false);
+  const [reviewNotesChapterSelectionInput, setReviewNotesChapterSelectionInput] = useState("");
   const [quizChapterSelectionInput, setQuizChapterSelectionInput] = useState("");
   const [oxChapterSelectionInput, setOxChapterSelectionInput] = useState("");
   const [flashcardChapterSelectionInput, setFlashcardChapterSelectionInput] = useState("");
@@ -224,6 +248,9 @@ function App() {
   const [chapterRangeError, setChapterRangeError] = useState("");
   const [isDetectingChapterRanges, setIsDetectingChapterRanges] = useState(false);
   const [artifacts, setArtifacts] = useState(null);
+  const [summaryEvidencePageCandidates, setSummaryEvidencePageCandidates] = useState([]);
+  const [partialSummaryEvidencePageCandidates, setPartialSummaryEvidencePageCandidates] = useState([]);
+  const [activeEvidenceHighlight, setActiveEvidenceHighlight] = useState(null);
   const downloadCacheRef = useRef(new Map()); // storagePath -> { file, thumbnail, remoteUrl, bucket }
   const backfillInProgressRef = useRef(false);
   const summaryRequestedRef = useRef(false);
@@ -234,7 +261,9 @@ function App() {
   const extractTextForChapterSelectionRef = useRef(null);
   const chapterOneStartPageCacheRef = useRef(new Map()); // docId -> chapter 1 start page
   const questionSourceTextCacheRef = useRef(new Map()); // docId:chapter1 -> source text
+  const evidenceMatchCacheRef = useRef(new Map()); // docId:query:candidates -> evidence pages/snippet
   const docArtifactsCacheRef = useRef(new Map()); // docId -> artifacts snapshot
+  const artifactsHighlightsRef = useRef(null);
   const folderAggregateCacheRef = useRef(new Map()); // folderId -> { signature, item }
   const folderAggregateBuildRef = useRef(new Map()); // folderId -> Promise<item>
   const quizAutoRequestedRef = useRef(false);
@@ -247,6 +276,7 @@ function App() {
   const loadFoldersRequestSeqRef = useRef(0);
   const detailContainerRef = useRef(null);
   const summaryRef = useRef(null);
+  const reviewNotesRef = useRef([]);
   const mockExamPrintRef = useRef(null);
   const mockExamMenuRef = useRef(null);
   const mockExamMenuButtonRef = useRef(null);
@@ -500,6 +530,8 @@ function App() {
     setPartialSummary("");
     setPartialSummaryRange("");
     setSavedPartialSummaries([]);
+    setSummaryEvidencePageCandidates([]);
+    setPartialSummaryEvidencePageCandidates([]);
     setIsSavedPartialSummaryOpen(false);
     setQuizChapterSelectionInput("");
     setOxChapterSelectionInput("");
@@ -509,6 +541,7 @@ function App() {
     tutorSectionRangeCacheRef.current.clear();
     chapterScopeTextCacheRef.current.clear();
     summaryContextCacheRef.current.clear();
+    evidenceMatchCacheRef.current.clear();
     setQuizSets([]);
     setOxItems(null);
     setOxSelections({});
@@ -1460,6 +1493,9 @@ function App() {
       const normalizedDocId = String(docId || "").trim();
       if (!supabase || !user || !normalizedDocId) {
         setArtifacts(null);
+        setReviewNotes([]);
+        reviewNotesRef.current = [];
+        artifactsHighlightsRef.current = null;
         return null;
       }
       try {
@@ -1472,10 +1508,14 @@ function App() {
         };
         docArtifactsCacheRef.current.set(normalizedDocId, mapped);
         const partialBundle = readPartialSummaryBundleFromHighlights(mapped.highlights);
+        const reviewNoteEntries = readReviewNotesFromHighlights(mapped.highlights);
         setArtifacts(mapped);
+        artifactsHighlightsRef.current = mapped.highlights || null;
         setPartialSummary(partialBundle.summary);
         setPartialSummaryRange(partialBundle.range);
         setSavedPartialSummaries(partialBundle.library);
+        setReviewNotes(reviewNoteEntries);
+        reviewNotesRef.current = reviewNoteEntries;
         setIsSavedPartialSummaryOpen(false);
         if (mapped.summary) {
           setSummary(mapped.summary);
@@ -1781,6 +1821,8 @@ function App() {
       setPartialSummary("");
       setPartialSummaryRange("");
       setSavedPartialSummaries([]);
+      setSummaryEvidencePageCandidates([]);
+      setPartialSummaryEvidencePageCandidates([]);
       setIsSavedPartialSummaryOpen(false);
       setQuizChapterSelectionInput("");
       setOxChapterSelectionInput("");
@@ -1789,6 +1831,7 @@ function App() {
       tutorPageTextCacheRef.current.clear();
       tutorSectionRangeCacheRef.current.clear();
       chapterScopeTextCacheRef.current.clear();
+      evidenceMatchCacheRef.current.clear();
       setArtifacts(null);
       const extractStart =
         typeof performance !== "undefined" && typeof performance.now === "function"
@@ -2141,6 +2184,8 @@ function App() {
     setPartialSummary("");
     setPartialSummaryRange("");
     setSavedPartialSummaries([]);
+    setSummaryEvidencePageCandidates([]);
+    setPartialSummaryEvidencePageCandidates([]);
     setIsSavedPartialSummaryOpen(false);
     setQuizChapterSelectionInput("");
     setOxChapterSelectionInput("");
@@ -2149,6 +2194,7 @@ function App() {
     tutorPageTextCacheRef.current.clear();
     tutorSectionRangeCacheRef.current.clear();
     chapterScopeTextCacheRef.current.clear();
+    evidenceMatchCacheRef.current.clear();
       setMockExams([]);
       setMockExamStatus("");
       setMockExamError("");
@@ -2640,6 +2686,7 @@ function App() {
         ...partial,
       };
       setArtifacts(merged);
+      artifactsHighlightsRef.current = merged.highlights || null;
       if (normalizedDocId) {
         docArtifactsCacheRef.current.set(normalizedDocId, merged);
       }
@@ -2675,6 +2722,20 @@ function App() {
     },
     [artifacts?.highlights, persistArtifacts, savedPartialSummaries]
   );
+
+  useEffect(() => {
+    reviewNotesRef.current = Array.isArray(reviewNotes) ? reviewNotes : [];
+  }, [reviewNotes]);
+
+  useEffect(() => {
+    artifactsHighlightsRef.current = artifacts?.highlights || null;
+  }, [artifacts?.highlights]);
+
+  useEffect(() => {
+    reviewNotesRef.current = [];
+    setReviewNotes([]);
+    setReviewNotesChapterSelectionInput("");
+  }, [selectedFileId]);
 
   useEffect(() => {
     uploadedFilesRef.current = uploadedFiles;
@@ -2946,6 +3007,458 @@ function App() {
     return 1;
   }, [chapterRangeInput, file, isCurrentPdfDocument, pageInfo?.total, pageInfo?.used, selectedFileId]);
 
+  const buildBoundedPageRange = useCallback(
+    (start, end, cap = 180) => {
+      const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
+      if (!Number.isFinite(totalPages) || totalPages <= 0) return [];
+      const lo = Math.max(1, Math.min(totalPages, Number.parseInt(start, 10) || 1));
+      const hi = Math.max(lo, Math.min(totalPages, Number.parseInt(end, 10) || lo));
+      const pages = [];
+      for (let page = lo; page <= hi; page += 1) {
+        pages.push(page);
+        if (pages.length >= cap) break;
+      }
+      return pages;
+    },
+    [pageInfo?.total, pageInfo?.used]
+  );
+
+  const buildPageCandidatesFromRanges = useCallback(
+    (ranges, cap = 180) => {
+      const pages = [];
+      for (const range of Array.isArray(ranges) ? ranges : []) {
+        const nextPages = buildBoundedPageRange(range?.pageStart, range?.pageEnd, Math.max(1, cap - pages.length));
+        pages.push(...nextPages);
+        if (pages.length >= cap) break;
+      }
+      return toSortedUniquePages(pages).slice(0, cap);
+    },
+    [buildBoundedPageRange]
+  );
+
+  const getDefaultSummaryEvidencePages = useCallback(() => {
+    const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
+    if (!Number.isFinite(totalPages) || totalPages <= 0) return [];
+    const upperBound = Math.min(totalPages, Math.max(Number(pageInfo?.used || 0), 80));
+    return buildBoundedPageRange(1, upperBound, 180);
+  }, [buildBoundedPageRange, pageInfo?.total, pageInfo?.used]);
+
+  const loadEvidencePageEntries = useCallback(
+    async (requestedPages, { useOcr = false, maxCharsPerPage = 4200 } = {}) => {
+      if (!file || !isCurrentPdfDocument) return [];
+      const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
+      const normalizedPages = toSortedUniquePages(requestedPages);
+      if (!normalizedPages.length) return [];
+
+      const entriesByPage = new Map();
+      const missing = [];
+      const pageCacheKey = (pageNumber) => `${docKey}:${pageNumber}`;
+
+      for (const pageNumber of normalizedPages) {
+        const cached = tutorPageTextCacheRef.current.get(pageCacheKey(pageNumber));
+        const shouldReloadForOcr =
+          useOcr &&
+          (!cached || !cached.ocrUsed || String(cached.text || "").trim().length < 180);
+        if (!cached || !String(cached.text || "").trim() || shouldReloadForOcr) {
+          missing.push(pageNumber);
+          continue;
+        }
+        entriesByPage.set(pageNumber, {
+          pageNumber,
+          text: String(cached.text || "").trim(),
+          ocrUsed: Boolean(cached.ocrUsed),
+        });
+      }
+
+      if (missing.length > 0) {
+        const fetched = await extractPdfPageTexts(file, missing, {
+          useOcr,
+          ocrLang: "kor+eng",
+          maxCharsPerPage,
+        });
+        for (const pageEntry of fetched?.pages || []) {
+          const pageNumber = Number.parseInt(pageEntry?.pageNumber, 10);
+          const text = String(pageEntry?.text || "").trim();
+          if (!Number.isFinite(pageNumber) || !text) continue;
+          const payload = {
+            pageNumber,
+            text,
+            ocrUsed: Boolean(pageEntry?.ocrUsed),
+          };
+          tutorPageTextCacheRef.current.set(pageCacheKey(pageNumber), {
+            text,
+            ocrUsed: payload.ocrUsed,
+          });
+          entriesByPage.set(pageNumber, payload);
+        }
+      }
+
+      return normalizedPages.map((pageNumber) => entriesByPage.get(pageNumber)).filter((entry) => entry?.text);
+    },
+    [file, isCurrentPdfDocument, selectedFileId]
+  );
+
+  const buildPageTaggedSourceText = useCallback(
+    async (
+      baseText,
+      candidatePages,
+      {
+        maxPages = 18,
+        maxCharsPerPage = 900,
+        maxTotalChars = 15000,
+        includeFallbackText = true,
+      } = {}
+    ) => {
+      const fallbackText = String(baseText || "").trim();
+      const normalizedPages = toSortedUniquePages(candidatePages).slice(0, maxPages);
+      if (!normalizedPages.length || !file || !isCurrentPdfDocument) {
+        return fallbackText;
+      }
+
+      let entries = await loadEvidencePageEntries(normalizedPages, {
+        useOcr: false,
+        maxCharsPerPage,
+      });
+      if (!entries.length) {
+        entries = await loadEvidencePageEntries(normalizedPages, {
+          useOcr: true,
+          maxCharsPerPage,
+        });
+      }
+      if (!entries.length) {
+        return fallbackText;
+      }
+
+      const blocks = [];
+      let totalChars = 0;
+      for (const entry of entries) {
+        const pageNumber = Number.parseInt(entry?.pageNumber, 10);
+        const compactText = String(entry?.text || "")
+          .replace(/\r\n/g, "\n")
+          .replace(/\n{2,}/g, "\n")
+          .replace(/[ \t]{2,}/g, " ")
+          .trim()
+          .slice(0, maxCharsPerPage);
+        if (!Number.isFinite(pageNumber) || !compactText) continue;
+
+        const block = `[p.${pageNumber}]\n${compactText}`;
+        if (totalChars + block.length > maxTotalChars && blocks.length > 0) break;
+        blocks.push(block);
+        totalChars += block.length + 2;
+      }
+
+      let taggedContext = blocks.join("\n\n").trim();
+      if (!taggedContext) {
+        return fallbackText;
+      }
+
+      if (includeFallbackText && fallbackText) {
+        const remaining = Math.max(0, maxTotalChars - taggedContext.length - 24);
+        if (remaining >= 600) {
+          taggedContext = `${taggedContext}\n\n[overall_context]\n${fallbackText.slice(0, remaining)}`.trim();
+        }
+      }
+
+      return taggedContext;
+    },
+    [file, isCurrentPdfDocument, loadEvidencePageEntries]
+  );
+
+  const resolveEvidenceForText = useCallback(
+    async (queryText, { candidatePages = [], fallbackPages = [], fallbackEnd = 120, maxMatches = 3 } = {}) => {
+      if (!file || !isCurrentPdfDocument) {
+        return { pages: [], snippet: "" };
+      }
+
+      const normalizedQuery = String(queryText || "").trim();
+      if (!normalizedQuery) {
+        return { pages: [], snippet: "" };
+      }
+
+      const fallbackList =
+        Array.isArray(fallbackPages) && fallbackPages.length > 0
+          ? toSortedUniquePages(fallbackPages)
+          : buildBoundedPageRange(1, fallbackEnd, 180);
+      const normalizedCandidatePages =
+        Array.isArray(candidatePages) && candidatePages.length > 0
+          ? toSortedUniquePages(candidatePages)
+          : fallbackList;
+      if (!normalizedCandidatePages.length) {
+        return { pages: [], snippet: "" };
+      }
+
+      const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
+      const queryKey = normalizeQuestionKey(normalizedQuery).slice(0, 220);
+      const cacheKey = `${docKey}:${queryKey}:${normalizedCandidatePages.join(",")}`;
+      const cached = evidenceMatchCacheRef.current.get(cacheKey);
+      if (cached) return cached;
+
+      let entries = await loadEvidencePageEntries(normalizedCandidatePages, {
+        useOcr: false,
+      });
+      let matches = findEvidenceMatches(normalizedQuery, entries, { limit: maxMatches });
+      if (matches.length === 0) {
+        matches = findEvidenceMatches(normalizedQuery, entries, {
+          limit: maxMatches,
+          minScore: 4,
+        });
+      }
+      if (matches.length === 0) {
+        entries = await loadEvidencePageEntries(normalizedCandidatePages, {
+          useOcr: true,
+        });
+        matches = findEvidenceMatches(normalizedQuery, entries, { limit: maxMatches });
+        if (matches.length === 0) {
+          matches = findEvidenceMatches(normalizedQuery, entries, {
+            limit: maxMatches,
+            minScore: 4,
+          });
+        }
+      }
+
+      const result = {
+        pages: matches.map((item) => ({
+          pageNumber: item.pageNumber,
+          snippet: item.snippet,
+        })),
+        snippet: String(matches[0]?.snippet || "").trim(),
+      };
+      evidenceMatchCacheRef.current.set(cacheKey, result);
+      return result;
+    },
+    [buildBoundedPageRange, file, isCurrentPdfDocument, loadEvidencePageEntries, selectedFileId]
+  );
+
+  useEffect(() => {
+    if (!isCurrentPdfDocument) {
+      setPartialSummaryEvidencePageCandidates((prev) => (prev.length ? [] : prev));
+      return;
+    }
+
+    const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
+    if (!Number.isFinite(totalPages) || totalPages <= 0 || !String(partialSummaryRange || "").trim()) {
+      setPartialSummaryEvidencePageCandidates((prev) => (prev.length ? [] : prev));
+      return;
+    }
+
+    const parsed = parsePageSelectionInput(partialSummaryRange, totalPages);
+    const nextPages = parsed.error ? [] : toSortedUniquePages(parsed.pages);
+    setPartialSummaryEvidencePageCandidates((prev) =>
+      areNumberArraysEqual(prev, nextPages) ? prev : nextPages
+    );
+  }, [isCurrentPdfDocument, pageInfo?.total, pageInfo?.used, partialSummaryRange]);
+
+  useEffect(() => {
+    setActiveEvidenceHighlight(null);
+  }, [selectedFileId, file]);
+
+  const jumpToEvidencePage = useCallback(
+    (pageNumber, snippet = "", label = "") => {
+      if (!isCurrentPdfDocument) return;
+      const normalizedPage = Number.parseInt(pageNumber, 10);
+      if (!Number.isFinite(normalizedPage) || normalizedPage <= 0) return;
+      setActiveEvidenceHighlight({
+        pageNumber: normalizedPage,
+        snippet: String(snippet || "").trim(),
+        label: String(label || "").trim(),
+        requestId: `${normalizedPage}:${Date.now()}`,
+      });
+      handlePageChange(normalizedPage);
+    },
+    [handlePageChange, isCurrentPdfDocument]
+  );
+
+  const resolveSummaryEvidence = useCallback(
+    async (pageText) =>
+      resolveEvidenceForText(pageText, {
+        candidatePages: summaryEvidencePageCandidates,
+        fallbackPages: getDefaultSummaryEvidencePages(),
+        fallbackEnd: Math.max(Number(pageInfo?.used || 0), 80),
+      }),
+    [
+      getDefaultSummaryEvidencePages,
+      pageInfo?.used,
+      resolveEvidenceForText,
+      summaryEvidencePageCandidates,
+    ]
+  );
+
+  const buildQuizEvidenceQuery = useCallback((question) => {
+    if (!question || typeof question !== "object") return "";
+    const prompt = String(question?.question || question?.prompt || "").trim();
+    const explanation = String(question?.explanation || "").trim();
+    const answer = String(question?.answer || "").trim();
+    const choices = Array.isArray(question?.choices) ? question.choices : [];
+    const answerIndex = Number.isFinite(question?.answerIndex) ? question.answerIndex : -1;
+    const correctChoice =
+      answerIndex >= 0 && answerIndex < choices.length ? String(choices[answerIndex] || "").trim() : "";
+    const fallbackChoices =
+      !correctChoice && choices.length > 0
+        ? choices
+            .map((choice) => String(choice || "").trim())
+            .filter(Boolean)
+            .slice(0, 4)
+        : [];
+
+    return [prompt, correctChoice, answer, explanation, ...fallbackChoices]
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join(" ");
+  }, []);
+
+  const buildOxEvidenceQuery = useCallback((item) => {
+    if (!item || typeof item !== "object") return "";
+    const prompt = String(item?.statement || item?.prompt || item?.question || "").trim();
+    const explanation = String(item?.explanation || "").trim();
+    const evidence = String(item?.evidence || "").trim();
+    const answerText =
+      item?.answer === true || String(item?.answer || "").trim().toUpperCase() === "O"
+        ? "O 참 true"
+        : item?.answer === false || String(item?.answer || "").trim().toUpperCase() === "X"
+          ? "X 거짓 false"
+          : "";
+    return [prompt, answerText, explanation, evidence]
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join(" ");
+  }, []);
+
+  const buildMockExamEvidenceQuery = useCallback((item) => {
+    if (!item || typeof item !== "object") return "";
+    const prompt = String(item?.prompt || item?.question || item?.statement || "").trim();
+    const explanation = String(item?.explanation || "").trim();
+    const evidence = String(item?.evidence || "").trim();
+    const choices = Array.isArray(item?.choices) ? item.choices : [];
+    const answerIndex = Number.isFinite(item?.answerIndex) ? item.answerIndex : -1;
+    const correctChoice =
+      answerIndex >= 0 && answerIndex < choices.length ? String(choices[answerIndex] || "").trim() : "";
+    const answer = String(item?.answer || "").trim();
+    return [prompt, correctChoice, answer, explanation, evidence]
+      .map((part) => String(part || "").trim())
+      .filter(Boolean)
+      .join(" ");
+  }, []);
+
+  const parseExplicitEvidencePages = useCallback((value) => {
+    const pages = [];
+    const source = String(value || "");
+    for (const match of source.matchAll(/(?:p\.?\s*|page\s*|페이지\s*|쪽\s*)(\d{1,4})/gi)) {
+      const pageNumber = Number.parseInt(match?.[1], 10);
+      if (Number.isFinite(pageNumber) && pageNumber > 0) {
+        pages.push(pageNumber);
+      }
+    }
+    return toSortedUniquePages(pages);
+  }, []);
+
+  const buildStoredEvidenceResult = useCallback(
+    (item) => {
+      if (!item || typeof item !== "object") return null;
+
+      const evidenceObject =
+        item?.evidence && typeof item.evidence === "object" && !Array.isArray(item.evidence)
+          ? item.evidence
+          : null;
+      const evidenceText = typeof item?.evidence === "string" ? item.evidence : "";
+      const evidencePages = toSortedUniquePages([
+        ...(Array.isArray(item?.evidencePages) ? item.evidencePages : []),
+        ...(Array.isArray(evidenceObject?.pages) ? evidenceObject.pages : []),
+        ...parseExplicitEvidencePages(item?.evidenceLabel),
+        ...parseExplicitEvidencePages(item?.evidenceSnippet),
+        ...parseExplicitEvidencePages(evidenceText),
+        ...parseExplicitEvidencePages(evidenceObject?.label),
+        ...parseExplicitEvidencePages(evidenceObject?.snippet),
+      ]);
+      const evidenceLabel = String(item?.evidenceLabel || evidenceObject?.label || "").trim();
+      const evidenceSnippet = String(
+        item?.evidenceSnippet || evidenceObject?.snippet || evidenceText || ""
+      ).trim();
+      const snippet = evidenceSnippet || evidenceLabel;
+
+      if (!evidencePages.length && !snippet) return null;
+
+      return {
+        pages: evidencePages.map((pageNumber) => ({
+          pageNumber,
+          snippet,
+          label: evidenceLabel,
+        })),
+        snippet,
+      };
+    },
+    [parseExplicitEvidencePages]
+  );
+
+  const resolvePartialSummaryEvidence = useCallback(
+    async (pageText) => {
+      const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
+      const parsed =
+        totalPages > 0 && String(partialSummaryRange || "").trim()
+          ? parsePageSelectionInput(partialSummaryRange, totalPages)
+          : { error: "", pages: [] };
+      const fallbackPages = partialSummaryEvidencePageCandidates.length
+        ? partialSummaryEvidencePageCandidates
+        : parsed.error
+          ? []
+          : toSortedUniquePages(parsed.pages);
+
+      return resolveEvidenceForText(pageText, {
+        candidatePages: fallbackPages,
+        fallbackPages,
+        fallbackEnd: Number(pageInfo?.used || 0) || 30,
+      });
+    },
+    [
+      pageInfo?.total,
+      pageInfo?.used,
+      partialSummaryEvidencePageCandidates,
+      partialSummaryRange,
+      resolveEvidenceForText,
+    ]
+  );
+
+  const resolveQuizEvidence = useCallback(
+    async (question) => {
+      const stored = buildStoredEvidenceResult(question);
+      if (stored?.pages?.length) {
+        return stored;
+      }
+      return resolveEvidenceForText(buildQuizEvidenceQuery(question), {
+        candidatePages: question?.evidencePages,
+        fallbackEnd: 120,
+      });
+    },
+    [buildQuizEvidenceQuery, buildStoredEvidenceResult, resolveEvidenceForText]
+  );
+
+  const resolveOxEvidence = useCallback(
+    async (item) => {
+      const stored = buildStoredEvidenceResult(item);
+      if (stored?.pages?.length) {
+        return stored;
+      }
+      return resolveEvidenceForText(buildOxEvidenceQuery(item), {
+        candidatePages: item?.evidencePages,
+        fallbackEnd: 120,
+      });
+    },
+    [buildOxEvidenceQuery, buildStoredEvidenceResult, resolveEvidenceForText]
+  );
+
+  const resolveMockExamEvidence = useCallback(
+    async (item) => {
+      const stored = buildStoredEvidenceResult(item);
+      if (stored?.pages?.length) {
+        return stored;
+      }
+      return resolveEvidenceForText(buildMockExamEvidenceQuery(item), {
+        candidatePages: item?.evidencePages,
+        fallbackEnd: 120,
+      });
+    },
+    [buildMockExamEvidenceQuery, buildStoredEvidenceResult, resolveEvidenceForText]
+  );
+
   const resolveQuestionSourceText = useCallback(
     async ({ featureLabel, chapterSelectionInput, baseText }) => {
       const chapterSelectionRaw = String(chapterSelectionInput || "").trim();
@@ -2961,39 +3474,39 @@ function App() {
         return {
           text: String(scoped?.text || "").trim(),
           scopeLabel: String(scoped?.scopeLabel || "").trim(),
+          pageCandidates: toSortedUniquePages(scoped?.pageCandidates),
         };
       }
 
       let sourceText = String(baseText || "").trim();
       if (!file || !isCurrentPdfDocument) {
-        return { text: sourceText, scopeLabel: "" };
+        return { text: sourceText, scopeLabel: "", pageCandidates: [] };
       }
 
       const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
       if (!Number.isFinite(totalPages) || totalPages <= 0) {
-        return { text: sourceText, scopeLabel: "" };
+        return { text: sourceText, scopeLabel: "", pageCandidates: [] };
       }
 
       const chapterOneStartPage = await resolveChapterOneStartPage();
       if (!Number.isFinite(chapterOneStartPage) || chapterOneStartPage <= 1) {
-        return { text: sourceText, scopeLabel: "" };
+        return { text: sourceText, scopeLabel: "", pageCandidates: [] };
       }
 
       const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
       const cacheKey = `${docKey}:chapter1:${chapterOneStartPage}`;
       const cachedText = questionSourceTextCacheRef.current.get(cacheKey);
       if (typeof cachedText === "string" && cachedText.trim().length > 80) {
+        const cachedPages = buildBoundedPageRange(chapterOneStartPage, chapterOneStartPage + 119, 120);
         return {
           text: cachedText,
           scopeLabel: `chapter 1+ (p.${chapterOneStartPage}~)`,
+          pageCandidates: cachedPages,
         };
       }
 
       const pageEnd = Math.min(totalPages, chapterOneStartPage + 119);
-      const pages = [];
-      for (let page = chapterOneStartPage; page <= pageEnd; page += 1) {
-        pages.push(page);
-      }
+      const pages = buildBoundedPageRange(chapterOneStartPage, pageEnd, 120);
       setStatus(`${featureLabel}: 챕터 1 이전 머릿말을 제외하고 텍스트를 준비 중...`);
 
       let extracted = await extractPdfTextFromPages(file, pages, 52000, {
@@ -3018,9 +3531,18 @@ function App() {
       return {
         text: sourceText,
         scopeLabel: filteredApplied ? `chapter 1+ (p.${chapterOneStartPage}~)` : "",
+        pageCandidates: filteredApplied ? pages : [],
       };
     },
-    [file, isCurrentPdfDocument, pageInfo?.total, pageInfo?.used, resolveChapterOneStartPage, selectedFileId]
+    [
+      buildBoundedPageRange,
+      file,
+      isCurrentPdfDocument,
+      pageInfo?.total,
+      pageInfo?.used,
+      resolveChapterOneStartPage,
+      selectedFileId,
+    ]
   );
 
   const requestQuestions = async ({ force = false } = {}) => {
@@ -3057,6 +3579,12 @@ function App() {
       });
       const quizSourceText = String(scopedSource?.text || "").trim();
       const scopeLabel = String(scopedSource?.scopeLabel || "").trim();
+      const evidencePages = toSortedUniquePages(scopedSource?.pageCandidates);
+      const generationSourceText = await buildPageTaggedSourceText(quizSourceText, evidencePages, {
+        maxPages: 20,
+        maxCharsPerPage: 950,
+        maxTotalChars: 15000,
+      });
       if (!quizSourceText) {
         throw new Error("챕터 1 이후 텍스트를 찾지 못했습니다. 챕터 범위를 먼저 설정해주세요.");
       }
@@ -3083,7 +3611,7 @@ function App() {
         const requestSaCount = Math.min(5, Math.max(targetSaCount - nextShortAnswer.length, 0) + 1);
 
         const quiz = normalizeQuizPayload(
-          await generateQuiz(quizSourceText, {
+          await generateQuiz(generationSourceText || quizSourceText, {
             multipleChoiceCount: requestMcCount,
             shortAnswerCount: requestSaCount,
             avoidQuestions: avoidQuestionTexts,
@@ -3118,8 +3646,22 @@ function App() {
       }
 
       const trimmedQuiz = {
-        multipleChoice: nextMultipleChoice.slice(0, targetMcCount),
-        shortAnswer: nextShortAnswer.slice(0, targetSaCount),
+        multipleChoice: nextMultipleChoice.slice(0, targetMcCount).map((item) => ({
+          ...item,
+          evidencePages: toSortedUniquePages(
+            Array.isArray(item?.evidencePages) && item.evidencePages.length
+              ? item.evidencePages
+              : evidencePages
+          ),
+        })),
+        shortAnswer: nextShortAnswer.slice(0, targetSaCount).map((item) => ({
+          ...item,
+          evidencePages: toSortedUniquePages(
+            Array.isArray(item?.evidencePages) && item.evidencePages.length
+              ? item.evidencePages
+              : evidencePages
+          ),
+        })),
       };
       const newSet = {
         id: `quiz-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -3167,7 +3709,255 @@ function App() {
     await requestQuestions({ force: true });
   };
 
+  const persistReviewNotes = useCallback(
+    (updater) => {
+      const base = Array.isArray(reviewNotesRef.current) ? reviewNotesRef.current : [];
+      const nextRaw = typeof updater === "function" ? updater(base) : updater;
+      const next = normalizeReviewNoteEntries(nextRaw);
+      reviewNotesRef.current = next;
+      setReviewNotes(next);
+      const nextHighlights = writeReviewNotesToHighlights(artifactsHighlightsRef.current, next);
+      artifactsHighlightsRef.current = nextHighlights;
+      persistArtifacts({ highlights: nextHighlights });
+      return next;
+    },
+    [persistArtifacts]
+  );
+
+  const createBaseReviewNote = useCallback(
+    ({
+      sourceType,
+      sourceLabel,
+      prompt,
+      explanation = "",
+      evidencePages = [],
+      evidenceSnippet = "",
+      evidenceLabel = "",
+    }) => {
+      const promptText = String(prompt || "").trim();
+      const questionKey = normalizeQuestionKey(promptText);
+      const now = new Date().toISOString();
+      return {
+        id: `${sourceType}:${questionKey}`,
+        sourceType,
+        sourceLabel,
+        questionKey,
+        prompt: promptText,
+        explanation: String(explanation || "").trim(),
+        evidencePages: toSortedUniquePages(Array.isArray(evidencePages) ? evidencePages : []),
+        evidenceSnippet: String(evidenceSnippet || "").trim(),
+        evidenceLabel: String(evidenceLabel || "").trim(),
+        wrongCount: 1,
+        reviewCount: 0,
+        resolved: false,
+        createdAt: now,
+        updatedAt: now,
+        lastWrongAt: now,
+        lastCorrectAt: null,
+        hiddenAt: null,
+      };
+    },
+    []
+  );
+
+  const upsertWrongReviewNote = useCallback(
+    (note) => {
+      if (!note?.questionKey || !note?.sourceType) return;
+      const now = new Date().toISOString();
+      persistReviewNotes((prev) => {
+        const list = Array.isArray(prev) ? prev : [];
+        const existingIndex = list.findIndex(
+          (item) => item?.sourceType === note.sourceType && item?.questionKey === note.questionKey
+        );
+        if (existingIndex < 0) {
+          return [
+            {
+              ...note,
+              createdAt: note.createdAt || now,
+              updatedAt: now,
+              lastWrongAt: now,
+              lastCorrectAt: note.lastCorrectAt || null,
+            },
+            ...list,
+          ];
+        }
+
+        const existing = list[existingIndex];
+        const next = [...list];
+        next[existingIndex] = {
+          ...existing,
+          ...note,
+          id: existing.id || note.id,
+          createdAt: existing.createdAt || note.createdAt || now,
+          updatedAt: now,
+          lastWrongAt: now,
+          wrongCount: Math.max(1, Number(existing?.wrongCount || 0) + 1),
+          reviewCount: Number(existing?.reviewCount || 0),
+          resolved: false,
+          hiddenAt: null,
+        };
+        return next;
+      });
+    },
+    [persistReviewNotes]
+  );
+
+  const markReviewNoteCorrectByPrompt = useCallback(
+    (sourceType, prompt, userAnswerText = "", userAnswerValue = "") => {
+      const questionKey = normalizeQuestionKey(prompt);
+      if (!questionKey) return;
+      const now = new Date().toISOString();
+      persistReviewNotes((prev) =>
+        (Array.isArray(prev) ? prev : []).map((item) =>
+          item?.sourceType === sourceType && item?.questionKey === questionKey
+            ? {
+                ...item,
+                userAnswerText: String(userAnswerText || "").trim() || item.userAnswerText,
+                userAnswerValue:
+                  userAnswerValue !== undefined && userAnswerValue !== null && userAnswerValue !== ""
+                    ? userAnswerValue
+                    : item.userAnswerValue,
+                resolved: true,
+                updatedAt: now,
+                lastCorrectAt: now,
+              }
+            : item
+        )
+      );
+    },
+    [persistReviewNotes]
+  );
+
+  const handleReviewNoteAttempt = useCallback(
+    (item, attempt) => {
+      if (!item?.id || !attempt) return;
+      const now = new Date().toISOString();
+      persistReviewNotes((prev) =>
+        (Array.isArray(prev) ? prev : []).map((note) => {
+          if (note?.id !== item.id) return note;
+          if (attempt.isCorrect) {
+            return {
+              ...note,
+              userAnswerText: String(attempt.userAnswerText || "").trim() || note.userAnswerText,
+              userAnswerValue:
+                attempt.userAnswerValue !== undefined ? attempt.userAnswerValue : note.userAnswerValue,
+              resolved: true,
+              reviewCount: Number(note?.reviewCount || 0) + 1,
+              updatedAt: now,
+              lastCorrectAt: now,
+            };
+          }
+          return {
+            ...note,
+            userAnswerText: String(attempt.userAnswerText || "").trim() || note.userAnswerText,
+            userAnswerValue:
+              attempt.userAnswerValue !== undefined ? attempt.userAnswerValue : note.userAnswerValue,
+            resolved: false,
+            wrongCount: Math.max(1, Number(note?.wrongCount || 0) + 1),
+            reviewCount: Number(note?.reviewCount || 0) + 1,
+            updatedAt: now,
+            lastWrongAt: now,
+          };
+        })
+      );
+    },
+    [persistReviewNotes]
+  );
+
+  const handleToggleReviewNoteResolved = useCallback(
+    (noteId, resolved) => {
+      if (!noteId) return;
+      const now = new Date().toISOString();
+      persistReviewNotes((prev) =>
+        (Array.isArray(prev) ? prev : []).map((item) =>
+          item?.id === noteId
+            ? {
+                ...item,
+                resolved: Boolean(resolved),
+                updatedAt: now,
+                lastCorrectAt: resolved ? now : item.lastCorrectAt,
+              }
+            : item
+        )
+      );
+    },
+    [persistReviewNotes]
+  );
+
+  const handleDeleteReviewNote = useCallback(
+    (noteId) => {
+      if (!noteId) return;
+      const now = new Date().toISOString();
+      persistReviewNotes((prev) =>
+        (Array.isArray(prev) ? prev : []).map((item) =>
+          item?.id === noteId
+            ? {
+                ...item,
+                hiddenAt: now,
+                updatedAt: now,
+              }
+            : item
+        )
+      );
+    },
+    [persistReviewNotes]
+  );
+
+  const handleOxSelect = useCallback(
+    (qIdx, choice) => {
+      const currentSelection = oxSelections?.[qIdx];
+      if (currentSelection === "o" || currentSelection === "x") return;
+
+      setOxSelections((prev) => ({
+        ...prev,
+        [qIdx]: choice,
+      }));
+
+      const item = Array.isArray(oxItems) ? oxItems[qIdx] : null;
+      if (!item || (choice !== "o" && choice !== "x")) return;
+
+      const expected = item.answer === true ? "o" : "x";
+      const userAnswerText = choice === "o" ? "O" : "X";
+      const prompt = String(item?.statement || item?.prompt || item?.question || "").trim();
+      if (choice === expected) {
+        markReviewNoteCorrectByPrompt("ox", prompt, userAnswerText, choice === "o");
+        return;
+      }
+
+      upsertWrongReviewNote({
+        ...createBaseReviewNote({
+          sourceType: "ox",
+          sourceLabel: "O/X",
+          prompt,
+          explanation: item?.explanation,
+          evidencePages: item?.evidencePages,
+          evidenceSnippet: item?.evidenceSnippet || item?.evidence,
+          evidenceLabel: item?.evidenceLabel || "",
+        }),
+        correctAnswerText: item.answer ? "O" : "X",
+        correctAnswerValue: Boolean(item.answer),
+        userAnswerText,
+        userAnswerValue: choice === "o",
+      });
+    },
+    [
+      createBaseReviewNote,
+      markReviewNoteCorrectByPrompt,
+      oxItems,
+      oxSelections,
+      setOxSelections,
+      upsertWrongReviewNote,
+    ]
+  );
+
   const handleChoiceSelect = (setId, qIdx, choiceIdx) => {
+    const targetSet = quizSets.find((set) => set.id === setId);
+    const multipleChoice = Array.isArray(targetSet?.questions?.multipleChoice)
+      ? targetSet.questions.multipleChoice
+      : [];
+    const question = multipleChoice[qIdx];
+    if (targetSet?.revealedChoices?.[qIdx]) return;
+
     setQuizSets((prev) =>
       prev.map((set) =>
         set.id === setId
@@ -3179,6 +3969,36 @@ function App() {
           : set
       )
     );
+
+    if (!question) return;
+
+    const choices = Array.isArray(question?.choices) ? question.choices : [];
+    const prompt = String(question?.question || question?.prompt || "").trim();
+    const selectedChoiceText = String(choices?.[choiceIdx] || "").trim();
+    const answerIndex = Number.isFinite(question?.answerIndex) ? question.answerIndex : -1;
+    const correctChoiceText = String(choices?.[answerIndex] || "").trim();
+    if (choiceIdx === answerIndex) {
+      markReviewNoteCorrectByPrompt("quiz_multiple_choice", prompt, selectedChoiceText, choiceIdx);
+      return;
+    }
+
+    upsertWrongReviewNote({
+      ...createBaseReviewNote({
+        sourceType: "quiz_multiple_choice",
+        sourceLabel: "객관식",
+        prompt,
+        explanation: question?.explanation,
+        evidencePages: question?.evidencePages,
+        evidenceSnippet: question?.evidenceSnippet,
+        evidenceLabel: question?.evidenceLabel,
+      }),
+      choices,
+      answerIndex,
+      correctAnswerText: correctChoiceText,
+      correctAnswerValue: answerIndex,
+      userAnswerText: selectedChoiceText,
+      userAnswerValue: choiceIdx,
+    });
   };
 
   const handleShortAnswerChange = (setId, idx, value) => {
@@ -3192,25 +4012,58 @@ function App() {
   };
 
   const handleShortAnswerCheck = (setId, idx) => {
+    const targetSet = quizSets.find((set) => set.id === setId);
+    const shortAnswers = Array.isArray(targetSet?.questions?.shortAnswer)
+      ? targetSet.questions.shortAnswer
+      : [];
+    const target = shortAnswers[idx];
+    if (!target?.answer) return;
+
+    const user = String(targetSet?.shortAnswerInput?.[idx] || "").trim().toLowerCase();
+    const answer = String(target.answer).trim().toLowerCase();
+    const normalizedUser = user.replace(/\s+/g, "");
+    const normalizedAnswer = answer.replace(/\s+/g, "");
+    const existingResult = targetSet?.shortAnswerResult?.[idx];
+    if (existingResult?.submittedValue === normalizedUser) return;
+    const isCorrect = normalizedUser === normalizedAnswer;
+
     setQuizSets((prev) =>
       prev.map((set) => {
         const shortAnswers = Array.isArray(set.questions?.shortAnswer) ? set.questions.shortAnswer : [];
         const target = shortAnswers[idx];
         if (set.id !== setId || !target?.answer) return set;
-        const user = String(set.shortAnswerInput?.[idx] || "").trim().toLowerCase();
-        const answer = String(target.answer).trim().toLowerCase();
-        const normalizedUser = user.replace(/\s+/g, "");
-        const normalizedAnswer = answer.replace(/\s+/g, "");
-        const isCorrect = normalizedUser === normalizedAnswer;
         return {
           ...set,
           shortAnswerResult: {
             ...set.shortAnswerResult,
-            [idx]: { isCorrect, answer: target.answer },
+            [idx]: { isCorrect, answer: target.answer, submittedValue: normalizedUser },
           },
         };
       })
     );
+
+    const prompt = String(target?.question || target?.prompt || "").trim();
+    const userAnswerText = String(targetSet?.shortAnswerInput?.[idx] || "").trim();
+    if (isCorrect) {
+      markReviewNoteCorrectByPrompt("quiz_short_answer", prompt, userAnswerText, userAnswerText);
+      return;
+    }
+
+    upsertWrongReviewNote({
+      ...createBaseReviewNote({
+        sourceType: "quiz_short_answer",
+        sourceLabel: "주관식",
+        prompt,
+        explanation: target?.explanation,
+        evidencePages: target?.evidencePages,
+        evidenceSnippet: target?.evidenceSnippet,
+        evidenceLabel: target?.evidenceLabel,
+      }),
+      correctAnswerText: String(target?.answer || "").trim(),
+      correctAnswerValue: String(target?.answer || "").trim(),
+      userAnswerText,
+      userAnswerValue: userAnswerText,
+    });
   };
 
   const buildAdaptiveChapterSummaryRanges = (chapters) => {
@@ -3283,6 +4136,260 @@ function App() {
       return Math.max(pageLimit, inferredLimit);
     },
     [isCurrentPdfDocument, pageInfo.total, pageInfo.used]
+  );
+
+  const configuredReviewSections = useMemo(() => {
+    const raw = String(chapterRangeInput || "").trim();
+    if (!raw) return [];
+    const limit = resolveChapterRangeLimit(raw);
+    if (!limit) return [];
+    const parsed = parseChapterRangeSelectionInput(raw, limit);
+    if (parsed.error) return [];
+    return (Array.isArray(parsed.chapters) ? parsed.chapters : [])
+      .map((chapter, index) => {
+        const chapterNumber = Number.parseInt(chapter?.chapterNumber, 10);
+        const pageStart = Number.parseInt(chapter?.pageStart, 10);
+        const pageEnd = Number.parseInt(chapter?.pageEnd, 10);
+        if (!Number.isFinite(pageStart) || !Number.isFinite(pageEnd) || pageStart <= 0 || pageEnd < pageStart) {
+          return null;
+        }
+        const normalizedChapterNumber =
+          Number.isFinite(chapterNumber) && chapterNumber > 0 ? chapterNumber : index + 1;
+        return {
+          id: String(chapter?.id || `review-section-${normalizedChapterNumber}`),
+          chapterNumber: normalizedChapterNumber,
+          pageStart,
+          pageEnd,
+          label: `\uC139\uC158 ${normalizedChapterNumber}`,
+          detailLabel: `\uC139\uC158 ${normalizedChapterNumber} \u00B7 ${pageStart}-${pageEnd}p`,
+        };
+      })
+      .filter(Boolean);
+  }, [chapterRangeInput, resolveChapterRangeLimit]);
+
+  const reviewNotesWithSections = useMemo(() => {
+    const notes = Array.isArray(reviewNotes) ? reviewNotes : [];
+    return notes.map((item) => {
+      const evidencePages = toSortedUniquePages(item?.evidencePages);
+      const matchedSections = configuredReviewSections.filter((section) =>
+        evidencePages.some((pageNumber) => pageNumber >= section.pageStart && pageNumber <= section.pageEnd)
+      );
+      const sectionNumbers = matchedSections.map((section) => section.chapterNumber);
+      const sectionLabels = matchedSections.map((section) => section.detailLabel);
+      return {
+        ...item,
+        sectionNumbers,
+        sectionLabels,
+      };
+    });
+  }, [configuredReviewSections, reviewNotes]);
+
+  const selectReviewNotesBySection = useCallback(
+    (items, chapterSelectionInput = "") => {
+      const list = (Array.isArray(items) ? items : []).filter((item) => !item?.hiddenAt);
+      const cleaned = String(chapterSelectionInput || "").trim();
+      if (!cleaned) {
+        return {
+          items: list,
+          error: "",
+          selectedSectionNumbers: [],
+        };
+      }
+      if (!configuredReviewSections.length) {
+        return {
+          items: list,
+          error: "\uBA3C\uC800 \uC694\uC57D \uD0ED\uC5D0\uC11C \uCC55\uD130 \uBC94\uC704\uB97C \uC124\uC815\uD574\uC8FC\uC138\uC694.",
+          selectedSectionNumbers: [],
+        };
+      }
+
+      const selected = parseChapterNumberSelectionInput(cleaned, configuredReviewSections);
+      if (selected.error) {
+        return {
+          items: list,
+          error: "\uC139\uC158 \uBC94\uC704\uB97C \uB2E4\uC2DC \uD655\uC778\uD574\uC8FC\uC138\uC694. (\uC608: 1-3,5)",
+          selectedSectionNumbers: [],
+        };
+      }
+
+      const selectedNumberSet = new Set(selected.chapterNumbers);
+      return {
+        items: list.filter((item) =>
+          Array.isArray(item?.sectionNumbers) &&
+          item.sectionNumbers.some((chapterNumber) => selectedNumberSet.has(chapterNumber))
+        ),
+        error: "",
+        selectedSectionNumbers: selected.chapterNumbers,
+      };
+    },
+    [configuredReviewSections]
+  );
+
+  const reviewNotesPanelState = useMemo(() => {
+    const filtered = selectReviewNotesBySection(reviewNotesWithSections, reviewNotesChapterSelectionInput);
+    return {
+      ...filtered,
+      items: sortReviewNotesByRecentWrong(filtered.items),
+    };
+  }, [reviewNotesChapterSelectionInput, reviewNotesWithSections, selectReviewNotesBySection]);
+
+  const examCramState = useMemo(() => {
+    const filtered = selectReviewNotesBySection(reviewNotesWithSections, reviewNotesChapterSelectionInput);
+    const recentPending = sortReviewNotesByRecentWrong(filtered.items.filter((item) => !item?.resolved)).slice(
+      0,
+      EXAM_CRAM_PREVIEW_LIMIT
+    );
+    return {
+      ...filtered,
+      items: recentPending,
+      pendingCount: filtered.items.filter((item) => !item?.resolved).length,
+    };
+  }, [reviewNotesChapterSelectionInput, reviewNotesWithSections, selectReviewNotesBySection]);
+
+  const handleCreateReviewNotesMockExam = useCallback(
+    async ({
+      chapterSelectionInput = "",
+      titlePrefix = "\uC624\uB2F5\uB178\uD2B8",
+      sourceKind = "review_notes",
+      statusLabel = "\uC624\uB2F5\uB178\uD2B8",
+    } = {}) => {
+      if (isGeneratingMockExam) return;
+
+      const notes = Array.isArray(reviewNotesWithSections) ? reviewNotesWithSections : [];
+      const scoped = selectReviewNotesBySection(notes, chapterSelectionInput);
+      if (scoped.error) {
+        setMockExamError(scoped.error);
+        setMockExamStatus("");
+        return;
+      }
+
+      const pendingNotes = sortReviewNotesByRecentWrong(
+        scoped.items.filter((item) => item && !item.resolved)
+      );
+
+      if (!pendingNotes.length) {
+        setMockExamError(
+          scoped.selectedSectionNumbers.length > 0
+            ? "\uC120\uD0DD\uD55C \uC139\uC158\uC5D0 \uBCF5\uC2B5\uD560 \uCD5C\uADFC \uC624\uB2F5\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."
+            : "\uC624\uB2F5\uB178\uD2B8\uC5D0 \uBCF5\uC2B5\uD560 \uCD5C\uADFC \uC624\uB2F5\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."
+        );
+        setMockExamStatus("");
+        return;
+      }
+
+      if (AUTH_ENABLED && !user) {
+        setMockExamError("먼저 로그인해 주세요.");
+        setMockExamStatus("");
+        return;
+      }
+      if (!selectedFileId) {
+        setMockExamError("먼저 문서를 선택해 주세요.");
+        setMockExamStatus("");
+        return;
+      }
+
+      setIsGeneratingMockExam(true);
+      setMockExamError("");
+      setMockExamStatus(`${statusLabel} \uBAA8\uC758\uACE0\uC0AC \uC0DD\uC131 \uC911...`);
+
+      try {
+        const examItems = pendingNotes.slice(0, REVIEW_NOTE_MOCK_EXAM_LIMIT).map((note, index) => {
+          const base = {
+            order: index + 1,
+            prompt: String(note?.prompt || "").trim(),
+            explanation: String(note?.explanation || "").trim(),
+            evidencePages: toSortedUniquePages(note?.evidencePages),
+            evidenceSnippet: String(note?.evidenceSnippet || "").trim(),
+            evidenceLabel: String(note?.evidenceLabel || "").trim(),
+            evidence: String(note?.evidenceLabel || note?.evidenceSnippet || "").trim(),
+          };
+
+          if (note?.sourceType === "ox") {
+            return {
+              ...base,
+              type: "ox",
+              answer: note?.correctAnswerValue === true,
+            };
+          }
+
+          if (note?.sourceType === "quiz_short_answer") {
+            return {
+              ...base,
+              type: "quiz-short",
+              answer: String(note?.correctAnswerText || "").trim(),
+            };
+          }
+
+          return {
+            ...base,
+            type: "quiz",
+            choices: Array.isArray(note?.choices) ? note.choices : [],
+            answerIndex: Number.isFinite(note?.answerIndex) ? note.answerIndex : null,
+          };
+        });
+
+        const answerSheet = buildMockExamAnswerSheet(examItems);
+        const now = new Date();
+        const dateStamp = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
+        const nextIndex = mockExams.length + 1;
+        const title = `${dateStamp} ${titlePrefix} \uBAA8\uC758\uACE0\uC0AC ${nextIndex}`;
+        const payload = {
+          title,
+          items: examItems,
+          answerSheet,
+          source: {
+            kind: sourceKind,
+            totalReviewNotes: pendingNotes.length,
+            sectionNumbers: scoped.selectedSectionNumbers,
+            recentOnly: true,
+          },
+          generatedAt: now.toISOString(),
+        };
+
+        const saved = user
+          ? await saveMockExam({
+              userId: user.id,
+              docId: selectedFileId,
+              docName: file?.name || "",
+              title,
+              totalQuestions: examItems.length,
+              payload,
+            })
+          : {
+              id: createLocalEntityId("mock-exam"),
+              doc_id: selectedFileId,
+              doc_name: file?.name || "",
+              title,
+              total_questions: examItems.length,
+              payload,
+              created_at: now.toISOString(),
+            };
+
+        setMockExams((prev) => [saved, ...prev]);
+        setActiveMockExamId(saved.id);
+        setShowMockExamAnswers(false);
+        setPanelTab("mockExam");
+        setMockExamStatus(
+          `${examItems.length}\uBB38\uD56D ${statusLabel} \uBAA8\uC758\uACE0\uC0AC\uB97C \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4.`
+        );
+      } catch (err) {
+        setMockExamError(
+          `${statusLabel} \uBAA8\uC758\uACE0\uC0AC \uC0DD\uC131\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: ${err.message}`
+        );
+        setMockExamStatus("");
+      } finally {
+        setIsGeneratingMockExam(false);
+      }
+    },
+    [
+      file?.name,
+      isGeneratingMockExam,
+      mockExams.length,
+      reviewNotesWithSections,
+      selectReviewNotesBySection,
+      selectedFileId,
+      user,
+    ]
   );
 
   const extractNonPdfSlideSections = useCallback((sourceText) => {
@@ -3533,10 +4640,11 @@ function App() {
 
       const normalizedSelection = selectedNumbers.join(",");
       const scopeLabel = `chapter ${normalizedSelection}`;
+      const pageCandidates = buildPageCandidatesFromRanges(targetChapters, 180);
       const cacheKey = `${selectedFileId || file?.name || "doc"}::${chapterConfigRaw}::${normalizedSelection}`;
       const cached = chapterScopeTextCacheRef.current.get(cacheKey);
       if (cached) {
-        return { text: cached, scopeLabel };
+        return { text: cached, scopeLabel, pageCandidates };
       }
 
       setStatus(`${featureLabel}: 챕터 범위 텍스트 추출 중...`);
@@ -3569,9 +4677,10 @@ function App() {
       }
 
       chapterScopeTextCacheRef.current.set(cacheKey, scopedText);
-      return { text: scopedText, scopeLabel };
+      return { text: scopedText, scopeLabel, pageCandidates };
     },
     [
+      buildPageCandidatesFromRanges,
       chapterRangeInput,
       buildNonPdfChapterSectionsFromText,
       extractedText,
@@ -3677,6 +4786,7 @@ function App() {
       }
 
       let summarySourceText = extractedText;
+      let nextSummaryEvidencePages = isPdfSource ? getDefaultSummaryEvidencePages() : [];
       if (!customChapterSections) {
         const summaryCacheKey = selectedFileId || file?.name || null;
         const cachedSummaryText = summaryCacheKey
@@ -3692,12 +4802,15 @@ function App() {
             const extendedText = String(extended?.text || "").trim();
             if (extendedText.length > summarySourceText.length) {
               summarySourceText = extendedText;
+              nextSummaryEvidencePages = buildBoundedPageRange(1, Number(extended?.pagesUsed || 80), 180);
               summaryContextCacheRef.current.set(summaryCacheKey, extendedText);
             }
           } catch {
             // fallback to already extracted text
           }
         }
+      } else if (isPdfSource) {
+        nextSummaryEvidencePages = buildPageCandidatesFromRanges(customChapterSections, 180);
       }
 
       setStatus("AI로 요약을 생성하는 중...");
@@ -3710,6 +4823,7 @@ function App() {
           })
         : await generateSummary(summarySourceText);
       setSummary(summarized);
+      setSummaryEvidencePageCandidates(nextSummaryEvidencePages);
       setUsageCounts((prev) => ({ ...prev, summary: prev.summary + 1 }));
       setStatus("요약이 생성되었습니다.");
       persistArtifacts({ summary: summarized });
@@ -3873,6 +4987,7 @@ function App() {
       });
       setPartialSummary(summarized);
       setPartialSummaryRange(selectionLabel);
+      setPartialSummaryEvidencePageCandidates(toSortedUniquePages(parsed.pages));
       const nowIso = new Date().toISOString();
       const currentSaved = Array.isArray(savedPartialSummaries) ? savedPartialSummaries : [];
       const duplicate = currentSaved.find(
@@ -4110,6 +5225,13 @@ function App() {
       });
       const oxSourceText = String(scopedSource?.text || "").trim();
       const scopeLabel = String(scopedSource?.scopeLabel || "").trim();
+      const evidencePages = toSortedUniquePages(scopedSource?.pageCandidates);
+      const generationSourceText = await buildPageTaggedSourceText(oxSourceText, evidencePages, {
+        maxPages: 20,
+        maxCharsPerPage: 950,
+        maxTotalChars: 15000,
+        includeFallbackText: false,
+      });
       if (!oxSourceText) {
         throw new Error("챕터 1 이후 텍스트를 찾지 못했습니다. 챕터 범위를 먼저 설정해주세요.");
       }
@@ -4123,13 +5245,20 @@ function App() {
       const seenQuestionKeys = createQuestionKeySet(avoidStatementTexts);
 
       const { generateOxQuiz } = await getOpenAiService();
-      const ox = await generateOxQuiz(oxSourceText, {
+      const ox = await generateOxQuiz(generationSourceText || oxSourceText, {
         avoidStatements: avoidStatementTexts,
       });
       const rawItems = Array.isArray(ox?.items) ? ox.items : [];
-      const qualityRawItems = rawItems.filter(
-        (item) => !isLowValueStudyPrompt(getOxPromptText(item))
-      );
+      const qualityRawItems = rawItems
+        .filter((item) => !isLowValueStudyPrompt(getOxPromptText(item)))
+        .map((item) => ({
+          ...item,
+          evidencePages: toSortedUniquePages(
+            Array.isArray(item?.evidencePages) && item.evidencePages.length
+              ? item.evidencePages
+              : evidencePages
+          ),
+        }));
       const items = [];
       pushUniqueByQuestionKey(items, qualityRawItems, getOxPromptText, seenQuestionKeys, 10);
 
@@ -4150,7 +5279,11 @@ function App() {
       setOxExplanationOpen({});
       setStatus(scopeLabel ? `O/X 문제가 생성되었습니다. (${scopeLabel})` : "O/X 문제가 생성되었습니다.");
       setUsageCounts((prev) => ({ ...prev, ox: prev.ox + 1 }));
-      persistArtifacts({ ox });
+      persistArtifacts({
+        ox: {
+          items,
+        },
+      });
     } catch (err) {
       setError(`O/X 문제 생성에 실패했습니다: ${err.message}`);
     } finally {
@@ -4603,6 +5736,8 @@ function App() {
     const isPdfSource = isCurrentPdfDocument;
     let sourceText = "";
     let scopeLabel = "";
+    let scopeEvidencePages = [];
+    let generationSourceText = "";
     try {
       const scopedSource = await resolveQuestionSourceText({
         featureLabel: "모의고사",
@@ -4611,6 +5746,12 @@ function App() {
       });
       sourceText = String(scopedSource?.text || "").trim();
       scopeLabel = String(scopedSource?.scopeLabel || "").trim();
+      scopeEvidencePages = toSortedUniquePages(scopedSource?.pageCandidates);
+      generationSourceText = await buildPageTaggedSourceText(sourceText, scopeEvidencePages, {
+        maxPages: 24,
+        maxCharsPerPage: 950,
+        maxTotalChars: 17000,
+      });
     } catch (err) {
       setMockExamError(String(err?.message || "모의고사 텍스트 추출에 실패했습니다."));
       return;
@@ -4645,19 +5786,26 @@ function App() {
         }
 
         const [oxResult, quizResult] = await Promise.all([
-          ai.generateOxQuiz(sourceText, {
+          ai.generateOxQuiz(generationSourceText || sourceText, {
             avoidStatements: avoidMockQuestionTexts,
           }),
-          ai.generateQuiz(sourceText, {
+          ai.generateQuiz(generationSourceText || sourceText, {
             multipleChoiceCount: 4,
             shortAnswerCount: 1,
             avoidQuestions: avoidMockQuestionTexts,
           }),
         ]);
 
-        oxPool = (Array.isArray(oxResult?.items) ? oxResult.items : []).filter(
-          (item) => !isLowValueStudyPrompt(getOxPromptText(item))
-        );
+        oxPool = (Array.isArray(oxResult?.items) ? oxResult.items : [])
+          .map((item) => ({
+            ...item,
+            evidencePages: toSortedUniquePages(
+              Array.isArray(item?.evidencePages) && item.evidencePages.length
+                ? item.evidencePages
+                : scopeEvidencePages
+            ),
+          }))
+          .filter((item) => !isLowValueStudyPrompt(getOxPromptText(item)));
         const normalizedQuiz = normalizeQuizPayload(quizResult);
         const scopedMultipleChoice = Array.isArray(normalizedQuiz?.multipleChoice)
           ? normalizedQuiz.multipleChoice
@@ -4680,6 +5828,14 @@ function App() {
               choices,
             }),
             explanation,
+            evidencePages: toSortedUniquePages(
+              Array.isArray(question?.evidencePages) && question.evidencePages.length
+                ? question.evidencePages
+                : scopeEvidencePages
+            ),
+            evidenceSnippet: String(question?.evidenceSnippet || "").trim(),
+            evidenceLabel: String(question?.evidenceLabel || "").trim(),
+            evidence: String(question?.evidence || "").trim(),
           });
         });
         scopedShortAnswers.forEach((item) => {
@@ -4692,6 +5848,14 @@ function App() {
             prompt,
             answer: resolveShortAnswerText(item?.answer, explanation),
             explanation,
+            evidencePages: toSortedUniquePages(
+              Array.isArray(item?.evidencePages) && item.evidencePages.length
+                ? item.evidencePages
+                : scopeEvidencePages
+            ),
+            evidenceSnippet: String(item?.evidenceSnippet || "").trim(),
+            evidenceLabel: String(item?.evidenceLabel || "").trim(),
+            evidence: String(item?.evidence || "").trim(),
           });
         });
       } else {
@@ -4714,6 +5878,10 @@ function App() {
                 choices,
               }),
               explanation,
+              evidencePages: toSortedUniquePages(question?.evidencePages),
+              evidenceSnippet: String(question?.evidenceSnippet || "").trim(),
+              evidenceLabel: String(question?.evidenceLabel || "").trim(),
+              evidence: String(question?.evidence || "").trim(),
             });
           });
           shortAnswers.forEach((item) => {
@@ -4726,6 +5894,10 @@ function App() {
               prompt,
               answer: resolveShortAnswerText(item?.answer, explanation),
               explanation,
+              evidencePages: toSortedUniquePages(item?.evidencePages),
+              evidenceSnippet: String(item?.evidenceSnippet || "").trim(),
+              evidenceLabel: String(item?.evidenceLabel || "").trim(),
+              evidence: String(item?.evidence || "").trim(),
             });
           });
         });
@@ -4761,7 +5933,8 @@ function App() {
       for (let attempt = 0; attempt < maxHardAttempts; attempt += 1) {
         if (hardItems.length >= hardCount) break;
         const requestCount = Math.min(10, hardCount + attempt * 2 + 1);
-        const hardResult = await ai.generateHardQuiz(sourceText, {
+        const hardGenerationSource = generationSourceText || sourceText;
+        const hardResult = await ai.generateHardQuiz(hardGenerationSource, {
           count: requestCount,
           avoidQuestions: avoidMockQuestionTexts,
         });
@@ -4793,6 +5966,9 @@ function App() {
         answer: item?.answer === true ? "O" : "X",
         explanation: String(item?.explanation || "").trim(),
         evidence: String(item?.evidence || "").trim(),
+        evidencePages: toSortedUniquePages(item?.evidencePages),
+        evidenceSnippet: String(item?.evidenceSnippet || "").trim(),
+        evidenceLabel: String(item?.evidenceLabel || "").trim(),
       }));
 
       const mappedQuiz = pickedQuiz.map((item) => ({ ...item }));
@@ -4807,6 +5983,14 @@ function App() {
           choices: Array.isArray(item?.choices) ? item.choices : [],
         }),
         explanation: String(item?.explanation || "").trim(),
+        evidencePages: toSortedUniquePages(
+          Array.isArray(item?.evidencePages) && item.evidencePages.length
+            ? item.evidencePages
+            : scopeEvidencePages
+        ),
+        evidenceSnippet: String(item?.evidenceSnippet || "").trim(),
+        evidenceLabel: String(item?.evidenceLabel || "").trim(),
+        evidence: String(item?.evidence || "").trim(),
       }));
 
       const examItems = [...mappedOx, ...mappedQuiz, ...mappedHard].map((item, idx) => ({
@@ -4880,6 +6064,7 @@ function App() {
     quizSets,
     mockExamChapterSelectionInput,
     selectedFileId,
+    buildPageTaggedSourceText,
     getOpenAiService,
     resolveQuestionSourceText,
     user,
@@ -5128,6 +6313,7 @@ function App() {
     file,
     pageInfo,
     currentPage,
+    activeEvidenceHighlight,
     handlePageChange,
     handleDragStart,
     panelTab,
@@ -5170,6 +6356,10 @@ function App() {
     status: safeStatus,
     error: safeError,
     summaryRef,
+    jumpToEvidencePage,
+    resolveSummaryEvidence,
+    resolvePartialSummaryEvidence,
+    resolveMockExamEvidence,
     mockExams,
     mockExamMenuRef,
     mockExamMenuButtonRef,
@@ -5202,9 +6392,22 @@ function App() {
     quizMix,
     setQuizMix,
     quizSets,
+    reviewNotes: reviewNotesPanelState.items,
+    reviewNoteSections: configuredReviewSections,
+    reviewNotesSectionSelectionInput: reviewNotesChapterSelectionInput,
+    setReviewNotesSectionSelectionInput: setReviewNotesChapterSelectionInput,
+    reviewNotesSectionError: reviewNotesPanelState.error,
+    examCramItems: examCramState.items,
+    examCramPendingCount: examCramState.pendingCount,
+    examCramSectionError: examCramState.error,
+    resolveQuizEvidence,
     handleChoiceSelect,
     handleShortAnswerChange,
     handleShortAnswerCheck,
+    handleReviewNoteAttempt,
+    handleToggleReviewNoteResolved,
+    handleDeleteReviewNote,
+    handleCreateReviewNotesMockExam,
     regenerateQuiz,
     isLoadingOx,
     requestOxQuiz,
@@ -5212,7 +6415,9 @@ function App() {
     setOxChapterSelectionInput,
     regenerateOxQuiz,
     oxItems,
+    resolveOxEvidence,
     oxSelections,
+    handleOxSelect,
     setOxSelections,
     oxExplanationOpen,
     setOxExplanationOpen,

@@ -8,9 +8,11 @@ import {
   MARKDOWN_MATH_REMARK_PLUGINS,
   normalizeMathMarkdown,
 } from "../components/MathMarkdown";
+import EvidencePageLinks from "../components/EvidencePageLinks";
 import OxSection from "../components/OxSection";
 import PdfPreview from "../components/PdfPreview";
 import QuizSection from "../components/QuizSection";
+import ReviewNotesPanel from "../components/ReviewNotesPanel";
 import SummaryCard from "../components/SummaryCard";
 import { useQuizMixCarousel } from "../hooks/useQuizMixCarousel";
 import { LETTERS } from "../constants";
@@ -147,6 +149,7 @@ export default function DetailPage({
   file,
   pageInfo,
   currentPage,
+  activeEvidenceHighlight,
   handlePageChange,
   handleDragStart,
   panelTab,
@@ -187,6 +190,10 @@ export default function DetailPage({
   status,
   error,
   summaryRef,
+  jumpToEvidencePage,
+  resolveSummaryEvidence,
+  resolvePartialSummaryEvidence,
+  resolveMockExamEvidence,
   mockExams,
   mockExamMenuRef,
   mockExamMenuButtonRef,
@@ -219,9 +226,22 @@ export default function DetailPage({
   quizMix,
   setQuizMix,
   quizSets,
+  reviewNotes,
+  reviewNoteSections,
+  reviewNotesSectionSelectionInput,
+  setReviewNotesSectionSelectionInput,
+  reviewNotesSectionError,
+  examCramItems,
+  examCramPendingCount,
+  examCramSectionError,
+  resolveQuizEvidence,
   handleChoiceSelect,
   handleShortAnswerChange,
   handleShortAnswerCheck,
+  handleReviewNoteAttempt,
+  handleToggleReviewNoteResolved,
+  handleDeleteReviewNote,
+  handleCreateReviewNotesMockExam,
   regenerateQuiz,
   isLoadingOx,
   requestOxQuiz,
@@ -229,7 +249,9 @@ export default function DetailPage({
   setOxChapterSelectionInput,
   regenerateOxQuiz,
   oxItems,
+  resolveOxEvidence,
   oxSelections,
+  handleOxSelect,
   setOxSelections,
   oxExplanationOpen,
   setOxExplanationOpen,
@@ -348,6 +370,8 @@ export default function DetailPage({
         answer: String(item?.answer || "-").trim() || "-",
         explanation: String(item?.explanation || "").trim(),
         evidence: String(item?.evidence || "").trim(),
+        prompt: String(item?.prompt || "").trim(),
+        evidencePages: Array.isArray(item?.evidencePages) ? item.evidencePages : [],
       }));
     }
 
@@ -361,8 +385,10 @@ export default function DetailPage({
       return {
         number: idx + 1,
         answer,
+        prompt: String(item?.prompt || "").trim(),
         explanation: String(persisted?.explanation || item?.explanation || "").trim(),
         evidence: String(persisted?.evidence || item?.evidence || "").trim(),
+        evidencePages: Array.isArray(item?.evidencePages) ? item.evidencePages : [],
       };
     });
   }, [activeMockExam?.payload?.answerSheet, mockExamOrderedItems]);
@@ -385,6 +411,7 @@ export default function DetailPage({
     { id: "summary", label: "\uC694\uC57D" },
     { id: "quiz", label: "\uD034\uC988" },
     { id: "ox", label: "O/X" },
+    { id: "reviewNotes", label: "\uC624\uB2F5\uB178\uD2B8" },
     { id: "mockExam", label: "\uBAA8\uC758\uACE0\uC0AC" },
     { id: "flashcards", label: "\uCE74\uB4DC" },
     { id: "tutor", label: "AI \uD29C\uD130" },
@@ -444,6 +471,7 @@ export default function DetailPage({
           file={file}
           pageInfo={pageInfo}
           currentPage={currentPage}
+          evidenceHighlight={activeEvidenceHighlight}
           onPageChange={handlePageChange}
           previewText={extractedText}
           isLoadingText={isLoadingText}
@@ -473,7 +501,7 @@ export default function DetailPage({
       </div>
 
       <div className="flex min-w-0 flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
-        <div className="detail-tab-strip mobile-tab-row flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-1.5 shadow-lg shadow-black/30 md:grid md:grid-cols-6 md:px-3 md:py-2">
+        <div className="detail-tab-strip mobile-tab-row flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-1.5 shadow-lg shadow-black/30 md:grid md:grid-cols-7 md:px-3 md:py-2">
           {panelItems.map((item) => {
             const active = panelTab === item.id;
             return (
@@ -773,7 +801,10 @@ export default function DetailPage({
               {isLoadingSummary && <p className="mt-2 text-sm text-slate-300">{"\uC694\uC57D \uC0DD\uC131 \uC911..."}</p>}
               {!isLoadingSummary && summary && (
                 <div ref={summaryRef}>
-                  <SummaryCard summary={summary} renderExportPages={isExportingSummary} />
+                  <SummaryCard
+                    summary={summary}
+                    renderExportPages={isExportingSummary}
+                  />
                 </div>
               )}
               {!isLoadingSummary && !summary && (
@@ -866,7 +897,9 @@ export default function DetailPage({
                   )}
 
                   {partialSummary ? (
-                    <SummaryCard summary={partialSummary} />
+                    <SummaryCard
+                      summary={partialSummary}
+                    />
                   ) : (
                     <p className="mt-3 text-xs text-slate-400">
                       {
@@ -1033,8 +1066,7 @@ export default function DetailPage({
                       {mockExamOrderedItems.length > 0 && (
                         <div ref={mockExamPrintRef} className="space-y-10 flex flex-col items-center">
                           {mockExamPages.map((pageItems, pageIndex) => {
-                            const isFourGrid = pageItems.length === 4;
-                            const pageStart = pageIndex === 0 ? 1 : pageIndex === 1 ? 5 : 9;
+                            const pageStart = pageIndex * 2 + 1;
                             return (
                               <section
                                 key={`mock-exam-page-${pageIndex}`}
@@ -1049,17 +1081,15 @@ export default function DetailPage({
                                 </div>
                                 <div className="mt-3 border-t border-black" />
                                 <div
-                                  className={`relative mt-6 grid gap-8 ${
-                                    isFourGrid ? "grid-cols-2 grid-rows-2" : "grid-cols-2"
-                                  }`}
+                                  className="relative mt-6 grid grid-cols-2 gap-8"
                                   style={{
                                     minHeight: "900px",
-                                    gridAutoFlow: isFourGrid ? "column" : "row",
+                                    gridAutoFlow: "row",
                                   }}
                                 >
                                   <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-black/80" />
                                   {pageItems.map((item, idx) => {
-                                    const columnIndex = isFourGrid ? Math.floor(idx / 2) : idx % 2;
+                                    const columnIndex = idx % 2;
                                     const paddingClass = columnIndex === 0 ? "pr-6" : "pl-6";
                                     return (
                                       <div key={`mock-exam-cell-${pageIndex}-${idx}`} className={`${paddingClass} min-w-0`}>
@@ -1071,6 +1101,29 @@ export default function DetailPage({
                               </section>
                             );
                           })}
+                        </div>
+                      )}
+
+                      {mockExamOrderedItems.length > 0 && (
+                        <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+                          <p className="text-sm font-semibold text-emerald-200">문항별 근거 페이지</p>
+                          <div className="mt-3 space-y-3">
+                            {mockExamOrderedItems.map((item, idx) => (
+                              <div key={`mock-exam-evidence-${idx}`} className="rounded-xl bg-white/5 px-3 py-3">
+                                <p className="text-xs font-semibold text-emerald-100">{idx + 1}번 문항</p>
+                                {item?.prompt && (
+                                  <div className="mt-1">
+                                    {renderMockRichText(item.prompt, "text-xs text-slate-200")}
+                                  </div>
+                                )}
+                                <EvidencePageLinks
+                                  requestKey={`mock:${idx}:${String(item?.prompt || "").trim()}`}
+                                  onResolveEvidence={() => resolveMockExamEvidence?.(item)}
+                                  onJumpToPage={jumpToEvidencePage}
+                                />
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
 
@@ -1196,6 +1249,8 @@ export default function DetailPage({
                       title={`퀴즈 세트 ${idx + 1}`}
                       questions={set.questions}
                       summary={null}
+                      onResolveEvidence={resolveQuizEvidence}
+                      onJumpToEvidencePage={jumpToEvidencePage}
                       selectedChoices={set.selectedChoices}
                       revealedChoices={set.revealedChoices}
                       shortAnswerInput={set.shortAnswerInput}
@@ -1314,14 +1369,11 @@ export default function DetailPage({
                 <OxSection
                   title="O/X 퀴즈"
                   items={oxItems}
+                  onResolveEvidence={resolveOxEvidence}
+                  onJumpToEvidencePage={jumpToEvidencePage}
                   selections={oxSelections}
                   explanationsOpen={oxExplanationOpen}
-                  onSelect={(qIdx, choice) =>
-                    setOxSelections((prev) => ({
-                      ...prev,
-                      [qIdx]: choice,
-                    }))
-                  }
+                  onSelect={handleOxSelect}
                   onToggleExplanation={(qIdx) =>
                     setOxExplanationOpen((prev) => ({
                       ...prev,
@@ -1331,6 +1383,24 @@ export default function DetailPage({
                 />
               )}
             </div>
+          )}
+
+          {panelTab === "reviewNotes" && (
+            <ReviewNotesPanel
+              items={reviewNotes}
+              availableSections={reviewNoteSections}
+              sectionSelectionInput={reviewNotesSectionSelectionInput}
+              onSectionSelectionChange={setReviewNotesSectionSelectionInput}
+              sectionSelectionError={reviewNotesSectionError}
+              examCramItems={examCramItems}
+              examCramPendingCount={examCramPendingCount}
+              examCramSectionError={examCramSectionError}
+              onSubmitAttempt={handleReviewNoteAttempt}
+              onJumpToEvidencePage={jumpToEvidencePage}
+              onDelete={handleDeleteReviewNote}
+              onCreateMockExam={handleCreateReviewNotesMockExam}
+              isCreatingMockExam={isGeneratingMockExam}
+            />
           )}
 
           {panelTab === "flashcards" && (

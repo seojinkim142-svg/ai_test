@@ -1,7 +1,16 @@
 import { LETTERS } from "../constants";
+import EvidencePageLinks from "./EvidencePageLinks";
 import MathMarkdown from "./MathMarkdown";
 
-function MultipleChoiceItem({ question, idx, selectedChoice, revealed, onSelect }) {
+function MultipleChoiceItem({
+  question,
+  idx,
+  selectedChoice,
+  revealed,
+  onSelect,
+  onResolveEvidence,
+  onJumpToEvidencePage,
+}) {
   return (
     <article className="rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
       <div className="flex items-start justify-between gap-3">
@@ -12,26 +21,28 @@ function MultipleChoiceItem({ question, idx, selectedChoice, revealed, onSelect 
             className="summary-prose mt-1 max-w-none break-words text-sm text-slate-100 [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto"
           />
         </div>
-        <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-100">객관식</span>
+        <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-100">
+          객관식
+        </span>
       </div>
+
       <ul className="mt-3 space-y-2">
         {(question.choices || []).map((choice, cIdx) => {
           const isAnswer = cIdx === question.answerIndex;
           const isSelected = selectedChoice === cIdx;
-          const isRevealed = revealed;
-          const showState = isRevealed && isSelected;
+          const showState = revealed && isSelected;
           const isCorrectSelection = showState && isAnswer;
           const isWrongSelection = showState && !isAnswer;
 
           return (
             <li
-              key={choice}
+              key={`${idx}-${cIdx}-${choice}`}
               className={`flex cursor-pointer items-start gap-2 rounded-xl px-3 py-2 text-sm ring-1 transition ${
                 isCorrectSelection
                   ? "bg-emerald-500/20 text-emerald-50 ring-emerald-400/60"
-                : isWrongSelection
-                ? "bg-red-500/10 text-red-100 ring-red-400/40"
-                : "bg-white/5 text-slate-200 ring-white/5 hover:ring-emerald-300/40"
+                  : isWrongSelection
+                    ? "bg-red-500/10 text-red-100 ring-red-400/40"
+                    : "bg-white/5 text-slate-200 ring-white/5 hover:ring-emerald-300/40"
               }`}
               onClick={() => onSelect(idx, cIdx)}
             >
@@ -44,15 +55,25 @@ function MultipleChoiceItem({ question, idx, selectedChoice, revealed, onSelect 
           );
         })}
       </ul>
+
+      <EvidencePageLinks
+        requestKey={`quiz-mc:${idx}:${String(question?.question || "").trim()}`}
+        onResolveEvidence={() => onResolveEvidence?.(question)}
+        onJumpToPage={onJumpToEvidencePage}
+      />
+
       {revealed && (
         <div className="mt-3 flex flex-col gap-2 text-sm">
           {selectedChoice === question.answerIndex ? (
-            <p className="rounded-lg bg-emerald-500/15 px-3 py-2 text-emerald-50 ring-1 ring-emerald-400/40">정답입니다! 잘했어요.</p>
+            <p className="rounded-lg bg-emerald-500/15 px-3 py-2 text-emerald-50 ring-1 ring-emerald-400/40">
+              정답입니다. 잘하셨어요.
+            </p>
           ) : (
             <p className="rounded-lg bg-red-500/10 px-3 py-2 text-red-100 ring-1 ring-red-400/40">
               오답입니다. 정답: {LETTERS[question.answerIndex] || "-"}
             </p>
           )}
+
           {question.explanation && (
             <div className="rounded-lg bg-white/5 px-3 py-2 text-xs text-slate-200 ring-1 ring-white/10">
               <p className="mb-1 font-semibold text-slate-100">해설</p>
@@ -68,7 +89,17 @@ function MultipleChoiceItem({ question, idx, selectedChoice, revealed, onSelect 
   );
 }
 
-function ShortAnswer({ question, questionNumber, index, userInput, result, onChange, onCheck }) {
+function ShortAnswer({
+  question,
+  questionNumber,
+  index,
+  userInput,
+  result,
+  onChange,
+  onCheck,
+  onResolveEvidence,
+  onJumpToEvidencePage,
+}) {
   if (!question) return null;
 
   return (
@@ -81,18 +112,22 @@ function ShortAnswer({ question, questionNumber, index, userInput, result, onCha
             className="summary-prose mt-1 max-w-none break-words text-sm text-slate-100 [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto"
           />
         </div>
-        <span className="rounded-full bg-cyan-500/20 px-2 py-1 text-xs font-semibold text-cyan-100">주관식</span>
+        <span className="rounded-full bg-cyan-500/20 px-2 py-1 text-xs font-semibold text-cyan-100">
+          주관식
+        </span>
       </div>
+
       <div className="mt-3 flex flex-col gap-2">
         <input
           name="short-answer"
           type="text"
           value={userInput}
-          onChange={(e) => onChange(index, e.target.value)}
+          onChange={(event) => onChange(index, event.target.value)}
           className="w-full rounded-lg bg-slate-900/60 px-3 py-2 text-sm text-slate-100 ring-1 ring-white/10 focus:ring-emerald-400"
-          placeholder="정답을 입력해주세요"
+          placeholder="정답을 입력해 주세요"
         />
         <button
+          type="button"
           onClick={() => onCheck(index)}
           className="ghost-button inline-flex text-sm text-cyan-100"
           data-ghost-size="sm"
@@ -100,6 +135,13 @@ function ShortAnswer({ question, questionNumber, index, userInput, result, onCha
         >
           정답 확인
         </button>
+
+        <EvidencePageLinks
+          requestKey={`quiz-sa:${index}:${String(question?.question || "").trim()}`}
+          onResolveEvidence={() => onResolveEvidence?.(question)}
+          onJumpToPage={onJumpToEvidencePage}
+        />
+
         {result && (
           <div
             className={`rounded-lg px-3 py-2 text-sm ring-1 ${
@@ -108,7 +150,7 @@ function ShortAnswer({ question, questionNumber, index, userInput, result, onCha
                 : "bg-red-500/10 text-red-100 ring-red-400/40"
             }`}
           >
-            {result.isCorrect ? "정답입니다! 잘했어요." : `오답입니다. 정답: ${result.answer}`}
+            {result.isCorrect ? "정답입니다. 잘하셨어요." : `오답입니다. 정답: ${result.answer}`}
           </div>
         )}
       </div>
@@ -127,6 +169,8 @@ function QuizSection({
   onSelectChoice,
   onShortAnswerChange,
   onShortAnswerCheck,
+  onResolveEvidence,
+  onJumpToEvidencePage,
 }) {
   const multipleChoice = questions?.multipleChoice || [];
   const shortAnswers = Array.isArray(questions?.shortAnswer) ? questions.shortAnswer : [];
@@ -147,14 +191,16 @@ function QuizSection({
       {summary}
 
       <div className="mt-4 space-y-4">
-        {multipleChoice.map((q, idx) => (
+        {multipleChoice.map((question, idx) => (
           <MultipleChoiceItem
             key={`mc-${idx}`}
             idx={idx}
-            question={q}
+            question={question}
             selectedChoice={selectedChoices[idx]}
             revealed={revealedChoices[idx]}
             onSelect={onSelectChoice}
+            onResolveEvidence={onResolveEvidence}
+            onJumpToEvidencePage={onJumpToEvidencePage}
           />
         ))}
 
@@ -168,6 +214,8 @@ function QuizSection({
             result={shortAnswerResult?.[idx] || null}
             onChange={onShortAnswerChange}
             onCheck={onShortAnswerCheck}
+            onResolveEvidence={onResolveEvidence}
+            onJumpToEvidencePage={onJumpToEvidencePage}
           />
         ))}
       </div>
