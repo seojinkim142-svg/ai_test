@@ -119,11 +119,13 @@ import {
 } from "./utils/appShared";
 import {
   formatPartialSummaryDefaultName,
+  readExamCramFromHighlights,
   normalizeReviewNoteEntries,
   readReviewNotesFromHighlights,
   normalizeSavedPartialSummaryEntries,
   readPartialSummaryBundleFromHighlights,
   sanitizeUiText,
+  writeExamCramToHighlights,
   writePartialSummaryBundleToHighlights,
   writeReviewNotesToHighlights,
 } from "./utils/studyArtifacts";
@@ -135,6 +137,15 @@ import {
   parseChapterNumberSelectionInput,
   resolveTutorReplyText,
 } from "./utils/tutorHelpers";
+import {
+  collectExamCramQuizItems,
+  createQuizSetState,
+  EXAM_CRAM_PREVIEW_LIMIT,
+  isMissingFeedbackTableError,
+  mergeQuizWithLegacyOx,
+  REVIEW_NOTE_MOCK_EXAM_LIMIT,
+  sortReviewNotesByRecentWrong,
+} from "./utils/appFeatureHelpers";
 
 const AuthPanel = lazy(() => import("./components/AuthPanel"));
 const Header = lazy(() => import("./components/Header"));
@@ -149,30 +160,6 @@ const FEEDBACK_CATEGORY_OPTIONS = [
   { value: "feature", label: "\uAE30\uB2A5 \uC81C\uC548" },
   { value: "ux", label: "\uC0AC\uC6A9\uC131 \uC758\uACAC" },
 ];
-const REVIEW_NOTE_MOCK_EXAM_LIMIT = 10;
-const EXAM_CRAM_PREVIEW_LIMIT = 8;
-
-const getReviewNoteRecentTimestamp = (item) =>
-  new Date(item?.lastWrongAt || item?.updatedAt || item?.createdAt || 0).getTime() || 0;
-
-const sortReviewNotesByRecentWrong = (items) =>
-  [...(Array.isArray(items) ? items : [])].sort((left, right) => {
-    const timeDiff = getReviewNoteRecentTimestamp(right) - getReviewNoteRecentTimestamp(left);
-    if (timeDiff !== 0) return timeDiff;
-    const wrongDiff = Number(right?.wrongCount || 0) - Number(left?.wrongCount || 0);
-    if (wrongDiff !== 0) return wrongDiff;
-    return String(left?.prompt || "").localeCompare(String(right?.prompt || ""));
-  });
-
-const isMissingFeedbackTableError = (error) => {
-  const code = String(error?.code || "").trim().toUpperCase();
-  const message = String(error?.message || "").toLowerCase();
-  return (
-    code === "PGRST205" ||
-    (message.includes("could not find the table") && message.includes("user_feedback")) ||
-    (message.includes("relation") && message.includes("user_feedback"))
-  );
-};
 
 function App() {
   const [file, setFile] = useState(null);
@@ -190,7 +177,7 @@ function App() {
   const [theme, setTheme] = useState("dark");
   const [summary, setSummary] = useState("");
   const [quizSets, setQuizSets] = useState([]);
-  const [quizMix, setQuizMix] = useState({ multipleChoice: 4, shortAnswer: 1 });
+  const [quizMix, setQuizMix] = useState({ multipleChoice: 4, shortAnswer: 2, ox: 1 });
   const [oxItems, setOxItems] = useState(null);
   const [oxSelections, setOxSelections] = useState({});
   const [oxExplanationOpen, setOxExplanationOpen] = useState({});
@@ -198,6 +185,7 @@ function App() {
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [selectedFileId, setSelectedFileId] = useState(null);
+  const [pendingDocumentOpen, setPendingDocumentOpen] = useState(null);
   const [panelTab, setPanelTab] = useState("summary");
   const [splitPercent, setSplitPercent] = useState(50);
   const [isResizingSplit, setIsResizingSplit] = useState(false);
@@ -239,6 +227,12 @@ function App() {
   const [reviewNotes, setReviewNotes] = useState([]);
   const [isSavedPartialSummaryOpen, setIsSavedPartialSummaryOpen] = useState(false);
   const [reviewNotesChapterSelectionInput, setReviewNotesChapterSelectionInput] = useState("");
+  const [examCramContent, setExamCramContent] = useState("");
+  const [examCramUpdatedAt, setExamCramUpdatedAt] = useState("");
+  const [examCramScopeLabel, setExamCramScopeLabel] = useState("");
+  const [isGeneratingExamCram, setIsGeneratingExamCram] = useState(false);
+  const [examCramStatus, setExamCramStatus] = useState("");
+  const [examCramError, setExamCramError] = useState("");
   const [quizChapterSelectionInput, setQuizChapterSelectionInput] = useState("");
   const [oxChapterSelectionInput, setOxChapterSelectionInput] = useState("");
   const [flashcardChapterSelectionInput, setFlashcardChapterSelectionInput] = useState("");
@@ -258,6 +252,7 @@ function App() {
   const tutorPageTextCacheRef = useRef(new Map()); // docId:page -> { text, ocrUsed }
   const tutorSectionRangeCacheRef = useRef(new Map()); // docId:section:anchor -> range
   const chapterScopeTextCacheRef = useRef(new Map()); // scoped key -> text
+  const chapterSectionTextCacheRef = useRef(new Map()); // docId::chapterConfig -> extracted chapter sections
   const extractTextForChapterSelectionRef = useRef(null);
   const chapterOneStartPageCacheRef = useRef(new Map()); // docId -> chapter 1 start page
   const questionSourceTextCacheRef = useRef(new Map()); // docId:chapter1 -> source text
@@ -274,6 +269,7 @@ function App() {
   const loadUploadsRef = useRef(null);
   const loadUploadsRequestSeqRef = useRef(0);
   const loadFoldersRequestSeqRef = useRef(0);
+  const fileOpenRequestSeqRef = useRef(0);
   const detailContainerRef = useRef(null);
   const summaryRef = useRef(null);
   const reviewNotesRef = useRef([]);
@@ -328,6 +324,14 @@ function App() {
   const safeFlashcardError = useMemo(
     () => sanitizeUiText(flashcardError, "플래시카드 처리 중 오류가 발생했습니다."),
     [flashcardError]
+  );
+  const safeExamCramStatus = useMemo(
+    () => sanitizeUiText(examCramStatus, "시험 직전 정리가 준비되었습니다."),
+    [examCramStatus]
+  );
+  const safeExamCramError = useMemo(
+    () => sanitizeUiText(examCramError, "시험 직전 정리 처리 중 오류가 발생했습니다."),
+    [examCramError]
   );
   const activeDocumentKind = useMemo(() => detectSupportedDocumentKind(file), [file]);
   const isCurrentPdfDocument = useMemo(() => {
@@ -540,6 +544,7 @@ function App() {
     tutorPageTextCacheRef.current.clear();
     tutorSectionRangeCacheRef.current.clear();
     chapterScopeTextCacheRef.current.clear();
+    chapterSectionTextCacheRef.current.clear();
     summaryContextCacheRef.current.clear();
     evidenceMatchCacheRef.current.clear();
     setQuizSets([]);
@@ -1496,6 +1501,9 @@ function App() {
         setReviewNotes([]);
         reviewNotesRef.current = [];
         artifactsHighlightsRef.current = null;
+        setExamCramContent("");
+        setExamCramUpdatedAt("");
+        setExamCramScopeLabel("");
         return null;
       }
       try {
@@ -1509,34 +1517,39 @@ function App() {
         docArtifactsCacheRef.current.set(normalizedDocId, mapped);
         const partialBundle = readPartialSummaryBundleFromHighlights(mapped.highlights);
         const reviewNoteEntries = readReviewNotesFromHighlights(mapped.highlights);
+        const examCramBundle = readExamCramFromHighlights(mapped.highlights);
         setArtifacts(mapped);
         artifactsHighlightsRef.current = mapped.highlights || null;
         setPartialSummary(partialBundle.summary);
         setPartialSummaryRange(partialBundle.range);
         setSavedPartialSummaries(partialBundle.library);
         setReviewNotes(reviewNoteEntries);
+        setExamCramContent(examCramBundle.content);
+        setExamCramUpdatedAt(examCramBundle.updatedAt || "");
+        setExamCramScopeLabel(examCramBundle.scopeLabel);
         reviewNotesRef.current = reviewNoteEntries;
         setIsSavedPartialSummaryOpen(false);
         if (mapped.summary) {
           setSummary(mapped.summary);
+          summaryContextCacheRef.current.set(normalizedDocId, String(mapped.summary || "").trim());
           summaryRequestedRef.current = true;
         }
-        if (mapped.quiz) {
-          const normalizedQuiz = normalizeQuizPayload(mapped.quiz);
-          const cachedSet = {
-            id: `quiz-cached-${normalizedDocId}`,
-            questions: normalizedQuiz,
-            selectedChoices: {},
-            revealedChoices: {},
-            shortAnswerInput: {},
-            shortAnswerResult: {},
-          };
+        if (mapped.quiz || mapped.ox) {
+          const normalizedQuiz = mergeQuizWithLegacyOx(mapped.quiz, mapped.ox);
+          const cachedSet = createQuizSetState(
+            normalizedQuiz,
+            `quiz-cached-${normalizedDocId}`
+          );
           setQuizSets([cachedSet]);
+          setOxItems(
+            normalizedQuiz.ox.length > 0
+              ? normalizedQuiz.ox
+              : Array.isArray(mapped.ox?.items)
+                ? mapped.ox.items
+                : []
+          );
           quizAutoRequestedRef.current = true;
-        }
-        if (mapped.ox) {
-          setOxItems(mapped.ox?.items || []);
-          oxAutoRequestedRef.current = true;
+          oxAutoRequestedRef.current = Boolean(normalizedQuiz.ox.length || mapped.ox);
         }
         return mapped;
       } catch (err) {
@@ -1760,26 +1773,48 @@ function App() {
   const processSelectedFile = useCallback(
     async (item, { pushState = true } = {}) => {
       if (!item) return;
+      const requestSeq = fileOpenRequestSeqRef.current + 1;
+      fileOpenRequestSeqRef.current = requestSeq;
       let resolvedItem = item;
       const isFolderAggregate = Boolean(resolvedItem?.folderAggregate);
+      const nextDocId = resolvedItem.id;
+      setPendingDocumentOpen({
+        id: nextDocId,
+        name: String(resolvedItem?.name || resolvedItem?.file?.name || "문서").trim() || "문서",
+      });
       if (!isFolderAggregate && !resolvedItem.file) {
         try {
           resolvedItem = await ensureFileForItem(resolvedItem);
+          if (fileOpenRequestSeqRef.current !== requestSeq) return;
         } catch (err) {
+          if (fileOpenRequestSeqRef.current !== requestSeq) return;
+          setPendingDocumentOpen(null);
           setError(`파일을 불러오지 못했습니다. ${err.message}`);
           return;
         }
       }
-      if (!resolvedItem?.file) return;
+      if (!resolvedItem?.file) {
+        if (fileOpenRequestSeqRef.current === requestSeq) {
+          setPendingDocumentOpen(null);
+        }
+        return;
+      }
 
       const targetFile = isFolderAggregate ? resolvedItem.file : normalizeSupportedFile(resolvedItem.file);
-      if (!(targetFile instanceof File)) return;
+      if (!(targetFile instanceof File)) {
+        if (fileOpenRequestSeqRef.current === requestSeq) {
+          setPendingDocumentOpen(null);
+        }
+        return;
+      }
       const targetFileKind = detectSupportedDocumentKind(targetFile);
       if (!targetFileKind) {
+        if (fileOpenRequestSeqRef.current === requestSeq) {
+          setPendingDocumentOpen(null);
+        }
         setError("지원하지 않는 파일 형식입니다. PDF, DOCX, PPTX만 지원합니다.");
         return;
       }
-      const nextDocId = resolvedItem.id;
       const savedChapterRangeInput = isPdfDocumentKind(targetFileKind)
         ? loadSavedChapterRangeInput(nextDocId)
         : "";
@@ -1812,6 +1847,7 @@ function App() {
       setDocumentRemoteUrl(isFolderAggregate ? "" : String(resolvedItem.remoteUrl || "").trim());
       setFile(targetFile);
       setSelectedFileId(nextDocId);
+      setPendingDocumentOpen(null);
       setPanelTab("summary");
       resetQuizState();
       summaryRequestedRef.current = false;
@@ -1831,6 +1867,7 @@ function App() {
       tutorPageTextCacheRef.current.clear();
       tutorSectionRangeCacheRef.current.clear();
       chapterScopeTextCacheRef.current.clear();
+      chapterSectionTextCacheRef.current.clear();
       evidenceMatchCacheRef.current.clear();
       setArtifacts(null);
       const extractStart =
@@ -1868,6 +1905,7 @@ function App() {
         let loaded = null;
         if (isFolderAggregate) {
           loaded = await artifactsPromise;
+          if (fileOpenRequestSeqRef.current !== requestSeq) return;
           const aggregateText = String(resolvedItem.aggregateText || "").trim();
           const aggregatePageInfo = resolvedItem.aggregatePageInfo || { used: 0, total: 0 };
           const aggregateThumbnail = resolvedItem.aggregateThumbnail || resolvedItem.thumbnail || null;
@@ -1881,18 +1919,38 @@ function App() {
           });
           setThumbnailUrl(aggregateThumbnail);
         } else {
-          const [loadedArtifacts, textResult, thumb] = await Promise.all([
+          const textExtractOptions = {
+            pageLimit: 30,
+            maxLength: 12000,
+            useOcr: false,
+          };
+          const [loadedArtifacts, initialTextResult, thumb] = await Promise.all([
             artifactsPromise,
-            extractDocumentText(targetFile, {
-              pageLimit: 30,
-              maxLength: 12000,
-              useOcr: isPdfDocumentKind(targetFileKind),
-              ocrLang: "kor+eng",
-              onOcrProgress: (message) => setStatus(message),
-            }),
+            extractDocumentText(targetFile, textExtractOptions),
             generateDocumentThumbnail(targetFile),
           ]);
+          if (fileOpenRequestSeqRef.current !== requestSeq) return;
           loaded = loadedArtifacts;
+          const hasSavedStudyArtifacts = Boolean(
+            loadedArtifacts?.summary || loadedArtifacts?.quiz || loadedArtifacts?.ox
+          );
+          let textResult = initialTextResult;
+          const initialText = String(initialTextResult?.text || "").trim();
+
+          if (
+            isPdfDocumentKind(targetFileKind) &&
+            !hasSavedStudyArtifacts &&
+            !initialText
+          ) {
+            textResult = await extractDocumentText(targetFile, {
+              ...textExtractOptions,
+              useOcr: true,
+              ocrLang: "kor+eng",
+              onOcrProgress: (message) => setStatus(message),
+            });
+            if (fileOpenRequestSeqRef.current !== requestSeq) return;
+          }
+
           const { text, pagesUsed, totalPages } = textResult;
           setExtractedText(text);
           setPreviewText(text);
@@ -1911,10 +1969,12 @@ function App() {
         );
         setError("");
         await Promise.all([loadMockExams(nextDocId), loadFlashcards(nextDocId)]);
+        if (fileOpenRequestSeqRef.current !== requestSeq) return;
         if (loaded?.summary) {
           setStatus(isFolderAggregate ? "저장된 폴더 요약을 불러왔습니다." : "Loaded saved summary.");
         }
       } catch (err) {
+        if (fileOpenRequestSeqRef.current !== requestSeq) return;
         setError(
           isFolderAggregate
             ? `폴더 전체 요약본을 준비하지 못했습니다: ${err.message}`
@@ -1925,12 +1985,16 @@ function App() {
         setPreviewText("");
         setPageInfo({ used: 0, total: 0 });
       } finally {
-        setIsLoadingText(false);
+        if (fileOpenRequestSeqRef.current === requestSeq) {
+          setPendingDocumentOpen(null);
+          setIsLoadingText(false);
+        }
       }
     },
     [
       currentPage,
       ensureFileForItem,
+      fileOpenRequestSeqRef,
       loadSavedChapterRangeInput,
       loadArtifacts,
       loadFlashcards,
@@ -2157,12 +2221,13 @@ function App() {
     ]
   );
 
-  const showDetail = Boolean(file && selectedFileId);
+  const showDetail = Boolean(selectedFileId || pendingDocumentOpen?.id);
   const shouldShowPremiumProfilePicker = Boolean(
     user && isPremiumTier && !loadingTier && showPremiumProfilePicker
   );
 
   const goBackToList = useCallback(() => {
+    fileOpenRequestSeqRef.current += 1;
     if (selectedFileId) {
       savePageProgressSnapshot({
         docId: selectedFileId,
@@ -2174,6 +2239,7 @@ function App() {
       URL.revokeObjectURL(pdfUrl);
     }
     setSelectedFileId(null);
+    setPendingDocumentOpen(null);
     setFile(null);
       setPdfUrl(null);
       setDocumentRemoteUrl("");
@@ -2194,6 +2260,7 @@ function App() {
     tutorPageTextCacheRef.current.clear();
     tutorSectionRangeCacheRef.current.clear();
     chapterScopeTextCacheRef.current.clear();
+    chapterSectionTextCacheRef.current.clear();
     evidenceMatchCacheRef.current.clear();
       setMockExams([]);
       setMockExamStatus("");
@@ -2634,13 +2701,12 @@ function App() {
   const handleSelectFile = useCallback(
     async (item) => {
       try {
-        const ensured = await ensureFileForItemRef.current(item);
-        await processSelectedFileRef.current(ensured);
+        await processSelectedFileRef.current(item);
       } catch (err) {
         setError(`?좏깮???뚯씪???щ뒗 ???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       }
     },
-    [ensureFileForItemRef, processSelectedFileRef]
+    [processSelectedFileRef]
   );
 
   const handleSelectFolderSummary = useCallback(
@@ -2723,6 +2789,18 @@ function App() {
     [artifacts?.highlights, persistArtifacts, savedPartialSummaries]
   );
 
+  const persistExamCramBundle = useCallback(
+    ({ content = "", scopeLabel = "", updatedAt = new Date().toISOString() } = {}) => {
+      const nextHighlights = writeExamCramToHighlights(artifacts?.highlights, {
+        content,
+        scopeLabel,
+        updatedAt,
+      });
+      persistArtifacts({ highlights: nextHighlights });
+    },
+    [artifacts?.highlights, persistArtifacts]
+  );
+
   useEffect(() => {
     reviewNotesRef.current = Array.isArray(reviewNotes) ? reviewNotes : [];
   }, [reviewNotes]);
@@ -2735,6 +2813,12 @@ function App() {
     reviewNotesRef.current = [];
     setReviewNotes([]);
     setReviewNotesChapterSelectionInput("");
+    setIsGeneratingExamCram(false);
+    setExamCramContent("");
+    setExamCramUpdatedAt("");
+    setExamCramScopeLabel("");
+    setExamCramStatus("");
+    setExamCramError("");
   }, [selectedFileId]);
 
   useEffect(() => {
@@ -3120,12 +3204,6 @@ function App() {
         maxCharsPerPage,
       });
       if (!entries.length) {
-        entries = await loadEvidencePageEntries(normalizedPages, {
-          useOcr: true,
-          maxCharsPerPage,
-        });
-      }
-      if (!entries.length) {
         return fallbackText;
       }
 
@@ -3494,6 +3572,11 @@ function App() {
       }
 
       const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
+      const cachedSummaryText = String(summaryContextCacheRef.current.get(docKey) || "").trim();
+      const usedSummaryCache = cachedSummaryText.length > sourceText.length;
+      if (usedSummaryCache) {
+        sourceText = cachedSummaryText;
+      }
       const cacheKey = `${docKey}:chapter1:${chapterOneStartPage}`;
       const cachedText = questionSourceTextCacheRef.current.get(cacheKey);
       if (typeof cachedText === "string" && cachedText.trim().length > 80) {
@@ -3507,21 +3590,22 @@ function App() {
 
       const pageEnd = Math.min(totalPages, chapterOneStartPage + 119);
       const pages = buildBoundedPageRange(chapterOneStartPage, pageEnd, 120);
+      const initialPageBudget = Math.max(0, Number(pageInfo?.used || 0));
+      const hasBaseText = sourceText.length >= 600;
+      if (hasBaseText && (initialPageBudget >= chapterOneStartPage || usedSummaryCache)) {
+        return {
+          text: sourceText,
+          scopeLabel: "",
+          pageCandidates: pages,
+        };
+      }
       setStatus(`${featureLabel}: 챕터 1 이전 머릿말을 제외하고 텍스트를 준비 중...`);
 
-      let extracted = await extractPdfTextFromPages(file, pages, 52000, {
+      const extracted = await extractPdfTextFromPages(file, pages, 52000, {
         useOcr: false,
       });
-      let filteredText = String(extracted?.text || "").trim();
+      const filteredText = String(extracted?.text || "").trim();
       let filteredApplied = false;
-      if (!filteredText) {
-        extracted = await extractPdfTextFromPages(file, pages, 52000, {
-          useOcr: true,
-          ocrLang: "kor+eng",
-          onOcrProgress: (message) => setStatus(message),
-        });
-        filteredText = String(extracted?.text || "").trim();
-      }
       if (filteredText) {
         questionSourceTextCacheRef.current.set(cacheKey, filteredText);
         sourceText = filteredText;
@@ -3531,15 +3615,15 @@ function App() {
       return {
         text: sourceText,
         scopeLabel: filteredApplied ? `chapter 1+ (p.${chapterOneStartPage}~)` : "",
-        pageCandidates: filteredApplied ? pages : [],
+        pageCandidates: filteredApplied || sourceText ? pages : [],
       };
     },
     [
       buildBoundedPageRange,
       file,
       isCurrentPdfDocument,
-      pageInfo?.total,
       pageInfo?.used,
+      pageInfo?.total,
       resolveChapterOneStartPage,
       selectedFileId,
     ]
@@ -3596,27 +3680,53 @@ function App() {
       const historicalMockTexts = collectQuestionTextsFromMockExams(mockExams);
       const avoidQuestionTexts = dedupeQuestionTexts([...historicalQuizTexts, ...historicalMockTexts]).slice(0, 80);
       const seenQuestionKeys = createQuestionKeySet(avoidQuestionTexts);
+      const historicalOxTexts = collectQuestionTextsFromOxItems(oxItems);
+      const avoidStatementTexts = dedupeQuestionTexts([...historicalOxTexts, ...historicalMockTexts]).slice(0, 80);
+      const seenOxKeys = createQuestionKeySet(avoidStatementTexts);
 
       const targetMcCount = Math.max(0, Number(quizMix.multipleChoice) || 0);
       const targetSaCount = Math.max(0, Number(quizMix.shortAnswer) || 0);
+      const targetOxCount = Math.max(0, Number(quizMix.ox) || 0);
       const nextMultipleChoice = [];
       const nextShortAnswer = [];
+      const nextOx = [];
 
-      const { generateQuiz } = await getOpenAiService();
+      const { generateQuiz, generateOxQuiz } = await getOpenAiService();
       const maxAttempts = 3;
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        if (nextMultipleChoice.length >= targetMcCount && nextShortAnswer.length >= targetSaCount) break;
+        if (
+          nextMultipleChoice.length >= targetMcCount &&
+          nextShortAnswer.length >= targetSaCount &&
+          nextOx.length >= targetOxCount
+        ) {
+          break;
+        }
 
-        const requestMcCount = Math.min(5, Math.max(targetMcCount - nextMultipleChoice.length, 1) + 1);
-        const requestSaCount = Math.min(5, Math.max(targetSaCount - nextShortAnswer.length, 0) + 1);
-
-        const quiz = normalizeQuizPayload(
-          await generateQuiz(generationSourceText || quizSourceText, {
-            multipleChoiceCount: requestMcCount,
-            shortAnswerCount: requestSaCount,
-            avoidQuestions: avoidQuestionTexts,
-          })
-        );
+        const requestMcCount =
+          targetMcCount > nextMultipleChoice.length
+            ? Math.min(5, targetMcCount - nextMultipleChoice.length + 1)
+            : 0;
+        const requestSaCount =
+          targetSaCount > nextShortAnswer.length
+            ? Math.min(5, targetSaCount - nextShortAnswer.length + 1)
+            : 0;
+        const shouldRequestQuiz = requestMcCount > 0 || requestSaCount > 0;
+        const shouldRequestOx = targetOxCount > nextOx.length;
+        const [quizResult, oxResult] = await Promise.all([
+          shouldRequestQuiz
+            ? generateQuiz(generationSourceText || quizSourceText, {
+                multipleChoiceCount: requestMcCount,
+                shortAnswerCount: requestSaCount,
+                avoidQuestions: avoidQuestionTexts,
+              })
+            : Promise.resolve({ multipleChoice: [], shortAnswer: [] }),
+          shouldRequestOx
+            ? generateOxQuiz(generationSourceText || quizSourceText, {
+                avoidStatements: avoidStatementTexts,
+              })
+            : Promise.resolve({ items: [] }),
+        ]);
+        const quiz = normalizeQuizPayload(quizResult);
 
         pushUniqueByQuestionKey(
           nextMultipleChoice,
@@ -3632,6 +3742,13 @@ function App() {
           seenQuestionKeys,
           targetSaCount
         );
+        pushUniqueByQuestionKey(
+          nextOx,
+          Array.isArray(oxResult?.items) ? oxResult.items : [],
+          getOxPromptText,
+          seenOxKeys,
+          targetOxCount
+        );
 
         const mergedAvoidQuestions = mergeQuestionHistory(
           avoidQuestionTexts,
@@ -3639,9 +3756,19 @@ function App() {
           120
         );
         avoidQuestionTexts.splice(0, avoidQuestionTexts.length, ...mergedAvoidQuestions);
+        const mergedAvoidStatements = mergeQuestionHistory(
+          avoidStatementTexts,
+          nextOx.map(getOxPromptText),
+          120
+        );
+        avoidStatementTexts.splice(0, avoidStatementTexts.length, ...mergedAvoidStatements);
       }
 
-      if (nextMultipleChoice.length < targetMcCount || nextShortAnswer.length < targetSaCount) {
+      if (
+        nextMultipleChoice.length < targetMcCount ||
+        nextShortAnswer.length < targetSaCount ||
+        nextOx.length < targetOxCount
+      ) {
         throw new Error("중복 문항을 제외하느라 충분한 새 문항을 만들지 못했습니다. 범위를 바꿔 다시 시도해 주세요.");
       }
 
@@ -3662,19 +3789,29 @@ function App() {
               : evidencePages
           ),
         })),
+        ox: nextOx.slice(0, targetOxCount).map((item) => ({
+          ...item,
+          evidencePages: toSortedUniquePages(
+            Array.isArray(item?.evidencePages) && item.evidencePages.length
+              ? item.evidencePages
+              : evidencePages
+          ),
+        })),
       };
-      const newSet = {
-        id: `quiz-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        questions: trimmedQuiz,
-        selectedChoices: {},
-        revealedChoices: {},
-        shortAnswerInput: {},
-        shortAnswerResult: {},
-      };
+      const newSet = createQuizSetState(trimmedQuiz);
       setQuizSets((prev) => [...prev, newSet]);
+      setOxItems((prev) => [
+        ...(Array.isArray(prev) ? prev : []),
+        ...(Array.isArray(trimmedQuiz.ox) ? trimmedQuiz.ox : []),
+      ]);
       setStatus(scopeLabel ? `퀴즈 세트가 생성되었습니다. (${scopeLabel})` : "퀴즈 세트가 생성되었습니다.");
       setUsageCounts((prev) => ({ ...prev, quiz: prev.quiz + 1 }));
-      persistArtifacts({ quiz: trimmedQuiz });
+      persistArtifacts({
+        quiz: trimmedQuiz,
+        ox: {
+          items: Array.isArray(trimmedQuiz.ox) ? trimmedQuiz.ox : [],
+        },
+      });
     } catch (err) {
       setError(`퀴즈 세트 생성에 실패했습니다: ${err.message}`);
     } finally {
@@ -3703,9 +3840,12 @@ function App() {
     }
     quizAutoRequestedRef.current = true;
     resetQuizState();
+    setOxItems(null);
+    setOxSelections({});
+    setOxExplanationOpen({});
     setStatus("퀴즈 세트를 초기화하고 다시 생성하는 중...");
     setError("");
-    await persistArtifacts({ quiz: null });
+    await persistArtifacts({ quiz: null, ox: null });
     await requestQuestions({ force: true });
   };
 
@@ -3949,6 +4089,75 @@ function App() {
       upsertWrongReviewNote,
     ]
   );
+
+  const handleQuizOxSelect = useCallback(
+    (setId, qIdx, choice) => {
+      const targetSet = quizSets.find((set) => set.id === setId);
+      const currentSelection = targetSet?.oxSelections?.[qIdx];
+      if (currentSelection === "o" || currentSelection === "x") return;
+
+      setQuizSets((prev) =>
+        prev.map((set) =>
+          set.id === setId
+            ? {
+                ...set,
+                oxSelections: { ...set.oxSelections, [qIdx]: choice },
+              }
+            : set
+        )
+      );
+
+      const items = Array.isArray(targetSet?.questions?.ox) ? targetSet.questions.ox : [];
+      const item = items[qIdx];
+      if (!item || (choice !== "o" && choice !== "x")) return;
+
+      const expected = item.answer === true ? "o" : "x";
+      const userAnswerText = choice === "o" ? "O" : "X";
+      const prompt = String(item?.statement || item?.prompt || item?.question || "").trim();
+      if (choice === expected) {
+        markReviewNoteCorrectByPrompt("ox", prompt, userAnswerText, choice === "o");
+        return;
+      }
+
+      upsertWrongReviewNote({
+        ...createBaseReviewNote({
+          sourceType: "ox",
+          sourceLabel: "O/X",
+          prompt,
+          explanation: item?.explanation,
+          evidencePages: item?.evidencePages,
+          evidenceSnippet: item?.evidenceSnippet || item?.evidence,
+          evidenceLabel: item?.evidenceLabel || "",
+        }),
+        correctAnswerText: item.answer ? "O" : "X",
+        correctAnswerValue: Boolean(item.answer),
+        userAnswerText,
+        userAnswerValue: choice === "o",
+      });
+    },
+    [
+      createBaseReviewNote,
+      markReviewNoteCorrectByPrompt,
+      quizSets,
+      upsertWrongReviewNote,
+    ]
+  );
+
+  const handleToggleQuizOxExplanation = useCallback((setId, qIdx) => {
+    setQuizSets((prev) =>
+      prev.map((set) =>
+        set.id === setId
+          ? {
+              ...set,
+              oxExplanationOpen: {
+                ...set.oxExplanationOpen,
+                [qIdx]: !set?.oxExplanationOpen?.[qIdx],
+              },
+            }
+          : set
+      )
+    );
+  }, []);
 
   const handleChoiceSelect = (setId, qIdx, choiceIdx) => {
     const targetSet = quizSets.find((set) => set.id === setId);
@@ -4233,18 +4442,126 @@ function App() {
     };
   }, [reviewNotesChapterSelectionInput, reviewNotesWithSections, selectReviewNotesBySection]);
 
+  const examCramQuizItems = useMemo(() => collectExamCramQuizItems(quizSets), [quizSets]);
+
   const examCramState = useMemo(() => {
     const filtered = selectReviewNotesBySection(reviewNotesWithSections, reviewNotesChapterSelectionInput);
-    const recentPending = sortReviewNotesByRecentWrong(filtered.items.filter((item) => !item?.resolved)).slice(
-      0,
-      EXAM_CRAM_PREVIEW_LIMIT
-    );
+    const pendingNotes = sortReviewNotesByRecentWrong(filtered.items.filter((item) => !item?.resolved));
+    const recentPending = pendingNotes.slice(0, EXAM_CRAM_PREVIEW_LIMIT);
+    const summaryReference = String(summary || partialSummary || "").trim();
+    const oxReferenceCount = Array.isArray(oxItems) ? oxItems.length : 0;
     return {
       ...filtered,
       items: recentPending,
-      pendingCount: filtered.items.filter((item) => !item?.resolved).length,
+      pendingCount: pendingNotes.length,
+      referenceCounts: {
+        summary: summaryReference ? 1 : 0,
+        quiz: examCramQuizItems.length,
+        ox: oxReferenceCount,
+        reviewNotes: pendingNotes.length,
+      },
+      hasAnySource:
+        Boolean(summaryReference) ||
+        examCramQuizItems.length > 0 ||
+        oxReferenceCount > 0 ||
+        pendingNotes.length > 0,
     };
-  }, [reviewNotesChapterSelectionInput, reviewNotesWithSections, selectReviewNotesBySection]);
+  }, [
+    examCramQuizItems,
+    oxItems,
+    partialSummary,
+    reviewNotesChapterSelectionInput,
+    reviewNotesWithSections,
+    selectReviewNotesBySection,
+    summary,
+  ]);
+
+  const handleGenerateExamCram = useCallback(
+    async ({ chapterSelectionInput = "" } = {}) => {
+      if (isGeneratingExamCram) return;
+      if (!selectedFileId) {
+        setExamCramError("먼저 문서를 선택해 주세요.");
+        setExamCramStatus("");
+        return;
+      }
+
+      const scoped = selectReviewNotesBySection(reviewNotesWithSections, chapterSelectionInput);
+      if (scoped.error) {
+        setExamCramError(scoped.error);
+        setExamCramStatus("");
+        return;
+      }
+
+      const summaryText = String(summary || partialSummary || "").trim();
+      const quizReferenceItems = examCramQuizItems.slice(0, 12);
+      const oxReferenceItems = (Array.isArray(oxItems) ? oxItems : []).slice(0, 10);
+      const reviewNoteReferences = sortReviewNotesByRecentWrong(
+        scoped.items.filter((item) => item && !item.resolved)
+      ).slice(0, 10);
+      const hasSources =
+        Boolean(summaryText) ||
+        quizReferenceItems.length > 0 ||
+        oxReferenceItems.length > 0 ||
+        reviewNoteReferences.length > 0;
+
+      if (!hasSources) {
+        setExamCramError("먼저 요약, 퀴즈, O/X, 오답노트 중 하나를 준비해주세요.");
+        setExamCramStatus("");
+        return;
+      }
+
+      const scopeLabel = scoped.selectedSectionNumbers.length
+        ? `섹션 ${scoped.selectedSectionNumbers.join(", ")} 기준`
+        : "";
+
+      setIsGeneratingExamCram(true);
+      setExamCramError("");
+      setExamCramStatus(scopeLabel ? `시험 직전 AI 정리 생성 중... (${scopeLabel})` : "시험 직전 AI 정리 생성 중...");
+
+      try {
+        const ai = await getOpenAiService();
+        const generated = await ai.generateExamCramSheet({
+          summaryText,
+          oxItems: oxReferenceItems,
+          quizItems: quizReferenceItems,
+          reviewNotes: reviewNoteReferences,
+          scopeLabel,
+        });
+        const trimmed = String(generated || "").trim();
+        if (!trimmed) {
+          throw new Error("AI가 비어 있는 정리를 반환했습니다.");
+        }
+
+        const nextUpdatedAt = new Date().toISOString();
+        setExamCramContent(trimmed);
+        setExamCramUpdatedAt(nextUpdatedAt);
+        setExamCramScopeLabel(scopeLabel);
+        setExamCramStatus(scopeLabel ? `시험 직전 AI 정리가 준비되었습니다. (${scopeLabel})` : "시험 직전 AI 정리가 준비되었습니다.");
+        persistExamCramBundle({
+          content: trimmed,
+          scopeLabel,
+          updatedAt: nextUpdatedAt,
+        });
+      } catch (err) {
+        setExamCramError(`시험 직전 AI 정리 생성에 실패했습니다: ${err.message}`);
+        setExamCramStatus("");
+      } finally {
+        setIsGeneratingExamCram(false);
+      }
+    },
+    [
+      examCramQuizItems,
+      getOpenAiService,
+      isGeneratingExamCram,
+      oxItems,
+      partialSummary,
+      persistExamCramBundle,
+      reviewNotesWithSections,
+      selectReviewNotesBySection,
+      selectedFileId,
+      summary,
+    ]
+  );
 
   const handleCreateReviewNotesMockExam = useCallback(
     async ({
@@ -4641,10 +4958,32 @@ function App() {
       const normalizedSelection = selectedNumbers.join(",");
       const scopeLabel = `chapter ${normalizedSelection}`;
       const pageCandidates = buildPageCandidatesFromRanges(targetChapters, 180);
-      const cacheKey = `${selectedFileId || file?.name || "doc"}::${chapterConfigRaw}::${normalizedSelection}`;
+      const docKey = selectedFileId || file?.name || "doc";
+      const sectionCacheKey = `${docKey}::${chapterConfigRaw}`;
+      const cacheKey = `${sectionCacheKey}::${normalizedSelection}`;
       const cached = chapterScopeTextCacheRef.current.get(cacheKey);
       if (cached) {
         return { text: cached, scopeLabel, pageCandidates };
+      }
+      const cachedChapterSections = Array.isArray(chapterSectionTextCacheRef.current.get(sectionCacheKey))
+        ? chapterSectionTextCacheRef.current.get(sectionCacheKey)
+        : [];
+      if (cachedChapterSections.length) {
+        const cachedScopedText = cachedChapterSections
+          .filter((chapter) => selectedNumberSet.has(Number.parseInt(chapter?.chapterNumber, 10)))
+          .map((chapter) => {
+            const chapterNumber = Number.parseInt(chapter?.chapterNumber, 10);
+            const title = chapterNumber > 0 ? `챕터 ${chapterNumber}` : "챕터";
+            const text = String(chapter?.text || "").trim();
+            if (!text) return "";
+            return `## ${title}\n${text}`;
+          })
+          .filter(Boolean)
+          .join("\n\n");
+        if (cachedScopedText.trim()) {
+          chapterScopeTextCacheRef.current.set(cacheKey, cachedScopedText);
+          return { text: cachedScopedText, scopeLabel, pageCandidates };
+        }
       }
 
       setStatus(`${featureLabel}: 챕터 범위 텍스트 추출 중...`);
@@ -4654,14 +4993,29 @@ function App() {
             featureLabel,
             targetUnitCount: totalPages,
           });
-      const scopedSections = isCurrentPdfDocument
-        ? (await extractPdfTextByRanges(file, targetChapters, {
+      const cachedSummarySourceText = String(
+        summaryContextCacheRef.current.get(String(selectedFileId || file?.name || "").trim()) || ""
+      ).trim();
+      const fallbackChapterSourceText =
+        String(extractedText || "").trim() || cachedSummarySourceText;
+      let scopedSections = [];
+      if (isCurrentPdfDocument) {
+        scopedSections =
+          (await extractPdfTextByRanges(file, targetChapters, {
             maxLengthPerRange: 14000,
-            useOcr: true,
-            ocrLang: "kor+eng",
-            onOcrProgress: (message) => setStatus(message),
-          }))?.chapters || []
-        : buildNonPdfChapterSectionsFromText(nonPdfSourceText, targetChapters, totalPages);
+            useOcr: false,
+          }))?.chapters || [];
+        const hasScopedText = scopedSections.some((chapter) => String(chapter?.text || "").trim());
+        if (!hasScopedText && fallbackChapterSourceText) {
+          scopedSections = buildNonPdfChapterSectionsFromText(
+            fallbackChapterSourceText,
+            targetChapters,
+            totalPages
+          );
+        }
+      } else {
+        scopedSections = buildNonPdfChapterSectionsFromText(nonPdfSourceText, targetChapters, totalPages);
+      }
       const scopedText = scopedSections
         .map((chapter) => {
           const chapterNumber = Number.parseInt(chapter?.chapterNumber, 10);
@@ -4712,7 +5066,7 @@ function App() {
       setError("현재 요금제의 요약 생성 한도에 도달했습니다.");
       return;
     }
-    if (!extractedText && !hasManualChapterConfig) {
+    if (!extractedText && !hasManualChapterConfig && !isPdfSource) {
       setError("추출된 텍스트가 없습니다. 챕터 범위를 입력하거나 PDF 텍스트 추출을 먼저 실행해주세요.");
       return;
     }
@@ -4764,6 +5118,10 @@ function App() {
               maxLengthPerRange: 14000,
               useOcr: true,
               ocrLang: "kor+eng",
+              ocrScale: 1.35,
+              ocrMaxPixels: 1000000,
+              ocrPageOrder: "spread",
+              maxOcrPagesPerRange: 4,
               onOcrProgress: (message) => setStatus(message),
             }))?.chapters || []
           : buildNonPdfChapterSectionsFromText(nonPdfSourceText, chapterRangesForSummary, totalPages);
@@ -4782,6 +5140,33 @@ function App() {
           .filter((chapter) => String(chapter.text || "").trim().length > 0);
         if (!customChapterSections.length) {
           throw new Error("설정한 챕터 범위에서 텍스트를 추출하지 못했습니다.");
+        }
+        const chapterSectionsCacheKey = `${selectedFileId || file?.name || "doc"}::${chapterConfigRaw}`;
+        chapterSectionTextCacheRef.current.set(
+          chapterSectionsCacheKey,
+          customChapterSections.map((chapter) => ({
+            chapterNumber: chapter.chapterNumber,
+            pageStart: chapter.pageStart,
+            pageEnd: chapter.pageEnd,
+            text: String(chapter.text || "").trim(),
+          }))
+        );
+        const combinedChapterText = customChapterSections
+          .map((chapter) => {
+            const chapterNumber = Number.parseInt(chapter?.chapterNumber, 10);
+            const title = chapterNumber > 0 ? `챕터 ${chapterNumber}` : "챕터";
+            const text = String(chapter?.text || "").trim();
+            if (!text) return "";
+            return `## ${title}\n${text}`;
+          })
+          .filter(Boolean)
+          .join("\n\n");
+        const summaryCacheKey = String(selectedFileId || file?.name || "").trim();
+        if (summaryCacheKey && combinedChapterText) {
+          const previous = String(summaryContextCacheRef.current.get(summaryCacheKey) || "").trim();
+          if (combinedChapterText.length > previous.length) {
+            summaryContextCacheRef.current.set(summaryCacheKey, combinedChapterText);
+          }
         }
       }
 
@@ -4809,8 +5194,49 @@ function App() {
             // fallback to already extracted text
           }
         }
+
+        if (!String(summarySourceText || "").trim() && file && isPdfSource) {
+          try {
+            setStatus("요약용 OCR 텍스트를 추출하는 중...");
+            const ocrExtended = await extractPdfText(file, 80, 50000, {
+              useOcr: true,
+              ocrLang: "kor+eng",
+              ocrScale: 1.35,
+              ocrMaxPixels: 1000000,
+              ocrPageOrder: "spread",
+              maxOcrPages: 18,
+              onOcrProgress: (message) => setStatus(message),
+            });
+            const ocrText = String(ocrExtended?.text || "").trim();
+            if (ocrText) {
+              summarySourceText = ocrText;
+              nextSummaryEvidencePages = buildBoundedPageRange(
+                1,
+                Number(ocrExtended?.pagesUsed || 80),
+                180
+              );
+              if (summaryCacheKey) {
+                summaryContextCacheRef.current.set(summaryCacheKey, ocrText);
+              }
+              setExtractedText((prev) => {
+                const previous = String(prev || "").trim();
+                return ocrText.length > previous.length ? ocrText : prev;
+              });
+              setPreviewText((prev) => {
+                const previous = String(prev || "").trim();
+                return ocrText.length > previous.length ? ocrText : prev;
+              });
+            }
+          } catch {
+            // fallback to existing extracted text only
+          }
+        }
       } else if (isPdfSource) {
         nextSummaryEvidencePages = buildPageCandidatesFromRanges(customChapterSections, 180);
+      }
+
+      if (!String(summarySourceText || "").trim() && !customChapterSections) {
+        throw new Error("요약에 사용할 텍스트를 추출하지 못했습니다.");
       }
 
       setStatus("AI로 요약을 생성하는 중...");
@@ -6311,6 +6737,7 @@ function App() {
     pdfUrl,
     documentRemoteUrl,
     file,
+    pendingDocumentOpen,
     pageInfo,
     currentPage,
     activeEvidenceHighlight,
@@ -6400,13 +6827,24 @@ function App() {
     examCramItems: examCramState.items,
     examCramPendingCount: examCramState.pendingCount,
     examCramSectionError: examCramState.error,
+    examCramReferenceCounts: examCramState.referenceCounts,
+    examCramHasAnySource: examCramState.hasAnySource,
+    examCramContent,
+    examCramUpdatedAt,
+    examCramScopeLabel,
+    examCramStatus: safeExamCramStatus,
+    examCramError: safeExamCramError,
+    isGeneratingExamCram,
     resolveQuizEvidence,
     handleChoiceSelect,
     handleShortAnswerChange,
     handleShortAnswerCheck,
+    handleQuizOxSelect,
+    handleToggleQuizOxExplanation,
     handleReviewNoteAttempt,
     handleToggleReviewNoteResolved,
     handleDeleteReviewNote,
+    handleGenerateExamCram,
     handleCreateReviewNotesMockExam,
     regenerateQuiz,
     isLoadingOx,

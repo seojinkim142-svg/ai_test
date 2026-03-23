@@ -11,10 +11,17 @@ import {
   validateKakaoReadyUrls,
 } from "../../lib/payments/kakaopay.js";
 import { authenticateSupabaseUserFromRequest } from "../../lib/billing/tier-sync.js";
+import { getProTrialStatus, PRO_TRIAL_TIER } from "../../lib/billing/pro-trial.js";
 
 const normalizePositiveInteger = (value, fallback = 0) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.floor(parsed);
+};
+
+const normalizeNonNegativeInteger = (value, fallback = 0) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
   return Math.floor(parsed);
 };
 
@@ -60,19 +67,24 @@ export default async function handler(req, res) {
     return;
   }
 
-  const amount = normalizePositiveInteger(body?.amount);
+  const requestedTier = String(body?.tier || body?.planTier || "").trim().toLowerCase();
   const orderId = String(body?.orderId || "").trim();
   const itemName = String(body?.itemName || body?.plan || "KakaoPay Plan").trim() || "KakaoPay Plan";
+  const amount = normalizeNonNegativeInteger(body?.amount);
   const quantity = normalizePositiveInteger(body?.quantity, 1) || 1;
   const vatAmount = normalizePositiveInteger(body?.vatAmount, Math.floor(amount / 11));
   const taxFreeAmount = normalizePositiveInteger(body?.taxFreeAmount, 0);
   const registerSubscription =
     body?.registerSubscription === true || String(body?.paymentMode || "").trim().toLowerCase() === "subscription";
+  const isProTrialRegistration =
+    registerSubscription &&
+    body?.proTrial === true &&
+    requestedTier === PRO_TRIAL_TIER;
   const approvalUrl = String(body?.approvalUrl || `${clientOrigin}/?kakaoPay=approve`).trim();
   const cancelUrl = String(body?.cancelUrl || `${clientOrigin}/?kakaoPay=cancel`).trim();
   const failUrl = String(body?.failUrl || `${clientOrigin}/?kakaoPay=fail`).trim();
 
-  if (!amount || !orderId) {
+  if ((!orderId || (!isProTrialRegistration && amount <= 0) || (isProTrialRegistration && amount < 0))) {
     sendJson(res, 400, { message: "amount and orderId are required." }, allowOrigin);
     return;
   }
@@ -107,6 +119,22 @@ export default async function handler(req, res) {
     return;
   }
   const authenticatedUserId = authResult.userId;
+
+  if (isProTrialRegistration) {
+    try {
+      const trialStatus = await getProTrialStatus({ authResult });
+      if (!trialStatus.eligible) {
+        const message = trialStatus.claimedAt
+          ? "Pro 무료 1개월 체험은 이미 사용했습니다."
+          : "현재 Free 상태에서만 Pro 무료 체험을 시작할 수 있습니다.";
+        sendJson(res, 409, { message }, allowOrigin);
+        return;
+      }
+    } catch (error) {
+      sendJson(res, 500, { message: error?.message || "Pro trial status lookup failed." }, allowOrigin);
+      return;
+    }
+  }
 
   const requestPayload = {
     cid: registerSubscription ? subscriptionCid : cid,

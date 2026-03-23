@@ -12,7 +12,8 @@ export function useQuizMixCarousel({ quizMix, quizMixOptions, setQuizMix }) {
       quizMixOptions.findIndex(
         (option) =>
           option.multipleChoice === mix?.multipleChoice &&
-          option.shortAnswer === mix?.shortAnswer
+          option.shortAnswer === mix?.shortAnswer &&
+          option.ox === mix?.ox
       ),
     [quizMixOptions]
   );
@@ -56,7 +57,8 @@ export function useQuizMixCarousel({ quizMix, quizMixOptions, setQuizMix }) {
       if (!option) return;
       if (
         option.multipleChoice !== quizMix?.multipleChoice ||
-        option.shortAnswer !== quizMix?.shortAnswer
+        option.shortAnswer !== quizMix?.shortAnswer ||
+        option.ox !== quizMix?.ox
       ) {
         setQuizMix(option);
       }

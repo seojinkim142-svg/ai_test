@@ -389,15 +389,15 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
         }}
       >
         <div className="mx-auto flex min-h-[82vh] max-w-6xl flex-col items-center justify-center text-center zeus-hero-reveal">
-          <p className="text-xs uppercase tracking-[0.34em] text-emerald-200/90">AI 학습 도우미</p>
+          <p className="text-xs uppercase tracking-[0.34em] text-emerald-200/90">공부 AI</p>
           <h1 className="landing-title mt-5 text-5xl font-bold leading-[0.98] text-white drop-shadow-[0_8px_35px_rgba(0,0,0,0.45)] sm:text-7xl md:text-[96px]">
             PDF 하나로
             <br />
             요약, 퀴즈, 카드까지
           </h1>
           <p className="landing-subtitle mt-6 max-w-3xl text-base text-emerald-50/90 sm:text-xl">
-            강의자료를 올리면 요약부터 문제 생성, AI 튜터까지 자동으로 연결됩니다.
-            반복 복습 루프를 한 곳에서 완성하세요.
+            Zeusian은 PDF 강의자료를 요약하고 문제를 만드는 공부 AI입니다.
+            요약부터 퀴즈, 카드, AI 튜터까지 자동으로 연결하고 반복 복습 루프를 한 곳에서 완성하세요.
           </p>
           <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row">
             <button
@@ -689,6 +689,9 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
           >
             Zeusian 시작하기
           </button>
+          <p className="mt-4 text-sm text-emerald-100/60">
+            공부 AI 소개가 필요하면 <a href="/study-ai" className="font-semibold text-emerald-200 transition hover:text-emerald-100">전용 안내 페이지</a>에서 자세히 볼 수 있습니다.
+          </p>
         </div>
       </section>
 

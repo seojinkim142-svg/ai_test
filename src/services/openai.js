@@ -325,6 +325,140 @@ You are a teaching assistant who writes a detailed Korean markdown summary.
 ${extractedText}
   `.trim();
 }
+
+function formatExamCramAnswer(value, fallback = "-") {
+  const normalized = normalizeEvidenceText(value, 120);
+  return normalized || fallback;
+}
+
+function formatExamCramQuizBlock(quizItems = []) {
+  const list = Array.isArray(quizItems) ? quizItems : [];
+  if (!list.length) return "";
+  return list
+    .slice(0, 12)
+    .map((item, index) => {
+      const prompt = normalizeEvidenceText(item?.prompt || item?.question, 150);
+      const answer = formatExamCramAnswer(item?.answerText || item?.answer || item?.correctAnswerText);
+      const explanation = normalizeEvidenceText(item?.explanation, 180);
+      const evidence = normalizeEvidenceText(item?.evidenceLabel || item?.evidenceSnippet, 120);
+      return [
+        `${index + 1}. 문제: ${prompt || "-"}`,
+        `- 정답: ${answer}`,
+        explanation ? `- 포인트: ${explanation}` : "",
+        evidence ? `- 근거: ${evidence}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n");
+}
+
+function formatExamCramOxBlock(oxItems = []) {
+  const list = Array.isArray(oxItems) ? oxItems : [];
+  if (!list.length) return "";
+  return list
+    .slice(0, 10)
+    .map((item, index) => {
+      const statement = normalizeEvidenceText(item?.statement || item?.question || item?.prompt, 140);
+      const answer = item?.answer === true ? "O" : item?.answer === false ? "X" : "-";
+      const explanation = normalizeEvidenceText(item?.explanation, 180);
+      const evidence = normalizeEvidenceText(item?.evidenceLabel || item?.evidenceSnippet, 120);
+      return [
+        `${index + 1}. 문장: ${statement || "-"}`,
+        `- 정답: ${answer}`,
+        explanation ? `- 포인트: ${explanation}` : "",
+        evidence ? `- 근거: ${evidence}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n");
+}
+
+function formatExamCramReviewNoteBlock(reviewNotes = []) {
+  const list = Array.isArray(reviewNotes) ? reviewNotes : [];
+  if (!list.length) return "";
+  return list
+    .slice(0, 10)
+    .map((item, index) => {
+      const prompt = normalizeEvidenceText(item?.prompt, 150);
+      const answer = formatExamCramAnswer(item?.correctAnswerText);
+      const explanation = normalizeEvidenceText(item?.explanation, 180);
+      const wrongCount = Math.max(1, Number.parseInt(item?.wrongCount, 10) || 1);
+      const previousAnswer = normalizeEvidenceText(item?.userAnswerText, 100);
+      const evidence = normalizeEvidenceText(item?.evidenceLabel || item?.evidenceSnippet, 120);
+      return [
+        `${index + 1}. 오답 포인트: ${prompt || "-"}`,
+        `- 정답: ${answer}`,
+        `- 누적 오답: ${wrongCount}회`,
+        previousAnswer ? `- 이전 제출 답안: ${previousAnswer}` : "",
+        explanation ? `- 해설: ${explanation}` : "",
+        evidence ? `- 근거: ${evidence}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n");
+}
+
+function buildExamCramPrompt({
+  summaryText = "",
+  oxItems = [],
+  quizItems = [],
+  reviewNotes = [],
+  scopeLabel = "",
+} = {}) {
+  const sections = [];
+  const summaryBlock = limitText(String(summaryText || "").trim(), 7000);
+  const oxBlock = formatExamCramOxBlock(oxItems);
+  const quizBlock = formatExamCramQuizBlock(quizItems);
+  const reviewNoteBlock = formatExamCramReviewNoteBlock(reviewNotes);
+
+  if (scopeLabel) {
+    sections.push(`[선택 범위]\n${String(scopeLabel || "").trim()}`);
+  }
+  if (summaryBlock) {
+    sections.push(`[현재 요약]\n${summaryBlock}`);
+  }
+  if (oxBlock) {
+    sections.push(`[현재 O/X]\n${oxBlock}`);
+  }
+  if (quizBlock) {
+    sections.push(`[현재 퀴즈]\n${quizBlock}`);
+  }
+  if (reviewNoteBlock) {
+    sections.push(`[오답노트]\n${reviewNoteBlock}`);
+  }
+
+  return `
+You create a last-minute Korean exam cram sheet from study artifacts.
+
+[Goal]
+- Build a dense, practical guide that answers: "What should I read right before the exam?"
+
+[Rules]
+- Use only the provided study artifacts.
+- Merge overlapping points from summary, quiz, O/X, and wrong answers.
+- Treat wrong answers as warning signals, but do not make the output an error log only.
+- Prioritize high-yield concepts, distinctions, formulas, definitions, exceptions, traps, and likely exam pivots.
+- When quizzes or O/X reveal a misconception, rewrite it as a compact caution point.
+- Keep it concise enough to scan in 5-10 minutes, but dense enough to be useful.
+- Write in Korean markdown.
+- Use headings and bullets, not long paragraphs.
+- If formulas or symbols matter, preserve them with LaTeX-friendly markdown.
+- End with a very short final checklist.
+
+[Preferred structure]
+## 시험 직전 이것만
+## 꼭 구분할 개념
+## 헷갈리기 쉬운 함정
+## 마지막 1분 체크리스트
+
+[Study artifacts]
+${sections.join("\n\n")}
+  `.trim();
+}
+
 function buildFlashcardsContext(extractedText, count) {
   const trimmed = (extractedText || "").trim();
   if (!trimmed) return "";
@@ -1667,6 +1801,50 @@ export async function generateSummary(
   const content = data.choices?.[0]?.message?.content?.trim() || "";
   return sanitizeMarkdown(content);
 }
+
+export async function generateExamCramSheet({
+  summaryText = "",
+  oxItems = [],
+  quizItems = [],
+  reviewNotes = [],
+  scopeLabel = "",
+} = {}) {
+  const hasSources =
+    Boolean(String(summaryText || "").trim()) ||
+    (Array.isArray(oxItems) && oxItems.length > 0) ||
+    (Array.isArray(quizItems) && quizItems.length > 0) ||
+    (Array.isArray(reviewNotes) && reviewNotes.length > 0);
+  if (!hasSources) {
+    throw new Error("No study artifacts available for exam cram guide.");
+  }
+
+  const prompt = buildExamCramPrompt({
+    summaryText,
+    oxItems,
+    quizItems,
+    reviewNotes,
+    scopeLabel,
+  });
+  const data = await postChatRequest(
+    {
+      model: MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Create a Korean markdown exam cram sheet from the provided study artifacts only. Keep it high-yield, compact, and immediately useful before an exam.",
+        },
+        { role: "user", content: prompt },
+      ],
+      temperature: 1,
+    },
+    { retries: 0 }
+  );
+
+  const content = data.choices?.[0]?.message?.content?.trim() || "";
+  return sanitizeMarkdown(content);
+}
+
 export async function generateFlashcards(extractedText, { count = 8 } = {}) {
   const contextText = buildFlashcardsContext(extractedText, count);
   if (!contextText) {

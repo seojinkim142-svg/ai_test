@@ -3,6 +3,7 @@ import { createPremiumProfileId } from "./appStateHelpers";
 const PARTIAL_SUMMARY_ARTIFACT_KEY = "__partial_summary_state_v1";
 const PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY = "__partial_summary_library_v1";
 const REVIEW_NOTES_ARTIFACT_KEY = "__review_notes_v1";
+const EXAM_CRAM_ARTIFACT_KEY = "__exam_cram_v1";
 const LEGACY_HIGHLIGHTS_WRAP_KEY = "__legacy_highlights_payload_v1";
 const MOJIBAKE_COMPAT_CHAR_RE = /[\uF900-\uFAFF]/;
 const REVIEW_NOTE_SOURCE_TYPES = new Set(["quiz_multiple_choice", "quiz_short_answer", "ox"]);
@@ -226,6 +227,16 @@ export function readReviewNotesFromHighlights(highlightsValue) {
   return normalizeReviewNoteEntries(base?.[REVIEW_NOTES_ARTIFACT_KEY]);
 }
 
+export function readExamCramFromHighlights(highlightsValue) {
+  const base = isPlainObject(highlightsValue) ? highlightsValue : null;
+  const rawState = isPlainObject(base?.[EXAM_CRAM_ARTIFACT_KEY]) ? base[EXAM_CRAM_ARTIFACT_KEY] : null;
+  return {
+    content: String(rawState?.content || "").trim(),
+    scopeLabel: String(rawState?.scopeLabel || "").trim(),
+    updatedAt: toIsoDateString(rawState?.updatedAt, null),
+  };
+}
+
 export function writePartialSummaryBundleToHighlights(
   highlightsValue,
   {
@@ -286,6 +297,30 @@ export function writeReviewNotesToHighlights(highlightsValue, reviewNotes) {
     base[REVIEW_NOTES_ARTIFACT_KEY] = normalizedNotes;
   } else {
     delete base[REVIEW_NOTES_ARTIFACT_KEY];
+  }
+
+  delete base.__instructor_emphasis_library_v1;
+  delete base.__instructor_emphasis_active_id_v1;
+  delete base.__instructor_emphasis_v1;
+
+  return Object.keys(base).length > 0 ? base : null;
+}
+
+export function writeExamCramToHighlights(highlightsValue, { content, scopeLabel, updatedAt } = {}) {
+  const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
+  if (!isPlainObject(highlightsValue) && highlightsValue != null) {
+    base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
+  }
+
+  const normalizedContent = String(content || "").trim();
+  if (normalizedContent) {
+    base[EXAM_CRAM_ARTIFACT_KEY] = {
+      content: normalizedContent,
+      scopeLabel: String(scopeLabel || "").trim(),
+      updatedAt: toIsoDateString(updatedAt, new Date()) || new Date().toISOString(),
+    };
+  } else {
+    delete base[EXAM_CRAM_ARTIFACT_KEY];
   }
 
   delete base.__instructor_emphasis_library_v1;

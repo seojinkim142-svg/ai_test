@@ -38,10 +38,22 @@ const LABELS = {
   sectionUnknown: "\uC139\uC158 \uBBF8\uC9C0\uC815",
   examCramTitle: "\uC2DC\uD5D8 \uC9C1\uC804",
   examCramSubtitle:
-    "\uCD5C\uADFC \uC624\uB2F5\uB9CC \uC555\uCD95\uD574\uC11C \uC9C1\uC804 \uBCF5\uC2B5\uC6A9 \uBAA8\uC758\uACE0\uC0AC\uB97C \uB9CC\uB4ED\uB2C8\uB2E4.",
-  examCramCreate: "\uC2DC\uD5D8 \uC9C1\uC804 \uBAA8\uC758\uACE0\uC0AC \uB9CC\uB4E4\uAE30",
-  examCramPendingCount: "\uBCF5\uC2B5 \uB300\uC0C1",
-  examCramPreviewCount: "\uCD5C\uADFC \uBBF8\uB9AC\uBCF4\uAE30",
+    "\uC694\uC57D, \uD034\uC988, O/X, \uC624\uB2F5\uB178\uD2B8\uB97C \uD569\uCCD0 \uC2DC\uD5D8 \uC9C1\uC804\uC5D0 \uC774\uAC83\uB9CC \uBCF4\uBA74 \uB418\uB294 AI \uCD5C\uC885 \uC815\uB9AC\uB97C \uB9CC\uB4ED\uB2C8\uB2E4.",
+  examCramCreate: "\uC2DC\uD5D8 \uC9C1\uC804 AI \uC815\uB9AC \uB9CC\uB4E4\uAE30",
+  examCramCreateLoading: "AI \uC815\uB9AC \uC0DD\uC131 \uC911...",
+  examCramPendingCount: "\uC624\uB2F5 \uCC38\uACE0",
+  examCramPreviewCount: "\uCD5C\uADFC \uC624\uB2F5 \uBBF8\uB9AC\uBCF4\uAE30",
+  examCramSummaryRef: "\uC694\uC57D",
+  examCramQuizRef: "\uD034\uC988",
+  examCramOxRef: "O/X",
+  examCramReviewRef: "\uC624\uB2F5\uB178\uD2B8",
+  examCramReferenceTitle: "\uCC38\uACE0 \uC790\uB8CC",
+  examCramGuideTitle: "\uC2DC\uD5D8 \uC9C1\uC804 \uC774\uAC83\uB9CC \uBD10\uB77C",
+  examCramGuideEmpty: "\uC544\uC9C1 \uC0DD\uC131\uB41C \uC2DC\uD5D8 \uC9C1\uC804 AI \uC815\uB9AC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4.",
+  examCramUpdatedAt: "\uCD5C\uADFC \uC0DD\uC131",
+  examCramScope: "\uAE30\uC900 \uBC94\uC704",
+  examCramNoReferences:
+    "\uBA3C\uC800 \uC694\uC57D, \uD034\uC988, O/X, \uC624\uB2F5\uB178\uD2B8 \uC911 \uD558\uB098 \uC774\uC0C1\uC744 \uC900\uBE44\uD574\uC8FC\uC138\uC694.",
   examCramEmpty: "\uC120\uD0DD\uD55C \uBC94\uC704\uC5D0 \uCD5C\uADFC \uC624\uB2F5\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.",
 };
 
@@ -368,11 +380,30 @@ function ReviewNoteCard({
 function ExamCramCard({
   items,
   pendingCount,
-  onCreateMockExam,
-  isCreatingMockExam,
+  referenceCounts,
+  hasAnySource,
+  content,
+  updatedAt,
+  scopeLabel,
+  status,
+  error,
+  onGenerateExamCram,
+  isGeneratingExamCram,
   sectionSelectionInput,
 }) {
   const previewItems = Array.isArray(items) ? items.slice(0, 3) : [];
+  const normalizedCounts = {
+    summary: Math.max(0, Number(referenceCounts?.summary) || 0),
+    quiz: Math.max(0, Number(referenceCounts?.quiz) || 0),
+    ox: Math.max(0, Number(referenceCounts?.ox) || 0),
+    reviewNotes: Math.max(0, Number(referenceCounts?.reviewNotes) || 0),
+  };
+  const referenceBadges = [
+    { label: LABELS.examCramSummaryRef, count: normalizedCounts.summary },
+    { label: LABELS.examCramQuizRef, count: normalizedCounts.quiz },
+    { label: LABELS.examCramOxRef, count: normalizedCounts.ox },
+    { label: LABELS.examCramReviewRef, count: normalizedCounts.reviewNotes },
+  ];
 
   return (
     <div className="mt-4 rounded-2xl border border-cyan-300/15 bg-cyan-400/5 p-4">
@@ -395,21 +426,43 @@ function ExamCramCard({
         <button
           type="button"
           onClick={() =>
-            onCreateMockExam?.({
+            onGenerateExamCram?.({
               chapterSelectionInput: sectionSelectionInput,
-              titlePrefix: "\uC2DC\uD5D8 \uC9C1\uC804",
-              sourceKind: "exam_cram",
-              statusLabel: "\uC2DC\uD5D8 \uC9C1\uC804",
             })
           }
-          disabled={isCreatingMockExam || pendingCount <= 0}
+          disabled={isGeneratingExamCram || !hasAnySource}
           className="ghost-button text-sm text-emerald-100"
           data-ghost-size="sm"
           style={{ "--ghost-color": "16, 185, 129" }}
         >
-          {isCreatingMockExam ? LABELS.createMockExamLoading : LABELS.examCramCreate}
+          {isGeneratingExamCram ? LABELS.examCramCreateLoading : LABELS.examCramCreate}
         </button>
       </div>
+
+      <div className="mt-4 rounded-xl bg-slate-950/35 px-3 py-3 ring-1 ring-white/10">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+          {LABELS.examCramReferenceTitle}
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {referenceBadges.map((badge) => (
+            <span
+              key={badge.label}
+              className="rounded-full bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-slate-200 ring-1 ring-white/10"
+            >
+              {`${badge.label} ${badge.count}`}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {status && <p className="mt-4 text-sm text-emerald-100">{status}</p>}
+      {error && (
+        <p className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-100 ring-1 ring-red-400/30">
+          {error}
+        </p>
+      )}
+
+      {!hasAnySource && <p className="mt-3 text-sm text-slate-300">{LABELS.examCramNoReferences}</p>}
 
       {previewItems.length === 0 ? (
         <p className="mt-3 text-sm text-slate-300">{LABELS.examCramEmpty}</p>
@@ -435,6 +488,31 @@ function ExamCramCard({
           ))}
         </div>
       )}
+
+      <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/45 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-cyan-100">{LABELS.examCramGuideTitle}</p>
+            {scopeLabel && <p className="mt-1 text-xs text-slate-300">{`${LABELS.examCramScope}: ${scopeLabel}`}</p>}
+          </div>
+          {updatedAt && (
+            <span className="rounded-full bg-white/5 px-3 py-1 text-[11px] font-semibold text-slate-300 ring-1 ring-white/10">
+              {`${LABELS.examCramUpdatedAt} ${formatTimestamp(updatedAt)}`}
+            </span>
+          )}
+        </div>
+
+        {content ? (
+          <div className="mt-4">
+            <MathMarkdown
+              content={content}
+              className="summary-prose prose prose-invert max-w-none break-words text-sm text-slate-100 prose-headings:text-cyan-50 prose-strong:text-slate-50 prose-p:leading-relaxed [&_.katex-display]:my-2 [&_.katex-display]:overflow-x-auto"
+            />
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-slate-300">{LABELS.examCramGuideEmpty}</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -448,11 +526,20 @@ function ReviewNotesPanel({
   examCramItems,
   examCramPendingCount = 0,
   examCramSectionError,
+  examCramReferenceCounts,
+  examCramHasAnySource = false,
+  examCramContent,
+  examCramUpdatedAt,
+  examCramScopeLabel,
+  examCramStatus,
+  examCramError,
   onSubmitAttempt,
   onJumpToEvidencePage,
   onDelete,
+  onGenerateExamCram,
   onCreateMockExam,
   isCreatingMockExam = false,
+  isGeneratingExamCram = false,
 }) {
   const [filter, setFilter] = useState("all");
 
@@ -521,8 +608,15 @@ function ReviewNotesPanel({
         <ExamCramCard
           items={examCramItems}
           pendingCount={examCramPendingCount}
-          onCreateMockExam={onCreateMockExam}
-          isCreatingMockExam={isCreatingMockExam}
+          referenceCounts={examCramReferenceCounts}
+          hasAnySource={examCramHasAnySource}
+          content={examCramContent}
+          updatedAt={examCramUpdatedAt}
+          scopeLabel={examCramScopeLabel}
+          status={examCramStatus}
+          error={examCramError}
+          onGenerateExamCram={onGenerateExamCram}
+          isGeneratingExamCram={isGeneratingExamCram}
           sectionSelectionInput={sectionSelectionInput}
         />
 

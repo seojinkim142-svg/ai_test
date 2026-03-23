@@ -2,7 +2,7 @@
   "id": "/",
   "name": "Zeusian",
   "short_name": "Zeusian",
-  "description": "Study PDFs with summaries, quizzes, flashcards, and AI tutoring.",
+  "description": "PDF 강의자료를 요약하고 퀴즈, 플래시카드, AI 튜터로 이어주는 공부 AI",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

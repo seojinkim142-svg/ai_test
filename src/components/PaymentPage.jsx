@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  approveKakaoPay,
-  chargeKakaoPaySubscription,
-  fetchKakaoPaySubscriptionStatus,
-  inactiveKakaoPaySubscription,
-  requestKakaoPayReady,
-} from "../services/kakaopay";
+import { approveKakaoPay, chargeKakaoPaySubscription, fetchKakaoPaySubscriptionStatus, inactiveKakaoPaySubscription, requestKakaoPayReady } from "../services/kakaopay";
+import { fetchProTrialStatus } from "../services/nicepayments";
 import { getAccessToken } from "../services/supabase";
 import { useCardPayment } from "../hooks/useCardPayment";
 import { useNiceSubscription } from "../hooks/useNiceSubscription";
@@ -211,6 +206,12 @@ function PaymentPage({
   const [paying, setPaying] = useState(false);
   const [paymentError, setPaymentError] = useState("");
   const [paymentNotice, setPaymentNotice] = useState("");
+  const [proTrialStatus, setProTrialStatus] = useState({
+    eligible: false,
+    claimedAt: null,
+    currentTier: currentTier || "free",
+  });
+  const [isLoadingProTrial, setIsLoadingProTrial] = useState(false);
   const [subscriptionState, setSubscriptionState] = useState(null);
   const showSubscriptionSettings = false;
   const [isLoadingSubscription, setIsLoadingSubscription] = useState(false);
@@ -345,7 +346,11 @@ function PaymentPage({
     user,
     selectedPlan,
     billingMonths: normalizedBillingMonths,
-    enabled: isRecurringSelection,
+    enabled:
+      isRecurringSelection ||
+      isPaidTier ||
+      (currentTier === "free" && selectedPlan === "Pro" && proTrialStatus?.eligible === true),
+    proTrialEligible: currentTier === "free" && selectedPlan === "Pro" && proTrialStatus?.eligible === true,
     onTierUpdated,
     setPaymentError,
     setPaymentNotice,
@@ -364,6 +369,15 @@ function PaymentPage({
     Boolean(niceSubscriptionData) ||
     isLoadingSubscription ||
     isLoadingNiceSubscription;
+  const canShowProTrial = currentTier === "free" && selectedPlan === "Pro";
+  const isProTrialEligible = canShowProTrial && Boolean(proTrialStatus?.eligible);
+  const canStartKakaoProTrial =
+    isProTrialEligible &&
+    Boolean(selectedKakaoPlan) &&
+    !paying &&
+    !isLoadingSubscription &&
+    !isSameActiveKakaoSubscription;
+  const isUsingProTrialFlow = isProTrialEligible;
 
   const loadKakaoSubscriptionStatus = useCallback(
     async ({ showLoading = false } = {}) => {
@@ -418,6 +432,53 @@ function PaymentPage({
   }, [loadKakaoSubscriptionStatus]);
 
   useEffect(() => {
+    let active = true;
+
+    if (!user?.id) {
+      setProTrialStatus({
+        eligible: false,
+        claimedAt: null,
+        currentTier: "free",
+      });
+      setIsLoadingProTrial(false);
+      return undefined;
+    }
+
+    setIsLoadingProTrial(true);
+    getAccessToken()
+      .then((accessToken) => {
+        if (!accessToken) {
+          throw new Error("무료 체험 확인에는 로그인 세션이 필요합니다.");
+        }
+        return fetchProTrialStatus({ accessToken });
+      })
+      .then((result) => {
+        if (!active) return;
+        setProTrialStatus({
+          eligible: result?.eligible === true,
+          claimedAt: result?.claimedAt || null,
+          currentTier: String(result?.currentTier || currentTier || "free").trim().toLowerCase() || "free",
+        });
+      })
+      .catch((error) => {
+        if (!active) return;
+        console.warn("Failed to load Pro trial status:", error);
+        setProTrialStatus({
+          eligible: false,
+          claimedAt: null,
+          currentTier: currentTier || "free",
+        });
+      })
+      .finally(() => {
+        if (active) setIsLoadingProTrial(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [currentTier, user?.id]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     if (handledKakaoReturnRef.current) return;
     const params = new URLSearchParams(window.location.search);
@@ -460,6 +521,8 @@ function PaymentPage({
     }
     const storedTier = String(stored.tier || stored.planTier || "").trim().toLowerCase();
     const storedMonths = Number(stored.billingMonths ?? stored.months ?? 1);
+    const storedHasAmount = Object.prototype.hasOwnProperty.call(stored, "amount");
+    const storedProTrial = stored?.proTrial === true;
 
     if (!stored?.tid || !stored?.orderId) {
       setPaymentError("결제 세션 정보를 찾을 수 없습니다. 다시 결제를 진행해주세요.");
@@ -494,11 +557,12 @@ function PaymentPage({
               Number.isFinite(storedMonths) && storedMonths > 0
                 ? Math.floor(storedMonths)
                 : selectedChargeMonths,
-            amount: Number(stored.amount) > 0 ? Number(stored.amount) : selectedKakaoAmount,
+            amount: storedHasAmount ? Number(stored.amount) : selectedKakaoAmount,
             itemName: String(stored.itemName || selectedKakaoItemName || "").trim(),
             registerSubscription:
               stored?.registerSubscription === true ||
               String(stored?.paymentMode || "").trim().toLowerCase() === "subscription",
+            proTrial: storedProTrial,
             paymentMode:
               String(stored?.paymentMode || "").trim().toLowerCase() === "subscription"
                 ? "subscription"
@@ -519,7 +583,9 @@ function PaymentPage({
         setPaymentNotice("결제가 완료되었습니다. 요금제가 갱신되었습니다.");
         const isSubscriptionApproval = approvalResult?.paymentMode === "subscription";
         const noticeParts = [
-          isSubscriptionApproval
+          storedProTrial || approvalResult?.proTrial
+            ? "카카오페이 결제수단 등록과 Pro 1개월 무료체험이 시작되었습니다. 다음 달부터 자동결제됩니다."
+            : isSubscriptionApproval
             ? refreshedSubscription?.status === "active"
               ? "카카오페이 정기결제 등록과 첫 결제가 완료되었습니다."
               : "결제는 완료됐지만 정기결제 상태 확인이 필요합니다."
@@ -648,6 +714,94 @@ function PaymentPage({
       window.location.href = resolveKakaoRedirectUrl(data) || redirectUrl;
     } catch (err) {
       setPaymentError(err?.message || "카카오페이 결제 준비에 실패했습니다.");
+      setPaying(false);
+    }
+  };
+
+  const handleKakaoProTrial = async () => {
+    if (!user?.id) {
+      setPaymentNotice("");
+      setPaymentError("카카오페이 무료체험 시작에는 로그인이 필요합니다.");
+      return;
+    }
+
+    if (!isProTrialEligible) {
+      setPaymentNotice("");
+      setPaymentError("Pro 무료체험 가능 여부를 확인한 뒤 다시 시도해주세요.");
+      return;
+    }
+
+    if (!selectedKakaoPlan) {
+      setPaymentNotice("");
+      setPaymentError("카카오페이는 Pro 플랜에서만 무료체험을 시작할 수 있습니다.");
+      return;
+    }
+
+    setPaymentError("");
+    setPaymentNotice("");
+    setPaying(true);
+
+    const orderId = `kpay_trial_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const appOrigin = resolvePublicAppOrigin() || window.location.origin;
+    const approvalUrl = `${appOrigin}/?kakaoPay=approve`;
+    const cancelUrl = `${appOrigin}/?kakaoPay=cancel`;
+    const failUrl = `${appOrigin}/?kakaoPay=fail`;
+
+    try {
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        throw new Error("무료체험 준비에는 로그인 세션이 필요합니다.");
+      }
+
+      const data = await requestKakaoPayReady(
+        {
+          orderId,
+          userId: user.id,
+          amount: 0,
+          itemName: "제우시안 프로 1개월 무료체험",
+          plan: selectedPlan,
+          tier: selectedKakaoPlan.tier,
+          billingMonths: 1,
+          registerSubscription: true,
+          proTrial: true,
+          paymentMode: "subscription",
+          approvalUrl,
+          cancelUrl,
+          failUrl,
+        },
+        { accessToken }
+      );
+
+      const redirectUrl =
+        data?.next_redirect_pc_url || data?.next_redirect_mobile_url || data?.next_redirect_app_url;
+
+      if (!data?.tid || !(resolveKakaoRedirectUrl(data) || redirectUrl)) {
+        throw new Error("카카오페이 무료체험 준비에 실패했습니다. 잠시 후 다시 시도해주세요.");
+      }
+
+      localStorage.setItem(
+        KAKAOPAY_STORAGE_KEY,
+        JSON.stringify({
+          tid: data.tid,
+          orderId,
+          planName: selectedPlan,
+          tier: selectedKakaoPlan.tier,
+          billingMonths: 1,
+          amount: 0,
+          itemName: "제우시안 프로 1개월 무료체험",
+          registerSubscription: true,
+          proTrial: true,
+          paymentMode: "subscription",
+        })
+      );
+      markPaymentReturnPending({
+        provider: "kakaopay",
+        paymentMode: "subscription-trial",
+      });
+
+      window.location.href = resolveKakaoRedirectUrl(data) || redirectUrl;
+    } catch (error) {
+      setPaymentError(error?.message || "카카오페이 무료체험 준비에 실패했습니다.");
       setPaying(false);
     }
   };
@@ -883,9 +1037,9 @@ function PaymentPage({
             <div className="flex flex-wrap items-center gap-2">
               <span className={isLight ? "text-slate-600" : "text-slate-300"}>결제 개월</span>
               <select
-                value={normalizedBillingMonths}
+                value={isUsingProTrialFlow ? 1 : normalizedBillingMonths}
                 onChange={(event) => setBillingMonths(Number(event.target.value))}
-                disabled={selectedPlan === "Free"}
+                disabled={selectedPlan === "Free" || isUsingProTrialFlow}
                 className={`rounded-md border px-2 py-1 text-xs ${
                   isLight
                     ? "border-slate-300 bg-white text-slate-700"
@@ -901,26 +1055,58 @@ function PaymentPage({
             </div>
             {selectedPlan !== "Free" && (
               <>
-                <span className={isLight ? "text-slate-700" : "text-slate-100"}>
-                  {isRecurringSelection ? "첫 결제금액" : "총 결제금액"} {selectedKakaoAmount.toLocaleString()} KRW
-                </span>
-                {isRecurringSelection && (
-                  <span className={isLight ? "text-slate-500" : "text-slate-300"}>
-                    이후 매월 {selectedKakaoAmount.toLocaleString()} KRW가 자동 결제됩니다.
-                  </span>
+                {isUsingProTrialFlow ? (
+                  <>
+                    <span className={isLight ? "text-slate-700" : "text-slate-100"}>
+                      오늘 결제 0 KRW
+                    </span>
+                    <span className={isLight ? "text-slate-500" : "text-slate-300"}>
+                      결제수단 등록 후 1개월 뒤부터 매월 4,900 KRW가 자동 결제됩니다.
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className={isLight ? "text-slate-700" : "text-slate-100"}>
+                      {isRecurringSelection ? "첫 결제금액" : "총 결제금액"} {selectedKakaoAmount.toLocaleString()} KRW
+                    </span>
+                    {isRecurringSelection && (
+                      <span className={isLight ? "text-slate-500" : "text-slate-300"}>
+                        이후 매월 {selectedKakaoAmount.toLocaleString()} KRW가 자동 결제됩니다.
+                      </span>
+                    )}
+                  </>
                 )}
               </>
+            )}
+          </div>
+          <div className="flex flex-col gap-2">
+            {canShowProTrial && (
+              <p className={`max-w-xs text-xs ${isLight ? "text-slate-500" : "text-slate-300"}`}>
+                {isLoadingProTrial
+                  ? "무료체험 가능 여부를 확인 중입니다."
+                  : isProTrialEligible
+                    ? "아래 결제수단을 등록하면 Pro 1개월 무료체험이 바로 시작되고, 다음 달부터 자동결제됩니다."
+                    : proTrialStatus?.claimedAt
+                      ? "이미 Pro 무료체험을 사용했습니다."
+                      : "현재 조건에서는 Pro 무료체험을 시작할 수 없습니다."}
+              </p>
             )}
           </div>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 [&>*:nth-child(2)]:hidden [&>*:nth-child(4)]:hidden [&>*:nth-child(5)]:hidden">
             <button
               type="button"
-              onClick={isRecurringSelection ? handleKakaoPay : handleKakaoOneTimePay}
-              disabled={!canProceedWithKakao}
+              onClick={isUsingProTrialFlow ? handleKakaoProTrial : isRecurringSelection ? handleKakaoPay : handleKakaoOneTimePay}
+              disabled={isUsingProTrialFlow ? !canStartKakaoProTrial : !canProceedWithKakao}
               className={`ghost-button text-sm ${isLight ? "text-amber-700" : "text-amber-100"}`}
               style={{ "--ghost-color": "234, 179, 8" }}
             >
-              {paying ? "카카오페이 처리 중..." : "카카오페이"}
+              {paying
+                ? isUsingProTrialFlow
+                  ? "무료체험 처리 중..."
+                  : "카카오페이 처리 중..."
+                : isUsingProTrialFlow
+                  ? "카카오페이 무료체험"
+                  : "카카오페이"}
             </button>
             <button hidden
               type="button"
@@ -933,16 +1119,22 @@ function PaymentPage({
             </button>
             <button
               type="button"
-              onClick={isRecurringSelection ? startNiceSubscription : openCardWidget}
-              disabled={!canProceedWithCard}
+              onClick={isUsingProTrialFlow ? () => startNiceSubscription({ proTrial: true }) : isRecurringSelection ? () => startNiceSubscription() : openCardWidget}
+              disabled={isUsingProTrialFlow ? !canStartNiceSubscription : !canProceedWithCard}
               className={`ghost-button text-sm ${isLight ? "text-emerald-700" : "text-emerald-100"}`}
               style={{ "--ghost-color": "16, 185, 129" }}
             >
-              {cardPaying ? "신용카드 처리 중..." : "신용카드"}
+              {isStartingNiceSubscription || cardPaying
+                ? isUsingProTrialFlow
+                  ? "무료체험 처리 중..."
+                  : "신용카드 처리 중..."
+                : isUsingProTrialFlow
+                  ? "신용카드 무료체험"
+                  : "신용카드"}
             </button>
             <button hidden
               type="button"
-              onClick={startNiceSubscription}
+              onClick={() => startNiceSubscription()}
               disabled={!canStartNiceSubscription}
               className={`ghost-button text-sm ${isLight ? "text-cyan-700" : "text-cyan-100"}`}
               style={{ "--ghost-color": "6, 182, 212" }}

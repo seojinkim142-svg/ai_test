@@ -110,6 +110,8 @@ function PdfPreview({
   const pageLayoutCacheRef = useRef(new Map());
   const renderTaskRef = useRef(null);
   const renderRequestRef = useRef(0);
+  const renderCycleRef = useRef(0);
+  const resizeRafRef = useRef(null);
   const wheelLockRef = useRef(0);
   const touchStartRef = useRef(null);
   const sourceKey = useMemo(
@@ -636,14 +638,25 @@ function PdfPreview({
     let cancelled = false;
 
     const renderCurrentPage = async () => {
+      const cycleId = renderCycleRef.current + 1;
+      renderCycleRef.current = cycleId;
       setNativeError("");
       setIsNativeLoading(true);
       let renderTask = null;
 
       try {
-        if (renderTaskRef.current) {
-          renderTaskRef.current.cancel();
-          renderTaskRef.current = null;
+        const previousTask = renderTaskRef.current;
+        if (previousTask) {
+          try {
+            previousTask.cancel();
+            await previousTask.promise;
+          } catch {
+            // Cancellation is expected when page/size changes during rendering.
+          } finally {
+            if (renderTaskRef.current === previousTask) {
+              renderTaskRef.current = null;
+            }
+          }
         }
 
         const maxPage = Math.max(1, Number(doc.numPages) || 1);
@@ -654,7 +667,13 @@ function PdfPreview({
           return;
         }
         const page = await doc.getPage(targetPage);
-        if (cancelled || renderRequestRef.current !== requestId) return;
+        if (
+          cancelled ||
+          renderRequestRef.current !== requestId ||
+          renderCycleRef.current !== cycleId
+        ) {
+          return;
+        }
         const context = canvas.getContext("2d", { alpha: false });
         if (!context) throw new Error("Canvas context is unavailable.");
 
@@ -673,7 +692,13 @@ function PdfPreview({
         context.fillStyle = "#ffffff";
         context.fillRect(0, 0, canvas.width, canvas.height);
 
-        if (cancelled || renderRequestRef.current !== requestId) return;
+        if (
+          cancelled ||
+          renderRequestRef.current !== requestId ||
+          renderCycleRef.current !== cycleId
+        ) {
+          return;
+        }
 
         renderTask = page.render({
           canvasContext: context,
@@ -683,7 +708,13 @@ function PdfPreview({
         renderTaskRef.current = renderTask;
         await renderTask.promise;
 
-        if (cancelled || renderRequestRef.current !== requestId) return;
+        if (
+          cancelled ||
+          renderRequestRef.current !== requestId ||
+          renderCycleRef.current !== cycleId
+        ) {
+          return;
+        }
       } catch (err) {
         if (cancelled || err?.name === "RenderingCancelledException") return;
         setNativeError(err?.message || "PDF 페이지 렌더링에 실패했습니다.");
@@ -691,7 +722,11 @@ function PdfPreview({
         if (renderTask && renderTaskRef.current === renderTask) {
           renderTaskRef.current = null;
         }
-        if (!cancelled && renderRequestRef.current === requestId) {
+        if (
+          !cancelled &&
+          renderRequestRef.current === requestId &&
+          renderCycleRef.current === cycleId
+        ) {
           setIsNativeLoading(false);
         }
       }
@@ -700,16 +735,27 @@ function PdfPreview({
     renderCurrentPage();
 
     const handleResize = () => {
-      renderCurrentPage();
+      if (resizeRafRef.current) {
+        cancelAnimationFrame(resizeRafRef.current);
+      }
+      resizeRafRef.current = requestAnimationFrame(() => {
+        resizeRafRef.current = null;
+        renderCurrentPage();
+      });
     };
     window.addEventListener("resize", handleResize);
 
     return () => {
       cancelled = true;
+      renderCycleRef.current += 1;
       if (renderRequestRef.current === requestId) {
         renderRequestRef.current += 1;
       }
       window.removeEventListener("resize", handleResize);
+      if (resizeRafRef.current) {
+        cancelAnimationFrame(resizeRafRef.current);
+        resizeRafRef.current = null;
+      }
       if (renderTaskRef.current) {
         try {
           renderTaskRef.current.cancel();
