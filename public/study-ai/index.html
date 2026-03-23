@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>공부 AI | PDF 요약과 문제 생성 | Zeusian</title>
+    <meta
+      name="description"
+      content="Zeusian은 PDF를 올리면 요약, 퀴즈, OX, 카드, AI 튜터까지 이어지는 공부 AI 서비스입니다."
+    />
+    <meta name="robots" content="index,follow" />
+    <link rel="canonical" href="https://zeusian.ai.kr/study-ai" />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="ko_KR" />
+    <meta property="og:title" content="공부 AI | PDF 요약과 문제 생성 | Zeusian" />
+    <meta
+      property="og:description"
+      content="PDF를 업로드하면 요약, 퀴즈, OX, 카드, AI 튜터까지 한 흐름으로 이어지는 공부 AI 서비스입니다."
+    />
+    <meta property="og:url" content="https://zeusian.ai.kr/study-ai" />
+    <meta property="og:site_name" content="Zeusian" />
+    <meta property="og:image" content="https://zeusian.ai.kr/zeusian_logo.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="공부 AI | PDF 요약과 문제 생성 | Zeusian" />
+    <meta
+      name="twitter:description"
+      content="Zeusian은 PDF 요약, 문제 생성, 카드, AI 튜터를 연결한 공부 AI 서비스입니다."
+    />
+    <meta name="twitter:image" content="https://zeusian.ai.kr/zeusian_logo.png" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebPage",
+        "name": "공부 AI | PDF 요약과 문제 생성 | Zeusian",
+        "url": "https://zeusian.ai.kr/study-ai",
+        "inLanguage": "ko-KR",
+        "description": "Zeusian은 PDF를 올리면 요약, 퀴즈, OX, 카드, AI 튜터까지 이어지는 공부 AI 서비스입니다.",
+        "isPartOf": {
+          "@type": "WebSite",
+          "name": "Zeusian",
+          "alternateName": "제우시안",
+          "url": "https://zeusian.ai.kr/"
+        },
+        "about": ["공부 AI", "PDF 요약", "문제 생성", "AI 튜터"]
+      }
+    </script>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #04110c;
+        --panel: rgba(8, 24, 18, 0.88);
+        --line: rgba(110, 231, 183, 0.18);
+        --text: #ecfdf5;
+        --muted: rgba(236, 253, 245, 0.72);
+        --accent: #6ee7b7;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Pretendard", "Noto Sans KR", system-ui, sans-serif;
+        background:
+          radial-gradient(circle at top, rgba(52, 211, 153, 0.2), transparent 35%),
+          linear-gradient(180deg, #071711 0%, var(--bg) 100%);
+        color: var(--text);
+      }
+
+      main {
+        width: min(960px, calc(100% - 32px));
+        margin: 0 auto;
+        padding: 72px 0 88px;
+      }
+
+      .hero,
+      .section {
+        border: 1px solid var(--line);
+        background: var(--panel);
+        backdrop-filter: blur(10px);
+        border-radius: 28px;
+        padding: 32px;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+      }
+
+      .hero {
+        margin-bottom: 20px;
+      }
+
+      .eyebrow {
+        margin: 0 0 14px;
+        color: var(--accent);
+        font-size: 0.82rem;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        font-weight: 700;
+      }
+
+      h1,
+      h2 {
+        margin: 0;
+        line-height: 1.05;
+      }
+
+      h1 {
+        font-size: clamp(2.4rem, 6vw, 4.7rem);
+      }
+
+      h2 {
+        font-size: clamp(1.5rem, 4vw, 2.2rem);
+        margin-bottom: 14px;
+      }
+
+      p {
+        color: var(--muted);
+        line-height: 1.7;
+        font-size: 1.05rem;
+      }
+
+      .hero p {
+        max-width: 680px;
+        margin: 18px 0 0;
+      }
+
+      .cta-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 24px;
+      }
+
+      .button,
+      .button-secondary {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 14px 18px;
+        border-radius: 999px;
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      .button {
+        background: var(--accent);
+        color: #052e23;
+      }
+
+      .button-secondary {
+        border: 1px solid var(--line);
+        color: var(--text);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 20px;
+        margin-top: 20px;
+      }
+
+      ul {
+        margin: 0;
+        padding-left: 20px;
+        color: var(--muted);
+        line-height: 1.8;
+      }
+
+      strong {
+        color: var(--text);
+      }
+
+      @media (max-width: 720px) {
+        main {
+          padding: 32px 0 56px;
+        }
+
+        .hero,
+        .section {
+          border-radius: 22px;
+          padding: 24px;
+        }
+
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <p class="eyebrow">공부 AI</p>
+        <h1>PDF를 올리면 바로 공부 흐름으로 이어지는 AI</h1>
+        <p>
+          Zeusian은 강의자료, 교재, 정리 PDF를 올리면 곧바로 요약, 퀴즈, OX, 카드, AI 튜터,
+          모의고사까지 이어지는 공부 AI 서비스입니다.
+        </p>
+        <div class="cta-row">
+          <a class="button" href="/">Zeusian 시작하기</a>
+          <a class="button-secondary" href="/privacy">개인정보처리방침</a>
+        </div>
+      </section>
+
+      <div class="grid">
+        <section class="section">
+          <h2>공부 AI로 할 수 있는 것</h2>
+          <ul>
+            <li>PDF 핵심 요약으로 긴 문서를 빠르게 정리</li>
+            <li>객관식, 주관식, OX 문제 생성으로 이해도 점검</li>
+            <li>카드 학습으로 반복 복습 루프 구성</li>
+            <li>AI 튜터와 문서 기반 질의응답</li>
+            <li>모의고사 생성과 결과 PDF 다운로드</li>
+          </ul>
+        </section>
+
+        <section class="section">
+          <h2>이런 검색어와 잘 맞습니다</h2>
+          <p>
+            <strong>공부 AI</strong>, <strong>PDF 요약 AI</strong>, <strong>문제 생성 AI</strong>,
+            <strong>AI 튜터</strong>를 찾는 사용자에게 맞춘 학습 흐름입니다. 단순 채팅이 아니라
+            문서 기반 복습까지 이어지는 것이 핵심입니다.
+          </p>
+        </section>
+
+        <section class="section">
+          <h2>왜 Zeusian이 맞는가</h2>
+          <p>
+            한 번의 업로드로 요약과 문제 풀이, 다시 질문과 복습 카드까지 연결됩니다.
+            시험 준비처럼 같은 자료를 여러 번 복습해야 할 때 특히 효율적입니다.
+          </p>
+        </section>
+
+        <section class="section">
+          <h2>브랜드 검색 외 일반 검색 대응</h2>
+          <p>
+            제우시안이나 Zeusian처럼 브랜드명을 모르는 사용자도 <strong>공부 AI</strong> 같은 일반
+            검색어로 서비스를 찾을 수 있도록 이 안내 페이지를 제공합니다.
+          </p>
+        </section>
+      </div>
+    </main>
+  </body>
+</html>

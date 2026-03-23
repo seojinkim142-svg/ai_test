@@ -3,6 +3,7 @@ import http from "http";
 import dotenv from "dotenv";
 import configHandler from "../api/nicepayments/config.js";
 import confirmHandler from "../api/nicepayments/confirm.js";
+import proTrialHandler from "../api/nicepayments/pro-trial.js";
 import returnHandler from "../api/nicepayments/return.js";
 import subscriptionHandler from "../api/nicepayments/subscription/[action].js";
 
@@ -13,6 +14,7 @@ const PORT = Number(process.env.NICEPAYMENTS_PORT || 8791);
 const ROUTES = new Map([
   ["/api/nicepayments/config", configHandler],
   ["/api/nicepayments/confirm", confirmHandler],
+  ["/api/nicepayments/pro-trial", proTrialHandler],
   ["/api/nicepayments/return", returnHandler],
   ["/api/nicepayments/subscription/prepare", subscriptionHandler],
   ["/api/nicepayments/subscription/return", subscriptionHandler],

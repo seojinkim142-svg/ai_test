@@ -69,6 +69,10 @@ export function fetchNicePaymentsConfig() {
   return postJson(buildNicePaymentsUrl("/config"), {});
 }
 
+export function fetchProTrialStatus(options = {}) {
+  return postJson(buildNicePaymentsUrl("/pro-trial"), { action: "status" }, options);
+}
+
 export function prepareNicePaymentsSubscription(payload, options = {}) {
   return postJson(buildNicePaymentsUrl("/subscription/prepare"), payload, options);
 }

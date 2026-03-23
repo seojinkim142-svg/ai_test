@@ -87,6 +87,7 @@ export function useNiceSubscription({
   selectedPlan,
   billingMonths = 1,
   enabled = true,
+  proTrialEligible = false,
   onTierUpdated,
   setPaymentError,
   setPaymentNotice,
@@ -108,6 +109,7 @@ export function useNiceSubscription({
   const selectedItemName = selectedPlanConfig ? selectedPlanConfig.itemName : "";
 
   const activeSubscription = subscriptionState?.status === "active" ? subscriptionState : null;
+  const canStartProTrial = proTrialEligible && selectedPlanConfig?.tier === "pro";
   const isSameActiveSubscription =
     Boolean(activeSubscription) &&
     activeSubscription?.tier === selectedPlanConfig?.tier &&
@@ -115,7 +117,7 @@ export function useNiceSubscription({
     Number(activeSubscription?.amount) === selectedAmount;
   const canStartSubscription =
     Boolean(selectedPlanConfig) &&
-    normalizedBillingMonths >= 2 &&
+    (canStartProTrial || normalizedBillingMonths >= 2) &&
     !isStartingSubscription &&
     !isLoadingSubscription &&
     !isSameActiveSubscription;
@@ -165,6 +167,7 @@ export function useNiceSubscription({
     const params = new URLSearchParams(window.location.search);
     const billingState = params.get("niceBilling");
     const message = params.get("message");
+    const trialMode = params.get("trial") === "1";
 
     if (!billingState) return;
     handledReturnRef.current = true;
@@ -179,7 +182,11 @@ export function useNiceSubscription({
         if (billingState === "success") {
           await loadSubscriptionStatus();
           onTierUpdated?.();
-          const noticeParts = ["나이스페이 카드 정기결제 등록과 첫 결제가 완료되었습니다."];
+          const noticeParts = [
+            trialMode
+              ? "나이스페이 결제수단 등록과 Pro 1개월 무료체험이 시작되었습니다. 다음 달부터 자동결제됩니다."
+              : "나이스페이 카드 정기결제 등록과 첫 결제가 완료되었습니다.",
+          ];
           if (maskMessage(message)) {
             noticeParts.push(`주의: ${maskMessage(message)}`);
           }
@@ -198,7 +205,9 @@ export function useNiceSubscription({
     })();
   }, [loadSubscriptionStatus, onTierUpdated, setPaymentError, setPaymentNotice]);
 
-  const startSubscription = async () => {
+  const startSubscription = async ({ proTrial = false } = {}) => {
+    const useProTrial = proTrial === true && canStartProTrial;
+
     if (!user?.id) {
       setPaymentNotice("");
       setPaymentError("카드 정기결제에는 로그인 세션이 필요합니다.");
@@ -211,7 +220,7 @@ export function useNiceSubscription({
       return;
     }
 
-    if (normalizedBillingMonths < 2) {
+    if (!useProTrial && normalizedBillingMonths < 2) {
       setPaymentError("");
       setPaymentNotice("카드 정기결제는 2개월 이상부터 등록할 수 있습니다.");
       return;
@@ -245,6 +254,7 @@ export function useNiceSubscription({
           tier: selectedPlanConfig.tier,
           billingMonths: subscriptionBillingMonths,
           itemName: selectedItemName,
+          proTrial: useProTrial,
           buyerName: user?.user_metadata?.name || user?.email?.split("@")[0] || "user",
           buyerEmail: user?.email || "",
         },
@@ -275,7 +285,7 @@ export function useNiceSubscription({
       document.body.appendChild(form);
       markPaymentReturnPending({
         provider: "nicepayments-billing",
-        paymentMode: "subscription",
+        paymentMode: useProTrial ? "subscription-trial" : "subscription",
       });
 
       try {
@@ -292,7 +302,7 @@ export function useNiceSubscription({
       }
     } catch (error) {
       clearPaymentReturnPending();
-      setPaymentError(error?.message || "카드 정기결제 준비에 실패했습니다.");
+      setPaymentError(error?.message || (useProTrial ? "무료체험 준비에 실패했습니다." : "카드 정기결제 준비에 실패했습니다."));
     } finally {
       setIsStartingSubscription(false);
     }

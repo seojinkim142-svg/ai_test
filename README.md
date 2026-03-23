@@ -2,6 +2,35 @@
 
 Zeusian is an AI-powered PDF study assistant built with React + Vite. The app supports document upload, summary generation, quiz/OX/mock-exam creation, flashcards, AI tutor interactions, premium profile spaces, and folder-level combined study documents.
 
+## Recent Changes
+
+Recent app changes that are already reflected in the current codebase:
+
+- OCR pipeline optimization
+  - Reused PDF document handles and Tesseract workers.
+  - Added OCR result caching and throttled OCR progress updates.
+  - Reduced OCR render cost with page-order sampling and pixel caps.
+- PDF open flow improvement
+  - Tapping a document now enters the detail screen immediately.
+  - Remote file fetch now continues in the background while the detail page shows an opening/loading state.
+- Native social login redirect fix
+  - Android/Capacitor login flows now return through the app callback instead of `localhost`.
+  - Supabase auth callback exchange is handled through the native deep link flow.
+- Quiz structure update
+  - OX questions were merged into the main quiz flow.
+  - Quiz mixes now support `OX / 객관식 / 주관식` ratios with a fixed total of 7 questions.
+  - Quiz rendering order is now `OX -> 객관식 -> 주관식`.
+- PDF preview stability fix
+  - Prevented overlapping PDF.js canvas renders that caused native tablet preview failures.
+- Frontend bundle optimization
+  - Split large runtime chunks in Vite for React, Supabase, markdown, PDF, jsPDF, and html2canvas.
+  - Moved large helper logic out of `src/App.jsx` into consolidated utility modules without excessive file fragmentation.
+- Encoding recovery
+  - Restored major mojibake/broken Korean UI strings in quiz and detail screen components.
+- Quiz generation OCR behavior change
+  - Quiz, OX, and mock-exam generation no longer trigger fresh OCR during question generation.
+  - These features now prefer extracted text, cached summary source text, and chapter text cached during summary generation.
+
 ## Modularization And Deployment Notes
 
 This project is modularized with Vercel deployment constraints in mind.

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import ActionsPanel from "../components/ActionsPanel";
 import AiTutorPanel from "../components/AiTutorPanel";
@@ -147,6 +147,7 @@ export default function DetailPage({
   pdfUrl,
   documentRemoteUrl,
   file,
+  pendingDocumentOpen,
   pageInfo,
   currentPage,
   activeEvidenceHighlight,
@@ -234,13 +235,24 @@ export default function DetailPage({
   examCramItems,
   examCramPendingCount,
   examCramSectionError,
+  examCramReferenceCounts,
+  examCramHasAnySource,
+  examCramContent,
+  examCramUpdatedAt,
+  examCramScopeLabel,
+  examCramStatus,
+  examCramError,
+  isGeneratingExamCram,
   resolveQuizEvidence,
   handleChoiceSelect,
   handleShortAnswerChange,
   handleShortAnswerCheck,
+  handleQuizOxSelect,
+  handleToggleQuizOxExplanation,
   handleReviewNoteAttempt,
   handleToggleReviewNoteResolved,
   handleDeleteReviewNote,
+  handleGenerateExamCram,
   handleCreateReviewNotesMockExam,
   regenerateQuiz,
   isLoadingOx,
@@ -252,7 +264,6 @@ export default function DetailPage({
   resolveOxEvidence,
   oxSelections,
   handleOxSelect,
-  setOxSelections,
   oxExplanationOpen,
   setOxExplanationOpen,
   flashcards,
@@ -273,15 +284,32 @@ export default function DetailPage({
   handleSendTutorMessage,
   handleResetTutor,
 }) {
-  const quizMixOptions = useMemo(
+  const quizMixOptionsLegacy = useMemo(
     () => [
-      { multipleChoice: 5, shortAnswer: 0, label: "개관식 5 / 주관식 0" },
-      { multipleChoice: 4, shortAnswer: 1, label: "개관식 4 / 주관식 1" },
-      { multipleChoice: 3, shortAnswer: 2, label: "개관식 3 / 주관식 2" },
-      { multipleChoice: 2, shortAnswer: 3, label: "개관식 2 / 주관식 3" },
-      { multipleChoice: 1, shortAnswer: 4, label: "개관식 1 / 주관식 4" },
-      { multipleChoice: 0, shortAnswer: 5, label: "개관식 0 / 주관식 5" },
+      { multipleChoice: 5, shortAnswer: 0, label: "객관식 5 / 주관식 0" },
+      { multipleChoice: 4, shortAnswer: 1, label: "객관식 4 / 주관식 1" },
+      { multipleChoice: 3, shortAnswer: 2, label: "객관식 3 / 주관식 2" },
+      { multipleChoice: 2, shortAnswer: 3, label: "객관식 2 / 주관식 3" },
+      { multipleChoice: 1, shortAnswer: 4, label: "객관식 1 / 주관식 4" },
+      { multipleChoice: 0, shortAnswer: 5, label: "객관식 0 / 주관식 5" },
     ],
+    []
+  );
+  void quizMixOptionsLegacy;
+  const quizMixOptions = useMemo(
+    () =>
+      Array.from({ length: 8 }, (_, multipleChoice) => multipleChoice)
+        .reverse()
+        .flatMap((multipleChoice) =>
+          Array.from({ length: 8 - multipleChoice }, (_, shortAnswer) => shortAnswer)
+            .reverse()
+            .map((shortAnswer) => ({
+              multipleChoice,
+              shortAnswer,
+              ox: 7 - multipleChoice - shortAnswer,
+              label: `OX ${7 - multipleChoice - shortAnswer} / 객관식 ${multipleChoice} / 주관식 ${shortAnswer}`,
+            }))
+        ),
     []
   );
   const { quizMixScrollRef, handleQuizMixScroll } = useQuizMixCarousel({
@@ -331,7 +359,7 @@ export default function DetailPage({
           <p className="text-[13px] font-semibold text-black">{number}.</p>
           {renderMockRichText(item?.prompt, "text-[13px] text-black")}
           {isOx && <p className="text-[12px] text-black/80">1) O  2) X</p>}
-          {isShort && <p className="text-[12px] text-black/80">답: ____________________</p>}
+          {isShort && <p className="text-[12px] text-black/80">정답 ____________________</p>}
           {isMultiple && choices.length > 0 && (
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[12px] text-black/85">
               {choices.slice(0, 4).map((choice, idx) => (
@@ -407,16 +435,78 @@ export default function DetailPage({
     partialSummaryListRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [isSavedPartialSummaryOpen]);
 
+  useEffect(() => {
+    if (panelTab === "ox") {
+      setPanelTab("quiz");
+    }
+  }, [panelTab, setPanelTab]);
+
   const panelItems = [
     { id: "summary", label: "\uC694\uC57D" },
     { id: "quiz", label: "\uD034\uC988" },
-    { id: "ox", label: "O/X" },
     { id: "reviewNotes", label: "\uC624\uB2F5\uB178\uD2B8" },
     { id: "mockExam", label: "\uBAA8\uC758\uACE0\uC0AC" },
     { id: "flashcards", label: "\uCE74\uB4DC" },
     { id: "tutor", label: "AI \uD29C\uD130" },
   ];
   const totalPageCount = Number(pageInfo?.total || pageInfo?.used || 0);
+  const isPendingWithoutFile = Boolean(pendingDocumentOpen && !file);
+  const pendingDocumentName = String(pendingDocumentOpen?.name || "문서").trim() || "문서";
+
+  if (isPendingWithoutFile) {
+    return (
+      <section
+        ref={detailContainerRef}
+        className="app-safe-bottom flex flex-col gap-4 lg:h-[clamp(70vh,calc(100vh-120px),90vh)] lg:flex-row lg:items-stretch lg:gap-0 lg:overflow-hidden"
+      >
+        <div
+          className="flex flex-col gap-3 lg:h-full lg:min-w-0 lg:flex-[0_0_var(--split-basis)] lg:overflow-y-auto"
+          style={splitStyle}
+        >
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] px-4 py-3 shadow-lg shadow-black/20 lg:hidden">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-300/75">
+                  Document
+                </p>
+                <p className="truncate text-sm font-semibold text-white">{pendingDocumentName}</p>
+              </div>
+              <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">
+                준비 중
+              </span>
+            </div>
+          </div>
+          <div className="flex h-[58svh] min-h-[24rem] flex-1 items-center justify-center rounded-3xl border border-white/10 bg-slate-950/70 px-6 text-center shadow-2xl shadow-black/40 sm:min-h-[72vh] lg:h-full lg:min-h-0">
+            <div className="max-w-sm">
+              <div className="mx-auto mb-4 h-12 w-12 animate-pulse rounded-2xl border border-emerald-300/20 bg-emerald-400/10" />
+              <p className="text-base font-semibold text-white">{pendingDocumentName}</p>
+              <p className="mt-2 text-sm text-slate-300">문서를 여는 중입니다.</p>
+              <p className="mt-2 text-xs text-slate-400">
+                원격 저장소에서 파일을 불러오고 미리보기를 준비하고 있습니다.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="hidden w-5 shrink-0 lg:block xl:w-6" />
+
+        <div className="flex min-w-0 flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
+          <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-5 shadow-lg shadow-black/30">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300/75">
+              Opening
+            </p>
+            <p className="mt-3 text-lg font-semibold text-white">{pendingDocumentName}</p>
+            <p className="mt-2 text-sm text-slate-300">
+              파일 준비가 끝나면 요약, 퀴즈, 오답노트 화면이 바로 표시됩니다.
+            </p>
+            <div className="mt-4 rounded-2xl border border-emerald-300/15 bg-emerald-400/5 px-4 py-3 text-sm text-emerald-100">
+              잠시만 기다려 주세요. 첫 진입에서는 원격 저장소 다운로드 때문에 시간이 조금 걸릴 수 있습니다.
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
 
   return (
@@ -501,7 +591,7 @@ export default function DetailPage({
       </div>
 
       <div className="flex min-w-0 flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
-        <div className="detail-tab-strip mobile-tab-row flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-1.5 shadow-lg shadow-black/30 md:grid md:grid-cols-7 md:px-3 md:py-2">
+        <div className="detail-tab-strip mobile-tab-row flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-1.5 shadow-lg shadow-black/30 md:grid md:grid-cols-6 md:px-3 md:py-2">
           {panelItems.map((item) => {
             const active = panelTab === item.id;
             return (
@@ -685,7 +775,7 @@ export default function DetailPage({
                     </p>
                     {!isPdfDocument && (
                       <p className="text-xs text-slate-400">
-                        비PDF 문서는 자동 목차 추출 없이, 입력한 범위를 기준으로 텍스트를 논리적으로 나눠 사용합니다.
+                        비PDF 문서에서는 자동 목차 추출 없이, 입력한 범위를 기준으로 텍스트를 논리적으로 분할해 사용합니다.
                       </p>
                     )}
                   </div>
@@ -781,7 +871,7 @@ export default function DetailPage({
                           style={{ "--ghost-color": "148, 163, 184", padding: 0 }}
                           aria-label="이전 강조"
                         >
-                          {"˄"}
+                          {"?"}
                         </button>
                         <button
                           type="button"
@@ -792,7 +882,7 @@ export default function DetailPage({
                           style={{ "--ghost-color": "148, 163, 184", padding: 0 }}
                           aria-label="다음 강조"
                         >
-                          {"˅"}
+                          {"?"}
                         </button>
                       </div>
                     </div>
@@ -1035,7 +1125,7 @@ export default function DetailPage({
                     data-ghost-size="lg"
                     style={{ "--ghost-color": "99, 102, 241" }}
                   >
-                    PDF 저장
+                    PDF 다운로드
                   </button>
                   <button
                     type="button"
@@ -1133,7 +1223,7 @@ export default function DetailPage({
                           <div className="mt-3 space-y-2 text-xs text-slate-200">
                             {mockExamAnswerEntries.length === 0 && (
                               <p className="rounded-lg bg-white/5 px-3 py-2 text-slate-300">
-                                답지 데이터가 없습니다.
+                                아직 답안 데이터가 없습니다.
                               </p>
                             )}
                             {mockExamAnswerEntries.map((item, idx) => (
@@ -1219,10 +1309,11 @@ export default function DetailPage({
                   {quizMixOptions.map((option, index) => {
                     const isActive =
                       quizMix?.multipleChoice === option.multipleChoice &&
-                      quizMix?.shortAnswer === option.shortAnswer;
+                      quizMix?.shortAnswer === option.shortAnswer &&
+                      quizMix?.ox === option.ox;
                     return (
                       <button
-                        key={`mix-${option.multipleChoice}-${option.shortAnswer}`}
+                        key={`mix-${option.multipleChoice}-${option.shortAnswer}-${option.ox}`}
                         data-mix-index={index}
                         type="button"
                         onClick={() => setQuizMix(option)}
@@ -1255,15 +1346,24 @@ export default function DetailPage({
                       revealedChoices={set.revealedChoices}
                       shortAnswerInput={set.shortAnswerInput}
                       shortAnswerResult={set.shortAnswerResult}
+                      oxSelections={set.oxSelections}
+                      oxExplanationOpen={set.oxExplanationOpen}
                       onSelectChoice={(qIdx, choiceIdx) => handleChoiceSelect(set.id, qIdx, choiceIdx)}
                       onShortAnswerChange={(idx, val) => handleShortAnswerChange(set.id, idx, val)}
                       onShortAnswerCheck={(idx) => handleShortAnswerCheck(set.id, idx)}
+                      onOxSelect={(idx, choice) => handleQuizOxSelect(set.id, idx, choice)}
+                      onToggleOxExplanation={(idx) => handleToggleQuizOxExplanation(set.id, idx)}
                     />
                   ))}
                 </div>
               )}
 
-              <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <p className="mt-4 text-xs text-slate-300">
+                총 7문항으로 생성됩니다. 현재 비율: OX {quizMix?.ox ?? 0} / 객관식{" "}
+                {quizMix?.multipleChoice ?? 0} / 주관식 {quizMix?.shortAnswer ?? 0}
+              </p>
+
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <button
                   type="button"
                   onClick={requestQuestions}
@@ -1278,8 +1378,10 @@ export default function DetailPage({
                   style={{ "--ghost-color": "16, 185, 129" }}
                 >
                   {isLoadingQuiz
-                    ? "퀴즈 생성 중.."
-                    : `퀴즈 5문제 바로 생성하기 (객관식 ${quizMix?.multipleChoice ?? 0} / 주관식 ${quizMix?.shortAnswer ?? 0})`}
+                    ? "퀴즈 생성 중..."
+                    : `퀴즈 7문제 바로 생성하기 (OX ${quizMix?.ox ?? 0} / 객관식 ${
+                        quizMix?.multipleChoice ?? 0
+                      } / 주관식 ${quizMix?.shortAnswer ?? 0})`}
                 </button>
                 {!isFreeTier && (
                   <button
@@ -1292,7 +1394,7 @@ export default function DetailPage({
                   >
                     {isLoadingQuiz
                       ? "퀴즈 재생성 중..."
-                      : "퀴즈 재생성(덮어쓰기)"}
+                      : "퀴즈 재생성 (덮어쓰기)"}
                   </button>
                 )}
               </div>
@@ -1361,7 +1463,7 @@ export default function DetailPage({
                   data-ghost-size="xl"
                   style={{ "--ghost-color": "16, 185, 129" }}
                 >
-                  {isLoadingOx ? "O/X 재생성 중..." : "O/X 퀴즈 재생성(덮어쓰기)"}
+                  {isLoadingOx ? "O/X 재생성 중..." : "O/X 퀴즈 재생성 (덮어쓰기)"}
                 </button>
               </div>
 
@@ -1395,11 +1497,20 @@ export default function DetailPage({
               examCramItems={examCramItems}
               examCramPendingCount={examCramPendingCount}
               examCramSectionError={examCramSectionError}
+              examCramReferenceCounts={examCramReferenceCounts}
+              examCramHasAnySource={examCramHasAnySource}
+              examCramContent={examCramContent}
+              examCramUpdatedAt={examCramUpdatedAt}
+              examCramScopeLabel={examCramScopeLabel}
+              examCramStatus={examCramStatus}
+              examCramError={examCramError}
               onSubmitAttempt={handleReviewNoteAttempt}
               onJumpToEvidencePage={jumpToEvidencePage}
               onDelete={handleDeleteReviewNote}
+              onGenerateExamCram={handleGenerateExamCram}
               onCreateMockExam={handleCreateReviewNotesMockExam}
               isCreatingMockExam={isGeneratingMockExam}
+              isGeneratingExamCram={isGeneratingExamCram}
             />
           )}
 

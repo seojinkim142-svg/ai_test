@@ -30,7 +30,8 @@ export const normalizeQuizPayload = (payload) => {
   const multipleChoice = Array.isArray(payload?.multipleChoice) ? payload.multipleChoice : [];
   const rawShort = payload?.shortAnswer;
   const shortAnswer = Array.isArray(rawShort) ? rawShort : rawShort ? [rawShort] : [];
-  return { multipleChoice, shortAnswer };
+  const ox = Array.isArray(payload?.ox) ? payload.ox : [];
+  return { multipleChoice, shortAnswer, ox };
 };
 
 export const getTierLabel = (tier) => {

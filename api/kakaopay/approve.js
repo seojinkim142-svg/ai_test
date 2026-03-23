@@ -14,6 +14,13 @@ import {
   syncPaidTierFromAmount,
 } from "../../lib/billing/tier-sync.js";
 import {
+  getProTrialStatus,
+  grantProTrialTier,
+  markProTrialClaimed,
+  PRO_TRIAL_RECURRING_AMOUNT,
+  PRO_TRIAL_TIER,
+} from "../../lib/billing/pro-trial.js";
+import {
   buildPublicSubscription,
   fetchKakaoSubscriptionByUserId,
   markKakaoSubscriptionInactive,
@@ -98,6 +105,10 @@ export default async function handler(req, res) {
   const itemName = String(body?.itemName || "").trim();
   const registerSubscription =
     body?.registerSubscription === true || String(body?.paymentMode || "").trim().toLowerCase() === "subscription";
+  const isProTrialRegistration =
+    registerSubscription &&
+    body?.proTrial === true &&
+    requestedTier === PRO_TRIAL_TIER;
 
   if (!tid || !orderId || !pgToken) {
     sendJson(res, 400, { message: "tid, orderId, and pgToken are required." }, allowOrigin);
@@ -122,6 +133,23 @@ export default async function handler(req, res) {
     return;
   }
   const userId = authResult.userId;
+
+  let trialStatus = null;
+  if (isProTrialRegistration) {
+    try {
+      trialStatus = await getProTrialStatus({ authResult });
+      if (!trialStatus.eligible) {
+        const message = trialStatus.claimedAt
+          ? "Pro 무료 1개월 체험은 이미 사용했습니다."
+          : "현재 Free 상태에서만 Pro 무료 체험을 시작할 수 있습니다.";
+        sendJson(res, 409, { message }, allowOrigin);
+        return;
+      }
+    } catch (error) {
+      sendJson(res, 500, { message: error?.message || "Pro trial status lookup failed." }, allowOrigin);
+      return;
+    }
+  }
 
   const requestPayload = {
     cid: registerSubscription ? subscriptionCid : cid,
@@ -157,6 +185,7 @@ export default async function handler(req, res) {
     let subscriptionRecord = null;
     let subscriptionSaved = false;
     let subscriptionWarning = "";
+    const approvedAtIso = data?.approved_at || data?.created_at || new Date().toISOString();
     if (registerSubscription && String(data?.sid || "").trim()) {
       try {
         const currentSubscription = await fetchKakaoSubscriptionByUserId({
@@ -198,14 +227,17 @@ export default async function handler(req, res) {
           cid: requestPayload.cid,
           tier: requestedTier,
           billingMonths: requestedMonths,
-          amount: Number(data?.amount?.total ?? data?.amount?.total_amount ?? body?.amount),
+          amount: isProTrialRegistration
+            ? PRO_TRIAL_RECURRING_AMOUNT
+            : Number(data?.amount?.total ?? data?.amount?.total_amount ?? body?.amount),
           itemName: itemName || String(data?.item_name || body?.itemName || "").trim(),
           orderId,
           tid,
-          approvedAt: data?.approved_at || data?.created_at || new Date().toISOString(),
+          approvedAt: approvedAtIso,
           rawApprove: data,
           metadata: {
             paymentMode: "subscription",
+            proTrial: isProTrialRegistration,
           },
         });
         subscriptionSaved = true;
@@ -214,16 +246,65 @@ export default async function handler(req, res) {
       }
     }
 
-    const approvedAmount =
-      Number(data?.amount?.total ?? data?.amount?.total_amount ?? data?.total_amount ?? body?.amount);
-    const tierSyncResult = await syncPaidTierFromAmount({
-      req,
-      amount: approvedAmount,
-      requestedTier,
-      requestedMonths,
-    });
+    let tierSyncResult;
+    if (isProTrialRegistration) {
+      tierSyncResult = await grantProTrialTier({ userId });
+
+      if (tierSyncResult.ok) {
+        try {
+          const claimResult = await markProTrialClaimed({
+            authResult,
+            user: trialStatus?.user,
+          });
+          trialStatus = {
+            ...trialStatus,
+            claimedAt: claimResult.claimedAt,
+            eligible: false,
+            user: claimResult.user,
+          };
+        } catch (claimError) {
+          subscriptionWarning = subscriptionWarning
+            ? `${subscriptionWarning} Pro trial claim save failed: ${claimError.message}`
+            : `Pro trial claim save failed: ${claimError.message}`;
+        }
+      }
+    } else {
+      const approvedAmount =
+        Number(data?.amount?.total ?? data?.amount?.total_amount ?? data?.total_amount ?? body?.amount);
+      tierSyncResult = await syncPaidTierFromAmount({
+        req,
+        amount: approvedAmount,
+        requestedTier,
+        requestedMonths,
+      });
+    }
 
     if (!tierSyncResult.ok) {
+      if (isProTrialRegistration && subscriptionRecord?.sid) {
+        try {
+          const inactiveResult = await requestSubscriptionInactive({
+            apiBase,
+            authScheme,
+            secretKey,
+            subscriptionInactivePath,
+            subscriptionCid: String(subscriptionRecord.cid || requestPayload.cid).trim() || requestPayload.cid,
+            sid: subscriptionRecord.sid,
+          });
+
+          if (inactiveResult.ok) {
+            await markKakaoSubscriptionInactive({
+              userId,
+              reason: "pro_trial_grant_failed",
+              rawInactive: inactiveResult.data,
+            });
+          }
+        } catch (inactiveError) {
+          subscriptionWarning = subscriptionWarning
+            ? `${subscriptionWarning} Trial subscription cleanup failed: ${inactiveError.message}`
+            : `Trial subscription cleanup failed: ${inactiveError.message}`;
+        }
+      }
+
       sendJson(
         res,
         tierSyncResult.status,
@@ -231,6 +312,7 @@ export default async function handler(req, res) {
           ...data,
           message: tierSyncResult.message,
           tierUpdated: false,
+          subscriptionWarning,
         },
         allowOrigin
       );
@@ -243,6 +325,7 @@ export default async function handler(req, res) {
       {
         ...data,
         paymentMode: registerSubscription ? "subscription" : "one-time",
+        proTrial: isProTrialRegistration,
         subscriptionSaved,
         subscriptionWarning,
         subscription: buildPublicSubscription(subscriptionRecord),
