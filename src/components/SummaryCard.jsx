@@ -473,18 +473,47 @@ function SummaryCard({
     });
   }, [summaryKey, totalPages]);
 
-  const handleNavPointerDown = useCallback((event, navigate) => {
-    if (event.pointerType === "mouse" && event.button !== 0) return;
-    event.preventDefault();
-    event.stopPropagation();
-    navigate();
-  }, []);
+  const handleSummaryPageClick = useCallback(
+    (event) => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest("a, button, input, textarea, select, label, summary")
+      ) {
+        return;
+      }
 
-  const handleNavClick = useCallback((event, navigate) => {
-    event.stopPropagation();
-    if (event.detail !== 0) return;
-    navigate();
-  }, []);
+      if (typeof window !== "undefined" && typeof window.getSelection === "function") {
+        const selectedText = String(window.getSelection()?.toString() || "").trim();
+        if (selectedText) return;
+      }
+
+      const currentTarget = event.currentTarget;
+      if (!(currentTarget instanceof HTMLElement)) return;
+
+      const rect = currentTarget.getBoundingClientRect();
+      if (!rect.width) return;
+
+      const offsetX = event.clientX - rect.left;
+      const edgeRatio = 0.22;
+      if (offsetX <= rect.width * edgeRatio) {
+        if (!canGoPrev) return;
+        event.preventDefault();
+        goPrev();
+        return;
+      }
+      if (offsetX >= rect.width * (1 - edgeRatio)) {
+        if (!canGoNext) return;
+        event.preventDefault();
+        goNext();
+      }
+    },
+    [canGoNext, canGoPrev, goNext, goPrev]
+  );
+
+  const handleNavPointerDown = useCallback(() => {}, []);
+
+  const handleNavClick = useCallback(() => {}, []);
 
   const handleCardKeyDown = useCallback(
     (event) => {
@@ -608,21 +637,24 @@ function SummaryCard({
           />
         )}
 
-        <div className="relative flex items-center justify-center px-10 md:px-12">
+        <div className="relative w-full">
           <button
             type="button"
             onPointerDown={(event) => handleNavPointerDown(event, goPrev)}
             onClick={(event) => handleNavClick(event, goPrev)}
             disabled={!canGoPrev}
             aria-label="이전 요약 페이지"
-            className="ghost-button absolute left-1 top-1/2 z-20 h-8 w-8 -translate-y-1/2 text-xs text-slate-100 pointer-events-auto sm:h-9 sm:w-9"
+            className="hidden ghost-button absolute left-1 top-1/2 z-20 h-8 w-8 -translate-y-1/2 text-xs text-slate-100 pointer-events-auto sm:h-9 sm:w-9"
             style={{ "--ghost-color": "148, 163, 184", touchAction: "manipulation", padding: 0 }}
           >
             {"<"}
           </button>
 
-          <div className="w-full max-w-[980px]">
-            <div className="mx-auto aspect-[210/297] w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950/45 p-4 shadow-inner shadow-black/30 md:p-7">
+          <div className="w-full max-w-none">
+            <div
+              className="mx-auto aspect-[210/297] w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950/45 p-4 shadow-inner shadow-black/30 md:p-7"
+              onClick={handleSummaryPageClick}
+            >
               <div className="show-scrollbar h-full overflow-auto pr-1">
                 {renderMarkdownPage(currentPage, markdownComponents)}
               </div>
@@ -635,7 +667,7 @@ function SummaryCard({
             onClick={(event) => handleNavClick(event, goNext)}
             disabled={!canGoNext}
             aria-label="다음 요약 페이지"
-            className="ghost-button absolute right-1 top-1/2 z-20 h-8 w-8 -translate-y-1/2 text-xs text-slate-100 pointer-events-auto sm:h-9 sm:w-9"
+            className="hidden ghost-button absolute right-1 top-1/2 z-20 h-8 w-8 -translate-y-1/2 text-xs text-slate-100 pointer-events-auto sm:h-9 sm:w-9"
             style={{ "--ghost-color": "148, 163, 184", touchAction: "manipulation", padding: 0 }}
           >
             {">"}
