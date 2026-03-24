@@ -355,7 +355,7 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
       <nav className="fixed inset-x-0 top-0 z-50 border-b border-emerald-200/10 bg-black/55 backdrop-blur-2xl">
         <div className="mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-3">
           <div className="flex items-center gap-8">
-            <p className="text-lg font-semibold tracking-wide text-emerald-100">Zeusian</p>
+            <p className="text-lg font-semibold tracking-wide text-emerald-100">Zeusian.ai</p>
             <div className="hidden items-center gap-6 text-sm text-emerald-50/80 md:flex">
               {NAV_ITEMS.map((item) => (
                 <button
@@ -396,7 +396,7 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
             요약, 퀴즈, 카드까지
           </h1>
           <p className="landing-subtitle mt-6 max-w-3xl text-base text-emerald-50/90 sm:text-xl">
-            Zeusian은 PDF 강의자료를 요약하고 문제를 만드는 공부 AI입니다.
+            Zeusian.ai는 PDF 강의자료를 요약하고 문제를 만드는 공부 AI입니다.
             요약부터 퀴즈, 카드, AI 튜터까지 자동으로 연결하고 반복 복습 루프를 한 곳에서 완성하세요.
           </p>
           <div className="mt-10 flex flex-col items-center gap-3 sm:flex-row">
@@ -687,7 +687,7 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
             onClick={handleStart}
             className="mt-10 rounded-full bg-emerald-300 px-9 py-3 text-base font-semibold text-emerald-950 transition hover:bg-emerald-200"
           >
-            Zeusian 시작하기
+            Zeusian.ai 시작하기
           </button>
           <p className="mt-4 text-sm text-emerald-100/60">
             공부 AI 소개가 필요하면 <a href="/study-ai" className="font-semibold text-emerald-200 transition hover:text-emerald-100">전용 안내 페이지</a>에서 자세히 볼 수 있습니다.
