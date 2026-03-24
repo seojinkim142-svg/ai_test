@@ -1,6 +1,10 @@
-# Zeusian
+# Zeusian.ai
 
-Zeusian is an AI-powered PDF study assistant built with React + Vite. The app supports document upload, summary generation, quiz/OX/mock-exam creation, flashcards, AI tutor interactions, premium profile spaces, and folder-level combined study documents.
+Zeusian.ai is an AI-powered PDF study assistant built with React + Vite. The app supports document upload, summary generation, quiz/OX/mock-exam creation, flashcards, AI tutor interactions, premium profile spaces, and folder-level combined study documents.
+
+## Branding
+
+Use `Zeusian.ai` as the primary product name in UI copy, SEO metadata, and documentation. Keep `Zeusian` only where a legacy identifier or an external integration explicitly requires it.
 
 ## Recent Changes
 
@@ -30,6 +34,9 @@ Recent app changes that are already reflected in the current codebase:
 - Quiz generation OCR behavior change
   - Quiz, OX, and mock-exam generation no longer trigger fresh OCR during question generation.
   - These features now prefer extracted text, cached summary source text, and chapter text cached during summary generation.
+- Chapter-scoped question generation fix
+  - Quiz, OX, and mock-exam generation now clamp AI-provided evidence pages to the selected chapter range for PDF sources.
+  - Chapter-selected generation no longer mixes tagged chapter pages with fallback whole-document context.
 
 ## Modularization And Deployment Notes
 

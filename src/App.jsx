@@ -153,6 +153,7 @@ const LoginBackground = lazy(() => import("./components/LoginBackground"));
 const PaymentPage = lazy(() => import("./components/PaymentPage"));
 const DetailPage = lazy(() => import("./pages/DetailPage"));
 const PremiumProfilePicker = lazy(() => import("./components/PremiumProfilePicker"));
+const SettingsDialog = lazy(() => import("./components/SettingsDialog"));
 const FOLDER_AGGREGATE_META_KEY = "__folder_aggregate_meta_v1";
 const FEEDBACK_CATEGORY_OPTIONS = [
   { value: "general", label: "\uC77C\uBC18" },
@@ -191,6 +192,7 @@ function App() {
   const [isResizingSplit, setIsResizingSplit] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showGuestIntro, setShowGuestIntro] = useState(() => !AUTH_ENABLED);
   const [currentPage, setCurrentPage] = useState(1);
@@ -437,12 +439,31 @@ function App() {
     setShowAuth(true);
   }, []);
 
+  const openSettings = useCallback(() => {
+    setShowSettings(true);
+  }, []);
+
+  const closeSettings = useCallback(() => {
+    setShowSettings(false);
+  }, []);
+
   const closeAuth = useCallback(() => {
     setShowAuth(false);
   }, []);
 
   const openBilling = useCallback(() => {
     setShowPayment(true);
+  }, []);
+
+  const openBillingFromSettings = useCallback(() => {
+    setShowSettings(false);
+    setShowPayment(true);
+  }, []);
+
+  const openAuthFromSettings = useCallback(() => {
+    setShowSettings(false);
+    if (!AUTH_ENABLED) return;
+    setShowAuth(true);
   }, []);
 
   const handleOpenFeedbackDialog = useCallback(() => {
@@ -454,6 +475,15 @@ function App() {
     setFeedbackError("");
     setIsFeedbackDialogOpen(true);
   }, [openAuth, user]);
+
+  const handleOpenFeedbackFromSettings = useCallback(() => {
+    setShowSettings(false);
+    handleOpenFeedbackDialog();
+  }, [handleOpenFeedbackDialog]);
+
+  const handleThemeChange = useCallback((nextTheme) => {
+    setTheme(nextTheme === "light" ? "light" : "dark");
+  }, []);
 
   const handleCloseFeedbackDialog = useCallback(() => {
     if (isSubmittingFeedback) return;
@@ -1249,10 +1279,6 @@ function App() {
     [isFolderFeatureEnabled, user, uploadedFiles, isPremiumTier, folders]
   );
 
-  const toggleTheme = useCallback(() => {
-    setTheme((prev) => (prev === "light" ? "dark" : "light"));
-  }, []);
-
   const shortPreview = useMemo(
     () => (previewText.length > 700 ? `${previewText.slice(0, 700)}...` : previewText),
     [previewText]
@@ -1260,14 +1286,14 @@ function App() {
 
   const tutorNotice = useMemo(() => {
     if (!file || !selectedFileId) {
-      return "?쒗꽣 梨꾪똿???ъ슜?섎젮硫?PDF瑜?癒쇱? ?댁뼱二쇱꽭??"
+      return "튜터 채팅을 사용하려면 PDF를 먼저 열어주세요.";
     }
     if (isLoadingText) {
-      return "PDF ?띿뒪??異붿텧???꾩쭅 吏꾪뻾 以묒엯?덈떎. ?좎떆留?湲곕떎?ㅼ＜?몄슂."
+      return "PDF 텍스트 추출이 아직 진행 중입니다. 잠시만 기다려 주세요.";
     }
     const trimmed = (extractedText || "").trim();
     if (!trimmed) {
-      return "??PDF?먯꽌 異붿텧???띿뒪?멸? ?놁뒿?덈떎."
+      return "PDF에서 추출된 텍스트가 없습니다.";
     }
     return "";
   }, [extractedText, file, isLoadingText, selectedFileId]);
@@ -1280,6 +1306,12 @@ function App() {
       root.classList.remove("theme-light");
     }
   }, [theme]);
+
+  useEffect(() => {
+    if (showPayment || shouldRenderAuthScreen) {
+      setShowSettings(false);
+    }
+  }, [showPayment, shouldRenderAuthScreen]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1613,6 +1645,11 @@ function App() {
       setIsSigningOut(false);
     }
   }, [authSignOut, refreshSession]);
+
+  const handleSignOutFromSettings = useCallback(async () => {
+    setShowSettings(false);
+    await handleSignOut();
+  }, [handleSignOut]);
 
   useEffect(() => {
     if (user) {
@@ -3467,6 +3504,35 @@ function App() {
     [parseExplicitEvidencePages]
   );
 
+  const clampEvidencePagesToScope = useCallback((pages, allowedPages) => {
+    const normalizedAllowed = toSortedUniquePages(allowedPages);
+    const normalizedPages = toSortedUniquePages(pages);
+    if (!normalizedAllowed.length) return normalizedPages;
+    const allowedSet = new Set(normalizedAllowed);
+    return normalizedPages.filter((pageNumber) => allowedSet.has(pageNumber));
+  }, []);
+
+  const filterGeneratedItemsToScope = useCallback(
+    (items, allowedPages) => {
+      const normalizedAllowed = toSortedUniquePages(allowedPages);
+      if (!normalizedAllowed.length) {
+        return Array.isArray(items) ? items : [];
+      }
+
+      return (Array.isArray(items) ? items : [])
+        .map((item) => {
+          const nextEvidencePages = clampEvidencePagesToScope(item?.evidencePages, normalizedAllowed);
+          if (!nextEvidencePages.length) return null;
+          return {
+            ...item,
+            evidencePages: nextEvidencePages,
+          };
+        })
+        .filter(Boolean);
+    },
+    [clampEvidencePagesToScope]
+  );
+
   const resolvePartialSummaryEvidence = useCallback(
     async (pageText) => {
       const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
@@ -3664,10 +3730,12 @@ function App() {
       const quizSourceText = String(scopedSource?.text || "").trim();
       const scopeLabel = String(scopedSource?.scopeLabel || "").trim();
       const evidencePages = toSortedUniquePages(scopedSource?.pageCandidates);
+      const enforceScopedEvidence = isCurrentPdfDocument && evidencePages.length > 0;
       const generationSourceText = await buildPageTaggedSourceText(quizSourceText, evidencePages, {
         maxPages: 20,
         maxCharsPerPage: 950,
         maxTotalChars: 15000,
+        includeFallbackText: !chapterSelectionRaw,
       });
       if (!quizSourceText) {
         throw new Error("챕터 1 이후 텍스트를 찾지 못했습니다. 챕터 범위를 먼저 설정해주세요.");
@@ -3692,7 +3760,7 @@ function App() {
       const nextOx = [];
 
       const { generateQuiz, generateOxQuiz } = await getOpenAiService();
-      const maxAttempts = 3;
+      const maxAttempts = enforceScopedEvidence ? 4 : 3;
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         if (
           nextMultipleChoice.length >= targetMcCount &&
@@ -3727,24 +3795,39 @@ function App() {
             : Promise.resolve({ items: [] }),
         ]);
         const quiz = normalizeQuizPayload(quizResult);
+        const scopedMultipleChoice = enforceScopedEvidence
+          ? filterGeneratedItemsToScope(Array.isArray(quiz.multipleChoice) ? quiz.multipleChoice : [], evidencePages)
+          : Array.isArray(quiz.multipleChoice)
+            ? quiz.multipleChoice
+            : [];
+        const scopedShortAnswer = enforceScopedEvidence
+          ? filterGeneratedItemsToScope(Array.isArray(quiz.shortAnswer) ? quiz.shortAnswer : [], evidencePages)
+          : Array.isArray(quiz.shortAnswer)
+            ? quiz.shortAnswer
+            : [];
+        const scopedOx = enforceScopedEvidence
+          ? filterGeneratedItemsToScope(Array.isArray(oxResult?.items) ? oxResult.items : [], evidencePages)
+          : Array.isArray(oxResult?.items)
+            ? oxResult.items
+            : [];
 
         pushUniqueByQuestionKey(
           nextMultipleChoice,
-          Array.isArray(quiz.multipleChoice) ? quiz.multipleChoice : [],
+          scopedMultipleChoice,
           getQuizPromptText,
           seenQuestionKeys,
           targetMcCount
         );
         pushUniqueByQuestionKey(
           nextShortAnswer,
-          Array.isArray(quiz.shortAnswer) ? quiz.shortAnswer : [],
+          scopedShortAnswer,
           getQuizPromptText,
           seenQuestionKeys,
           targetSaCount
         );
         pushUniqueByQuestionKey(
           nextOx,
-          Array.isArray(oxResult?.items) ? oxResult.items : [],
+          scopedOx,
           getOxPromptText,
           seenOxKeys,
           targetOxCount
@@ -3775,27 +3858,33 @@ function App() {
       const trimmedQuiz = {
         multipleChoice: nextMultipleChoice.slice(0, targetMcCount).map((item) => ({
           ...item,
-          evidencePages: toSortedUniquePages(
-            Array.isArray(item?.evidencePages) && item.evidencePages.length
-              ? item.evidencePages
-              : evidencePages
-          ),
+          evidencePages: enforceScopedEvidence
+            ? clampEvidencePagesToScope(item?.evidencePages, evidencePages)
+            : toSortedUniquePages(
+                Array.isArray(item?.evidencePages) && item.evidencePages.length
+                  ? item.evidencePages
+                  : evidencePages
+              ),
         })),
         shortAnswer: nextShortAnswer.slice(0, targetSaCount).map((item) => ({
           ...item,
-          evidencePages: toSortedUniquePages(
-            Array.isArray(item?.evidencePages) && item.evidencePages.length
-              ? item.evidencePages
-              : evidencePages
-          ),
+          evidencePages: enforceScopedEvidence
+            ? clampEvidencePagesToScope(item?.evidencePages, evidencePages)
+            : toSortedUniquePages(
+                Array.isArray(item?.evidencePages) && item.evidencePages.length
+                  ? item.evidencePages
+                  : evidencePages
+              ),
         })),
         ox: nextOx.slice(0, targetOxCount).map((item) => ({
           ...item,
-          evidencePages: toSortedUniquePages(
-            Array.isArray(item?.evidencePages) && item.evidencePages.length
-              ? item.evidencePages
-              : evidencePages
-          ),
+          evidencePages: enforceScopedEvidence
+            ? clampEvidencePagesToScope(item?.evidencePages, evidencePages)
+            : toSortedUniquePages(
+                Array.isArray(item?.evidencePages) && item.evidencePages.length
+                  ? item.evidencePages
+                  : evidencePages
+              ),
         })),
       };
       const newSet = createQuizSetState(trimmedQuiz);
@@ -5652,6 +5741,7 @@ function App() {
       const oxSourceText = String(scopedSource?.text || "").trim();
       const scopeLabel = String(scopedSource?.scopeLabel || "").trim();
       const evidencePages = toSortedUniquePages(scopedSource?.pageCandidates);
+      const enforceScopedEvidence = isCurrentPdfDocument && evidencePages.length > 0;
       const generationSourceText = await buildPageTaggedSourceText(oxSourceText, evidencePages, {
         maxPages: 20,
         maxCharsPerPage: 950,
@@ -5675,15 +5765,18 @@ function App() {
         avoidStatements: avoidStatementTexts,
       });
       const rawItems = Array.isArray(ox?.items) ? ox.items : [];
-      const qualityRawItems = rawItems
+      const scopedRawItems = enforceScopedEvidence ? filterGeneratedItemsToScope(rawItems, evidencePages) : rawItems;
+      const qualityRawItems = scopedRawItems
         .filter((item) => !isLowValueStudyPrompt(getOxPromptText(item)))
         .map((item) => ({
           ...item,
-          evidencePages: toSortedUniquePages(
-            Array.isArray(item?.evidencePages) && item.evidencePages.length
-              ? item.evidencePages
-              : evidencePages
-          ),
+          evidencePages: enforceScopedEvidence
+            ? clampEvidencePagesToScope(item?.evidencePages, evidencePages)
+            : toSortedUniquePages(
+                Array.isArray(item?.evidencePages) && item.evidencePages.length
+                  ? item.evidencePages
+                  : evidencePages
+              ),
         }));
       const items = [];
       pushUniqueByQuestionKey(items, qualityRawItems, getOxPromptText, seenQuestionKeys, 10);
@@ -5911,7 +6004,7 @@ function App() {
       const trimmed = String(prompt || "").trim();
       if (!trimmed || isTutorLoading) return;
       if (!file || !selectedFileId) {
-        setTutorError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+        setTutorError("먼저 PDF를 열어주세요.");
         return;
       }
       if (!isCurrentPdfDocument) {
@@ -5919,12 +6012,12 @@ function App() {
         return;
       }
       if (isLoadingText) {
-        setTutorError("PDF ?띿뒪??異붿텧???꾩쭅 吏꾪뻾 以묒엯?덈떎. ?좎떆留?湲곕떎?ㅼ＜?몄슂.");
+        setTutorError("PDF 텍스트 추출이 아직 진행 중입니다. 잠시만 기다려 주세요.");
         return;
       }
       const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
       if (!totalPages) {
-        setTutorError("?섏씠吏 ?뺣낫瑜??쎌? 紐삵뻽?듬땲?? PDF瑜??ㅼ떆 ?댁뼱二쇱꽭??");
+        setTutorError("페이지 정보를 읽지 못했습니다. PDF를 다시 열어주세요.");
         return;
       }
 
@@ -6013,7 +6106,7 @@ function App() {
           .filter((entry) => entry && entry.text);
       };
 
-      setStatus("吏덈Ц 愿??蹂몃Ц ?섏씠吏瑜?寃?됲븯??以?..");
+      setStatus("질문 관련 본문 페이지를 검색하는 중...");
       const narrowScanPages = buildPageRange(anchorPage - 20, anchorPage + 90, 130);
       const broadScanPages = buildPageRange(anchorPage - 70, anchorPage + 220, 260);
 
@@ -6075,7 +6168,7 @@ function App() {
         maxCharsPerPage: 5200,
       });
       if (!finalEntries.length) {
-        setTutorError("吏덈Ц 愿??蹂몃Ц ?섏씠吏?먯꽌 ?띿뒪?몃? 李얠? 紐삵뻽?듬땲?? PDF瑜??ㅼ떆 ?댁뼱二쇱꽭??");
+        setTutorError("질문 관련 본문 페이지에서 텍스트를 찾지 못했습니다. PDF를 다시 열어주세요.");
         setStatus("");
         return;
       }
@@ -6123,7 +6216,7 @@ function App() {
         });
         setTutorMessages((prev) => [...prev, { role: "assistant", content: safeReply }]);
       } catch (err) {
-        setTutorError(`AI ?쒗꽣 ?듬? ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+        setTutorError(`AI 튜터 응답 생성에 실패했습니다: ${err.message}`);
       } finally {
         setIsTutorLoading(false);
         setStatus("");
@@ -6177,6 +6270,7 @@ function App() {
         maxPages: 24,
         maxCharsPerPage: 950,
         maxTotalChars: 17000,
+        includeFallbackText: !hasChapterScope,
       });
     } catch (err) {
       setMockExamError(String(err?.message || "모의고사 텍스트 추출에 실패했습니다."));
@@ -6197,6 +6291,7 @@ function App() {
 
     try {
       const ai = await getOpenAiService();
+      const enforceScopedEvidence = isCurrentPdfDocument && scopeEvidencePages.length > 0;
       let oxPool = (Array.isArray(oxItems) ? oxItems : []).filter(
         (item) => !isLowValueStudyPrompt(getOxPromptText(item))
       );
@@ -6222,21 +6317,40 @@ function App() {
           }),
         ]);
 
-        oxPool = (Array.isArray(oxResult?.items) ? oxResult.items : [])
+        const scopedOxItems = enforceScopedEvidence
+          ? filterGeneratedItemsToScope(Array.isArray(oxResult?.items) ? oxResult.items : [], scopeEvidencePages)
+          : Array.isArray(oxResult?.items)
+            ? oxResult.items
+            : [];
+        oxPool = scopedOxItems
           .map((item) => ({
             ...item,
-            evidencePages: toSortedUniquePages(
-              Array.isArray(item?.evidencePages) && item.evidencePages.length
-                ? item.evidencePages
-                : scopeEvidencePages
-            ),
+            evidencePages: enforceScopedEvidence
+              ? clampEvidencePagesToScope(item?.evidencePages, scopeEvidencePages)
+              : toSortedUniquePages(
+                  Array.isArray(item?.evidencePages) && item.evidencePages.length
+                    ? item.evidencePages
+                    : scopeEvidencePages
+                ),
           }))
           .filter((item) => !isLowValueStudyPrompt(getOxPromptText(item)));
         const normalizedQuiz = normalizeQuizPayload(quizResult);
-        const scopedMultipleChoice = Array.isArray(normalizedQuiz?.multipleChoice)
-          ? normalizedQuiz.multipleChoice
-          : [];
-        const scopedShortAnswers = Array.isArray(normalizedQuiz?.shortAnswer) ? normalizedQuiz.shortAnswer : [];
+        const scopedMultipleChoice = enforceScopedEvidence
+          ? filterGeneratedItemsToScope(
+              Array.isArray(normalizedQuiz?.multipleChoice) ? normalizedQuiz.multipleChoice : [],
+              scopeEvidencePages
+            )
+          : Array.isArray(normalizedQuiz?.multipleChoice)
+            ? normalizedQuiz.multipleChoice
+            : [];
+        const scopedShortAnswers = enforceScopedEvidence
+          ? filterGeneratedItemsToScope(
+              Array.isArray(normalizedQuiz?.shortAnswer) ? normalizedQuiz.shortAnswer : [],
+              scopeEvidencePages
+            )
+          : Array.isArray(normalizedQuiz?.shortAnswer)
+            ? normalizedQuiz.shortAnswer
+            : [];
 
         scopedMultipleChoice.forEach((question) => {
           const prompt = String(question?.question || "").trim();
@@ -6254,11 +6368,13 @@ function App() {
               choices,
             }),
             explanation,
-            evidencePages: toSortedUniquePages(
-              Array.isArray(question?.evidencePages) && question.evidencePages.length
-                ? question.evidencePages
-                : scopeEvidencePages
-            ),
+            evidencePages: enforceScopedEvidence
+              ? clampEvidencePagesToScope(question?.evidencePages, scopeEvidencePages)
+              : toSortedUniquePages(
+                  Array.isArray(question?.evidencePages) && question.evidencePages.length
+                    ? question.evidencePages
+                    : scopeEvidencePages
+                ),
             evidenceSnippet: String(question?.evidenceSnippet || "").trim(),
             evidenceLabel: String(question?.evidenceLabel || "").trim(),
             evidence: String(question?.evidence || "").trim(),
@@ -6274,11 +6390,13 @@ function App() {
             prompt,
             answer: resolveShortAnswerText(item?.answer, explanation),
             explanation,
-            evidencePages: toSortedUniquePages(
-              Array.isArray(item?.evidencePages) && item.evidencePages.length
-                ? item.evidencePages
-                : scopeEvidencePages
-            ),
+            evidencePages: enforceScopedEvidence
+              ? clampEvidencePagesToScope(item?.evidencePages, scopeEvidencePages)
+              : toSortedUniquePages(
+                  Array.isArray(item?.evidencePages) && item.evidencePages.length
+                    ? item.evidencePages
+                    : scopeEvidencePages
+                ),
             evidenceSnippet: String(item?.evidenceSnippet || "").trim(),
             evidenceLabel: String(item?.evidenceLabel || "").trim(),
             evidence: String(item?.evidence || "").trim(),
@@ -6355,7 +6473,7 @@ function App() {
 
       const hardCount = Math.max(3, 10 - (pickedOx.length + pickedQuiz.length));
       const hardItems = [];
-      const maxHardAttempts = 3;
+      const maxHardAttempts = enforceScopedEvidence ? 4 : 3;
       for (let attempt = 0; attempt < maxHardAttempts; attempt += 1) {
         if (hardItems.length >= hardCount) break;
         const requestCount = Math.min(10, hardCount + attempt * 2 + 1);
@@ -6364,9 +6482,13 @@ function App() {
           count: requestCount,
           avoidQuestions: avoidMockQuestionTexts,
         });
-        const rawHardItems = (Array.isArray(hardResult?.items) ? hardResult.items : []).filter(
-          (item) => !isLowValueStudyPrompt(String(item?.question || "").trim())
-        );
+        const rawHardItems = (
+          enforceScopedEvidence
+            ? filterGeneratedItemsToScope(Array.isArray(hardResult?.items) ? hardResult.items : [], scopeEvidencePages)
+            : Array.isArray(hardResult?.items)
+              ? hardResult.items
+              : []
+        ).filter((item) => !isLowValueStudyPrompt(String(item?.question || "").trim()));
         pushUniqueByQuestionKey(
           hardItems,
           rawHardItems,
@@ -6409,11 +6531,13 @@ function App() {
           choices: Array.isArray(item?.choices) ? item.choices : [],
         }),
         explanation: String(item?.explanation || "").trim(),
-        evidencePages: toSortedUniquePages(
-          Array.isArray(item?.evidencePages) && item.evidencePages.length
-            ? item.evidencePages
-            : scopeEvidencePages
-        ),
+        evidencePages: enforceScopedEvidence
+          ? clampEvidencePagesToScope(item?.evidencePages, scopeEvidencePages)
+          : toSortedUniquePages(
+              Array.isArray(item?.evidencePages) && item.evidencePages.length
+                ? item.evidencePages
+                : scopeEvidencePages
+            ),
         evidenceSnippet: String(item?.evidenceSnippet || "").trim(),
         evidenceLabel: String(item?.evidenceLabel || "").trim(),
         evidence: String(item?.evidence || "").trim(),
@@ -6933,6 +7057,30 @@ function App() {
           />
         </Suspense>
       )}
+      {showSettings && (
+        <Suspense fallback={null}>
+          <SettingsDialog
+            onClose={closeSettings}
+            theme={theme}
+            onThemeChange={handleThemeChange}
+            user={user}
+            authEnabled={AUTH_ENABLED}
+            currentTier={tier}
+            currentTierExpiresAt={tierExpiresAt}
+            currentTierRemainingDays={tierRemainingDays}
+            loadingTier={loadingTier}
+            activeProfile={activePremiumProfile}
+            premiumSpaceMode={premiumSpaceMode}
+            onOpenBilling={AUTH_ENABLED ? openBillingFromSettings : null}
+            onOpenFeedbackDialog={AUTH_ENABLED ? handleOpenFeedbackFromSettings : null}
+            onOpenLogin={AUTH_ENABLED ? openAuthFromSettings : null}
+            onSignOut={handleSignOutFromSettings}
+            signingOut={isSigningOut}
+            onRefresh={user ? handleManualSync : null}
+            isRefreshing={isManualSyncing}
+          />
+        </Suspense>
+      )}
       {shouldShowPremiumProfilePicker && (
         <Suspense fallback={null}>
           <PremiumProfilePicker
@@ -7148,14 +7296,11 @@ function App() {
           <Suspense fallback={null}>
             <Header
               user={user}
-              onSignOut={handleSignOut}
-              signingOut={isSigningOut}
               theme={theme}
               onGoHome={showDetail ? goBackToList : null}
-              onOpenFeedbackDialog={AUTH_ENABLED ? handleOpenFeedbackDialog : null}
               onOpenBilling={openBilling}
+              onOpenSettings={openSettings}
               showBilling={AUTH_ENABLED}
-              onToggleTheme={toggleTheme}
               onOpenLogin={openAuth}
               authEnabled={AUTH_ENABLED}
               isPremiumTier={isPremiumTier}
