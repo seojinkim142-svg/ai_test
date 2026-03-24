@@ -10,6 +10,7 @@ function OxCard({
   onToggleExplanation,
   onResolveEvidence,
   onJumpToEvidencePage,
+  onDelete,
 }) {
   const revealed = selection === "o" || selection === "x";
   const isCorrect =
@@ -25,9 +26,22 @@ function OxCard({
             className="summary-prose mt-1 max-w-none break-words text-sm text-slate-100 [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto"
           />
         </div>
-        <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-100">
-          O/X
-        </span>
+        <div className="flex items-center gap-2">
+          {typeof onDelete === "function" && (
+            <button
+              type="button"
+              onClick={() => onDelete(idx)}
+              className="ghost-button text-[11px] text-slate-200"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "226, 232, 240" }}
+            >
+              Delete
+            </button>
+          )}
+          <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-100">
+            O/X
+          </span>
+        </div>
       </div>
 
       <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -106,6 +120,7 @@ function OxSection({
   onToggleExplanation,
   onResolveEvidence,
   onJumpToEvidencePage,
+  onDeleteItem,
 }) {
   const list = items || [];
 
@@ -133,6 +148,7 @@ function OxSection({
             onToggleExplanation={() => onToggleExplanation?.(idx)}
             onResolveEvidence={onResolveEvidence}
             onJumpToEvidencePage={onJumpToEvidencePage}
+            onDelete={onDeleteItem}
           />
         ))}
       </div>

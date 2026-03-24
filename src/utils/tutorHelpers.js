@@ -235,7 +235,79 @@ export function resolveTutorReplyText(rawReply, { question, rawEvidenceText }) {
   return reply;
 }
 
+function parseNormalizedChapterNumberSelectionInput(rawInput, chapters) {
+  const available = Array.isArray(chapters) ? chapters : [];
+  const chapterNumbers = available
+    .map((chapter) => Number.parseInt(chapter?.chapterNumber, 10))
+    .filter((num) => Number.isFinite(num) && num > 0);
+  const chapterNumberSet = new Set(chapterNumbers);
+  if (!chapterNumbers.length) {
+    return {
+      chapterNumbers: [],
+      normalizedInput: "",
+      error: "설정된 범위에서 사용할 수 있는 챕터가 없습니다.",
+    };
+  }
+
+  const cleaned = String(rawInput || "").replace(/\s+/g, "");
+  if (!cleaned) {
+    return { chapterNumbers, normalizedInput: "", error: "" };
+  }
+  if (!/^\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*$/.test(cleaned)) {
+    return {
+      chapterNumbers: [],
+      normalizedInput: "",
+      error: "챕터 범위는 n, n-m, 1,3,5 같은 형식으로 입력해주세요.",
+    };
+  }
+
+  const selected = new Set();
+  const normalizedInput = cleaned;
+  const tokens = cleaned.split(",").filter(Boolean);
+  for (const token of tokens) {
+    if (token.includes("-")) {
+      const [startRaw, endRaw] = token.split("-");
+      const start = Number.parseInt(startRaw, 10);
+      const end = Number.parseInt(endRaw, 10);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0 || start >= end) {
+        return {
+          chapterNumbers: [],
+          normalizedInput: "",
+          error: "챕터 범위는 작은 수부터 입력해주세요. 예: 3-5, 1,3,5",
+        };
+      }
+      for (let chapterNumber = start; chapterNumber <= end; chapterNumber += 1) {
+        selected.add(chapterNumber);
+      }
+      continue;
+    }
+
+    const chapterNumber = Number.parseInt(token, 10);
+    if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) {
+      return {
+        chapterNumbers: [],
+        normalizedInput: "",
+        error: "챕터 번호를 다시 확인해주세요.",
+      };
+    }
+    selected.add(chapterNumber);
+  }
+
+  const filtered = [...selected]
+    .filter((num) => chapterNumberSet.has(num))
+    .sort((left, right) => left - right);
+  if (!filtered.length) {
+    return {
+      chapterNumbers: [],
+      normalizedInput,
+      error: `설정된 챕터 범위에 해당하는 번호가 없습니다. 사용 가능: ${chapterNumbers.join(", ")}`,
+    };
+  }
+  return { chapterNumbers: filtered, normalizedInput, error: "" };
+}
+
 export function parseChapterNumberSelectionInput(rawInput, chapters) {
+  return parseNormalizedChapterNumberSelectionInput(rawInput, chapters);
   const available = Array.isArray(chapters) ? chapters : [];
   const chapterNumbers = available
     .map((chapter) => Number.parseInt(chapter?.chapterNumber, 10))

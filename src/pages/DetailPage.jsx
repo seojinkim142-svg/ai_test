@@ -255,7 +255,8 @@ export default function DetailPage({
   handleDeleteReviewNote,
   handleGenerateExamCram,
   handleCreateReviewNotesMockExam,
-  deleteQuiz,
+  deleteOxQuiz,
+  deleteOxQuestion,
   isLoadingOx,
   requestOxQuiz,
   oxChapterSelectionInput,
@@ -287,12 +288,10 @@ export default function DetailPage({
 }) {
   const normalizeChapterSelectionInput = (value) => String(value || "").replace(/\s+/g, "");
   const quizQuestionTotal =
-    (Number(quizMix?.multipleChoice) || 0) +
-    (Number(quizMix?.shortAnswer) || 0) +
-    (Number(quizMix?.ox) || 0);
+    (Number(quizMix?.multipleChoice) || 0) + (Number(quizMix?.shortAnswer) || 0);
   const quizMixHelperText = quizMixError
     ? quizMixError
-    : "형식: 객관식-주관식-OX (예: 4-3-1)";
+    : "형식: 객관식-주관식 (예: 4-3)";
   const mockMarkdownComponents = useMemo(
     () => ({
       p: ({ children }) => <p className="my-0 leading-relaxed">{children}</p>,
@@ -566,7 +565,7 @@ export default function DetailPage({
       </div>
 
       <div className="flex min-w-0 flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
-        <div className="detail-tab-strip mobile-tab-row flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-1.5 shadow-lg shadow-black/30 md:grid md:grid-cols-6 md:px-3 md:py-2">
+        <div className="detail-tab-strip mobile-tab-row flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-1.5 shadow-lg shadow-black/30 md:grid md:grid-cols-6 md:px-3 md:py-2.5">
           {panelItems.map((item) => {
             const active = panelTab === item.id;
             return (
@@ -574,7 +573,7 @@ export default function DetailPage({
                 key={item.id}
                 type="button"
                 onClick={() => setPanelTab(item.id)}
-                className="ghost-button min-w-[92px] shrink-0 text-xs text-slate-200 md:min-w-0 md:w-full md:text-sm"
+                className="ghost-button min-w-[96px] shrink-0 text-xs text-slate-200 md:min-h-[46px] md:min-w-0 md:w-full md:text-[15px]"
                 data-ghost-size="sm"
                 data-ghost-active={active}
                 style={{ "--ghost-color": active ? "52, 211, 153" : "148, 163, 184" }}
@@ -587,7 +586,7 @@ export default function DetailPage({
 
         <div className="pb-20 pr-0 sm:flex-1 sm:overflow-auto sm:pb-2 sm:pr-1">
           {panelTab === "summary" && (
-            <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
+            <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30 md:p-5">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-sm font-semibold text-emerald-200">요약</p>
                 <div className="flex flex-wrap justify-end gap-2">
@@ -1000,7 +999,7 @@ export default function DetailPage({
                           normalizeChapterSelectionInput(event.target.value)
                         )
                       }
-                      placeholder="챕터 범위 (예: 1-3,5)"
+                      placeholder="챕터 범위 (예: 3, 3-5, 1,3,5)"
                       className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
                     />
                     <button
@@ -1253,12 +1252,12 @@ export default function DetailPage({
                   <input
                     type="text"
                     value={quizChapterSelectionInput}
-                    onChange={(event) =>
-                      setQuizChapterSelectionInput(
-                        normalizeChapterSelectionInput(event.target.value)
-                      )
-                    }
-                    placeholder="챕터 범위 (예: 1-3,5)"
+                    onChange={(event) => {
+                      const nextValue = normalizeChapterSelectionInput(event.target.value);
+                      setQuizChapterSelectionInput(nextValue);
+                      setOxChapterSelectionInput(nextValue);
+                    }}
+                    placeholder="챕터 범위 (예: 3, 3-5, 1,3,5)"
                     className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
                   />
                   <button
@@ -1282,7 +1281,7 @@ export default function DetailPage({
                     value={quizMixInput}
                     onChange={(event) => setQuizMixInput(event.target.value)}
                     disabled={isLoadingQuiz || isLoadingText}
-                    placeholder="객관식-주관식-OX 예: 4-3-1"
+                    placeholder="객관식-주관식 예: 4-3"
                     className={`w-full rounded-xl border bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition ${
                       quizMixError
                         ? "border-red-400/45 focus:border-red-300/60"
@@ -1322,12 +1321,11 @@ export default function DetailPage({
               )}
 
               <p className="mt-4 text-xs text-slate-300">
-                현재 구성: 객관식 {quizMix?.multipleChoice ?? 0} / 주관식 {quizMix?.shortAnswer ?? 0} / OX{" "}
-                {quizMix?.ox ?? 0}
+                현재 구성: 객관식 {quizMix?.multipleChoice ?? 0} / 주관식 {quizMix?.shortAnswer ?? 0}
                 {` (총 ${quizQuestionTotal}문항)`}
               </p>
 
-              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
                 <button
                   type="button"
                   onClick={requestQuestions}
@@ -1355,15 +1353,55 @@ export default function DetailPage({
                 </button>
                 <button
                   type="button"
-                  onClick={deleteQuiz}
-                  disabled={isLoadingQuiz || quizSets.length === 0}
+                  onClick={() =>
+                    (Array.isArray(oxItems) && oxItems.length > 0 ? regenerateOxQuiz : requestOxQuiz)({
+                      auto: false,
+                      chapterSelectionInputOverride: quizChapterSelectionInput,
+                    })
+                  }
+                  disabled={isLoadingOx || isLoadingText}
+                  className="ghost-button w-full text-sm text-emerald-100"
+                  data-ghost-size="xl"
+                  style={{ "--ghost-color": "16, 185, 129" }}
+                >
+                  {isLoadingOx
+                    ? "O/X 생성 중..."
+                    : Array.isArray(oxItems) && oxItems.length > 0
+                      ? "O/X 다시 생성"
+                      : "O/X 생성"}
+                </button>
+                <button
+                  type="button"
+                  onClick={deleteOxQuiz}
+                  disabled={isLoadingOx || !Array.isArray(oxItems) || oxItems.length === 0}
                   className="ghost-button w-full text-sm text-slate-200"
                   data-ghost-size="xl"
                   style={{ "--ghost-color": "148, 163, 184" }}
                 >
-                  퀴즈 삭제
+                  O/X 삭제
                 </button>
               </div>
+
+              {Array.isArray(oxItems) && oxItems.length > 0 && (
+                <div className="mt-4">
+                  <OxSection
+                    title="O/X 퀴즈"
+                    items={oxItems}
+                    onResolveEvidence={resolveOxEvidence}
+                    onJumpToEvidencePage={jumpToEvidencePage}
+                    onDeleteItem={deleteOxQuestion}
+                    selections={oxSelections}
+                    explanationsOpen={oxExplanationOpen}
+                    onSelect={handleOxSelect}
+                    onToggleExplanation={(qIdx) =>
+                      setOxExplanationOpen((prev) => ({
+                        ...prev,
+                        [qIdx]: !prev?.[qIdx],
+                      }))
+                    }
+                  />
+                </div>
+              )}
             </>
           )}
 
@@ -1394,7 +1432,7 @@ export default function DetailPage({
                         normalizeChapterSelectionInput(event.target.value)
                       )
                     }
-                    placeholder="챕터 범위 (예: 1-3,5)"
+                    placeholder="챕터 범위 (예: 3, 3-5, 1,3,5)"
                     className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
                   />
                   <button
@@ -1439,6 +1477,7 @@ export default function DetailPage({
                   items={oxItems}
                   onResolveEvidence={resolveOxEvidence}
                   onJumpToEvidencePage={jumpToEvidencePage}
+                  onDeleteItem={deleteOxQuestion}
                   selections={oxSelections}
                   explanationsOpen={oxExplanationOpen}
                   onSelect={handleOxSelect}
@@ -1492,7 +1531,7 @@ export default function DetailPage({
                         normalizeChapterSelectionInput(event.target.value)
                       )
                     }
-                    placeholder="챕터 범위 (예: 1-3,5)"
+                    placeholder="챕터 범위 (예: 3, 3-5, 1,3,5)"
                     className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
                   />
                   <button

@@ -142,7 +142,6 @@ import {
   createQuizSetState,
   EXAM_CRAM_PREVIEW_LIMIT,
   isMissingFeedbackTableError,
-  mergeQuizWithLegacyOx,
   REVIEW_NOTE_MOCK_EXAM_LIMIT,
   sortReviewNotesByRecentWrong,
 } from "./utils/appFeatureHelpers";
@@ -164,9 +163,18 @@ const FEEDBACK_CATEGORY_OPTIONS = [
 const DEFAULT_QUIZ_MIX = Object.freeze({
   multipleChoice: 4,
   shortAnswer: 2,
-  ox: 1,
 });
-const DEFAULT_QUIZ_MIX_INPUT = `${DEFAULT_QUIZ_MIX.multipleChoice}-${DEFAULT_QUIZ_MIX.shortAnswer}-${DEFAULT_QUIZ_MIX.ox}`;
+const DEFAULT_QUIZ_MIX_INPUT = `${DEFAULT_QUIZ_MIX.multipleChoice}-${DEFAULT_QUIZ_MIX.shortAnswer}`;
+
+function getInitialSplitPercent() {
+  if (typeof window === "undefined") return 50;
+  if (!Capacitor.isNativePlatform()) return 50;
+  const width = Number(window.innerWidth || window.screen?.width || 0);
+  const height = Number(window.innerHeight || window.screen?.height || 0);
+  const shorterSide = Math.min(width, height);
+  const longerSide = Math.max(width, height);
+  return shorterSide >= 700 && longerSide >= 1000 ? 56 : 50;
+}
 
 function parseQuizMixInput(value) {
   const raw = String(value || "").trim();
@@ -174,7 +182,7 @@ function parseQuizMixInput(value) {
     return {
       mix: null,
       total: 0,
-      error: "문항 비율을 입력해주세요. 형식: 객관식-주관식-OX (예: 4-3-1)",
+      error: "문항 비율을 입력해주세요. 형식: 객관식-주관식 (예: 4-3)",
     };
   }
 
@@ -183,16 +191,16 @@ function parseQuizMixInput(value) {
     .filter(Boolean)
     .map((part) => Number.parseInt(part, 10));
 
-  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
+  if (parts.length !== 2 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
     return {
       mix: null,
       total: 0,
-      error: "문항 비율은 객관식-주관식-OX 형식으로 입력해주세요. 예: 4-3-1",
+      error: "문항 비율은 객관식-주관식 형식으로 입력해주세요. 예: 4-3",
     };
   }
 
-  const [multipleChoice, shortAnswer, ox] = parts;
-  const total = multipleChoice + shortAnswer + ox;
+  const [multipleChoice, shortAnswer] = parts;
+  const total = multipleChoice + shortAnswer;
   if (total <= 0) {
     return {
       mix: null,
@@ -205,7 +213,6 @@ function parseQuizMixInput(value) {
     mix: {
       multipleChoice,
       shortAnswer,
-      ox,
     },
     total,
     error: "",
@@ -238,7 +245,7 @@ function App() {
   const [selectedFileId, setSelectedFileId] = useState(null);
   const [pendingDocumentOpen, setPendingDocumentOpen] = useState(null);
   const [panelTab, setPanelTab] = useState("summary");
-  const [splitPercent, setSplitPercent] = useState(50);
+  const [splitPercent, setSplitPercent] = useState(() => getInitialSplitPercent());
   const [isResizingSplit, setIsResizingSplit] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
@@ -1620,21 +1627,30 @@ function App() {
           summaryRequestedRef.current = true;
         }
         if (mapped.quiz || mapped.ox) {
-          const normalizedQuiz = mergeQuizWithLegacyOx(mapped.quiz, mapped.ox);
-          const cachedSet = createQuizSetState(
-            normalizedQuiz,
-            `quiz-cached-${normalizedDocId}`
-          );
-          setQuizSets([cachedSet]);
-          setOxItems(
+          const normalizedQuiz = normalizeQuizPayload(mapped.quiz || {});
+          const cachedOxItems =
             normalizedQuiz.ox.length > 0
               ? normalizedQuiz.ox
               : Array.isArray(mapped.ox?.items)
                 ? mapped.ox.items
-                : []
+                : [];
+          const quizWithoutOx = {
+            multipleChoice: normalizedQuiz.multipleChoice,
+            shortAnswer: normalizedQuiz.shortAnswer,
+            ox: [],
+          };
+          const hasQuizItems =
+            quizWithoutOx.multipleChoice.length > 0 || quizWithoutOx.shortAnswer.length > 0;
+          setQuizSets(
+            hasQuizItems
+              ? [createQuizSetState(quizWithoutOx, `quiz-cached-${normalizedDocId}`)]
+              : []
           );
-          quizAutoRequestedRef.current = true;
-          oxAutoRequestedRef.current = Boolean(normalizedQuiz.ox.length || mapped.ox);
+          setOxItems(cachedOxItems);
+          setOxSelections({});
+          setOxExplanationOpen({});
+          quizAutoRequestedRef.current = hasQuizItems;
+          oxAutoRequestedRef.current = cachedOxItems.length > 0;
         }
         return mapped;
       } catch (err) {
@@ -1824,18 +1840,18 @@ function App() {
       }
       const name = item.name || item.file?.name || "document.pdf";
       const fileObj = normalizeSupportedFile(new File([blob], name, { type: blob.type || "" }));
-      const thumb = await generateDocumentThumbnail(fileObj);
+      const thumb = item.thumbnail || null;
       const enriched = {
         ...item,
         file: fileObj,
-        thumbnail: item.thumbnail || thumb,
+        thumbnail: thumb,
         remoteUrl: signed || null,
         path: resolvedStoragePath,
         bucket,
       };
       const cachePayload = {
         file: fileObj,
-        thumbnail: item.thumbnail || thumb,
+        thumbnail: thumb,
         remoteUrl: signed || null,
         path: resolvedStoragePath,
         bucket,
@@ -1952,6 +1968,9 @@ function App() {
       setIsSavedPartialSummaryOpen(false);
       setQuizChapterSelectionInput("");
       setOxChapterSelectionInput("");
+      setOxItems(null);
+      setOxSelections({});
+      setOxExplanationOpen({});
       setFlashcardChapterSelectionInput("");
       setMockExamChapterSelectionInput("");
       tutorPageTextCacheRef.current.clear();
@@ -2010,14 +2029,18 @@ function App() {
           setThumbnailUrl(aggregateThumbnail);
         } else {
           const textExtractOptions = {
-            pageLimit: 30,
-            maxLength: 12000,
+            pageLimit: isNativePlatform && isPdfDocumentKind(targetFileKind) ? 18 : 30,
+            maxLength: isNativePlatform && isPdfDocumentKind(targetFileKind) ? 9000 : 12000,
             useOcr: false,
           };
+          const thumbnailPromise =
+            isNativePlatform && isPdfDocumentKind(targetFileKind)
+              ? Promise.resolve(resolvedItem.thumbnail || null)
+              : generateDocumentThumbnail(targetFile);
           const [loadedArtifacts, initialTextResult, thumb] = await Promise.all([
             artifactsPromise,
             extractDocumentText(targetFile, textExtractOptions),
-            generateDocumentThumbnail(targetFile),
+            thumbnailPromise,
           ]);
           if (fileOpenRequestSeqRef.current !== requestSeq) return;
           loaded = loadedArtifacts;
@@ -2030,7 +2053,8 @@ function App() {
           if (
             isPdfDocumentKind(targetFileKind) &&
             !hasSavedStudyArtifacts &&
-            !initialText
+            !initialText &&
+            !isNativePlatform
           ) {
             textResult = await extractDocumentText(targetFile, {
               ...textExtractOptions,
@@ -2045,7 +2069,7 @@ function App() {
           setExtractedText(text);
           setPreviewText(text);
           setPageInfo({ used: pagesUsed, total: totalPages });
-          setThumbnailUrl(thumb);
+          setThumbnailUrl(thumb || resolvedItem.thumbnail || null);
         }
         const extractEnd =
           typeof performance !== "undefined" && typeof performance.now === "function"
@@ -3805,61 +3829,46 @@ function App() {
       const historicalMockTexts = collectQuestionTextsFromMockExams(mockExams);
       const avoidQuestionTexts = dedupeQuestionTexts([...historicalQuizTexts, ...historicalMockTexts]).slice(0, 80);
       const seenQuestionKeys = createQuestionKeySet(avoidQuestionTexts);
-      const historicalOxTexts = collectQuestionTextsFromOxItems(oxItems);
-      const avoidStatementTexts = dedupeQuestionTexts([...historicalOxTexts, ...historicalMockTexts]).slice(0, 80);
-      const seenOxKeys = createQuestionKeySet(avoidStatementTexts);
 
       const targetMcCount = Math.max(0, Number(quizMix.multipleChoice) || 0);
       const targetSaCount = Math.max(0, Number(quizMix.shortAnswer) || 0);
-      const targetOxCount = Math.max(0, Number(quizMix.ox) || 0);
-      const targetTotalCount = targetMcCount + targetSaCount + targetOxCount;
+      const targetTotalCount = targetMcCount + targetSaCount;
       if (targetTotalCount <= 0) {
         throw new Error("최소 1문항 이상 입력해주세요.");
       }
+      const mcBatchLimit = 10;
+      const saBatchLimit = 10;
       const nextMultipleChoice = [];
       const nextShortAnswer = [];
-      const nextOx = [];
 
-      const { generateQuiz, generateOxQuiz } = await getOpenAiService();
+      const { generateQuiz } = await getOpenAiService();
       const maxAttempts = Math.max(
-        enforceScopedEvidence ? 4 : 3,
-        Math.ceil(targetMcCount / 5) + 1,
-        Math.ceil(targetSaCount / 5) + 1,
-        Math.ceil(targetOxCount / 10) + 1
+        enforceScopedEvidence ? 3 : 2,
+        Math.ceil(targetMcCount / mcBatchLimit) + 1,
+        Math.ceil(targetSaCount / saBatchLimit) + 1
       );
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        if (
-          nextMultipleChoice.length >= targetMcCount &&
-          nextShortAnswer.length >= targetSaCount &&
-          nextOx.length >= targetOxCount
-        ) {
+        if (nextMultipleChoice.length >= targetMcCount && nextShortAnswer.length >= targetSaCount) {
           break;
         }
 
         const requestMcCount =
           targetMcCount > nextMultipleChoice.length
-            ? Math.min(5, targetMcCount - nextMultipleChoice.length + 1)
+            ? Math.min(mcBatchLimit, targetMcCount - nextMultipleChoice.length + 1)
             : 0;
         const requestSaCount =
           targetSaCount > nextShortAnswer.length
-            ? Math.min(5, targetSaCount - nextShortAnswer.length + 1)
+            ? Math.min(saBatchLimit, targetSaCount - nextShortAnswer.length + 1)
             : 0;
         const shouldRequestQuiz = requestMcCount > 0 || requestSaCount > 0;
-        const shouldRequestOx = targetOxCount > nextOx.length;
-        const [quizResult, oxResult] = await Promise.all([
-          shouldRequestQuiz
-            ? generateQuiz(generationSourceText || quizSourceText, {
-                multipleChoiceCount: requestMcCount,
-                shortAnswerCount: requestSaCount,
-                avoidQuestions: avoidQuestionTexts,
-              })
-            : Promise.resolve({ multipleChoice: [], shortAnswer: [] }),
-          shouldRequestOx
-            ? generateOxQuiz(generationSourceText || quizSourceText, {
-                avoidStatements: avoidStatementTexts,
-              })
-            : Promise.resolve({ items: [] }),
-        ]);
+        const quizResult = shouldRequestQuiz
+          ? await generateQuiz(generationSourceText || quizSourceText, {
+              multipleChoiceCount: requestMcCount,
+              shortAnswerCount: requestSaCount,
+              avoidQuestions: avoidQuestionTexts,
+              scopeLabel,
+            })
+          : { multipleChoice: [], shortAnswer: [] };
         const quiz = normalizeQuizPayload(quizResult);
         const scopedMultipleChoice = enforceScopedEvidence
           ? filterGeneratedItemsToScope(Array.isArray(quiz.multipleChoice) ? quiz.multipleChoice : [], evidencePages)
@@ -3870,11 +3879,6 @@ function App() {
           ? filterGeneratedItemsToScope(Array.isArray(quiz.shortAnswer) ? quiz.shortAnswer : [], evidencePages)
           : Array.isArray(quiz.shortAnswer)
             ? quiz.shortAnswer
-            : [];
-        const scopedOx = enforceScopedEvidence
-          ? filterGeneratedItemsToScope(Array.isArray(oxResult?.items) ? oxResult.items : [], evidencePages)
-          : Array.isArray(oxResult?.items)
-            ? oxResult.items
             : [];
 
         pushUniqueByQuestionKey(
@@ -3891,13 +3895,6 @@ function App() {
           seenQuestionKeys,
           targetSaCount
         );
-        pushUniqueByQuestionKey(
-          nextOx,
-          scopedOx,
-          getOxPromptText,
-          seenOxKeys,
-          targetOxCount
-        );
 
         const mergedAvoidQuestions = mergeQuestionHistory(
           avoidQuestionTexts,
@@ -3905,19 +3902,9 @@ function App() {
           120
         );
         avoidQuestionTexts.splice(0, avoidQuestionTexts.length, ...mergedAvoidQuestions);
-        const mergedAvoidStatements = mergeQuestionHistory(
-          avoidStatementTexts,
-          nextOx.map(getOxPromptText),
-          120
-        );
-        avoidStatementTexts.splice(0, avoidStatementTexts.length, ...mergedAvoidStatements);
       }
 
-      if (
-        nextMultipleChoice.length < targetMcCount ||
-        nextShortAnswer.length < targetSaCount ||
-        nextOx.length < targetOxCount
-      ) {
+      if (nextMultipleChoice.length < targetMcCount || nextShortAnswer.length < targetSaCount) {
         throw new Error("중복 문항을 제외하느라 충분한 새 문항을 만들지 못했습니다. 범위를 바꿔 다시 시도해 주세요.");
       }
 
@@ -3942,31 +3929,12 @@ function App() {
                   : evidencePages
               ),
         })),
-        ox: nextOx.slice(0, targetOxCount).map((item) => ({
-          ...item,
-          evidencePages: enforceScopedEvidence
-            ? clampEvidencePagesToScope(item?.evidencePages, evidencePages)
-            : toSortedUniquePages(
-                Array.isArray(item?.evidencePages) && item.evidencePages.length
-                  ? item.evidencePages
-                  : evidencePages
-              ),
-        })),
       };
       const newSet = createQuizSetState(trimmedQuiz);
       setQuizSets((prev) => [...prev, newSet]);
-      setOxItems((prev) => [
-        ...(Array.isArray(prev) ? prev : []),
-        ...(Array.isArray(trimmedQuiz.ox) ? trimmedQuiz.ox : []),
-      ]);
       setStatus(scopeLabel ? `퀴즈 세트가 생성되었습니다. (${scopeLabel})` : "퀴즈 세트가 생성되었습니다.");
       setUsageCounts((prev) => ({ ...prev, quiz: prev.quiz + 1 }));
-      persistArtifacts({
-        quiz: trimmedQuiz,
-        ox: {
-          items: Array.isArray(trimmedQuiz.ox) ? trimmedQuiz.ox : [],
-        },
-      });
+      persistArtifacts({ quiz: trimmedQuiz });
     } catch (err) {
       setError(`퀴즈 세트 생성에 실패했습니다: ${err.message}`);
     } finally {
@@ -3985,6 +3953,81 @@ function App() {
     setStatus("퀴즈를 삭제했습니다.");
     setError("");
     await persistArtifacts({ quiz: null });
+  };
+
+  const reindexOxStateMap = (value, removedIndex) =>
+    Object.entries(value || {}).reduce((next, [key, entryValue]) => {
+      const numericKey = Number.parseInt(key, 10);
+      if (!Number.isFinite(numericKey) || numericKey === removedIndex) return next;
+      next[numericKey > removedIndex ? numericKey - 1 : numericKey] = entryValue;
+      return next;
+    }, {});
+
+  const handleDeleteOxQuestion = async (questionIndex) => {
+    if (isLoadingOx) return;
+    const currentItems = Array.isArray(oxItems) ? oxItems : [];
+    const normalizedIndex = Number.parseInt(questionIndex, 10);
+    if (
+      !Number.isFinite(normalizedIndex) ||
+      normalizedIndex < 0 ||
+      normalizedIndex >= currentItems.length
+    ) {
+      return;
+    }
+
+    const nextItems = currentItems.filter((_, idx) => idx !== normalizedIndex);
+    const nextSelections = reindexOxStateMap(oxSelections, normalizedIndex);
+    const nextExplanationOpen = reindexOxStateMap(oxExplanationOpen, normalizedIndex);
+
+    oxAutoRequestedRef.current = nextItems.length > 0;
+    setOxItems(nextItems.length > 0 ? nextItems : null);
+    setOxSelections(nextSelections);
+    setOxExplanationOpen(nextExplanationOpen);
+    setQuizSets((prev) =>
+      (Array.isArray(prev) ? prev : []).map((set) => {
+        const normalizedQuestions = normalizeQuizPayload(set?.questions || {});
+        return {
+          ...set,
+          questions: {
+            ...normalizedQuestions,
+            ox: normalizedQuestions.ox.filter((_, idx) => idx !== normalizedIndex),
+          },
+          oxSelections: reindexOxStateMap(set?.oxSelections, normalizedIndex),
+          oxExplanationOpen: reindexOxStateMap(set?.oxExplanationOpen, normalizedIndex),
+        };
+      })
+    );
+    setStatus(nextItems.length > 0 ? "O/X 문제를 삭제했습니다." : "마지막 O/X 문제를 삭제했습니다.");
+    setError("");
+    await persistArtifacts({
+      ox: nextItems.length > 0 ? { items: nextItems } : null,
+    });
+  };
+
+  const handleDeleteOxQuiz = async () => {
+    if (isLoadingOx) return;
+    if (!Array.isArray(oxItems) || oxItems.length === 0) {
+      setError("삭제할 O/X 퀴즈가 없습니다.");
+      return;
+    }
+    oxAutoRequestedRef.current = false;
+    setOxItems(null);
+    setOxSelections({});
+    setOxExplanationOpen({});
+    setQuizSets((prev) =>
+      (Array.isArray(prev) ? prev : []).map((set) => ({
+        ...set,
+        questions: {
+          ...normalizeQuizPayload(set?.questions || {}),
+          ox: [],
+        },
+        oxSelections: {},
+        oxExplanationOpen: {},
+      }))
+    );
+    setStatus("O/X 퀴즈를 삭제했습니다.");
+    setError("");
+    await persistArtifacts({ ox: null });
   };
 
   const persistReviewNotes = useCallback(
@@ -4554,7 +4597,7 @@ function App() {
       if (selected.error) {
         return {
           items: list,
-          error: "\uC139\uC158 \uBC94\uC704\uB97C \uB2E4\uC2DC \uD655\uC778\uD574\uC8FC\uC138\uC694. (\uC608: 1-3,5)",
+          error: "챕터 범위를 다시 확인해주세요. (예: 3, 3-5, 1,3,5)",
           selectedSectionNumbers: [],
         };
       }
@@ -5093,8 +5136,8 @@ function App() {
         throw new Error("선택한 챕터에 해당하는 범위가 없습니다.");
       }
 
-      const normalizedSelection = selectedNumbers.join(",");
-      const scopeLabel = `chapter ${normalizedSelection}`;
+      const normalizedSelection = String(selected.normalizedInput || selectedNumbers.join(",")).trim();
+      const scopeLabel = normalizedSelection ? `챕터 ${normalizedSelection}` : "";
       const pageCandidates = buildPageCandidatesFromRanges(targetChapters, 180);
       const docKey = selectedFileId || file?.name || "doc";
       const sectionCacheKey = `${docKey}::${chapterConfigRaw}`;
@@ -5761,7 +5804,7 @@ function App() {
     }
   }, [summary, file, isExportingSummary]);
 
-  const requestOxQuiz = async ({ auto = false, force = false } = {}) => {
+  const requestOxQuiz = async ({ auto = false, force = false, chapterSelectionInputOverride = "" } = {}) => {
     if (isLoadingOx && !force) return;
     if (!file) {
       setError("먼저 PDF를 열어주세요.");
@@ -5771,7 +5814,12 @@ function App() {
       setError("현재 요금제의 O/X 생성 한도에 도달했습니다.");
       return;
     }
-    const chapterSelectionRaw = String(oxChapterSelectionInput || "").trim();
+    const chapterSelectionRaw = String(
+      chapterSelectionInputOverride || oxChapterSelectionInput || quizChapterSelectionInput || ""
+    ).trim();
+    if (chapterSelectionRaw !== String(oxChapterSelectionInput || "").trim()) {
+      setOxChapterSelectionInput(chapterSelectionRaw);
+    }
     const isPdfSource = isCurrentPdfDocument;
     if (!extractedText && !chapterSelectionRaw && !isPdfSource) {
       setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
@@ -5812,6 +5860,8 @@ function App() {
       const { generateOxQuiz } = await getOpenAiService();
       const ox = await generateOxQuiz(generationSourceText || oxSourceText, {
         avoidStatements: avoidStatementTexts,
+        count: 2,
+        scopeLabel,
       });
       const rawItems = Array.isArray(ox?.items) ? ox.items : [];
       const scopedRawItems = enforceScopedEvidence ? filterGeneratedItemsToScope(rawItems, evidencePages) : rawItems;
@@ -5828,7 +5878,7 @@ function App() {
               ),
         }));
       const items = [];
-      pushUniqueByQuestionKey(items, qualityRawItems, getOxPromptText, seenQuestionKeys, 10);
+      pushUniqueByQuestionKey(items, qualityRawItems, getOxPromptText, seenQuestionKeys, 2);
 
       if (ox?.debug || items.length === 0) {
         setOxItems([]);
@@ -5859,7 +5909,7 @@ function App() {
     }
   };
 
-  const regenerateOxQuiz = async () => {
+  const regenerateOxQuiz = async ({ chapterSelectionInputOverride = "" } = {}) => {
     if (isLoadingOx) return;
     if (!file) {
       setError("먼저 PDF를 열어주세요.");
@@ -5869,18 +5919,24 @@ function App() {
       setError("현재 요금제의 O/X 생성 한도에 도달했습니다.");
       return;
     }
-    const chapterSelectionRaw = String(oxChapterSelectionInput || "").trim();
+    const chapterSelectionRaw = String(
+      chapterSelectionInputOverride || oxChapterSelectionInput || quizChapterSelectionInput || ""
+    ).trim();
+    if (chapterSelectionRaw !== String(oxChapterSelectionInput || "").trim()) {
+      setOxChapterSelectionInput(chapterSelectionRaw);
+    }
     if (!extractedText && !chapterSelectionRaw && !isCurrentPdfDocument) {
       setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
       return;
     }
     oxAutoRequestedRef.current = true;
     setOxItems(null);
-      setOxSelections({});
+    setOxSelections({});
+    setOxExplanationOpen({});
     setStatus("O/X를 초기화하고 다시 생성하는 중...");
     setError("");
     await persistArtifacts({ ox: null });
-    await requestOxQuiz({ auto: false, force: true });
+    await requestOxQuiz({ auto: false, force: true, chapterSelectionInputOverride: chapterSelectionRaw });
   };
 
   const handleAddFlashcard = useCallback(
@@ -6358,11 +6414,13 @@ function App() {
         const [oxResult, quizResult] = await Promise.all([
           ai.generateOxQuiz(generationSourceText || sourceText, {
             avoidStatements: avoidMockQuestionTexts,
+            scopeLabel,
           }),
           ai.generateQuiz(generationSourceText || sourceText, {
             multipleChoiceCount: 4,
             shortAnswerCount: 1,
             avoidQuestions: avoidMockQuestionTexts,
+            scopeLabel,
           }),
         ]);
 
@@ -7022,6 +7080,8 @@ function App() {
     handleGenerateExamCram,
     handleCreateReviewNotesMockExam,
     deleteQuiz: handleDeleteQuiz,
+    deleteOxQuiz: handleDeleteOxQuiz,
+    deleteOxQuestion: handleDeleteOxQuestion,
     isLoadingOx,
     requestOxQuiz,
     oxChapterSelectionInput,

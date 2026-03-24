@@ -31,7 +31,7 @@ const LABELS = {
   createMockExam: "\uC624\uB2F5\uB178\uD2B8 \uB9CC\uB4E4\uAE30",
   createMockExamLoading: "\uC624\uB2F5\uB178\uD2B8 \uC0DD\uC131 \uC911...",
   sectionInput: "\uCC55\uD130 \uBC94\uC704",
-  sectionPlaceholder: "\uCC55\uD130 \uBC94\uC704 (\uC608: 1-3,5)",
+  sectionPlaceholder: "\uCC55\uD130 \uBC94\uC704 (\uC608: 3, 3-5, 1,3,5)",
   sectionHelp:
     "\uC120\uD0DD\uD55C \uCC55\uD130 \uBC94\uC704\uAC00 \uC624\uB2F5\uB178\uD2B8\uC640 \uC2DC\uD5D8 \uC9C1\uC804 \uC815\uB9AC\uC5D0 \uD568\uAED8 \uC801\uC6A9\uB429\uB2C8\uB2E4.",
   availableSections: "\uC124\uC815\uB41C \uCC55\uD130",
