@@ -255,7 +255,7 @@ export default function DetailPage({
   handleDeleteReviewNote,
   handleGenerateExamCram,
   handleCreateReviewNotesMockExam,
-  deleteOxQuiz,
+  deleteQuiz,
   deleteOxQuestion,
   isLoadingOx,
   requestOxQuiz,
@@ -1372,13 +1372,13 @@ export default function DetailPage({
                 </button>
                 <button
                   type="button"
-                  onClick={deleteOxQuiz}
-                  disabled={isLoadingOx || !Array.isArray(oxItems) || oxItems.length === 0}
+                  onClick={deleteQuiz}
+                  disabled={isLoadingQuiz || !Array.isArray(quizSets) || quizSets.length === 0}
                   className="ghost-button w-full text-sm text-slate-200"
                   data-ghost-size="xl"
                   style={{ "--ghost-color": "148, 163, 184" }}
                 >
-                  O/X 삭제
+                  퀴즈 삭제
                 </button>
               </div>
 
