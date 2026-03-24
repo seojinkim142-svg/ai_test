@@ -153,6 +153,7 @@ You are a professor creating quiz questions from lecture material.
 - Avoid pure memorization prompts (raw URLs, names, single numbers).
 - If the document contains page tags like [p.12], first choose 1-2 tagged evidence passages and then write the question from that evidence only.
 - evidencePages must use only page numbers that actually appear in the provided page tags.
+- If the tagged evidence does not support the question, omit that item instead of using outside knowledge or other pages.
 - evidenceSnippet should be a short Korean source phrase copied or lightly normalized from the document so it can be highlighted later.
 
 [Output format]
@@ -207,6 +208,7 @@ You are creating high-difficulty mock exam items from the document.
 - Include plausible distractors but keep one clear correct answer.
 - If the document contains page tags like [p.12], select the supporting tagged evidence first and write the question from that evidence only.
 - evidencePages must reference only visible tagged pages.
+- If the tagged evidence does not support the question, omit that item instead of using outside knowledge or other pages.
 - evidenceSnippet should be a short source phrase copied or lightly normalized from the document.
 - Never ask textbook/preface metadata:
   target audience, whether exercises/cyber materials/code are included,
@@ -264,7 +266,8 @@ ${avoidBlock ? `- ${avoidBlock.replace(/\n/g, "\n  ")}` : ""}
 9. evidence should briefly cite source clue/location when available.
 10. Include evidencePages and evidenceSnippet for every item.
 11. evidenceSnippet should be a short source phrase copied or lightly normalized from the document.
-12. Exclude low-value metadata/trivia items:
+12. If the tagged evidence does not support the statement, omit that item instead of using outside knowledge or other pages.
+13. Exclude low-value metadata/trivia items:
    textbook target audience, supplement/material availability,
    author/publisher/contact, TOC/chapter structure.
 

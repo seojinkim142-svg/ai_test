@@ -5,13 +5,10 @@ const BACKUP_PROFILE_AVATAR = "/profile-default-character.svg";
 
 const Header = memo(function Header({
   user,
-  onSignOut,
-  signingOut = false,
   theme = "dark",
-  onToggleTheme,
   onGoHome,
-  onOpenFeedbackDialog,
   onOpenBilling,
+  onOpenSettings,
   onOpenLogin,
   showBilling = true,
   onRefresh,
@@ -51,7 +48,7 @@ const Header = memo(function Header({
               </p>
               <div className="mt-1 flex items-end gap-2 sm:gap-3">
                 <h1 className="text-2xl font-bold leading-none text-white transition group-hover:text-emerald-50 sm:text-3xl">
-                  Zeusian
+                  Zeusian.ai
                 </h1>
                 {brandTierLabel && (
                   <span className="pb-0.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-200/80 transition group-hover:text-emerald-100 sm:text-sm">
@@ -66,7 +63,7 @@ const Header = memo(function Header({
                 {"\uD034\uC988\uC640 \uC694\uC57D"}
               </p>
               <div className="mt-1 flex items-end gap-2 sm:gap-3">
-                <h1 className="text-2xl font-bold leading-none text-white sm:text-3xl">Zeusian</h1>
+                <h1 className="text-2xl font-bold leading-none text-white sm:text-3xl">Zeusian.ai</h1>
                 {brandTierLabel && (
                   <span className="pb-0.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-200/80 sm:text-sm">
                     {brandTierLabel}
@@ -92,18 +89,6 @@ const Header = memo(function Header({
               </button>
             )}
 
-            {onOpenFeedbackDialog && (
-              <button
-                type="button"
-                onClick={onOpenFeedbackDialog}
-                className="ghost-button text-xs text-slate-200"
-                data-ghost-size="sm"
-                style={{ "--ghost-color": "148, 163, 184" }}
-              >
-                {"\uD53C\uB4DC\uBC31"}
-              </button>
-            )}
-
             {showBilling && (
               <button
                 type="button"
@@ -116,15 +101,17 @@ const Header = memo(function Header({
               </button>
             )}
 
+            {onOpenSettings && (
               <button
                 type="button"
-                onClick={onToggleTheme}
+                onClick={onOpenSettings}
                 className="ghost-button text-xs text-slate-200"
                 data-ghost-size="sm"
                 style={{ "--ghost-color": theme === "light" ? "14, 116, 144" : "148, 163, 184" }}
               >
-                {theme === "light" ? "\uB77C\uC774\uD2B8" : "\uB2E4\uD06C"}
+                설정
               </button>
+            )}
 
             {showPremiumButtons && (
               <>
@@ -190,31 +177,6 @@ const Header = memo(function Header({
               </button>
             )}
           </div>
-
-          {user && (
-            <div className="flex w-[14.75rem] max-w-full items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 shadow-inner shadow-black/30 sm:w-auto sm:rounded-full sm:py-1.5">
-              <div className="min-w-0 flex flex-col">
-                <span className="text-[11px] uppercase tracking-[0.15em] text-slate-400">
-                  {"\uACC4\uC815"}
-                </span>
-                <span className="max-w-[220px] truncate text-sm font-semibold leading-tight text-white">
-                  {user.email}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={onSignOut}
-                  disabled={signingOut}
-                  className="ghost-button shrink-0 text-xs text-emerald-100"
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "52, 211, 153" }}
-                >
-                  {signingOut ? "\uB85C\uADF8\uC544\uC6C3 \uC911..." : "\uB85C\uADF8\uC544\uC6C3"}
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </header>

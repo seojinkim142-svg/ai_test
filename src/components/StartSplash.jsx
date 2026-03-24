@@ -60,7 +60,7 @@ const StartSplash = memo(function StartSplash({ onActivated }) {
       }}
       role="button"
       tabIndex={0}
-      aria-label="Start Zeusian intro"
+      aria-label="Start Zeusian.ai intro"
     >
       <div className="splash-backdrop" aria-hidden="true" />
       <div className="splash-grid" aria-hidden="true" />

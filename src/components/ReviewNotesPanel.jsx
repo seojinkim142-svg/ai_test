@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import MathMarkdown from "./MathMarkdown";
 
 const LABELS = {
@@ -28,19 +28,19 @@ const LABELS = {
   filterPending: "\uBCF5\uC2B5 \uD544\uC694",
   filterAll: "\uC804\uCCB4",
   filterResolved: "\uD574\uACB0\uB428",
-  createMockExam: "\uC624\uB2F5 \uBAA8\uC758\uACE0\uC0AC \uB9CC\uB4E4\uAE30",
-  createMockExamLoading: "\uBAA8\uC758\uACE0\uC0AC \uC0DD\uC131 \uC911...",
-  sectionInput: "\uC139\uC158 \uBC94\uC704",
-  sectionPlaceholder: "\uC139\uC158 \uBC94\uC704 (\uC608: 1-3,5)",
+  createMockExam: "\uC624\uB2F5\uB178\uD2B8 \uB9CC\uB4E4\uAE30",
+  createMockExamLoading: "\uC624\uB2F5\uB178\uD2B8 \uC0DD\uC131 \uC911...",
+  sectionInput: "\uCC55\uD130 \uBC94\uC704",
+  sectionPlaceholder: "\uCC55\uD130 \uBC94\uC704 (\uC608: 1-3,5)",
   sectionHelp:
-    "\uC120\uD0DD\uD55C \uC139\uC158 \uBC94\uC704\uAC00 \uC624\uB2F5\uB178\uD2B8\uC640 \uC2DC\uD5D8 \uC9C1\uC804 \uD328\uB110\uC5D0 \uD568\uAED8 \uC801\uC6A9\uB429\uB2C8\uB2E4.",
-  availableSections: "\uC0AC\uC6A9 \uAC00\uB2A5 \uC139\uC158",
-  sectionUnknown: "\uC139\uC158 \uBBF8\uC9C0\uC815",
+    "\uC120\uD0DD\uD55C \uCC55\uD130 \uBC94\uC704\uAC00 \uC624\uB2F5\uB178\uD2B8\uC640 \uC2DC\uD5D8 \uC9C1\uC804 \uC815\uB9AC\uC5D0 \uD568\uAED8 \uC801\uC6A9\uB429\uB2C8\uB2E4.",
+  availableSections: "\uC124\uC815\uB41C \uCC55\uD130",
+  sectionUnknown: "\uCC55\uD130 \uBBF8\uC9C0\uC815",
   examCramTitle: "\uC2DC\uD5D8 \uC9C1\uC804",
   examCramSubtitle:
     "\uC694\uC57D, \uD034\uC988, O/X, \uC624\uB2F5\uB178\uD2B8\uB97C \uD569\uCCD0 \uC2DC\uD5D8 \uC9C1\uC804\uC5D0 \uC774\uAC83\uB9CC \uBCF4\uBA74 \uB418\uB294 AI \uCD5C\uC885 \uC815\uB9AC\uB97C \uB9CC\uB4ED\uB2C8\uB2E4.",
-  examCramCreate: "\uC2DC\uD5D8 \uC9C1\uC804 AI \uC815\uB9AC \uB9CC\uB4E4\uAE30",
-  examCramCreateLoading: "AI \uC815\uB9AC \uC0DD\uC131 \uC911...",
+  examCramCreate: "\uC2DC\uD5D8 \uC9C1\uC804 \uC815\uB9AC \uB9CC\uB4E4\uAE30",
+  examCramCreateLoading: "\uC2DC\uD5D8 \uC9C1\uC804 \uC815\uB9AC \uC0DD\uC131 \uC911...",
   examCramPendingCount: "\uC624\uB2F5 \uCC38\uACE0",
   examCramPreviewCount: "\uCD5C\uADFC \uC624\uB2F5 \uBBF8\uB9AC\uBCF4\uAE30",
   examCramSummaryRef: "\uC694\uC57D",
@@ -73,6 +73,10 @@ function normalizeShortAnswerText(value) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "");
+}
+
+function normalizeChapterSelectionInput(value) {
+  return String(value || "").replace(/\s+/g, "");
 }
 
 function ReviewRetryBlock({ item, onSubmit, onAttemptStateChange }) {
@@ -378,84 +382,18 @@ function ReviewNoteCard({
 }
 
 function ExamCramCard({
-  items,
-  pendingCount,
-  referenceCounts,
-  hasAnySource,
   content,
   updatedAt,
   scopeLabel,
   status,
   error,
-  onGenerateExamCram,
-  isGeneratingExamCram,
-  sectionSelectionInput,
+  hasAnySource,
 }) {
-  const previewItems = Array.isArray(items) ? items.slice(0, 3) : [];
-  const normalizedCounts = {
-    summary: Math.max(0, Number(referenceCounts?.summary) || 0),
-    quiz: Math.max(0, Number(referenceCounts?.quiz) || 0),
-    ox: Math.max(0, Number(referenceCounts?.ox) || 0),
-    reviewNotes: Math.max(0, Number(referenceCounts?.reviewNotes) || 0),
-  };
-  const referenceBadges = [
-    { label: LABELS.examCramSummaryRef, count: normalizedCounts.summary },
-    { label: LABELS.examCramQuizRef, count: normalizedCounts.quiz },
-    { label: LABELS.examCramOxRef, count: normalizedCounts.ox },
-    { label: LABELS.examCramReviewRef, count: normalizedCounts.reviewNotes },
-  ];
+  const hasResult = Boolean(content || status || error || updatedAt);
 
   return (
-    <div className="mt-4 rounded-2xl border border-cyan-300/15 bg-cyan-400/5 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-cyan-100">{LABELS.examCramTitle}</p>
-          <p className="mt-1 text-xs text-slate-300">{LABELS.examCramSubtitle}</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <span className="rounded-full bg-amber-400/10 px-3 py-1 text-[11px] font-semibold text-amber-100 ring-1 ring-amber-300/30">
-            {`${LABELS.examCramPendingCount} ${pendingCount}`}
-          </span>
-          <span className="rounded-full bg-cyan-400/10 px-3 py-1 text-[11px] font-semibold text-cyan-100 ring-1 ring-cyan-300/25">
-            {`${LABELS.examCramPreviewCount} ${previewItems.length}`}
-          </span>
-        </div>
-      </div>
-
-      <div className="mt-4">
-        <button
-          type="button"
-          onClick={() =>
-            onGenerateExamCram?.({
-              chapterSelectionInput: sectionSelectionInput,
-            })
-          }
-          disabled={isGeneratingExamCram || !hasAnySource}
-          className="ghost-button text-sm text-emerald-100"
-          data-ghost-size="sm"
-          style={{ "--ghost-color": "16, 185, 129" }}
-        >
-          {isGeneratingExamCram ? LABELS.examCramCreateLoading : LABELS.examCramCreate}
-        </button>
-      </div>
-
-      <div className="mt-4 rounded-xl bg-slate-950/35 px-3 py-3 ring-1 ring-white/10">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-          {LABELS.examCramReferenceTitle}
-        </p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {referenceBadges.map((badge) => (
-            <span
-              key={badge.label}
-              className="rounded-full bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-slate-200 ring-1 ring-white/10"
-            >
-              {`${badge.label} ${badge.count}`}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      {status && <p className="mt-4 text-sm text-emerald-100">{status}</p>}
+    <div className="mt-4">
+      {status && <p className="text-sm text-emerald-100">{status}</p>}
       {error && (
         <p className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-100 ring-1 ring-red-400/30">
           {error}
@@ -464,55 +402,36 @@ function ExamCramCard({
 
       {!hasAnySource && <p className="mt-3 text-sm text-slate-300">{LABELS.examCramNoReferences}</p>}
 
-      {previewItems.length === 0 ? (
-        <p className="mt-3 text-sm text-slate-300">{LABELS.examCramEmpty}</p>
-      ) : (
-        <div className="mt-4 space-y-2">
-          {previewItems.map((item) => (
-            <div key={`cram-${item.id}`} className="rounded-xl bg-white/5 px-3 py-3 ring-1 ring-white/10">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded-full bg-white/5 px-2 py-1 text-[10px] font-semibold text-slate-300 ring-1 ring-white/10">
-                  {item.sourceLabel}
-                </span>
-                <span className="rounded-full bg-white/5 px-2 py-1 text-[10px] font-semibold text-slate-300 ring-1 ring-white/10">
-                  {`${LABELS.wrongCountPrefix}${item.wrongCount}${LABELS.wrongCountSuffix}`}
-                </span>
-              </div>
-              <div className="mt-2">
-                <MathMarkdown
-                  content={item.prompt}
-                  className="summary-prose max-w-none break-words text-xs text-slate-200 [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto"
-                />
-              </div>
+      {hasResult && (
+        <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/45 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-2">
+              <p className="text-sm font-semibold text-cyan-100">{LABELS.examCramGuideTitle}</p>
+              {scopeLabel && (
+                <p className="text-xs text-slate-300">{`${LABELS.examCramScope} ${scopeLabel}`}</p>
+              )}
             </div>
-          ))}
-        </div>
-      )}
-
-      <div className="mt-4 rounded-2xl border border-white/10 bg-slate-950/45 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-sm font-semibold text-cyan-100">{LABELS.examCramGuideTitle}</p>
-            {scopeLabel && <p className="mt-1 text-xs text-slate-300">{`${LABELS.examCramScope}: ${scopeLabel}`}</p>}
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {updatedAt && (
+                <span className="rounded-full bg-white/5 px-3 py-1 text-[11px] font-semibold text-slate-300 ring-1 ring-white/10">
+                  {`${LABELS.examCramUpdatedAt} ${formatTimestamp(updatedAt)}`}
+                </span>
+              )}
+            </div>
           </div>
-          {updatedAt && (
-            <span className="rounded-full bg-white/5 px-3 py-1 text-[11px] font-semibold text-slate-300 ring-1 ring-white/10">
-              {`${LABELS.examCramUpdatedAt} ${formatTimestamp(updatedAt)}`}
-            </span>
+
+          {content ? (
+            <div className="mt-4">
+              <MathMarkdown
+                content={content}
+                className="summary-prose prose prose-invert max-w-none break-words text-sm text-slate-100 prose-headings:text-cyan-50 prose-strong:text-slate-50 prose-p:leading-relaxed [&_.katex-display]:my-2 [&_.katex-display]:overflow-x-auto"
+              />
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-slate-300">{LABELS.examCramGuideEmpty}</p>
           )}
         </div>
-
-        {content ? (
-          <div className="mt-4">
-            <MathMarkdown
-              content={content}
-              className="summary-prose prose prose-invert max-w-none break-words text-sm text-slate-100 prose-headings:text-cyan-50 prose-strong:text-slate-50 prose-p:leading-relaxed [&_.katex-display]:my-2 [&_.katex-display]:overflow-x-auto"
-            />
-          </div>
-        ) : (
-          <p className="mt-3 text-sm text-slate-300">{LABELS.examCramGuideEmpty}</p>
-        )}
-      </div>
+      )}
     </div>
   );
 }
@@ -541,33 +460,36 @@ function ReviewNotesPanel({
   isCreatingMockExam = false,
   isGeneratingExamCram = false,
 }) {
-  const [filter, setFilter] = useState("all");
-
-  const counts = useMemo(() => {
-    const list = Array.isArray(items) ? items : [];
-    return {
-      all: list.length,
-      pending: list.filter((item) => !item?.resolved).length,
-      resolved: list.filter((item) => item?.resolved).length,
-    };
-  }, [items]);
-
-  const filteredItems = useMemo(() => {
-    const list = Array.isArray(items) ? items : [];
-    if (filter === "resolved") return list.filter((item) => item?.resolved);
-    if (filter === "pending") return list.filter((item) => !item?.resolved);
-    return list;
-  }, [filter, items]);
-
-  const filterItems = [
-    { id: "pending", label: `${LABELS.filterPending} ${counts.pending}` },
-    { id: "all", label: `${LABELS.filterAll} ${counts.all}` },
-    { id: "resolved", label: `${LABELS.filterResolved} ${counts.resolved}` },
-  ];
-  const mergedSectionError = sectionSelectionError || examCramSectionError;
-  const availableSectionLabel = Array.isArray(availableSections)
-    ? availableSections.map((section) => section.chapterNumber).join(", ")
+  const list = Array.isArray(items) ? items : [];
+  const pendingCount = list.filter((item) => !item?.resolved).length;
+  void examCramItems;
+  void examCramPendingCount;
+  void examCramReferenceCounts;
+  const normalizedSectionSelection = normalizeChapterSelectionInput(sectionSelectionInput);
+  const activeSectionError = sectionSelectionError || examCramSectionError || "";
+  const availableSectionSummary = Array.isArray(availableSections)
+    ? availableSections
+        .slice(0, 4)
+        .map((section) => {
+          const chapterNumber = Number.parseInt(section?.chapterNumber, 10);
+          const pageStart = Number.parseInt(section?.pageStart, 10);
+          const pageEnd = Number.parseInt(section?.pageEnd, 10);
+          if (Number.isFinite(chapterNumber) && Number.isFinite(pageStart) && Number.isFinite(pageEnd)) {
+            return `챕터 ${chapterNumber} (${pageStart}-${pageEnd}p)`;
+          }
+          return LABELS.sectionUnknown;
+        })
+        .join(", ")
     : "";
+  const availableSectionSuffix =
+    Array.isArray(availableSections) && availableSections.length > 4
+      ? ` 외 ${availableSections.length - 4}개`
+      : "";
+  const sectionGuideText = activeSectionError
+    ? activeSectionError
+    : availableSectionSummary
+      ? `${LABELS.availableSections}: ${availableSectionSummary}${availableSectionSuffix}`
+      : LABELS.sectionHelp;
 
   return (
     <div className="space-y-4">
@@ -577,93 +499,83 @@ function ReviewNotesPanel({
             <p className="text-sm text-slate-300">{LABELS.subtitle}</p>
             <h2 className="text-2xl font-bold text-white">{LABELS.title}</h2>
           </div>
-          <div className="rounded-full bg-emerald-400/10 px-3 py-1 text-xs font-semibold uppercase text-emerald-100 ring-1 ring-emerald-300/30">
-            {`${counts.pending}${LABELS.unresolvedCountSuffix}`}
-          </div>
         </div>
 
         <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-3">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+            {LABELS.sectionInput}
+          </p>
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
             <input
               type="text"
               value={sectionSelectionInput}
-              onChange={(event) => onSectionSelectionChange?.(event.target.value)}
+              onChange={(event) =>
+                onSectionSelectionChange?.(normalizeChapterSelectionInput(event.target.value))
+              }
               placeholder={LABELS.sectionPlaceholder}
-              className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
+              className={`w-full rounded-xl border bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition ${
+                activeSectionError
+                  ? "border-red-400/45 focus:border-red-300/60"
+                  : "border-white/15 focus:border-emerald-300/60"
+              }`}
             />
           </div>
-          <p className="mt-2 text-xs text-slate-400">{LABELS.sectionHelp}</p>
-          {availableSectionLabel && (
-            <p className="mt-1 text-xs text-slate-400">
-              {`${LABELS.availableSections}: ${availableSectionLabel}`}
-            </p>
-          )}
-          {mergedSectionError && (
-            <p className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-100 ring-1 ring-red-400/30">
-              {mergedSectionError}
-            </p>
-          )}
+          <p
+            className={`mt-2 text-xs ${
+              activeSectionError ? "text-red-200" : "text-slate-400"
+            }`}
+          >
+            {sectionGuideText}
+          </p>
         </div>
 
-        <ExamCramCard
-          items={examCramItems}
-          pendingCount={examCramPendingCount}
-          referenceCounts={examCramReferenceCounts}
-          hasAnySource={examCramHasAnySource}
-          content={examCramContent}
-          updatedAt={examCramUpdatedAt}
-          scopeLabel={examCramScopeLabel}
-          status={examCramStatus}
-          error={examCramError}
-          onGenerateExamCram={onGenerateExamCram}
-          isGeneratingExamCram={isGeneratingExamCram}
-          sectionSelectionInput={sectionSelectionInput}
-        />
-
         <div className="mt-4 flex flex-wrap gap-2">
-          {filterItems.map((filterItem) => {
-            const active = filter === filterItem.id;
-            return (
-              <button
-                key={filterItem.id}
-                type="button"
-                onClick={() => setFilter(filterItem.id)}
-                className={`ghost-button text-xs ${active ? "text-emerald-100" : "text-slate-200"}`}
-                data-ghost-size="sm"
-                data-ghost-active={active}
-                style={{ "--ghost-color": active ? "52, 211, 153" : "148, 163, 184" }}
-              >
-                {filterItem.label}
-              </button>
-            );
-          })}
           <button
             type="button"
             onClick={() =>
               onCreateMockExam?.({
-                chapterSelectionInput: sectionSelectionInput,
+                chapterSelectionInput: normalizedSectionSelection,
                 titlePrefix: "\uC624\uB2F5\uB178\uD2B8",
                 sourceKind: "review_notes",
                 statusLabel: "\uC624\uB2F5\uB178\uD2B8",
               })
             }
-            disabled={isCreatingMockExam || counts.pending <= 0}
+            disabled={isCreatingMockExam || pendingCount <= 0 || Boolean(activeSectionError)}
             className="ghost-button text-xs text-emerald-100"
             data-ghost-size="sm"
             style={{ "--ghost-color": "16, 185, 129" }}
           >
             {isCreatingMockExam ? LABELS.createMockExamLoading : LABELS.createMockExam}
           </button>
+          <button
+            type="button"
+            onClick={() => onGenerateExamCram?.({ chapterSelectionInput: normalizedSectionSelection })}
+            disabled={isGeneratingExamCram || !examCramHasAnySource || Boolean(activeSectionError)}
+            className="ghost-button text-xs text-emerald-100"
+            data-ghost-size="sm"
+            style={{ "--ghost-color": "16, 185, 129" }}
+          >
+            {isGeneratingExamCram ? LABELS.examCramCreateLoading : LABELS.examCramCreate}
+          </button>
         </div>
+
+        <ExamCramCard
+          hasAnySource={examCramHasAnySource}
+          content={examCramContent}
+          updatedAt={examCramUpdatedAt}
+          scopeLabel={examCramScopeLabel}
+          status={examCramStatus}
+          error={examCramError}
+        />
       </div>
 
-      {filteredItems.length === 0 ? (
+      {list.length === 0 ? (
         <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-6 text-sm text-slate-300">
           {LABELS.noItems}
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredItems.map((item) => (
+          {list.map((item) => (
             <ReviewNoteCard
               key={item.id}
               item={item}
