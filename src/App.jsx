@@ -161,6 +161,56 @@ const FEEDBACK_CATEGORY_OPTIONS = [
   { value: "feature", label: "\uAE30\uB2A5 \uC81C\uC548" },
   { value: "ux", label: "\uC0AC\uC6A9\uC131 \uC758\uACAC" },
 ];
+const DEFAULT_QUIZ_MIX = Object.freeze({
+  multipleChoice: 4,
+  shortAnswer: 2,
+  ox: 1,
+});
+const DEFAULT_QUIZ_MIX_INPUT = `${DEFAULT_QUIZ_MIX.multipleChoice}-${DEFAULT_QUIZ_MIX.shortAnswer}-${DEFAULT_QUIZ_MIX.ox}`;
+
+function parseQuizMixInput(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return {
+      mix: null,
+      total: 0,
+      error: "문항 비율을 입력해주세요. 형식: 객관식-주관식-OX (예: 4-3-1)",
+    };
+  }
+
+  const parts = raw
+    .split(/[^0-9]+/)
+    .filter(Boolean)
+    .map((part) => Number.parseInt(part, 10));
+
+  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
+    return {
+      mix: null,
+      total: 0,
+      error: "문항 비율은 객관식-주관식-OX 형식으로 입력해주세요. 예: 4-3-1",
+    };
+  }
+
+  const [multipleChoice, shortAnswer, ox] = parts;
+  const total = multipleChoice + shortAnswer + ox;
+  if (total <= 0) {
+    return {
+      mix: null,
+      total: 0,
+      error: "최소 1문항 이상 입력해주세요.",
+    };
+  }
+
+  return {
+    mix: {
+      multipleChoice,
+      shortAnswer,
+      ox,
+    },
+    total,
+    error: "",
+  };
+}
 
 function App() {
   const [file, setFile] = useState(null);
@@ -178,7 +228,7 @@ function App() {
   const [theme, setTheme] = useState("dark");
   const [summary, setSummary] = useState("");
   const [quizSets, setQuizSets] = useState([]);
-  const [quizMix, setQuizMix] = useState({ multipleChoice: 4, shortAnswer: 2, ox: 1 });
+  const [quizMixInput, setQuizMixInput] = useState(DEFAULT_QUIZ_MIX_INPUT);
   const [oxItems, setOxItems] = useState(null);
   const [oxSelections, setOxSelections] = useState({});
   const [oxExplanationOpen, setOxExplanationOpen] = useState({});
@@ -1283,6 +1333,9 @@ function App() {
     () => (previewText.length > 700 ? `${previewText.slice(0, 700)}...` : previewText),
     [previewText]
   );
+  const parsedQuizMix = useMemo(() => parseQuizMixInput(quizMixInput), [quizMixInput]);
+  const quizMix = parsedQuizMix.mix;
+  const quizMixError = parsedQuizMix.error;
 
   const tutorNotice = useMemo(() => {
     if (!file || !selectedFileId) {
@@ -3701,6 +3754,10 @@ function App() {
       setError("먼저 PDF를 열어주세요.");
       return;
     }
+    if (!quizMix) {
+      setError(quizMixError || "문항 비율을 다시 확인해주세요.");
+      return;
+    }
     if (isFreeTier && quizSets.length > 0) {
       setError("무료 플랜에서는 퀴즈 세트를 1개만 생성할 수 있습니다.");
       return;
@@ -3755,12 +3812,21 @@ function App() {
       const targetMcCount = Math.max(0, Number(quizMix.multipleChoice) || 0);
       const targetSaCount = Math.max(0, Number(quizMix.shortAnswer) || 0);
       const targetOxCount = Math.max(0, Number(quizMix.ox) || 0);
+      const targetTotalCount = targetMcCount + targetSaCount + targetOxCount;
+      if (targetTotalCount <= 0) {
+        throw new Error("최소 1문항 이상 입력해주세요.");
+      }
       const nextMultipleChoice = [];
       const nextShortAnswer = [];
       const nextOx = [];
 
       const { generateQuiz, generateOxQuiz } = await getOpenAiService();
-      const maxAttempts = enforceScopedEvidence ? 4 : 3;
+      const maxAttempts = Math.max(
+        enforceScopedEvidence ? 4 : 3,
+        Math.ceil(targetMcCount / 5) + 1,
+        Math.ceil(targetSaCount / 5) + 1,
+        Math.ceil(targetOxCount / 10) + 1
+      );
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         if (
           nextMultipleChoice.length >= targetMcCount &&
@@ -3908,34 +3974,17 @@ function App() {
     }
   };
 
-  const regenerateQuiz = async () => {
+  const handleDeleteQuiz = async () => {
     if (isLoadingQuiz) return;
-    if (!file) {
-      setError("먼저 PDF를 열어주세요.");
+    if (!quizSets.length) {
+      setError("삭제할 퀴즈가 없습니다.");
       return;
     }
-    if (isFreeTier) {
-      setError("무료 플랜에서는 퀴즈 세트를 다시 생성할 수 없습니다.");
-      return;
-    }
-    if (hasReached("maxQuiz")) {
-      setError("현재 요금제의 퀴즈 생성 한도에 도달했습니다.");
-      return;
-    }
-    const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
-    if (!extractedText && !chapterSelectionRaw && !isCurrentPdfDocument) {
-      setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
-      return;
-    }
-    quizAutoRequestedRef.current = true;
+    quizAutoRequestedRef.current = false;
     resetQuizState();
-    setOxItems(null);
-    setOxSelections({});
-    setOxExplanationOpen({});
-    setStatus("퀴즈 세트를 초기화하고 다시 생성하는 중...");
+    setStatus("퀴즈를 삭제했습니다.");
     setError("");
-    await persistArtifacts({ quiz: null, ox: null });
-    await requestQuestions({ force: true });
+    await persistArtifacts({ quiz: null });
   };
 
   const persistReviewNotes = useCallback(
@@ -6940,8 +6989,10 @@ function App() {
     requestQuestions,
     quizChapterSelectionInput,
     setQuizChapterSelectionInput,
+    quizMixInput,
+    setQuizMixInput,
     quizMix,
-    setQuizMix,
+    quizMixError,
     quizSets,
     reviewNotes: reviewNotesPanelState.items,
     reviewNoteSections: configuredReviewSections,
@@ -6970,7 +7021,7 @@ function App() {
     handleDeleteReviewNote,
     handleGenerateExamCram,
     handleCreateReviewNotesMockExam,
-    regenerateQuiz,
+    deleteQuiz: handleDeleteQuiz,
     isLoadingOx,
     requestOxQuiz,
     oxChapterSelectionInput,
