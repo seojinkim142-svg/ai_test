@@ -142,12 +142,38 @@ function normalizeGeneratedItem(item) {
   };
 }
 
-function buildQuizPrompt(extractedText, { multipleChoiceCount, shortAnswerCount, avoidQuestions = [] }) {
+const ESSAY_STYLE_SHORT_ANSWER_RE =
+  /(설명하(?:세요|시오|라)?|서술하(?:세요|시오|라)?|논하(?:세요|시오|라)?|기술하(?:세요|시오|라)?|비교하(?:세요|시오|라)?|정리하(?:세요|시오|라)?|풀이하(?:세요|시오|라)?|이유를|근거를|어떻게|왜\b)/;
+
+function isConciseShortAnswerValue(value) {
+  const answer = String(value || "").trim();
+  if (!answer) return false;
+  if (answer.length > 28) return false;
+  if (/\r|\n/.test(answer)) return false;
+  if (/[.!?]$/.test(answer)) return false;
+  const wordCount = answer.split(/\s+/).filter(Boolean).length;
+  if (wordCount > 4) return false;
+  if (/(합니다|하십시오|하세요|이다|입니다|있다|없다|된다|해야)/.test(answer)) return false;
+  return true;
+}
+
+function isObjectiveShortAnswerItem(item) {
+  const question = String(item?.question || item?.prompt || "").trim();
+  if (!question) return false;
+  if (ESSAY_STYLE_SHORT_ANSWER_RE.test(question)) return false;
+  return isConciseShortAnswerValue(item?.answer);
+}
+
+function buildQuizPrompt(
+  extractedText,
+  { multipleChoiceCount, shortAnswerCount, avoidQuestions = [], scopeLabel = "" }
+) {
   const avoidBlock = buildAvoidReuseBlock(avoidQuestions, { title: "Do not reuse these previously asked questions" });
   return `
 You are a professor creating quiz questions from lecture material.
 
 [Rules]
+- Use only the selected chapter range shown below. Do not create questions from outside that range.
 - Use document facts only as context; do not ask verbatim recall questions.
 - Questions must test understanding, comparison, application, misconception checks, or interpretation.
 - Avoid pure memorization prompts (raw URLs, names, single numbers).
@@ -155,10 +181,13 @@ You are a professor creating quiz questions from lecture material.
 - evidencePages must use only page numbers that actually appear in the provided page tags.
 - If the tagged evidence does not support the question, omit that item instead of using outside knowledge or other pages.
 - evidenceSnippet should be a short Korean source phrase copied or lightly normalized from the document so it can be highlighted later.
+- Short-answer items must have one exact, short answer only: a number, formula, term, concept name, or short phrase.
+- Do not generate essay-style prompts such as "설명하라", "서술하라", "논하라", "기술하라", or questions that require long prose.
+- The short-answer answer field must be concise and directly gradable, not a sentence.
 
 [Output format]
 - Multiple-choice: ${multipleChoiceCount} questions, 4 options each.
-- Short-answer: ${shortAnswerCount} questions (calculation/explanation style).
+- Short-answer: ${shortAnswerCount} questions with a single exact answer.
 - Include answerIndex and explanation for multiple-choice.
 - Include answer and explanation for short-answer.
 - Include evidencePages, evidenceSnippet, and evidenceLabel for every item.
@@ -192,6 +221,7 @@ You are a professor creating quiz questions from lecture material.
 [Language]
 - Write all question/explanation text in Korean.
 ${avoidBlock ? `\n\n${avoidBlock}` : ""}
+${scopeLabel ? `\n\n[Selected chapter range]\n${scopeLabel}` : ""}
 
 [Document]
 ${extractedText}
@@ -243,18 +273,20 @@ ${avoidBlock ? `\n\n${avoidBlock}` : ""}
 ${extractedText}
   `.trim();
 }
-function buildOxPrompt(contextText, highlightText = "", avoidStatements = []) {
+function buildOxPrompt(contextText, highlightText = "", avoidStatements = [], scopeLabel = "") {
   const avoidBlock = buildAvoidReuseBlock(avoidStatements, { title: "Do not reuse these previously asked statements" });
   return `
 You create O/X (true/false) quiz items from PDF content.
 Follow all rules and return JSON only.
 
 [Input]
+- Selected chapter range: ${scopeLabel || "current document scope only"}
 - PDF summary/body excerpt
 ${highlightText ? `- Highlight sentences:\n${highlightText}` : ""}
 ${avoidBlock ? `- ${avoidBlock.replace(/\n/g, "\n  ")}` : ""}
 
 [Rules]
+0. Use only the selected chapter range above. Do not use content outside that range.
 1. Maximum 10 items.
 2. Format: true/false.
 3. Base every item on explicit or strongly implied document content.
@@ -1601,14 +1633,15 @@ async function postChatRequest(body, { retries = 1 } = {}) {
 }
 export async function generateQuiz(
   extractedText,
-  { multipleChoiceCount = 4, shortAnswerCount = 1, avoidQuestions = [] } = {}
+  { multipleChoiceCount = 4, shortAnswerCount = 1, avoidQuestions = [], scopeLabel = "" } = {}
 ) {
-  const mcCount = Math.max(0, Math.min(5, Number(multipleChoiceCount) || 0));
-  const saCount = Math.max(0, Math.min(5, Number(shortAnswerCount) || 0));
+  const mcCount = Math.max(0, Math.min(10, Number(multipleChoiceCount) || 0));
+  const saCount = Math.max(0, Math.min(10, Number(shortAnswerCount) || 0));
   const prompt = buildQuizPrompt(extractedText, {
     multipleChoiceCount: mcCount,
     shortAnswerCount: saCount,
     avoidQuestions,
+    scopeLabel,
   });
 
   const data = await postChatRequest(
@@ -1617,7 +1650,7 @@ export async function generateQuiz(
       messages: [
         {
           role: "system",
-          content: `Generate ${mcCount} Korean multiple-choice items (4 options each) plus ${saCount} Korean short-answer (calculation/explanation) items from the user's text only. Each question must assess understanding/apply/disambiguate/misconception check, not verbatim recall. Avoid asking for raw facts/URLs/names/numbers. Exclude textbook/preface metadata questions (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure). Respond with JSON only using the provided schema. shortAnswer must be an array with ${saCount} items (empty if 0).`,
+          content: `Generate ${mcCount} Korean multiple-choice items (4 options each) plus ${saCount} Korean short-answer items from the user's text only. Each question must assess understanding/apply/disambiguate/misconception check, not verbatim recall. Avoid asking for raw facts/URLs/names/numbers. Short-answer items must have one exact, short answer only, such as a number, formula, term, concept name, or short phrase. Do not generate essay-style prompts like 설명하라, 서술하라, 논하라, or 기술하라. The shortAnswer answer field must be directly gradable and must not be a sentence. Exclude textbook/preface metadata questions (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure). Respond with JSON only using the provided schema. shortAnswer must be an array with ${saCount} items (empty if 0).`,
         },
         { role: "user", content: prompt },
       ],
@@ -1635,7 +1668,8 @@ export async function generateQuiz(
     .filter((item) => !isLowValueStudyPrompt(String(item?.question || item?.prompt || "").trim()));
   const shortAnswer = (Array.isArray(parsed?.shortAnswer) ? parsed.shortAnswer : [])
     .map(normalizeGeneratedItem)
-    .filter((item) => !isLowValueStudyPrompt(String(item?.question || item?.prompt || "").trim()));
+    .filter((item) => !isLowValueStudyPrompt(String(item?.question || item?.prompt || "").trim()))
+    .filter(isObjectiveShortAnswerItem);
   return {
     ...parsed,
     multipleChoice,
@@ -1672,13 +1706,18 @@ export async function generateHardQuiz(extractedText, { count = 3, avoidQuestion
   return { items };
 }
 
-export async function generateOxQuiz(extractedText, { avoidStatements = [] } = {}) {
+export async function generateOxQuiz(
+  extractedText,
+  { avoidStatements = [], count = 10, skipEnrichment = false, scopeLabel = "" } = {}
+) {
+  const oxCount = Math.max(1, Math.min(12, Number(count) || 0));
+  const minFalseCount = Math.max(1, Math.min(4, Math.floor(oxCount / 2)));
   const hasPageTaggedContext = /\[p\.\d+\]/i.test(String(extractedText || ""));
   const chunked = hasPageTaggedContext
     ? limitText(extractedText, 12000)
     : chunkText(extractedText, { maxChunks: 5, maxChunkLength: 1400 });
   let summaryForOx = "";
-  if (!hasPageTaggedContext) {
+  if (!hasPageTaggedContext && !skipEnrichment) {
     try {
       summaryForOx = await generateSummary(extractedText, { chapterized: false });
     } catch {
@@ -1687,7 +1726,7 @@ export async function generateOxQuiz(extractedText, { avoidStatements = [] } = {
   }
 
   let highlightText = "";
-  if (!hasPageTaggedContext) {
+  if (!hasPageTaggedContext && !skipEnrichment) {
     try {
       const hl = await generateHighlights(extractedText);
       const hs = Array.isArray(hl?.highlights) ? hl.highlights : [];
@@ -1701,7 +1740,8 @@ export async function generateOxQuiz(extractedText, { avoidStatements = [] } = {
     }
   }
 
-  const contextForOx = summaryForOx && summaryForOx.length >= 60 ? summaryForOx : chunked;
+  const contextForOx =
+    !skipEnrichment && summaryForOx && summaryForOx.length >= 60 ? summaryForOx : chunked;
   if (!contextForOx || contextForOx.length < 60) {
     return {
       items: [],
@@ -1710,7 +1750,7 @@ export async function generateOxQuiz(extractedText, { avoidStatements = [] } = {
     };
   }
 
-  const prompt = buildOxPrompt(contextForOx, highlightText, avoidStatements);
+  const prompt = buildOxPrompt(contextForOx, highlightText, avoidStatements, scopeLabel);
 
   const data = await postChatRequest(
     {
@@ -1719,7 +1759,7 @@ export async function generateOxQuiz(extractedText, { avoidStatements = [] } = {
         {
           role: "system",
           content:
-            "Generate 10 Korean true/false (O/X) quiz statements strictly from the user's text. All statements, explanations, and evidence must be in Korean (translate/rephrase even if the source is English). Ensure at least 4 are false; if not possible, generate as many as possible but prefer false items. Each statement <=80 chars, explanation/evidence <=150 chars, no duplication, and every explanation cites the PDF as evidence where possible (e.g., p.3 definition paragraph, section 2.1 second sentence; if unavailable, evidence may be empty). Exclude low-value textbook metadata/trivia (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure).",
+            `Generate ${oxCount} Korean true/false (O/X) quiz statements strictly from the user's text. All statements, explanations, and evidence must be in Korean (translate/rephrase even if the source is English). Ensure at least ${minFalseCount} are false; if not possible, generate as many as possible but prefer false items. Each statement <=80 chars, explanation/evidence <=150 chars, no duplication, and every explanation cites the PDF as evidence where possible (e.g., p.3 definition paragraph, section 2.1 second sentence; if unavailable, evidence may be empty). Exclude low-value textbook metadata/trivia (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure).`,
         },
         { role: "user", content: prompt },
       ],
@@ -1735,7 +1775,8 @@ export async function generateOxQuiz(extractedText, { avoidStatements = [] } = {
     const parsed = parseJsonSafe(sanitized, "O/X JSON");
     const items = (Array.isArray(parsed?.items) ? parsed.items : [])
       .map(normalizeGeneratedItem)
-      .filter((item) => !isLowValueStudyPrompt(String(item?.statement || item?.question || item?.prompt || "").trim()));
+      .filter((item) => !isLowValueStudyPrompt(String(item?.statement || item?.question || item?.prompt || "").trim()))
+      .slice(0, oxCount);
     if (items.length > 0) {
       return {
         ...parsed,

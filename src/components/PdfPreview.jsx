@@ -32,6 +32,10 @@ function buildViewerSrc(pdfUrl, currentPage) {
   return `${baseUrl}#page=${page}&zoom=page-fit`;
 }
 
+function stripUrlHash(url) {
+  return String(url || "").split("#")[0];
+}
+
 function buildOfficeViewerSrc(documentUrl) {
   const normalized = String(documentUrl || "").trim();
   if (!normalized) return "";
@@ -92,6 +96,7 @@ function PdfPreview({
   const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
   const [loadedSrc, setLoadedSrc] = useState("");
   const [failedSrc, setFailedSrc] = useState("");
+  const [iframeSrc, setIframeSrc] = useState("");
   const [officeViewMode, setOfficeViewMode] = useState("original");
   const [loadedOfficeSrc, setLoadedOfficeSrc] = useState("");
   const [failedOfficeSrc, setFailedOfficeSrc] = useState("");
@@ -103,6 +108,7 @@ function PdfPreview({
     String(normalizePageNumber(currentPage))
   );
   const [docVersion, setDocVersion] = useState(0);
+  const iframeRef = useRef(null);
   const canvasRef = useRef(null);
   const canvasShellRef = useRef(null);
   const nativeScrollRef = useRef(null);
@@ -114,6 +120,8 @@ function PdfPreview({
   const resizeRafRef = useRef(null);
   const wheelLockRef = useRef(0);
   const touchStartRef = useRef(null);
+  const iframeRetrySrcRef = useRef("");
+  const iframeResetTimerRef = useRef(null);
   const sourceKey = useMemo(
     () => (file ? buildFileSignature(file) : String(pdfUrl || "")),
     [file, pdfUrl]
@@ -154,7 +162,7 @@ function PdfPreview({
     const pageNumber = normalizePageNumber(evidenceHighlight?.pageNumber);
     const snippet = String(evidenceHighlight?.snippet || "").trim();
     const label = String(evidenceHighlight?.label || "").trim();
-    if (!pageNumber || (!snippet && !label)) return null;
+    if (!pageNumber) return null;
     return {
       pageNumber,
       snippet,
@@ -169,6 +177,12 @@ function PdfPreview({
     const fromDoc = Number(pdfDocRef.current?.numPages || 0);
     return Math.max(1, fromInfo, fromDoc);
   }, [docVersion, pageInfo?.total, pageInfo?.used]);
+  const viewerSrc = useMemo(() => {
+    if (!pdfUrl) return "";
+    return buildViewerSrc(pdfUrl, currentPage);
+  }, [currentPage, pdfUrl]);
+  const viewerBaseSrc = useMemo(() => stripUrlHash(viewerSrc), [viewerSrc]);
+  const useCanvasPdfPreview = canPreviewPdf && isNativePlatform;
   const isOfficeDocument = documentKind === "docx" || documentKind === "pptx";
   const canDownloadFile = file instanceof File || Boolean(pdfUrl) || Boolean(documentUrl);
 
@@ -239,6 +253,48 @@ function PdfPreview({
     setOfficeViewMode(hasOfficeViewerUrl ? "original" : "text");
   }, [hasOfficeViewerUrl, isOfficeDocument, sourceKey, officeViewerSrc]);
 
+  const retryPdfIframeLoad = useCallback((targetSrc) => {
+    if (!targetSrc || typeof window === "undefined") return;
+    if (iframeResetTimerRef.current) {
+      window.clearTimeout(iframeResetTimerRef.current);
+      iframeResetTimerRef.current = null;
+    }
+    iframeRetrySrcRef.current = targetSrc;
+    setFailedSrc("");
+    setLoadedSrc("");
+    setIframeSrc("about:blank");
+    iframeResetTimerRef.current = window.setTimeout(() => {
+      iframeResetTimerRef.current = null;
+      setIframeSrc(targetSrc);
+    }, 80);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (iframeResetTimerRef.current && typeof window !== "undefined") {
+        window.clearTimeout(iframeResetTimerRef.current);
+        iframeResetTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (iframeResetTimerRef.current && typeof window !== "undefined") {
+      window.clearTimeout(iframeResetTimerRef.current);
+      iframeResetTimerRef.current = null;
+    }
+    iframeRetrySrcRef.current = "";
+    if (!viewerSrc) {
+      setIframeSrc("");
+      setLoadedSrc("");
+      setFailedSrc("");
+      return;
+    }
+    setFailedSrc("");
+    setIframeSrc(viewerSrc);
+    setLoadedSrc((prev) => (stripUrlHash(prev) === stripUrlHash(viewerSrc) ? viewerSrc : ""));
+  }, [sourceKey, viewerSrc]);
+
   const goToNextPage = useCallback(() => {
     if (normalizedCurrentPage >= totalPages) return;
     goToPage(normalizedCurrentPage + 1);
@@ -252,7 +308,7 @@ function PdfPreview({
   }, [goToPage, normalizedCurrentPage]);
 
   useEffect(() => {
-    if (!isNativePlatform) return undefined;
+    if (!useCanvasPdfPreview) return undefined;
     const handleKeyNavigation = (event) => {
       const tagName = String(event?.target?.tagName || "").toLowerCase();
       if (tagName === "input" || tagName === "textarea") return;
@@ -268,10 +324,10 @@ function PdfPreview({
     return () => {
       window.removeEventListener("keydown", handleKeyNavigation);
     };
-  }, [goToNextPage, goToPreviousPage, isNativePlatform]);
+  }, [goToNextPage, goToPreviousPage, useCanvasPdfPreview]);
 
   useEffect(() => {
-    if (!isNativePlatform) return undefined;
+    if (!useCanvasPdfPreview) return undefined;
     const syncTabletState = () => {
       setIsTabletDevice(detectTabletDevice());
     };
@@ -282,7 +338,7 @@ function PdfPreview({
       window.removeEventListener("resize", syncTabletState);
       window.removeEventListener("orientationchange", syncTabletState);
     };
-  }, [isNativePlatform]);
+  }, [useCanvasPdfPreview]);
 
   const handleNativeWheel = useCallback(
     (event) => {
@@ -459,7 +515,7 @@ function PdfPreview({
   );
 
   useEffect(() => {
-    if (!isNativePlatform || !canPreviewPdf || !activeHighlightTarget) {
+    if (!useCanvasPdfPreview || !activeHighlightTarget) {
       setHighlightRects([]);
       return undefined;
     }
@@ -473,6 +529,10 @@ function PdfPreview({
       .map((part) => String(part || "").trim())
       .filter(Boolean)
       .join(" ");
+    if (!queryText) {
+      setHighlightRects([]);
+      return undefined;
+    }
 
     const loadHighlight = async () => {
       try {
@@ -494,15 +554,9 @@ function PdfPreview({
   }, [
     activeHighlightTarget,
     buildNativePageLayout,
-    canPreviewPdf,
-    isNativePlatform,
     normalizedCurrentPage,
+    useCanvasPdfPreview,
   ]);
-
-  const viewerSrc = useMemo(() => {
-    if (!pdfUrl) return "";
-    return buildViewerSrc(pdfUrl, currentPage);
-  }, [currentPage, pdfUrl]);
 
   const pageController = (
     <div className="pointer-events-none absolute inset-x-0 bottom-2 z-30 flex justify-center px-2 sm:bottom-3 sm:px-3">
@@ -558,7 +612,7 @@ function PdfPreview({
   );
 
   useEffect(() => {
-    if (!isNativePlatform || !canPreviewPdf) return undefined;
+    if (!useCanvasPdfPreview) return undefined;
     let cancelled = false;
 
     const releaseCurrentDoc = async () => {
@@ -589,10 +643,10 @@ function PdfPreview({
         await releaseCurrentDoc();
 
         let source = null;
-        if (isPdfLikeFile(file) && typeof file?.arrayBuffer === "function") {
-          source = { data: await file.arrayBuffer() };
-        } else if (pdfUrl) {
+        if (pdfUrl) {
           source = pdfUrl;
+        } else if (isPdfLikeFile(file) && typeof file?.arrayBuffer === "function") {
+          source = { data: await file.arrayBuffer() };
         }
         if (!source) return;
 
@@ -624,10 +678,10 @@ function PdfPreview({
       cancelled = true;
       releaseCurrentDoc();
     };
-  }, [canPreviewPdf, file, isNativePlatform, pdfUrl, sourceKey]);
+  }, [file, pdfUrl, sourceKey, useCanvasPdfPreview]);
 
   useEffect(() => {
-    if (!isNativePlatform || !canPreviewPdf) return undefined;
+    if (!useCanvasPdfPreview) return undefined;
 
     const doc = pdfDocRef.current;
     const canvas = canvasRef.current;
@@ -677,8 +731,12 @@ function PdfPreview({
         const context = canvas.getContext("2d", { alpha: false });
         if (!context) throw new Error("Canvas context is unavailable.");
 
-        const parentWidth = canvas.parentElement?.clientWidth || 920;
-        const maxCssWidth = Math.max(320, Math.min(parentWidth - 16, 1400));
+        const scrollViewportWidth =
+          nativeScrollRef.current?.clientWidth ||
+          canvasShellRef.current?.parentElement?.clientWidth ||
+          canvas.parentElement?.clientWidth ||
+          920;
+        const maxCssWidth = Math.max(320, Math.min(scrollViewportWidth - 24, 1400));
         const baseViewport = page.getViewport({ scale: 1 });
         const cssScale = maxCssWidth / baseViewport.width;
         const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
@@ -765,7 +823,7 @@ function PdfPreview({
         renderTaskRef.current = null;
       }
     };
-  }, [canPreviewPdf, currentPage, docVersion, isNativePlatform, onPageChange]);
+  }, [currentPage, docVersion, onPageChange, useCanvasPdfPreview]);
 
   const isOfficeOriginalMode =
     isOfficeDocument && officeViewMode === "original" && Boolean(officeViewerSrc);
@@ -937,7 +995,7 @@ function PdfPreview({
     );
   }
 
-  if (isNativePlatform) {
+  if (useCanvasPdfPreview) {
     return (
       <div className="relative flex h-[58svh] min-h-[24rem] flex-1 overflow-hidden rounded-3xl border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/40 sm:min-h-[72vh] lg:h-full lg:min-h-0">
         {canDownloadFile && (
@@ -1006,24 +1064,33 @@ function PdfPreview({
     );
   }
 
-  const hasViewer = Boolean(viewerSrc);
-  const hasLoadError = hasViewer && failedSrc === viewerSrc;
-  const isLoading = hasViewer && loadedSrc !== viewerSrc && failedSrc !== viewerSrc;
+  const hasViewer = Boolean(iframeSrc);
+  const hasLoadError = Boolean(viewerSrc) && failedSrc === viewerSrc;
+  const isLoading = Boolean(viewerSrc) && !hasLoadError && stripUrlHash(loadedSrc) !== viewerBaseSrc;
 
   return (
     <div className="relative flex h-[58svh] min-h-[24rem] flex-1 overflow-hidden rounded-3xl border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/40 sm:min-h-[72vh] lg:h-full lg:min-h-0">
-      {!hasLoadError && (
+      {!hasLoadError && hasViewer && (
         <iframe
-          key={viewerSrc}
-          src={viewerSrc}
+          ref={iframeRef}
+          src={iframeSrc}
           title="PDF Preview"
           className="absolute inset-0 z-0 h-full w-full bg-white"
           loading="eager"
           onLoad={() => {
+            if (!viewerSrc || iframeSrc === "about:blank") return;
             setLoadedSrc(viewerSrc);
             setFailedSrc("");
+            if (iframeRetrySrcRef.current === viewerSrc) {
+              iframeRetrySrcRef.current = "";
+            }
           }}
           onError={() => {
+            if (!viewerSrc) return;
+            if (iframeRetrySrcRef.current !== viewerSrc) {
+              retryPdfIframeLoad(viewerSrc);
+              return;
+            }
             setFailedSrc(viewerSrc);
           }}
         />
@@ -1038,6 +1105,13 @@ function PdfPreview({
       {hasLoadError && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 text-center text-sm text-rose-100">
           <p>PDF 뷰어를 불러오지 못했습니다.</p>
+          <button
+            type="button"
+            onClick={() => retryPdfIframeLoad(viewerSrc)}
+            className="inline-flex items-center rounded-lg border border-rose-300/40 px-3 py-2 text-xs text-rose-100 hover:bg-rose-400/10"
+          >
+            다시 불러오기
+          </button>
           <a
             href={pdfUrl}
             target="_blank"

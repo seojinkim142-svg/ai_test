@@ -379,10 +379,10 @@ function SummaryCard({
       h1: (props) => <h1 className="mt-4 text-xl font-bold text-white" {...props} />,
       h2: (props) => <h2 className="mt-3 text-lg font-semibold text-white" {...props} />,
       h3: (props) => <h3 className="mt-2 text-base font-semibold text-emerald-100" {...props} />,
-      p: (props) => <p className="text-sm leading-relaxed text-slate-100" {...props} />,
+      p: (props) => <p className="text-sm leading-relaxed text-slate-100 md:text-[15px]" {...props} />,
       strong: (props) => <strong className="font-semibold text-slate-50" {...props} />,
-      ul: (props) => <ul className="list-disc space-y-1 pl-5 text-sm text-slate-100" {...props} />,
-      ol: (props) => <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-100" {...props} />,
+      ul: (props) => <ul className="list-disc space-y-1 pl-5 text-sm text-slate-100 md:text-[15px]" {...props} />,
+      ol: (props) => <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-100 md:text-[15px]" {...props} />,
       li: (props) => <li className="leading-relaxed" {...props} />,
       code: ({ inline, className, children, ...props }) =>
         inline ? (
@@ -396,7 +396,7 @@ function SummaryCard({
         ),
       table: (props) => (
         <div className="overflow-auto">
-          <table className="min-w-full text-left text-sm text-slate-100" {...props} />
+          <table className="min-w-full text-left text-sm text-slate-100 md:text-[15px]" {...props} />
         </div>
       ),
       th: (props) => (
@@ -553,7 +553,7 @@ function SummaryCard({
   return (
     <>
       <div
-        className="summary-card mt-4 rounded-2xl bg-gradient-to-br from-slate-900/60 via-slate-900/50 to-slate-900/40 p-4 ring-1 ring-white/10 caret-transparent"
+        className="summary-card mt-4 rounded-2xl bg-gradient-to-br from-slate-900/60 via-slate-900/50 to-slate-900/40 p-4 ring-1 ring-white/10 caret-transparent md:p-5"
         tabIndex={0}
         onKeyDown={handleCardKeyDown}
       >
@@ -622,7 +622,7 @@ function SummaryCard({
           </button>
 
           <div className="w-full max-w-[980px]">
-            <div className="mx-auto aspect-[210/297] w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950/45 p-4 shadow-inner shadow-black/30 md:p-6">
+            <div className="mx-auto aspect-[210/297] w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950/45 p-4 shadow-inner shadow-black/30 md:p-7">
               <div className="show-scrollbar h-full overflow-auto pr-1">
                 {renderMarkdownPage(currentPage, markdownComponents)}
               </div>
