@@ -3813,9 +3813,9 @@ function App() {
       const evidencePages = toSortedUniquePages(scopedSource?.pageCandidates);
       const enforceScopedEvidence = isCurrentPdfDocument && evidencePages.length > 0;
       const generationSourceText = await buildPageTaggedSourceText(quizSourceText, evidencePages, {
-        maxPages: 20,
-        maxCharsPerPage: 950,
-        maxTotalChars: 15000,
+        maxPages: 14,
+        maxCharsPerPage: 850,
+        maxTotalChars: 12000,
         includeFallbackText: !chapterSelectionRaw,
       });
       if (!quizSourceText) {
@@ -3826,9 +3826,9 @@ function App() {
       }
 
       const historicalQuizTexts = collectQuestionTextsFromQuizSets(quizSets);
-      const historicalMockTexts = collectQuestionTextsFromMockExams(mockExams);
-      const avoidQuestionTexts = dedupeQuestionTexts([...historicalQuizTexts, ...historicalMockTexts]).slice(0, 80);
-      const seenQuestionKeys = createQuestionKeySet(avoidQuestionTexts);
+      const recentAvoidQuestionTexts = dedupeQuestionTexts(historicalQuizTexts.slice(-18)).slice(-18);
+      const promptAvoidQuestionTexts = recentAvoidQuestionTexts.slice(-16);
+      const seenQuestionKeys = createQuestionKeySet(recentAvoidQuestionTexts);
 
       const targetMcCount = Math.max(0, Number(quizMix.multipleChoice) || 0);
       const targetSaCount = Math.max(0, Number(quizMix.shortAnswer) || 0);
@@ -3842,33 +3842,8 @@ function App() {
       const nextShortAnswer = [];
 
       const { generateQuiz } = await getOpenAiService();
-      const maxAttempts = Math.max(
-        enforceScopedEvidence ? 3 : 2,
-        Math.ceil(targetMcCount / mcBatchLimit) + 1,
-        Math.ceil(targetSaCount / saBatchLimit) + 1
-      );
-      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        if (nextMultipleChoice.length >= targetMcCount && nextShortAnswer.length >= targetSaCount) {
-          break;
-        }
-
-        const requestMcCount =
-          targetMcCount > nextMultipleChoice.length
-            ? Math.min(mcBatchLimit, targetMcCount - nextMultipleChoice.length + 1)
-            : 0;
-        const requestSaCount =
-          targetSaCount > nextShortAnswer.length
-            ? Math.min(saBatchLimit, targetSaCount - nextShortAnswer.length + 1)
-            : 0;
-        const shouldRequestQuiz = requestMcCount > 0 || requestSaCount > 0;
-        const quizResult = shouldRequestQuiz
-          ? await generateQuiz(generationSourceText || quizSourceText, {
-              multipleChoiceCount: requestMcCount,
-              shortAnswerCount: requestSaCount,
-              avoidQuestions: avoidQuestionTexts,
-              scopeLabel,
-            })
-          : { multipleChoice: [], shortAnswer: [] };
+      const generationInput = generationSourceText || quizSourceText;
+      const appendQuizBatch = (quizResult) => {
         const quiz = normalizeQuizPayload(quizResult);
         const scopedMultipleChoice = enforceScopedEvidence
           ? filterGeneratedItemsToScope(Array.isArray(quiz.multipleChoice) ? quiz.multipleChoice : [], evidencePages)
@@ -3880,6 +3855,8 @@ function App() {
           : Array.isArray(quiz.shortAnswer)
             ? quiz.shortAnswer
             : [];
+        const mcBefore = nextMultipleChoice.length;
+        const saBefore = nextShortAnswer.length;
 
         pushUniqueByQuestionKey(
           nextMultipleChoice,
@@ -3896,12 +3873,78 @@ function App() {
           targetSaCount
         );
 
-        const mergedAvoidQuestions = mergeQuestionHistory(
-          avoidQuestionTexts,
-          [...nextMultipleChoice.map(getQuizPromptText), ...nextShortAnswer.map(getQuizPromptText)],
-          120
+        return {
+          addedMc: nextMultipleChoice.length - mcBefore,
+          addedSa: nextShortAnswer.length - saBefore,
+        };
+      };
+      const requestQuizBatch = async (requestMcCount, requestSaCount, avoidQuestions) => {
+        if (requestMcCount <= 0 && requestSaCount <= 0) {
+          return { addedMc: 0, addedSa: 0 };
+        }
+        const quizResult = await generateQuiz(generationInput, {
+          multipleChoiceCount: requestMcCount,
+          shortAnswerCount: requestSaCount,
+          avoidQuestions,
+          scopeLabel,
+        });
+        return appendQuizBatch(quizResult);
+      };
+
+      const plannedBatchCount = Math.max(
+        1,
+        Math.ceil(targetMcCount / mcBatchLimit),
+        Math.ceil(targetSaCount / saBatchLimit)
+      );
+      let rollingAvoidQuestions = [...promptAvoidQuestionTexts];
+      for (let batchIndex = 0; batchIndex < plannedBatchCount; batchIndex += 1) {
+        if (nextMultipleChoice.length >= targetMcCount && nextShortAnswer.length >= targetSaCount) {
+          break;
+        }
+
+        const remainingMc = Math.max(0, targetMcCount - nextMultipleChoice.length);
+        const remainingSa = Math.max(0, targetSaCount - nextShortAnswer.length);
+        const requestMcCount =
+          remainingMc > 0
+            ? Math.min(mcBatchLimit, remainingMc + (remainingMc < mcBatchLimit ? 1 : 0))
+            : 0;
+        const requestSaCount =
+          remainingSa > 0
+            ? Math.min(saBatchLimit, remainingSa + (remainingSa < saBatchLimit ? 1 : 0))
+            : 0;
+
+        if (batchIndex > 0) {
+          setStatus(scopeLabel ? `퀴즈 세트 보완 중... (${scopeLabel})` : "퀴즈 세트 보완 중...");
+        }
+
+        const { addedMc, addedSa } = await requestQuizBatch(
+          requestMcCount,
+          requestSaCount,
+          rollingAvoidQuestions
         );
-        avoidQuestionTexts.splice(0, avoidQuestionTexts.length, ...mergedAvoidQuestions);
+        rollingAvoidQuestions = mergeQuestionHistory(
+          rollingAvoidQuestions,
+          [...nextMultipleChoice.map(getQuizPromptText), ...nextShortAnswer.map(getQuizPromptText)],
+          24
+        );
+
+        if (addedMc === 0 && addedSa === 0) {
+          break;
+        }
+      }
+
+      if (nextMultipleChoice.length < targetMcCount || nextShortAnswer.length < targetSaCount) {
+        const remainingMc = Math.max(0, targetMcCount - nextMultipleChoice.length);
+        const remainingSa = Math.max(0, targetSaCount - nextShortAnswer.length);
+
+        if (remainingMc > 0 || remainingSa > 0) {
+          setStatus(scopeLabel ? `퀴즈 세트 보완 중... (${scopeLabel})` : "퀴즈 세트 보완 중...");
+          await requestQuizBatch(
+            remainingMc > 0 ? Math.min(mcBatchLimit, remainingMc + 1) : 0,
+            remainingSa > 0 ? Math.min(saBatchLimit, remainingSa + 1) : 0,
+            rollingAvoidQuestions
+          );
+        }
       }
 
       if (nextMultipleChoice.length < targetMcCount || nextShortAnswer.length < targetSaCount) {
@@ -4002,32 +4045,6 @@ function App() {
     await persistArtifacts({
       ox: nextItems.length > 0 ? { items: nextItems } : null,
     });
-  };
-
-  const handleDeleteOxQuiz = async () => {
-    if (isLoadingOx) return;
-    if (!Array.isArray(oxItems) || oxItems.length === 0) {
-      setError("삭제할 O/X 퀴즈가 없습니다.");
-      return;
-    }
-    oxAutoRequestedRef.current = false;
-    setOxItems(null);
-    setOxSelections({});
-    setOxExplanationOpen({});
-    setQuizSets((prev) =>
-      (Array.isArray(prev) ? prev : []).map((set) => ({
-        ...set,
-        questions: {
-          ...normalizeQuizPayload(set?.questions || {}),
-          ox: [],
-        },
-        oxSelections: {},
-        oxExplanationOpen: {},
-      }))
-    );
-    setStatus("O/X 퀴즈를 삭제했습니다.");
-    setError("");
-    await persistArtifacts({ ox: null });
   };
 
   const persistReviewNotes = useCallback(
@@ -7080,7 +7097,6 @@ function App() {
     handleGenerateExamCram,
     handleCreateReviewNotesMockExam,
     deleteQuiz: handleDeleteQuiz,
-    deleteOxQuiz: handleDeleteOxQuiz,
     deleteOxQuestion: handleDeleteOxQuestion,
     isLoadingOx,
     requestOxQuiz,

@@ -168,7 +168,11 @@ function buildQuizPrompt(
   extractedText,
   { multipleChoiceCount, shortAnswerCount, avoidQuestions = [], scopeLabel = "" }
 ) {
-  const avoidBlock = buildAvoidReuseBlock(avoidQuestions, { title: "Do not reuse these previously asked questions" });
+  const avoidBlock = buildAvoidReuseBlock(avoidQuestions, {
+    title: "Do not reuse these previously asked questions",
+    maxItems: 16,
+    maxLength: 90,
+  });
   return `
 You are a professor creating quiz questions from lecture material.
 
@@ -1654,7 +1658,6 @@ export async function generateQuiz(
         },
         { role: "user", content: prompt },
       ],
-      temperature: 1, // gpt-5-mini default temperature
       response_format: { type: "json_object" },
     },
     { retries: 0 }
