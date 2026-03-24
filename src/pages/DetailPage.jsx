@@ -14,7 +14,6 @@ import PdfPreview from "../components/PdfPreview";
 import QuizSection from "../components/QuizSection";
 import ReviewNotesPanel from "../components/ReviewNotesPanel";
 import SummaryCard from "../components/SummaryCard";
-import { useQuizMixCarousel } from "../hooks/useQuizMixCarousel";
 import { LETTERS } from "../constants";
 
 const MOCK_BARE_LATEX_RE =
@@ -224,8 +223,10 @@ export default function DetailPage({
   requestQuestions,
   quizChapterSelectionInput,
   setQuizChapterSelectionInput,
+  quizMixInput,
+  setQuizMixInput,
   quizMix,
-  setQuizMix,
+  quizMixError,
   quizSets,
   reviewNotes,
   reviewNoteSections,
@@ -254,7 +255,7 @@ export default function DetailPage({
   handleDeleteReviewNote,
   handleGenerateExamCram,
   handleCreateReviewNotesMockExam,
-  regenerateQuiz,
+  deleteQuiz,
   isLoadingOx,
   requestOxQuiz,
   oxChapterSelectionInput,
@@ -284,40 +285,14 @@ export default function DetailPage({
   handleSendTutorMessage,
   handleResetTutor,
 }) {
-  const quizMixOptionsLegacy = useMemo(
-    () => [
-      { multipleChoice: 5, shortAnswer: 0, label: "객관식 5 / 주관식 0" },
-      { multipleChoice: 4, shortAnswer: 1, label: "객관식 4 / 주관식 1" },
-      { multipleChoice: 3, shortAnswer: 2, label: "객관식 3 / 주관식 2" },
-      { multipleChoice: 2, shortAnswer: 3, label: "객관식 2 / 주관식 3" },
-      { multipleChoice: 1, shortAnswer: 4, label: "객관식 1 / 주관식 4" },
-      { multipleChoice: 0, shortAnswer: 5, label: "객관식 0 / 주관식 5" },
-    ],
-    []
-  );
-  void quizMixOptionsLegacy;
-  const quizMixOptions = useMemo(
-    () =>
-      Array.from({ length: 8 }, (_, multipleChoice) => multipleChoice)
-        .reverse()
-        .flatMap((multipleChoice) =>
-          Array.from({ length: 8 - multipleChoice }, (_, shortAnswer) => shortAnswer)
-            .reverse()
-            .map((shortAnswer) => ({
-              multipleChoice,
-              shortAnswer,
-              ox: 7 - multipleChoice - shortAnswer,
-              label: `OX ${7 - multipleChoice - shortAnswer} / 객관식 ${multipleChoice} / 주관식 ${shortAnswer}`,
-            }))
-        ),
-    []
-  );
-  const { quizMixScrollRef, handleQuizMixScroll } = useQuizMixCarousel({
-    quizMix,
-    quizMixOptions,
-    setQuizMix,
-  });
   const normalizeChapterSelectionInput = (value) => String(value || "").replace(/\s+/g, "");
+  const quizQuestionTotal =
+    (Number(quizMix?.multipleChoice) || 0) +
+    (Number(quizMix?.shortAnswer) || 0) +
+    (Number(quizMix?.ox) || 0);
+  const quizMixHelperText = quizMixError
+    ? quizMixError
+    : "형식: 객관식-주관식-OX (예: 4-3-1)";
   const mockMarkdownComponents = useMemo(
     () => ({
       p: ({ children }) => <p className="my-0 leading-relaxed">{children}</p>,
@@ -1301,35 +1276,23 @@ export default function DetailPage({
 
               <div className="rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-300">문항 비율</p>
-                <div
-                  ref={quizMixScrollRef}
-                  onScroll={handleQuizMixScroll}
-                  className="show-scrollbar mt-3 flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scroll-smooth"
-                >
-                  {quizMixOptions.map((option, index) => {
-                    const isActive =
-                      quizMix?.multipleChoice === option.multipleChoice &&
-                      quizMix?.shortAnswer === option.shortAnswer &&
-                      quizMix?.ox === option.ox;
-                    return (
-                      <button
-                        key={`mix-${option.multipleChoice}-${option.shortAnswer}-${option.ox}`}
-                        data-mix-index={index}
-                        type="button"
-                        onClick={() => setQuizMix(option)}
-                        disabled={isLoadingQuiz || isLoadingText}
-                        aria-pressed={isActive}
-                        className={`w-full shrink-0 snap-center rounded-xl px-3 py-2 text-xs font-semibold ring-1 transition ${
-                          isActive
-                            ? "bg-emerald-500/20 text-emerald-100 ring-emerald-400/60"
-                            : "bg-white/5 text-slate-200 ring-white/10 hover:ring-emerald-300/40"
-                        }`}
-                      >
-                        {option.label}
-                      </button>
-                    );
-                  })}
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    type="text"
+                    value={quizMixInput}
+                    onChange={(event) => setQuizMixInput(event.target.value)}
+                    disabled={isLoadingQuiz || isLoadingText}
+                    placeholder="객관식-주관식-OX 예: 4-3-1"
+                    className={`w-full rounded-xl border bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition ${
+                      quizMixError
+                        ? "border-red-400/45 focus:border-red-300/60"
+                        : "border-white/15 focus:border-emerald-300/60"
+                    }`}
+                  />
                 </div>
+                <p className={`mt-2 text-xs ${quizMixError ? "text-red-200" : "text-slate-400"}`}>
+                  {quizMixHelperText}
+                </p>
               </div>
 
               {quizSets.length > 0 && (
@@ -1359,19 +1322,26 @@ export default function DetailPage({
               )}
 
               <p className="mt-4 text-xs text-slate-300">
-                총 7문항으로 생성됩니다. 현재 비율: OX {quizMix?.ox ?? 0} / 객관식{" "}
-                {quizMix?.multipleChoice ?? 0} / 주관식 {quizMix?.shortAnswer ?? 0}
+                현재 구성: 객관식 {quizMix?.multipleChoice ?? 0} / 주관식 {quizMix?.shortAnswer ?? 0} / OX{" "}
+                {quizMix?.ox ?? 0}
+                {` (총 ${quizQuestionTotal}문항)`}
               </p>
 
               <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <button
                   type="button"
                   onClick={requestQuestions}
-                  disabled={isLoadingQuiz || isLoadingText || (isFreeTier && quizSets.length > 0)}
+                  disabled={
+                    isLoadingQuiz ||
+                    isLoadingText ||
+                    Boolean(quizMixError) ||
+                    quizQuestionTotal <= 0 ||
+                    (isFreeTier && quizSets.length > 0)
+                  }
                   title={
                     isFreeTier && quizSets.length > 0
-                      ? "무료 티어에서는 퀴즈를 재생성할 수 없습니다."
-                      : undefined
+                      ? "무료 티어에서는 퀴즈 세트를 1개만 생성할 수 없습니다."
+                      : quizMixError || undefined
                   }
                   className="ghost-button w-full text-sm text-emerald-100"
                   data-ghost-size="xl"
@@ -1379,24 +1349,20 @@ export default function DetailPage({
                 >
                   {isLoadingQuiz
                     ? "퀴즈 생성 중..."
-                    : `퀴즈 7문제 바로 생성하기 (OX ${quizMix?.ox ?? 0} / 객관식 ${
-                        quizMix?.multipleChoice ?? 0
-                      } / 주관식 ${quizMix?.shortAnswer ?? 0})`}
+                    : quizQuestionTotal > 0
+                      ? `퀴즈 바로 생성하기 (총 ${quizQuestionTotal}문항)`
+                      : "퀴즈 바로 생성하기"}
                 </button>
-                {!isFreeTier && (
-                  <button
-                    type="button"
-                    onClick={regenerateQuiz}
-                    disabled={isLoadingQuiz || isLoadingText}
-                    className="ghost-button w-full text-sm text-emerald-100"
-                    data-ghost-size="xl"
-                    style={{ "--ghost-color": "16, 185, 129" }}
-                  >
-                    {isLoadingQuiz
-                      ? "퀴즈 재생성 중..."
-                      : "퀴즈 재생성 (덮어쓰기)"}
-                  </button>
-                )}
+                <button
+                  type="button"
+                  onClick={deleteQuiz}
+                  disabled={isLoadingQuiz || quizSets.length === 0}
+                  className="ghost-button w-full text-sm text-slate-200"
+                  data-ghost-size="xl"
+                  style={{ "--ghost-color": "148, 163, 184" }}
+                >
+                  퀴즈 삭제
+                </button>
               </div>
             </>
           )}
