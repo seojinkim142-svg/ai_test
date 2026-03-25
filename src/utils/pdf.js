@@ -9,9 +9,27 @@ const OCR_WORKER_IDLE_MS = 30000;
 const OCR_PROGRESS_INTERVAL_MS = 250;
 const DEFAULT_OCR_MAX_PIXELS = 2200000;
 
+function ensurePromiseWithResolvers() {
+  if (typeof Promise.withResolvers === "function") return;
+  Object.defineProperty(Promise, "withResolvers", {
+    configurable: true,
+    writable: true,
+    value() {
+      let resolve;
+      let reject;
+      const promise = new Promise((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    },
+  });
+}
+
 async function loadPdfRuntime() {
   if (!pdfRuntimePromise) {
     pdfRuntimePromise = (async () => {
+      ensurePromiseWithResolvers();
       const [pdfjs, workerSrcModule] = await Promise.all([
         import("pdfjs-dist"),
         import("pdfjs-dist/build/pdf.worker.min.mjs?url"),

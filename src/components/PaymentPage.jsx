@@ -1,3 +1,4 @@
+import { Capacitor } from "@capacitor/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { approveKakaoPay, chargeKakaoPaySubscription, fetchKakaoPaySubscriptionStatus, inactiveKakaoPaySubscription, requestKakaoPayReady } from "../services/kakaopay";
 import { fetchProTrialStatus } from "../services/nicepayments";
@@ -82,6 +83,31 @@ const kakaoPayPlans = {
   },
 };
 const BILLING_MONTH_OPTIONS = [1, 2];
+const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
+const KAKAO_RETURN_QUERY_KEYS = ["pg_token", "kakaoPay", "message"];
+
+function buildKakaoReturnUrl(state) {
+  if (typeof window === "undefined") return "";
+
+  const appOrigin = resolvePublicAppOrigin() || window.location.origin;
+
+  try {
+    const target = new URL("/api/kakaopay/return", `${appOrigin}/`);
+    target.searchParams.set("state", String(state || "").trim().toLowerCase() || "fail");
+    if (IS_NATIVE_PLATFORM) {
+      target.searchParams.set("mode", "native");
+    }
+    return target.toString();
+  } catch {
+    return "";
+  }
+}
+
+function getKakaoReturnKey(params) {
+  const parts = KAKAO_RETURN_QUERY_KEYS.map((key) => `${key}:${String(params.get(key) || "").trim()}`);
+  const hasValue = parts.some((entry) => !entry.endsWith(":"));
+  return hasValue ? parts.join("|") : "";
+}
 
 function shouldUseMobileKakaoRedirect() {
   if (typeof window === "undefined") return false;
@@ -200,6 +226,7 @@ function PaymentPage({
   theme = "dark",
   user,
   onTierUpdated,
+  paymentReturnSignal = 0,
 }) {
   const [selectedPlan, setSelectedPlan] = useState(tierMeta[currentTier] || "Free");
   const [billingMonths, setBillingMonths] = useState(1);
@@ -218,7 +245,7 @@ function PaymentPage({
   const [isCancellingSubscription, setIsCancellingSubscription] = useState(false);
   const [isChargingSubscription, setIsChargingSubscription] = useState(false);
   const [countdownNowMs, setCountdownNowMs] = useState(() => Date.now());
-  const handledKakaoReturnRef = useRef(false);
+  const handledKakaoReturnRef = useRef("");
   const cardWidgetSectionRef = useRef(null);
   const isLight = theme === "light";
   const surfaceClass = isLight
@@ -325,6 +352,7 @@ function PaymentPage({
     user,
     selectedPlan,
     billingMonths: normalizedBillingMonths,
+    paymentReturnSignal,
     onTierUpdated,
     setPaymentError,
     setPaymentNotice,
@@ -346,6 +374,7 @@ function PaymentPage({
     user,
     selectedPlan,
     billingMonths: normalizedBillingMonths,
+    paymentReturnSignal,
     enabled:
       isRecurringSelection ||
       isPaidTier ||
@@ -480,13 +509,13 @@ function PaymentPage({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (handledKakaoReturnRef.current) return;
     const params = new URLSearchParams(window.location.search);
     const pgToken = params.get("pg_token");
     const kakaoState = params.get("kakaoPay");
+    const handledKey = getKakaoReturnKey(params);
 
     if (!pgToken && !kakaoState) return;
-    handledKakaoReturnRef.current = true;
+    if (handledKey && handledKakaoReturnRef.current === handledKey) return;
 
     const clearUrl = () => {
       const cleanUrl = `${window.location.origin}${window.location.pathname}`;
@@ -494,6 +523,7 @@ function PaymentPage({
     };
 
     if (kakaoState === "cancel") {
+      handledKakaoReturnRef.current = handledKey;
       setPaymentNotice("");
       setPaymentError("카카오페이 결제가 취소되었습니다.");
       localStorage.removeItem(KAKAOPAY_STORAGE_KEY);
@@ -503,6 +533,7 @@ function PaymentPage({
     }
 
     if (kakaoState === "fail") {
+      handledKakaoReturnRef.current = handledKey;
       setPaymentNotice("");
       setPaymentError("카카오페이 결제 확인에 실패했습니다. 잠시 후 다시 시도해주세요.");
       localStorage.removeItem(KAKAOPAY_STORAGE_KEY);
@@ -525,6 +556,7 @@ function PaymentPage({
     const storedProTrial = stored?.proTrial === true;
 
     if (!stored?.tid || !stored?.orderId) {
+      handledKakaoReturnRef.current = handledKey;
       setPaymentError("결제 세션 정보를 찾을 수 없습니다. 다시 결제를 진행해주세요.");
       clearPaymentReturnPending();
       clearUrl();
@@ -536,6 +568,7 @@ function PaymentPage({
       return;
     }
 
+    handledKakaoReturnRef.current = handledKey;
     setPaying(true);
     setPaymentError("");
     setPaymentNotice("");
@@ -615,6 +648,7 @@ function PaymentPage({
     selectedKakaoAmount,
     selectedKakaoItemName,
     selectedKakaoPlan?.tier,
+    paymentReturnSignal,
   ]);
 
   const handleKakaoPay = async () => {
@@ -656,10 +690,9 @@ function PaymentPage({
     setPaying(true);
 
     const orderId = `kpay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const appOrigin = resolvePublicAppOrigin() || window.location.origin;
-    const approvalUrl = `${appOrigin}/?kakaoPay=approve`;
-    const cancelUrl = `${appOrigin}/?kakaoPay=cancel`;
-    const failUrl = `${appOrigin}/?kakaoPay=fail`;
+    const approvalUrl = buildKakaoReturnUrl("approve");
+    const cancelUrl = buildKakaoReturnUrl("cancel");
+    const failUrl = buildKakaoReturnUrl("fail");
 
     try {
       const accessToken = await getAccessToken();
@@ -742,10 +775,9 @@ function PaymentPage({
     setPaying(true);
 
     const orderId = `kpay_trial_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const appOrigin = resolvePublicAppOrigin() || window.location.origin;
-    const approvalUrl = `${appOrigin}/?kakaoPay=approve`;
-    const cancelUrl = `${appOrigin}/?kakaoPay=cancel`;
-    const failUrl = `${appOrigin}/?kakaoPay=fail`;
+    const approvalUrl = buildKakaoReturnUrl("approve");
+    const cancelUrl = buildKakaoReturnUrl("cancel");
+    const failUrl = buildKakaoReturnUrl("fail");
 
     try {
       const accessToken = await getAccessToken();
@@ -830,10 +862,9 @@ function PaymentPage({
     setPaying(true);
 
     const orderId = `kpay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const appOrigin = resolvePublicAppOrigin() || window.location.origin;
-    const approvalUrl = `${appOrigin}/?kakaoPay=approve`;
-    const cancelUrl = `${appOrigin}/?kakaoPay=cancel`;
-    const failUrl = `${appOrigin}/?kakaoPay=fail`;
+    const approvalUrl = buildKakaoReturnUrl("approve");
+    const cancelUrl = buildKakaoReturnUrl("cancel");
+    const failUrl = buildKakaoReturnUrl("fail");
 
     try {
       const accessToken = await getAccessToken();

@@ -1,20 +1,24 @@
 ﻿import { useCallback, useEffect, useMemo, useRef } from "react";
 import ReactMarkdown from "react-markdown";
+import { Suspense, lazy } from "react";
+import { Capacitor } from "@capacitor/core";
+import { useState } from "react";
 import ActionsPanel from "../components/ActionsPanel";
-import AiTutorPanel from "../components/AiTutorPanel";
-import FlashcardsPanel from "../components/FlashcardsPanel";
 import {
   MARKDOWN_MATH_REHYPE_PLUGINS,
   MARKDOWN_MATH_REMARK_PLUGINS,
   normalizeMathMarkdown,
 } from "../components/MathMarkdown";
 import EvidencePageLinks from "../components/EvidencePageLinks";
-import OxSection from "../components/OxSection";
 import PdfPreview from "../components/PdfPreview";
-import QuizSection from "../components/QuizSection";
-import ReviewNotesPanel from "../components/ReviewNotesPanel";
-import SummaryCard from "../components/SummaryCard";
 import { LETTERS } from "../constants";
+
+const AiTutorPanel = lazy(() => import("../components/AiTutorPanel"));
+const FlashcardsPanel = lazy(() => import("../components/FlashcardsPanel"));
+const OxSection = lazy(() => import("../components/OxSection"));
+const QuizSection = lazy(() => import("../components/QuizSection"));
+const ReviewNotesPanel = lazy(() => import("../components/ReviewNotesPanel"));
+const SummaryCard = lazy(() => import("../components/SummaryCard"));
 
 const MOCK_BARE_LATEX_RE =
   /\\(?:frac|dfrac|tfrac|sum|prod|int|sqrt|left|right|cdot|times|to|infty|leq?|geq?|neq?|approx|mathbb|mathbf|mathrm|text|lim)\b/;
@@ -140,6 +144,23 @@ function toMarkdownWithLatexMath(rawText) {
     })
     .join("\n");
 }
+
+function getTouchDistance(touches) {
+  if (!touches || touches.length < 2) return 0;
+  const [firstTouch, secondTouch] = touches;
+  const deltaX = Number(secondTouch?.clientX || 0) - Number(firstTouch?.clientX || 0);
+  const deltaY = Number(secondTouch?.clientY || 0) - Number(firstTouch?.clientY || 0);
+  return Math.hypot(deltaX, deltaY);
+}
+
+function PanelFallback({ label = "패널" }) {
+  return (
+    <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
+      {label} 불러오는 중...
+    </div>
+  );
+}
+
 export default function DetailPage({
   detailContainerRef,
   splitStyle,
@@ -287,11 +308,110 @@ export default function DetailPage({
   handleResetTutor,
 }) {
   const normalizeChapterSelectionInput = (value) => String(value || "").replace(/\s+/g, "");
+  const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
+  const clampMockExamZoom = useCallback(
+    (value) => Math.min(1.8, Math.max(0.75, Math.round((Number(value) || 1) * 100) / 100)),
+    []
+  );
+  const [mockExamZoom, setMockExamZoom] = useState(1);
+  const mockExamGestureRef = useRef({
+    isPinching: false,
+    didPinch: false,
+    startDistance: 0,
+    startZoom: 1,
+  });
+  const mockExamTapRef = useRef({
+    time: 0,
+    x: 0,
+    y: 0,
+  });
   const quizQuestionTotal =
     (Number(quizMix?.multipleChoice) || 0) + (Number(quizMix?.shortAnswer) || 0);
   const quizMixHelperText = quizMixError
     ? quizMixError
     : "형식: 객관식-주관식 (예: 4-3)";
+  const handleMockExamTouchStart = useCallback(
+    (event) => {
+      if (!isNativePlatform) return;
+      const touches = event.touches;
+      if (!touches || touches.length !== 2) return;
+
+      const startDistance = getTouchDistance(touches);
+      if (!startDistance) return;
+
+      mockExamGestureRef.current = {
+        isPinching: true,
+        didPinch: false,
+        startDistance,
+        startZoom: mockExamZoom,
+      };
+      mockExamTapRef.current.time = 0;
+    },
+    [isNativePlatform, mockExamZoom]
+  );
+  const handleMockExamTouchMove = useCallback(
+    (event) => {
+      if (!isNativePlatform) return;
+      const touches = event.touches;
+      const gesture = mockExamGestureRef.current;
+      if (!touches || touches.length !== 2 || !gesture.isPinching || !gesture.startDistance) return;
+
+      const currentDistance = getTouchDistance(touches);
+      if (!currentDistance) return;
+
+      event.preventDefault();
+      gesture.didPinch = true;
+      setMockExamZoom(clampMockExamZoom(gesture.startZoom * (currentDistance / gesture.startDistance)));
+    },
+    [clampMockExamZoom, isNativePlatform]
+  );
+  const handleMockExamTouchEnd = useCallback(
+    (event) => {
+      if (!isNativePlatform) return;
+      const gesture = mockExamGestureRef.current;
+      if (gesture.isPinching && (!event.touches || event.touches.length < 2)) {
+        mockExamGestureRef.current = {
+          isPinching: false,
+          didPinch: false,
+          startDistance: 0,
+          startZoom: mockExamZoom,
+        };
+        if (gesture.didPinch) return;
+      }
+      if (gesture.didPinch) {
+        return;
+      }
+
+      if (event.changedTouches?.length !== 1) return;
+      const touch = event.changedTouches[0];
+      const now = Date.now();
+      const lastTap = mockExamTapRef.current;
+      const elapsed = now - Number(lastTap.time || 0);
+      const deltaX = Math.abs(Number(touch?.clientX || 0) - Number(lastTap.x || 0));
+      const deltaY = Math.abs(Number(touch?.clientY || 0) - Number(lastTap.y || 0));
+
+      if (elapsed > 0 && elapsed <= 280 && deltaX <= 24 && deltaY <= 24) {
+        setMockExamZoom(1);
+        mockExamTapRef.current = { time: 0, x: 0, y: 0 };
+        return;
+      }
+
+      mockExamTapRef.current = {
+        time: now,
+        x: Number(touch?.clientX || 0),
+        y: Number(touch?.clientY || 0),
+      };
+    },
+    [isNativePlatform, mockExamZoom]
+  );
+  const handleMockExamTouchCancel = useCallback(() => {
+    mockExamGestureRef.current = {
+      isPinching: false,
+      didPinch: false,
+      startDistance: 0,
+      startZoom: mockExamZoom,
+    };
+  }, [mockExamZoom]);
   const mockMarkdownComponents = useMemo(
     () => ({
       p: ({ children }) => <p className="my-0 leading-relaxed">{children}</p>,
@@ -865,10 +985,12 @@ export default function DetailPage({
               {isLoadingSummary && <p className="mt-2 text-sm text-slate-300">{"\uC694\uC57D \uC0DD\uC131 \uC911..."}</p>}
               {!isLoadingSummary && summary && (
                 <div ref={summaryRef}>
-                  <SummaryCard
-                    summary={summary}
-                    renderExportPages={isExportingSummary}
-                  />
+                  <Suspense fallback={<PanelFallback label="요약" />}>
+                    <SummaryCard
+                      summary={summary}
+                      renderExportPages={isExportingSummary}
+                    />
+                  </Suspense>
                 </div>
               )}
               {!isLoadingSummary && !summary && (
@@ -961,9 +1083,11 @@ export default function DetailPage({
                   )}
 
                   {partialSummary ? (
-                    <SummaryCard
-                      summary={partialSummary}
-                    />
+                    <Suspense fallback={<PanelFallback label="부분 요약" />}>
+                      <SummaryCard
+                        summary={partialSummary}
+                      />
+                    </Suspense>
                   ) : (
                     <p className="mt-3 text-xs text-slate-400">
                       {
@@ -1119,6 +1243,16 @@ export default function DetailPage({
                     {mockExamError}
                   </p>
                 )}
+                {isNativePlatform && activeMockExam && mockExamOrderedItems.length > 0 && (
+                  <div className="rounded-2xl border border-white/10 bg-slate-900/55 px-3 py-3">
+                    <p className="text-xs font-semibold text-slate-200">
+                      문제지 배율 {Math.round(mockExamZoom * 100)}%
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      두 손가락으로 확대/축소하고, 두 번 탭하면 기본 크기로 돌아갑니다.
+                    </p>
+                  </div>
+                )}
 
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-100 overflow-auto">
                   {!activeMockExam && <p className="text-sm text-slate-400">선택된 모의고사가 없습니다.</p>}
@@ -1128,7 +1262,22 @@ export default function DetailPage({
                         <p className="text-sm text-slate-400">모의고사 문항이 없습니다.</p>
                       )}
                       {mockExamOrderedItems.length > 0 && (
-                        <div ref={mockExamPrintRef} className="space-y-10 flex flex-col items-center">
+                        <div
+                          ref={mockExamPrintRef}
+                          className="flex flex-col items-center space-y-10"
+                          onTouchStart={handleMockExamTouchStart}
+                          onTouchMove={handleMockExamTouchMove}
+                          onTouchEnd={handleMockExamTouchEnd}
+                          onTouchCancel={handleMockExamTouchCancel}
+                          style={
+                            isNativePlatform
+                              ? {
+                                  zoom: mockExamZoom,
+                                  touchAction: "pan-x pan-y",
+                                }
+                              : undefined
+                          }
+                        >
                           {mockExamPages.map((pageItems, pageIndex) => {
                             const pageStart = pageIndex * 4 + 1;
                             return (
@@ -1295,29 +1444,31 @@ export default function DetailPage({
               </div>
 
               {quizSets.length > 0 && (
-                <div className="space-y-4">
-                  {quizSets.map((set, idx) => (
-                    <QuizSection
-                      key={set.id}
-                      title={`퀴즈 세트 ${idx + 1}`}
-                      questions={set.questions}
-                      summary={null}
-                      onResolveEvidence={resolveQuizEvidence}
-                      onJumpToEvidencePage={jumpToEvidencePage}
-                      selectedChoices={set.selectedChoices}
-                      revealedChoices={set.revealedChoices}
-                      shortAnswerInput={set.shortAnswerInput}
-                      shortAnswerResult={set.shortAnswerResult}
-                      oxSelections={set.oxSelections}
-                      oxExplanationOpen={set.oxExplanationOpen}
-                      onSelectChoice={(qIdx, choiceIdx) => handleChoiceSelect(set.id, qIdx, choiceIdx)}
-                      onShortAnswerChange={(idx, val) => handleShortAnswerChange(set.id, idx, val)}
-                      onShortAnswerCheck={(idx) => handleShortAnswerCheck(set.id, idx)}
-                      onOxSelect={(idx, choice) => handleQuizOxSelect(set.id, idx, choice)}
-                      onToggleOxExplanation={(idx) => handleToggleQuizOxExplanation(set.id, idx)}
-                    />
-                  ))}
-                </div>
+                <Suspense fallback={<PanelFallback label="퀴즈" />}>
+                  <div className="space-y-4">
+                    {quizSets.map((set, idx) => (
+                      <QuizSection
+                        key={set.id}
+                        title={`퀴즈 세트 ${idx + 1}`}
+                        questions={set.questions}
+                        summary={null}
+                        onResolveEvidence={resolveQuizEvidence}
+                        onJumpToEvidencePage={jumpToEvidencePage}
+                        selectedChoices={set.selectedChoices}
+                        revealedChoices={set.revealedChoices}
+                        shortAnswerInput={set.shortAnswerInput}
+                        shortAnswerResult={set.shortAnswerResult}
+                        oxSelections={set.oxSelections}
+                        oxExplanationOpen={set.oxExplanationOpen}
+                        onSelectChoice={(qIdx, choiceIdx) => handleChoiceSelect(set.id, qIdx, choiceIdx)}
+                        onShortAnswerChange={(idx, val) => handleShortAnswerChange(set.id, idx, val)}
+                        onShortAnswerCheck={(idx) => handleShortAnswerCheck(set.id, idx)}
+                        onOxSelect={(idx, choice) => handleQuizOxSelect(set.id, idx, choice)}
+                        onToggleOxExplanation={(idx) => handleToggleQuizOxExplanation(set.id, idx)}
+                      />
+                    ))}
+                  </div>
+                </Suspense>
               )}
 
               <p className="mt-4 text-xs text-slate-300">
@@ -1384,22 +1535,24 @@ export default function DetailPage({
 
               {Array.isArray(oxItems) && oxItems.length > 0 && (
                 <div className="mt-4">
-                  <OxSection
-                    title="O/X 퀴즈"
-                    items={oxItems}
-                    onResolveEvidence={resolveOxEvidence}
-                    onJumpToEvidencePage={jumpToEvidencePage}
-                    onDeleteItem={deleteOxQuestion}
-                    selections={oxSelections}
-                    explanationsOpen={oxExplanationOpen}
-                    onSelect={handleOxSelect}
-                    onToggleExplanation={(qIdx) =>
-                      setOxExplanationOpen((prev) => ({
-                        ...prev,
-                        [qIdx]: !prev?.[qIdx],
-                      }))
-                    }
-                  />
+                  <Suspense fallback={<PanelFallback label="O/X 퀴즈" />}>
+                    <OxSection
+                      title="O/X 퀴즈"
+                      items={oxItems}
+                      onResolveEvidence={resolveOxEvidence}
+                      onJumpToEvidencePage={jumpToEvidencePage}
+                      onDeleteItem={deleteOxQuestion}
+                      selections={oxSelections}
+                      explanationsOpen={oxExplanationOpen}
+                      onSelect={handleOxSelect}
+                      onToggleExplanation={(qIdx) =>
+                        setOxExplanationOpen((prev) => ({
+                          ...prev,
+                          [qIdx]: !prev?.[qIdx],
+                        }))
+                      }
+                    />
+                  </Suspense>
                 </div>
               )}
             </>
@@ -1472,51 +1625,55 @@ export default function DetailPage({
               </div>
 
               {oxItems && oxItems.length > 0 && (
-                <OxSection
-                  title="O/X 퀴즈"
-                  items={oxItems}
-                  onResolveEvidence={resolveOxEvidence}
-                  onJumpToEvidencePage={jumpToEvidencePage}
-                  onDeleteItem={deleteOxQuestion}
-                  selections={oxSelections}
-                  explanationsOpen={oxExplanationOpen}
-                  onSelect={handleOxSelect}
-                  onToggleExplanation={(qIdx) =>
-                    setOxExplanationOpen((prev) => ({
-                      ...prev,
-                      [qIdx]: !prev?.[qIdx],
-                    }))
-                  }
-                />
+                <Suspense fallback={<PanelFallback label="O/X 퀴즈" />}>
+                  <OxSection
+                    title="O/X 퀴즈"
+                    items={oxItems}
+                    onResolveEvidence={resolveOxEvidence}
+                    onJumpToEvidencePage={jumpToEvidencePage}
+                    onDeleteItem={deleteOxQuestion}
+                    selections={oxSelections}
+                    explanationsOpen={oxExplanationOpen}
+                    onSelect={handleOxSelect}
+                    onToggleExplanation={(qIdx) =>
+                      setOxExplanationOpen((prev) => ({
+                        ...prev,
+                        [qIdx]: !prev?.[qIdx],
+                      }))
+                    }
+                  />
+                </Suspense>
               )}
             </div>
           )}
 
           {panelTab === "reviewNotes" && (
-            <ReviewNotesPanel
-              items={reviewNotes}
-              availableSections={reviewNoteSections}
-              sectionSelectionInput={reviewNotesSectionSelectionInput}
-              onSectionSelectionChange={setReviewNotesSectionSelectionInput}
-              sectionSelectionError={reviewNotesSectionError}
-              examCramItems={examCramItems}
-              examCramPendingCount={examCramPendingCount}
-              examCramSectionError={examCramSectionError}
-              examCramReferenceCounts={examCramReferenceCounts}
-              examCramHasAnySource={examCramHasAnySource}
-              examCramContent={examCramContent}
-              examCramUpdatedAt={examCramUpdatedAt}
-              examCramScopeLabel={examCramScopeLabel}
-              examCramStatus={examCramStatus}
-              examCramError={examCramError}
-              onSubmitAttempt={handleReviewNoteAttempt}
-              onJumpToEvidencePage={jumpToEvidencePage}
-              onDelete={handleDeleteReviewNote}
-              onGenerateExamCram={handleGenerateExamCram}
-              onCreateMockExam={handleCreateReviewNotesMockExam}
-              isCreatingMockExam={isGeneratingMockExam}
-              isGeneratingExamCram={isGeneratingExamCram}
-            />
+            <Suspense fallback={<PanelFallback label="복습 노트" />}>
+              <ReviewNotesPanel
+                items={reviewNotes}
+                availableSections={reviewNoteSections}
+                sectionSelectionInput={reviewNotesSectionSelectionInput}
+                onSectionSelectionChange={setReviewNotesSectionSelectionInput}
+                sectionSelectionError={reviewNotesSectionError}
+                examCramItems={examCramItems}
+                examCramPendingCount={examCramPendingCount}
+                examCramSectionError={examCramSectionError}
+                examCramReferenceCounts={examCramReferenceCounts}
+                examCramHasAnySource={examCramHasAnySource}
+                examCramContent={examCramContent}
+                examCramUpdatedAt={examCramUpdatedAt}
+                examCramScopeLabel={examCramScopeLabel}
+                examCramStatus={examCramStatus}
+                examCramError={examCramError}
+                onSubmitAttempt={handleReviewNoteAttempt}
+                onJumpToEvidencePage={jumpToEvidencePage}
+                onDelete={handleDeleteReviewNote}
+                onGenerateExamCram={handleGenerateExamCram}
+                onCreateMockExam={handleCreateReviewNotesMockExam}
+                isCreatingMockExam={isGeneratingMockExam}
+                isGeneratingExamCram={isGeneratingExamCram}
+              />
+            </Suspense>
           )}
 
           {panelTab === "flashcards" && (
@@ -1546,30 +1703,34 @@ export default function DetailPage({
                   </button>
                 </div>
               </div>
-              <FlashcardsPanel
-                cards={flashcards}
-                isLoading={isLoadingFlashcards}
-                onAdd={handleAddFlashcard}
-                onDelete={handleDeleteFlashcard}
-                onGenerate={handleGenerateFlashcards}
-                isGenerating={isGeneratingFlashcards}
-                canGenerate={Boolean(file && selectedFileId && extractedText && !isLoadingText)}
-                status={flashcardStatus}
-                error={flashcardError}
-              />
+              <Suspense fallback={<PanelFallback label="플래시카드" />}>
+                <FlashcardsPanel
+                  cards={flashcards}
+                  isLoading={isLoadingFlashcards}
+                  onAdd={handleAddFlashcard}
+                  onDelete={handleDeleteFlashcard}
+                  onGenerate={handleGenerateFlashcards}
+                  isGenerating={isGeneratingFlashcards}
+                  canGenerate={Boolean(file && selectedFileId && extractedText && !isLoadingText)}
+                  status={flashcardStatus}
+                  error={flashcardError}
+                />
+              </Suspense>
             </div>
           )}
           {panelTab === "tutor" && (
-            <AiTutorPanel
-              messages={tutorMessages}
-              isLoading={isTutorLoading}
-              error={tutorError}
-              canChat={!tutorNotice}
-              notice={tutorNotice}
-              fileName={file?.name || ""}
-              onSend={handleSendTutorMessage}
-              onReset={handleResetTutor}
-            />
+            <Suspense fallback={<PanelFallback label="AI 튜터" />}>
+              <AiTutorPanel
+                messages={tutorMessages}
+                isLoading={isTutorLoading}
+                error={tutorError}
+                canChat={!tutorNotice}
+                notice={tutorNotice}
+                fileName={file?.name || ""}
+                onSend={handleSendTutorMessage}
+                onReset={handleResetTutor}
+              />
+            </Suspense>
           )}
         </div>
       </div>

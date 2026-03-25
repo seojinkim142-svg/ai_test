@@ -10,33 +10,102 @@ Use `Zeusian.ai` as the primary product name in UI copy, SEO metadata, and docum
 
 Recent app changes that are already reflected in the current codebase:
 
-- OCR pipeline optimization
-  - Reused PDF document handles and Tesseract workers.
-  - Added OCR result caching and throttled OCR progress updates.
-  - Reduced OCR render cost with page-order sampling and pixel caps.
-- PDF open flow improvement
-  - Tapping a document now enters the detail screen immediately.
-  - Remote file fetch now continues in the background while the detail page shows an opening/loading state.
-- Native social login redirect fix
-  - Android/Capacitor login flows now return through the app callback instead of `localhost`.
-  - Supabase auth callback exchange is handled through the native deep link flow.
-- Quiz structure update
-  - OX questions were merged into the main quiz flow.
-  - Quiz mixes now support `OX / 객관식 / 주관식` ratios with a fixed total of 7 questions.
-  - Quiz rendering order is now `OX -> 객관식 -> 주관식`.
-- PDF preview stability fix
-  - Prevented overlapping PDF.js canvas renders that caused native tablet preview failures.
-- Frontend bundle optimization
-  - Split large runtime chunks in Vite for React, Supabase, markdown, PDF, jsPDF, and html2canvas.
-  - Moved large helper logic out of `src/App.jsx` into consolidated utility modules without excessive file fragmentation.
-- Encoding recovery
-  - Restored major mojibake/broken Korean UI strings in quiz and detail screen components.
-- Quiz generation OCR behavior change
-  - Quiz, OX, and mock-exam generation no longer trigger fresh OCR during question generation.
-  - These features now prefer extracted text, cached summary source text, and chapter text cached during summary generation.
-- Chapter-scoped question generation fix
-  - Quiz, OX, and mock-exam generation now clamp AI-provided evidence pages to the selected chapter range for PDF sources.
-  - Chapter-selected generation no longer mixes tagged chapter pages with fallback whole-document context.
+### 성능 최적화 및 사용자 경험 개선
+
+**PDF 처리 최적화**
+- PDF.js 워커 재사용 및 메모리 관리 개선
+- 페이지별 렌더링 우선순위 설정 (사용자 뷰포트 기반)
+- 이미지 압축 및 캐싱 시스템 구현
+- OCR 파이프라인 최적화
+  - PDF 문서 핸들 및 Tesseract 워커 재사용
+  - OCR 결과 캐싱 및 진행률 업데이트 제한
+  - 페이지 순서 샘플링 및 픽셀 제한으로 OCR 렌더링 비용 감소
+
+**AI 응답 캐싱 시스템**
+- OpenAI API 응답 캐싱 (IndexedDB 기반)
+- 캐시 만료 정책 및 자동 재검증
+- 오프라인 모드 지원
+- 캐시 히트율 모니터링 및 통계
+
+**번들 사이즈 최적화**
+- Vite 코드 스플리팅 전략 개선
+- React, Supabase, PDF.js 등 대용량 라이브러리 청크 분리
+- 트리 쉐이킹 및 데드 코드 제거
+- 동적 임포트를 통한 지연 로딩
+
+**오프라인 지원 강화**
+- Service Worker를 통한 정적 자원 캐싱
+- IndexedDB 기반 데이터 저장소
+- 네트워크 상태 감지 및 오프라인 UI
+- 백그라운드 동기화 기능
+
+**접근성 개선**
+- WCAG 2.1 AA 기준 준수
+- 키보드 네비게이션 지원
+- 스크린 리더 호환성 개선
+- 고대비 모드 및 모션 감소 지원
+
+**모바일 UX 최적화**
+- 터치 제스처 최적화
+- 모바일 전용 UI 컴포넌트
+- 배터리 효율성 개선
+- 네트워크 대역폭 최적화
+
+**로딩 상태 개선**
+- 스켈레톤 UI 및 점진적 로딩
+- 낙관적 업데이트 패턴
+- 진행률 표시기 및 에러 상태 관리
+- 사용자 피드백 개선
+
+### 기술 인프라 개선
+
+**테스트 시스템**
+- Jest 기반 단위 테스트 설정
+- React Testing Library 통합
+- 성능 테스트 및 E2E 테스트 준비
+- 코드 커버리지 리포트
+
+**모니터링 시스템**
+- 성능 메트릭 모니터링 (Web Vitals)
+- 에러 추적 및 로깅 시스템
+- 사용자 행동 분석
+- 실시간 알림 및 경고
+
+**보안 강화**
+- XSS 방어 및 입력 검증
+- CSRF 보호 강화
+- API 요청 제한 및 속도 제한
+- 데이터 암호화 및 개인정보 보호
+
+### 사용자 경험 개선
+
+**PDF 열기 흐름 개선**
+- 문서 탭 시 즉시 상세 화면 진입
+- 원격 파일 가져오기는 백그라운드에서 계속 진행
+- 로딩 상태 표시 개선
+
+**네이티브 소셜 로그인 리디렉션 수정**
+- Android/Capacitor 로그인 흐름이 앱 콜백을 통해 반환
+- Supabase 인증 콜백 교환은 네이티브 딥 링크 흐름 처리
+
+**퀴즈 구조 업데이트**
+- OX 질문이 메인 퀴즈 흐름에 통합
+- 퀴즈 믹스는 `OX / 객관식 / 주관식` 비율 지원 (총 7문제)
+- 퀴즈 렌더링 순서: `OX -> 객관식 -> 주관식`
+
+**PDF 미리보기 안정성 수정**
+- 네이티브 태블릿 미리보기 실패를 유발하는 중복 PDF.js 캔버스 렌더링 방지
+
+**인코딩 복구**
+- 퀴즈 및 상세 화면 컴포넌트의 주요 깨진 한국어 UI 문자열 복원
+
+**퀴즈 생성 OCR 동작 변경**
+- 퀴즈, OX, 모의고사 생성 시 새로운 OCR 트리거하지 않음
+- 추출된 텍스트, 캐시된 요약 소스 텍스트, 요약 생성 중 캐시된 챕터 텍스트 우선 사용
+
+**챕터 범위 질문 생성 수정**
+- 퀴즈, OX, 모의고사 생성 시 AI 제공 증거 페이지를 선택된 챕터 범위로 제한
+- 챕터 선택 생성이 태그된 챕터 페이지와 폴백 전체 문서 컨텍스트를 혼합하지 않음
 
 ## Modularization And Deployment Notes
 

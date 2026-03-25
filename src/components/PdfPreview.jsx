@@ -2,12 +2,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { detectSupportedDocumentKind, isPdfDocumentKind } from "../utils/document";
 import { findHighlightRects } from "../utils/pdfHighlight";
+import { ErrorCodes, handleError } from "../utils/errorHandler";
+import ErrorDisplay from "./ErrorDisplay";
 
 let pdfRuntimePromise = null;
+
+function ensurePromiseWithResolvers() {
+  if (typeof Promise.withResolvers === "function") return;
+  Object.defineProperty(Promise, "withResolvers", {
+    configurable: true,
+    writable: true,
+    value() {
+      let resolve;
+      let reject;
+      const promise = new Promise((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    },
+  });
+}
 
 async function loadPdfRuntime() {
   if (!pdfRuntimePromise) {
     pdfRuntimePromise = (async () => {
+      ensurePromiseWithResolvers();
       const [pdfjs, workerSrcModule] = await Promise.all([
         import("pdfjs-dist"),
         import("pdfjs-dist/build/pdf.worker.min.mjs?url"),
@@ -123,8 +143,8 @@ function PdfPreview({
   const iframeRetrySrcRef = useRef("");
   const iframeResetTimerRef = useRef(null);
   const sourceKey = useMemo(
-    () => (file ? buildFileSignature(file) : String(pdfUrl || "")),
-    [file, pdfUrl]
+    () => (file ? buildFileSignature(file) : String(pdfUrl || documentUrl || "")),
+    [documentUrl, file, pdfUrl]
   );
   const documentKind = useMemo(() => detectSupportedDocumentKind(file), [file]);
   const canPreviewPdf = useMemo(
@@ -177,10 +197,15 @@ function PdfPreview({
     const fromDoc = Number(pdfDocRef.current?.numPages || 0);
     return Math.max(1, fromInfo, fromDoc);
   }, [docVersion, pageInfo?.total, pageInfo?.used]);
+  const preferredPdfSourceUrl = useMemo(() => {
+    const localUrl = String(pdfUrl || "").trim();
+    const remoteUrl = String(documentUrl || "").trim();
+    return localUrl || remoteUrl;
+  }, [documentUrl, pdfUrl]);
   const viewerSrc = useMemo(() => {
-    if (!pdfUrl) return "";
-    return buildViewerSrc(pdfUrl, currentPage);
-  }, [currentPage, pdfUrl]);
+    if (!preferredPdfSourceUrl) return "";
+    return buildViewerSrc(preferredPdfSourceUrl, currentPage);
+  }, [currentPage, preferredPdfSourceUrl]);
   const viewerBaseSrc = useMemo(() => stripUrlHash(viewerSrc), [viewerSrc]);
   const useCanvasPdfPreview = canPreviewPdf && isNativePlatform;
   const isOfficeDocument = documentKind === "docx" || documentKind === "pptx";
@@ -613,25 +638,63 @@ function PdfPreview({
 
   useEffect(() => {
     if (!useCanvasPdfPreview) return undefined;
+    
     let cancelled = false;
+    let abortController = new AbortController();
 
+    // 강화된 리소스 해제 함수
     const releaseCurrentDoc = async () => {
+      // 1. 렌더링 작업 취소 및 정리
       if (renderTaskRef.current) {
         try {
           renderTaskRef.current.cancel();
+          // 작업 완료 대기 (중첩된 Promise 해결)
+          await renderTaskRef.current.promise.catch(() => {});
         } catch {
-          // ignore cancelled/finished render task cleanup errors
+          // 무시 - 작업이 이미 완료되었거나 취소된 경우
+        } finally {
+          renderTaskRef.current = null;
         }
-        renderTaskRef.current = null;
       }
+      
+      // 2. PDF 문서 해제
       if (pdfDocRef.current) {
         const previousDoc = pdfDocRef.current;
         pdfDocRef.current = null;
         try {
           await previousDoc.destroy();
-        } catch {
-          // ignore cleanup errors
+          // 추가 정리: 내부 참조 제거
+          if (previousDoc._pdfInfo) previousDoc._pdfInfo = null;
+          if (previousDoc._transport) previousDoc._transport = null;
+          if (previousDoc._pdfDocument) previousDoc._pdfDocument = null;
+        } catch (error) {
+          console.warn('PDF 문서 해제 중 오류:', error);
         }
+      }
+      
+      // 3. 캐시 클리어
+      pageLayoutCacheRef.current.clear();
+      
+      // 4. 캔버스 컨텍스트 정리
+      if (canvasRef.current) {
+        const context = canvasRef.current.getContext('2d');
+        if (context) {
+          context.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+          // 캔버스 크기 초기화
+          canvasRef.current.width = 1;
+          canvasRef.current.height = 1;
+        }
+      }
+      
+      // 5. 타이머 클리어
+      if (iframeResetTimerRef.current) {
+        clearTimeout(iframeResetTimerRef.current);
+        iframeResetTimerRef.current = null;
+      }
+      
+      // 6. AbortController 신호 전송
+      if (!abortController.signal.aborted) {
+        abortController.abort();
       }
     };
 
@@ -640,7 +703,12 @@ function PdfPreview({
       setIsNativeLoading(true);
 
       try {
+        // 기존 리소스 해제
         await releaseCurrentDoc();
+        
+        // 새로운 AbortController 생성
+        abortController = new AbortController();
+        const signal = abortController.signal;
 
         let source = null;
         if (pdfUrl) {
@@ -648,22 +716,51 @@ function PdfPreview({
         } else if (isPdfLikeFile(file) && typeof file?.arrayBuffer === "function") {
           source = { data: await file.arrayBuffer() };
         }
-        if (!source) return;
+        
+        if (!source) {
+          setIsNativeLoading(false);
+          return;
+        }
+
+        // 취소 체크
+        if (cancelled || signal.aborted) {
+          setIsNativeLoading(false);
+          return;
+        }
 
         const pdfjsLib = await loadPdfRuntime();
         const loadingTask = pdfjsLib.getDocument(source);
-        const doc = await loadingTask.promise;
+        
+        // 취소 가능한 Promise 래퍼
+        const docPromise = loadingTask.promise;
+        const doc = await Promise.race([
+          docPromise,
+          new Promise((_, reject) => {
+            if (signal.aborted) {
+              reject(new DOMException('Aborted', 'AbortError'));
+            }
+            signal.addEventListener('abort', () => {
+              reject(new DOMException('Aborted', 'AbortError'));
+            });
+          })
+        ]);
 
-        if (cancelled) {
+        if (cancelled || signal.aborted) {
           await doc.destroy();
+          setIsNativeLoading(false);
           return;
         }
 
         pdfDocRef.current = doc;
         setDocVersion((prev) => prev + 1);
       } catch (err) {
-        if (!cancelled) {
-          setNativeError(err?.message || "PDF 미리보기를 초기화하지 못했습니다.");
+        if (!cancelled && err.name !== 'AbortError') {
+          const handledError = handleError(err, { 
+            component: 'PdfPreview',
+            function: 'loadNativeDocument',
+            source: pdfUrl || (file?.name || 'unknown')
+          });
+          setNativeError(handledError.message || "PDF 미리보기를 초기화하지 못했습니다.");
         }
       } finally {
         if (!cancelled) {
@@ -676,6 +773,9 @@ function PdfPreview({
 
     return () => {
       cancelled = true;
+      if (!abortController.signal.aborted) {
+        abortController.abort();
+      }
       releaseCurrentDoc();
     };
   }, [file, pdfUrl, sourceKey, useCanvasPdfPreview]);
@@ -690,6 +790,7 @@ function PdfPreview({
     const requestId = renderRequestRef.current + 1;
     renderRequestRef.current = requestId;
     let cancelled = false;
+    let abortController = new AbortController();
 
     const renderCurrentPage = async () => {
       const cycleId = renderCycleRef.current + 1;
@@ -697,15 +798,18 @@ function PdfPreview({
       setNativeError("");
       setIsNativeLoading(true);
       let renderTask = null;
+      let currentPageObj = null;
 
       try {
+        // 이전 렌더링 작업 취소
         const previousTask = renderTaskRef.current;
         if (previousTask) {
           try {
             previousTask.cancel();
-            await previousTask.promise;
+            // 작업 완료 대기
+            await previousTask.promise.catch(() => {});
           } catch {
-            // Cancellation is expected when page/size changes during rendering.
+            // 무시 - 작업이 이미 완료되었거나 취소된 경우
           } finally {
             if (renderTaskRef.current === previousTask) {
               renderTaskRef.current = null;
@@ -713,21 +817,48 @@ function PdfPreview({
           }
         }
 
+        // 취소 체크
+        if (cancelled || abortController.signal.aborted) {
+          setIsNativeLoading(false);
+          return;
+        }
+
         const maxPage = Math.max(1, Number(doc.numPages) || 1);
         const requestedPage = normalizePageNumber(currentPage);
         const targetPage = Math.min(Math.max(1, requestedPage), maxPage);
+        
         if (targetPage !== requestedPage && typeof onPageChange === "function") {
           onPageChange(targetPage);
+          setIsNativeLoading(false);
           return;
         }
-        const page = await doc.getPage(targetPage);
+
+        // 페이지 가져오기 (취소 가능)
+        currentPageObj = await Promise.race([
+          doc.getPage(targetPage),
+          new Promise((_, reject) => {
+            if (abortController.signal.aborted) {
+              reject(new DOMException('Aborted', 'AbortError'));
+            }
+            abortController.signal.addEventListener('abort', () => {
+              reject(new DOMException('Aborted', 'AbortError'));
+            });
+          })
+        ]);
+
         if (
           cancelled ||
+          abortController.signal.aborted ||
           renderRequestRef.current !== requestId ||
           renderCycleRef.current !== cycleId
         ) {
+          if (currentPageObj) {
+            currentPageObj.cleanup();
+          }
+          setIsNativeLoading(false);
           return;
         }
+
         const context = canvas.getContext("2d", { alpha: false });
         if (!context) throw new Error("Canvas context is unavailable.");
 
@@ -737,51 +868,93 @@ function PdfPreview({
           canvas.parentElement?.clientWidth ||
           920;
         const maxCssWidth = Math.max(320, Math.min(scrollViewportWidth - 24, 1400));
-        const baseViewport = page.getViewport({ scale: 1 });
+        const baseViewport = currentPageObj.getViewport({ scale: 1 });
         const cssScale = maxCssWidth / baseViewport.width;
         const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
-        const viewport = page.getViewport({ scale: cssScale * pixelRatio });
+        const viewport = currentPageObj.getViewport({ scale: cssScale * pixelRatio });
 
+        // 캔버스 크기 설정
         canvas.width = Math.max(1, Math.floor(viewport.width));
         canvas.height = Math.max(1, Math.floor(viewport.height));
         canvas.style.width = `${Math.max(1, Math.floor(viewport.width / pixelRatio))}px`;
         canvas.style.height = `${Math.max(1, Math.floor(viewport.height / pixelRatio))}px`;
 
+        // 배경 채우기
         context.fillStyle = "#ffffff";
         context.fillRect(0, 0, canvas.width, canvas.height);
 
+        // 취소 체크
         if (
           cancelled ||
+          abortController.signal.aborted ||
           renderRequestRef.current !== requestId ||
           renderCycleRef.current !== cycleId
         ) {
+          setIsNativeLoading(false);
           return;
         }
 
-        renderTask = page.render({
+        // 렌더링 작업 시작
+        renderTask = currentPageObj.render({
           canvasContext: context,
           viewport,
           intent: "display",
         });
         renderTaskRef.current = renderTask;
-        await renderTask.promise;
+
+        // 렌더링 완료 대기 (취소 가능)
+        await Promise.race([
+          renderTask.promise,
+          new Promise((_, reject) => {
+            if (abortController.signal.aborted) {
+              reject(new DOMException('Aborted', 'AbortError'));
+            }
+            abortController.signal.addEventListener('abort', () => {
+              reject(new DOMException('Aborted', 'AbortError'));
+            });
+          })
+        ]);
 
         if (
           cancelled ||
+          abortController.signal.aborted ||
           renderRequestRef.current !== requestId ||
           renderCycleRef.current !== cycleId
         ) {
+          setIsNativeLoading(false);
           return;
         }
+
       } catch (err) {
-        if (cancelled || err?.name === "RenderingCancelledException") return;
-        setNativeError(err?.message || "PDF 페이지 렌더링에 실패했습니다.");
+        if (cancelled || err?.name === "RenderingCancelledException" || err?.name === "AbortError") {
+          // 취소된 작업은 무시
+          return;
+        }
+        
+        const handledError = handleError(err, { 
+          component: 'PdfPreview',
+          function: 'renderCurrentPage',
+          page: currentPage
+        });
+        setNativeError(handledError.message || "PDF 페이지 렌더링에 실패했습니다.");
+        
       } finally {
+        // 리소스 정리
         if (renderTask && renderTaskRef.current === renderTask) {
           renderTaskRef.current = null;
         }
+        
+        if (currentPageObj) {
+          try {
+            currentPageObj.cleanup();
+          } catch {
+            // 무시
+          }
+        }
+        
         if (
           !cancelled &&
+          !abortController.signal.aborted &&
           renderRequestRef.current === requestId &&
           renderCycleRef.current === cycleId
         ) {
@@ -798,9 +971,14 @@ function PdfPreview({
       }
       resizeRafRef.current = requestAnimationFrame(() => {
         resizeRafRef.current = null;
-        renderCurrentPage();
+        if (!abortController.signal.aborted) {
+          abortController.abort();
+          abortController = new AbortController();
+          renderCurrentPage();
+        }
       });
     };
+    
     window.addEventListener("resize", handleResize);
 
     return () => {
@@ -809,18 +987,34 @@ function PdfPreview({
       if (renderRequestRef.current === requestId) {
         renderRequestRef.current += 1;
       }
+      
+      // AbortController로 모든 비동기 작업 취소
+      if (!abortController.signal.aborted) {
+        abortController.abort();
+      }
+      
       window.removeEventListener("resize", handleResize);
+      
       if (resizeRafRef.current) {
         cancelAnimationFrame(resizeRafRef.current);
         resizeRafRef.current = null;
       }
+      
       if (renderTaskRef.current) {
         try {
           renderTaskRef.current.cancel();
         } catch {
-          // ignore cleanup errors
+          // 무시
         }
         renderTaskRef.current = null;
+      }
+      
+      // 캔버스 컨텍스트 정리
+      if (canvasRef.current) {
+        const context = canvasRef.current.getContext('2d');
+        if (context) {
+          context.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+        }
       }
     };
   }, [currentPage, docVersion, onPageChange, useCanvasPdfPreview]);
@@ -864,7 +1058,7 @@ function PdfPreview({
                 type="button"
                 onClick={handleDownloadFile}
                 disabled={!canDownloadFile}
-                className="rounded-full border border-white/15 bg-white/5 px-3 py-1 text-xs text-slate-200 transition hover:border-white/30 hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-full border border-white/15 bg-slate-800 px-3 py-1 text-xs text-slate-200 transition hover:border-white/30 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 다운로드
               </button>
@@ -1003,7 +1197,7 @@ function PdfPreview({
             <button
               type="button"
               onClick={handleDownloadFile}
-              className="rounded-full border border-white/20 bg-slate-900/88 px-3 py-1.5 text-xs text-slate-100 shadow-lg shadow-black/30 transition hover:border-emerald-300/50 hover:bg-slate-800"
+              className="rounded-full border border-white/20 bg-slate-800 px-3 py-1.5 text-xs text-slate-100 shadow-lg shadow-black/30 transition hover:border-emerald-300/50 hover:bg-slate-700"
             >
               다운로드
             </button>
@@ -1113,7 +1307,7 @@ function PdfPreview({
             다시 불러오기
           </button>
           <a
-            href={pdfUrl}
+            href={preferredPdfSourceUrl || pdfUrl || documentUrl}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center rounded-lg border border-rose-300/40 px-3 py-2 text-xs text-rose-100 hover:bg-rose-400/10"

@@ -2,6 +2,7 @@
 import http from "http";
 import dotenv from "dotenv";
 import approveHandler from "../api/kakaopay/approve.js";
+import returnHandler from "../api/kakaopay/return.js";
 import readyHandler from "../api/kakaopay/ready.js";
 import subscriptionHandler from "../api/kakaopay/subscription/[action].js";
 
@@ -12,6 +13,7 @@ const PORT = Number(process.env.KAKAOPAY_PORT || 8787);
 const ROUTES = new Map([
   ["/api/kakaopay/ready", readyHandler],
   ["/api/kakaopay/approve", approveHandler],
+  ["/api/kakaopay/return", returnHandler],
   ["/api/kakaopay/subscription/status", subscriptionHandler],
   ["/api/kakaopay/subscription/charge", subscriptionHandler],
   ["/api/kakaopay/subscription/inactive", subscriptionHandler],

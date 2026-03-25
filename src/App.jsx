@@ -94,7 +94,6 @@ import {
   getQuizPromptText,
   getOxPromptText,
   getMockExamPromptText,
-  collectQuestionTextsFromQuizSets,
   collectQuestionTextsFromOxItems,
   collectQuestionTextsFromMockExams,
   createQuestionKeySet,
@@ -120,11 +119,13 @@ import {
 import {
   formatPartialSummaryDefaultName,
   readExamCramFromHighlights,
+  readChapterRangeInputFromHighlights,
   normalizeReviewNoteEntries,
   readReviewNotesFromHighlights,
   normalizeSavedPartialSummaryEntries,
   readPartialSummaryBundleFromHighlights,
   sanitizeUiText,
+  writeChapterRangeInputToHighlights,
   writeExamCramToHighlights,
   writePartialSummaryBundleToHighlights,
   writeReviewNotesToHighlights,
@@ -165,6 +166,9 @@ const DEFAULT_QUIZ_MIX = Object.freeze({
   shortAnswer: 2,
 });
 const DEFAULT_QUIZ_MIX_INPUT = `${DEFAULT_QUIZ_MIX.multipleChoice}-${DEFAULT_QUIZ_MIX.shortAnswer}`;
+const PAYMENT_RETURN_QUERY_KEYS = ["pg_token", "kakaoPay", "nicePay", "niceBilling", "np_token", "message", "orderId", "amount", "trial"];
+const NATIVE_APP_PLUGIN =
+  Capacitor.isNativePlatform() && Capacitor.isPluginAvailable("App") ? Capacitor.registerPlugin("App") : null;
 
 function getInitialSplitPercent() {
   if (typeof window === "undefined") return 50;
@@ -174,6 +178,28 @@ function getInitialSplitPercent() {
   const shorterSide = Math.min(width, height);
   const longerSide = Math.max(width, height);
   return shorterSide >= 700 && longerSide >= 1000 ? 56 : 50;
+}
+
+function readPaymentReturnParams(rawUrl) {
+  const value = String(rawUrl || "").trim();
+  if (!value) return null;
+
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+
+  const params = new URLSearchParams();
+  PAYMENT_RETURN_QUERY_KEYS.forEach((key) => {
+    const paramValue = parsed.searchParams.get(key);
+    if (paramValue != null && String(paramValue).trim()) {
+      params.set(key, String(paramValue).trim());
+    }
+  });
+
+  return params.toString() ? params : null;
 }
 
 function parseQuizMixInput(value) {
@@ -219,6 +245,61 @@ function parseQuizMixInput(value) {
   };
 }
 
+function sumQuizBatchMetric(batches, key) {
+  return (Array.isArray(batches) ? batches : []).reduce((total, batch) => {
+    const value = Number(batch?.[key]) || 0;
+    return total + value;
+  }, 0);
+}
+
+function buildQuizGenerationFailureMessage({
+  targetMcCount = 0,
+  targetSaCount = 0,
+  finalMcCount = 0,
+  finalSaCount = 0,
+  batchDiagnostics = [],
+  enforceScopedEvidence = false,
+}) {
+  const batches = Array.isArray(batchDiagnostics) ? batchDiagnostics : [];
+  if (!batches.length) {
+    return "충분한 새 문항을 만들지 못했습니다. 범위를 바꿔 다시 시도해 주세요.";
+  }
+
+  const requestedMc = sumQuizBatchMetric(batches, "requestMcCount");
+  const requestedSa = sumQuizBatchMetric(batches, "requestSaCount");
+  const candidateMc = sumQuizBatchMetric(batches, "candidateMcCount");
+  const candidateSa = sumQuizBatchMetric(batches, "candidateSaCount");
+  const recoveredMc = sumQuizBatchMetric(batches, "recoveredMcCount");
+  const recoveredSa = sumQuizBatchMetric(batches, "recoveredSaCount");
+  const scopedOutMc = sumQuizBatchMetric(batches, "scopedOutMcCount");
+  const scopedOutSa = sumQuizBatchMetric(batches, "scopedOutSaCount");
+  const notAcceptedMc = sumQuizBatchMetric(batches, "notAcceptedMcCount");
+  const notAcceptedSa = sumQuizBatchMetric(batches, "notAcceptedSaCount");
+
+  const detailLines = [
+    `객관식 ${finalMcCount}/${targetMcCount}, 주관식 ${finalSaCount}/${targetSaCount}만 확보했습니다.`,
+    `객관식 후보: 요청 ${requestedMc}개 -> 유효 후보 ${candidateMc}개 -> 최종 채택 ${finalMcCount}개`,
+    `주관식 후보: 요청 ${requestedSa}개 -> 유효 후보 ${candidateSa}개 -> 최종 채택 ${finalSaCount}개`,
+  ];
+
+  if (recoveredMc > 0 || recoveredSa > 0) {
+    detailLines.push(`근거 페이지 재탐색으로 객관식 ${recoveredMc}개, 주관식 ${recoveredSa}개의 문항 근거를 복구했습니다.`);
+  }
+  if (enforceScopedEvidence && (scopedOutMc > 0 || scopedOutSa > 0)) {
+    detailLines.push(
+      `선택 범위/근거 페이지 검증에서 객관식 ${scopedOutMc}개, 주관식 ${scopedOutSa}개가 제외됐습니다.`
+    );
+  }
+  if (notAcceptedMc > 0 || notAcceptedSa > 0) {
+    detailLines.push(`중복 또는 목표 개수 초과로 객관식 ${notAcceptedMc}개, 주관식 ${notAcceptedSa}개가 제외됐습니다.`);
+  }
+  if (candidateMc < requestedMc || candidateSa < requestedSa) {
+    detailLines.push("OpenAI 응답에서 유효 후보 수 자체가 요청 수보다 적었습니다.");
+  }
+
+  return detailLines.join(" ");
+}
+
 function App() {
   const [file, setFile] = useState(null);
   const [extractedText, setExtractedText] = useState("");
@@ -249,6 +330,7 @@ function App() {
   const [isResizingSplit, setIsResizingSplit] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
+  const [paymentReturnSignal, setPaymentReturnSignal] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showGuestIntro, setShowGuestIntro] = useState(() => !AUTH_ENABLED);
@@ -312,6 +394,7 @@ function App() {
   const tutorSectionRangeCacheRef = useRef(new Map()); // docId:section:anchor -> range
   const chapterScopeTextCacheRef = useRef(new Map()); // scoped key -> text
   const chapterSectionTextCacheRef = useRef(new Map()); // docId::chapterConfig -> extracted chapter sections
+  const pageTaggedSourceTextCacheRef = useRef(new Map()); // docId:pages:options -> tagged source text
   const extractTextForChapterSelectionRef = useRef(null);
   const chapterOneStartPageCacheRef = useRef(new Map()); // docId -> chapter 1 start page
   const questionSourceTextCacheRef = useRef(new Map()); // docId:chapter1 -> source text
@@ -358,6 +441,7 @@ function App() {
   const [premiumSpaceMode, setPremiumSpaceMode] = useState(PREMIUM_SPACE_MODE_PROFILE);
   const premiumProfileHydratedRef = useRef(false);
   const premiumProfileSyncSignatureRef = useRef("");
+  const handledPaymentReturnUrlRef = useRef("");
   const safeStatus = useMemo(() => sanitizeUiText(status, ""), [status]);
   const safeError = useMemo(() => sanitizeUiText(error, "오류가 발생했습니다."), [error]);
   const safePageSummaryError = useMemo(
@@ -436,6 +520,31 @@ function App() {
         return;
       }
       window.history.replaceState(nextState, "", url);
+    },
+    [buildHistoryState]
+  );
+  const applyPaymentReturnUrl = useCallback(
+    (rawUrl) => {
+      if (typeof window === "undefined" || !window.history) return false;
+
+      const paymentParams = readPaymentReturnParams(rawUrl);
+      if (!paymentParams) return false;
+
+      const handledKey = paymentParams.toString();
+      if (handledKey && handledPaymentReturnUrlRef.current === handledKey) {
+        setShowPayment(true);
+        return true;
+      }
+
+      handledPaymentReturnUrlRef.current = handledKey;
+
+      const nextSearch = paymentParams.toString();
+      const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}`;
+      window.history.replaceState(buildHistoryState(), document.title, nextUrl);
+      clearPaymentReturnPending();
+      setShowPayment(true);
+      setPaymentReturnSignal((value) => value + 1);
+      return true;
     },
     [buildHistoryState]
   );
@@ -606,6 +715,53 @@ function App() {
     },
     [getChapterRangeStorageKey]
   );
+  const persistSharedChapterRangeInput = useCallback(
+    async (docId, value, { syncState = false } = {}) => {
+      const normalizedDocId = String(docId || "").trim();
+      if (!user || !normalizedDocId) return;
+
+      const currentDocId = String(selectedFileId || "").trim();
+      const cachedArtifacts = docArtifactsCacheRef.current.get(normalizedDocId);
+      const currentArtifacts =
+        normalizedDocId === currentDocId
+          ? {
+              ...(cachedArtifacts || {}),
+              ...(artifacts || {}),
+              highlights:
+                artifactsHighlightsRef.current ??
+                artifacts?.highlights ??
+                cachedArtifacts?.highlights ??
+                null,
+            }
+          : cachedArtifacts || {};
+      const nextHighlights = writeChapterRangeInputToHighlights(currentArtifacts?.highlights, value);
+      const nextArtifacts = {
+        ...currentArtifacts,
+        highlights: nextHighlights,
+      };
+
+      docArtifactsCacheRef.current.set(normalizedDocId, nextArtifacts);
+      if (syncState && normalizedDocId === currentDocId) {
+        setArtifacts(nextArtifacts);
+        artifactsHighlightsRef.current = nextHighlights || null;
+      }
+
+      try {
+        await saveDocArtifacts({
+          userId: user.id,
+          docId: normalizedDocId,
+          summary: nextArtifacts.summary,
+          quiz: nextArtifacts.quiz,
+          ox: nextArtifacts.ox,
+          highlights: nextHighlights,
+        });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("Failed to persist shared chapter ranges", err);
+      }
+    },
+    [artifacts, selectedFileId, user]
+  );
 
   const resetActiveDocumentState = useCallback(() => {
     if (pdfUrl) {
@@ -632,6 +788,7 @@ function App() {
     tutorSectionRangeCacheRef.current.clear();
     chapterScopeTextCacheRef.current.clear();
     chapterSectionTextCacheRef.current.clear();
+    pageTaggedSourceTextCacheRef.current.clear();
     summaryContextCacheRef.current.clear();
     evidenceMatchCacheRef.current.clear();
     setQuizSets([]);
@@ -1375,22 +1532,45 @@ function App() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const params = new URLSearchParams(window.location.search);
-    const hasPaymentReturnParams =
-      params.get("pg_token") ||
-      params.get("kakaoPay") ||
-      params.get("nicePay") ||
-      params.get("niceBilling") ||
-      params.get("np_token");
     const pendingPaymentReturn = readPaymentReturnPending();
 
-    if (hasPaymentReturnParams || pendingPaymentReturn) {
+    if (applyPaymentReturnUrl(window.location.href) || pendingPaymentReturn) {
       setShowPayment(true);
-      if (!hasPaymentReturnParams && pendingPaymentReturn) {
+      if (!readPaymentReturnParams(window.location.href) && pendingPaymentReturn) {
         clearPaymentReturnPending();
       }
     }
-  }, []);
+  }, [applyPaymentReturnUrl]);
+
+  useEffect(() => {
+    if (!isNativePlatform || !NATIVE_APP_PLUGIN) return undefined;
+
+    let cancelled = false;
+    let listenerHandle = null;
+
+    (async () => {
+      try {
+        if (typeof NATIVE_APP_PLUGIN.getLaunchUrl === "function") {
+          const launchData = await NATIVE_APP_PLUGIN.getLaunchUrl();
+          if (!cancelled) {
+            applyPaymentReturnUrl(launchData?.url);
+          }
+        }
+
+        listenerHandle = await NATIVE_APP_PLUGIN.addListener("appUrlOpen", ({ url }) => {
+          if (cancelled) return;
+          applyPaymentReturnUrl(url);
+        });
+      } catch (err) {
+        console.warn("Native payment callback listener setup failed:", err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      listenerHandle?.remove?.();
+    };
+  }, [applyPaymentReturnUrl, isNativePlatform]);
 
   useEffect(() => {
     if (!AUTH_ENABLED || !authReady || user || typeof window === "undefined") return;
@@ -1977,6 +2157,7 @@ function App() {
       tutorSectionRangeCacheRef.current.clear();
       chapterScopeTextCacheRef.current.clear();
       chapterSectionTextCacheRef.current.clear();
+      pageTaggedSourceTextCacheRef.current.clear();
       evidenceMatchCacheRef.current.clear();
       setArtifacts(null);
       const extractStart =
@@ -2029,8 +2210,8 @@ function App() {
           setThumbnailUrl(aggregateThumbnail);
         } else {
           const textExtractOptions = {
-            pageLimit: isNativePlatform && isPdfDocumentKind(targetFileKind) ? 18 : 30,
-            maxLength: isNativePlatform && isPdfDocumentKind(targetFileKind) ? 9000 : 12000,
+            pageLimit: 30,
+            maxLength: 12000,
             useOcr: false,
           };
           const thumbnailPromise =
@@ -2071,6 +2252,15 @@ function App() {
           setPageInfo({ used: pagesUsed, total: totalPages });
           setThumbnailUrl(thumb || resolvedItem.thumbnail || null);
         }
+        const sharedChapterRangeInput = readChapterRangeInputFromHighlights(loaded?.highlights);
+        const resolvedChapterRangeInput = sharedChapterRangeInput || savedChapterRangeInput;
+        if (resolvedChapterRangeInput !== savedChapterRangeInput && nextDocId) {
+          persistChapterRangeInput(nextDocId, resolvedChapterRangeInput);
+        }
+        if (!sharedChapterRangeInput && savedChapterRangeInput && user) {
+          void persistSharedChapterRangeInput(nextDocId, savedChapterRangeInput);
+        }
+        setChapterRangeInput(resolvedChapterRangeInput);
         const extractEnd =
           typeof performance !== "undefined" && typeof performance.now === "function"
             ? performance.now()
@@ -2109,6 +2299,7 @@ function App() {
       currentPage,
       ensureFileForItem,
       fileOpenRequestSeqRef,
+      isNativePlatform,
       loadSavedChapterRangeInput,
       loadArtifacts,
       loadFlashcards,
@@ -2116,8 +2307,11 @@ function App() {
       loadPageProgressSnapshot,
       normalizeSupportedFile,
       pdfUrl,
+      persistChapterRangeInput,
+      persistSharedChapterRangeInput,
       savePageProgressSnapshot,
       selectedFileId,
+      user,
       visitedPages,
     ]
   );
@@ -2375,6 +2569,7 @@ function App() {
     tutorSectionRangeCacheRef.current.clear();
     chapterScopeTextCacheRef.current.clear();
     chapterSectionTextCacheRef.current.clear();
+    pageTaggedSourceTextCacheRef.current.clear();
     evidenceMatchCacheRef.current.clear();
       setMockExams([]);
       setMockExamStatus("");
@@ -3312,6 +3507,22 @@ function App() {
       if (!normalizedPages.length || !file || !isCurrentPdfDocument) {
         return fallbackText;
       }
+      const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
+      const fallbackKey = includeFallbackText
+        ? `${fallbackText.length}:${fallbackText.slice(0, 160)}`
+        : "no-fallback";
+      const cacheKey = [
+        docKey,
+        normalizedPages.join(","),
+        maxCharsPerPage,
+        maxTotalChars,
+        includeFallbackText ? 1 : 0,
+        fallbackKey,
+      ].join("::");
+      const cached = pageTaggedSourceTextCacheRef.current.get(cacheKey);
+      if (typeof cached === "string" && cached.trim()) {
+        return cached;
+      }
 
       let entries = await loadEvidencePageEntries(normalizedPages, {
         useOcr: false,
@@ -3351,9 +3562,10 @@ function App() {
         }
       }
 
+      pageTaggedSourceTextCacheRef.current.set(cacheKey, taggedContext);
       return taggedContext;
     },
-    [file, isCurrentPdfDocument, loadEvidencePageEntries]
+    [file, isCurrentPdfDocument, loadEvidencePageEntries, selectedFileId]
   );
 
   const resolveEvidenceForText = useCallback(
@@ -3610,6 +3822,31 @@ function App() {
     [clampEvidencePagesToScope]
   );
 
+  const repairGeneratedQuizItemsToScope = useCallback(
+    (items, allowedPages) => {
+      const normalizedAllowed = toSortedUniquePages(allowedPages);
+      const list = Array.isArray(items) ? items : [];
+      if (!normalizedAllowed.length || !list.length) {
+        return list;
+      }
+
+      return list
+        .map((item) => {
+          if (!item || typeof item !== "object") return null;
+
+          const directPages = clampEvidencePagesToScope(item?.evidencePages, normalizedAllowed);
+          const nextPages = directPages.length ? directPages : normalizedAllowed;
+          return {
+            ...item,
+            evidencePages: nextPages,
+            evidenceLabel: String(item?.evidenceLabel || "").trim() || `p.${nextPages.join(", ")}`,
+          };
+        })
+        .filter(Boolean);
+    },
+    [clampEvidencePagesToScope]
+  );
+
   const resolvePartialSummaryEvidence = useCallback(
     async (pageText) => {
       const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
@@ -3641,11 +3878,12 @@ function App() {
   const resolveQuizEvidence = useCallback(
     async (question) => {
       const stored = buildStoredEvidenceResult(question);
-      if (stored?.pages?.length) {
+      const storedPages = Array.isArray(stored?.pages) ? stored.pages.map((entry) => entry?.pageNumber) : [];
+      if (storedPages.length && String(stored?.snippet || "").trim()) {
         return stored;
       }
       return resolveEvidenceForText(buildQuizEvidenceQuery(question), {
-        candidatePages: question?.evidencePages,
+        candidatePages: storedPages.length ? storedPages : question?.evidencePages,
         fallbackEnd: 120,
       });
     },
@@ -3747,8 +3985,23 @@ function App() {
       const extracted = await extractPdfTextFromPages(file, pages, 52000, {
         useOcr: false,
       });
-      const filteredText = String(extracted?.text || "").trim();
+      let filteredText = String(extracted?.text || "").trim();
       let filteredApplied = false;
+      if (!filteredText && !sourceText) {
+        try {
+          setStatus(`${featureLabel}: 챕터 1 이후 본문 OCR 텍스트를 추출하는 중...`);
+          const ocrExtracted = await extractPdfTextFromPages(file, pages.slice(0, 18), 52000, {
+            useOcr: true,
+            ocrLang: "kor+eng",
+            ocrScale: 1.35,
+            ocrMaxPixels: 1000000,
+            onOcrProgress: (message) => setStatus(message),
+          });
+          filteredText = String(ocrExtracted?.text || "").trim();
+        } catch {
+          // Keep the existing extracted source text.
+        }
+      }
       if (filteredText) {
         questionSourceTextCacheRef.current.set(cacheKey, filteredText);
         sourceText = filteredText;
@@ -3813,9 +4066,9 @@ function App() {
       const evidencePages = toSortedUniquePages(scopedSource?.pageCandidates);
       const enforceScopedEvidence = isCurrentPdfDocument && evidencePages.length > 0;
       const generationSourceText = await buildPageTaggedSourceText(quizSourceText, evidencePages, {
-        maxPages: 14,
-        maxCharsPerPage: 850,
-        maxTotalChars: 12000,
+        maxPages: 10,
+        maxCharsPerPage: 720,
+        maxTotalChars: 9000,
         includeFallbackText: !chapterSelectionRaw,
       });
       if (!quizSourceText) {
@@ -3825,10 +4078,8 @@ function App() {
         setStatus(`퀴즈 세트 생성 중... (${scopeLabel})`);
       }
 
-      const historicalQuizTexts = collectQuestionTextsFromQuizSets(quizSets);
-      const recentAvoidQuestionTexts = dedupeQuestionTexts(historicalQuizTexts.slice(-18)).slice(-18);
-      const promptAvoidQuestionTexts = recentAvoidQuestionTexts.slice(-16);
-      const seenQuestionKeys = createQuestionKeySet(recentAvoidQuestionTexts);
+      const promptAvoidQuestionTexts = [];
+      const seenQuestionKeys = createQuestionKeySet();
 
       const targetMcCount = Math.max(0, Number(quizMix.multipleChoice) || 0);
       const targetSaCount = Math.max(0, Number(quizMix.shortAnswer) || 0);
@@ -3843,18 +4094,19 @@ function App() {
 
       const { generateQuiz } = await getOpenAiService();
       const generationInput = generationSourceText || quizSourceText;
-      const appendQuizBatch = (quizResult) => {
+      const batchDiagnostics = [];
+      const appendQuizBatch = (quizResult, { requestMcCount = 0, requestSaCount = 0 } = {}) => {
         const quiz = normalizeQuizPayload(quizResult);
-        const scopedMultipleChoice = enforceScopedEvidence
-          ? filterGeneratedItemsToScope(Array.isArray(quiz.multipleChoice) ? quiz.multipleChoice : [], evidencePages)
-          : Array.isArray(quiz.multipleChoice)
-            ? quiz.multipleChoice
-            : [];
-        const scopedShortAnswer = enforceScopedEvidence
-          ? filterGeneratedItemsToScope(Array.isArray(quiz.shortAnswer) ? quiz.shortAnswer : [], evidencePages)
-          : Array.isArray(quiz.shortAnswer)
-            ? quiz.shortAnswer
-            : [];
+        const candidateMultipleChoice = Array.isArray(quiz.multipleChoice) ? quiz.multipleChoice : [];
+        const candidateShortAnswer = Array.isArray(quiz.shortAnswer) ? quiz.shortAnswer : [];
+        const scopeReadyMultipleChoice = enforceScopedEvidence
+          ? repairGeneratedQuizItemsToScope(candidateMultipleChoice, evidencePages)
+          : candidateMultipleChoice;
+        const scopeReadyShortAnswer = enforceScopedEvidence
+          ? repairGeneratedQuizItemsToScope(candidateShortAnswer, evidencePages)
+          : candidateShortAnswer;
+        const scopedMultipleChoice = scopeReadyMultipleChoice;
+        const scopedShortAnswer = scopeReadyShortAnswer;
         const mcBefore = nextMultipleChoice.length;
         const saBefore = nextShortAnswer.length;
 
@@ -3873,9 +4125,21 @@ function App() {
           targetSaCount
         );
 
+        const addedMc = nextMultipleChoice.length - mcBefore;
+        const addedSa = nextShortAnswer.length - saBefore;
         return {
-          addedMc: nextMultipleChoice.length - mcBefore,
-          addedSa: nextShortAnswer.length - saBefore,
+          requestMcCount,
+          requestSaCount,
+          candidateMcCount: candidateMultipleChoice.length,
+          candidateSaCount: candidateShortAnswer.length,
+          recoveredMcCount: Math.max(0, scopeReadyMultipleChoice.length - candidateMultipleChoice.length),
+          recoveredSaCount: Math.max(0, scopeReadyShortAnswer.length - candidateShortAnswer.length),
+          scopedOutMcCount: Math.max(0, scopeReadyMultipleChoice.length - scopedMultipleChoice.length),
+          scopedOutSaCount: Math.max(0, scopeReadyShortAnswer.length - scopedShortAnswer.length),
+          notAcceptedMcCount: Math.max(0, scopedMultipleChoice.length - addedMc),
+          notAcceptedSaCount: Math.max(0, scopedShortAnswer.length - addedSa),
+          addedMc,
+          addedSa,
         };
       };
       const requestQuizBatch = async (requestMcCount, requestSaCount, avoidQuestions) => {
@@ -3888,7 +4152,9 @@ function App() {
           avoidQuestions,
           scopeLabel,
         });
-        return appendQuizBatch(quizResult);
+        const batchResult = appendQuizBatch(quizResult, { requestMcCount, requestSaCount });
+        batchDiagnostics.push(batchResult);
+        return batchResult;
       };
 
       const plannedBatchCount = Math.max(
@@ -3896,21 +4162,27 @@ function App() {
         Math.ceil(targetMcCount / mcBatchLimit),
         Math.ceil(targetSaCount / saBatchLimit)
       );
+      const maxBatchAttempts = plannedBatchCount + (enforceScopedEvidence ? 2 : 1);
+      const stallLimit = enforceScopedEvidence ? 2 : 1;
+      const overfetchBase = enforceScopedEvidence ? 2 : 1;
       let rollingAvoidQuestions = [...promptAvoidQuestionTexts];
-      for (let batchIndex = 0; batchIndex < plannedBatchCount; batchIndex += 1) {
+      let consecutiveNoProgress = 0;
+      for (let batchIndex = 0; batchIndex < maxBatchAttempts; batchIndex += 1) {
         if (nextMultipleChoice.length >= targetMcCount && nextShortAnswer.length >= targetSaCount) {
           break;
         }
 
         const remainingMc = Math.max(0, targetMcCount - nextMultipleChoice.length);
         const remainingSa = Math.max(0, targetSaCount - nextShortAnswer.length);
+        const extraMc = remainingMc > 0 ? Math.min(3, overfetchBase + batchIndex) : 0;
+        const extraSa = remainingSa > 0 ? Math.min(3, overfetchBase + batchIndex) : 0;
         const requestMcCount =
           remainingMc > 0
-            ? Math.min(mcBatchLimit, remainingMc + (remainingMc < mcBatchLimit ? 1 : 0))
+            ? Math.min(mcBatchLimit, remainingMc + extraMc)
             : 0;
         const requestSaCount =
           remainingSa > 0
-            ? Math.min(saBatchLimit, remainingSa + (remainingSa < saBatchLimit ? 1 : 0))
+            ? Math.min(saBatchLimit, remainingSa + extraSa)
             : 0;
 
         if (batchIndex > 0) {
@@ -3929,26 +4201,26 @@ function App() {
         );
 
         if (addedMc === 0 && addedSa === 0) {
-          break;
+          consecutiveNoProgress += 1;
+          if (consecutiveNoProgress >= stallLimit) {
+            break;
+          }
+          continue;
         }
+        consecutiveNoProgress = 0;
       }
 
       if (nextMultipleChoice.length < targetMcCount || nextShortAnswer.length < targetSaCount) {
-        const remainingMc = Math.max(0, targetMcCount - nextMultipleChoice.length);
-        const remainingSa = Math.max(0, targetSaCount - nextShortAnswer.length);
-
-        if (remainingMc > 0 || remainingSa > 0) {
-          setStatus(scopeLabel ? `퀴즈 세트 보완 중... (${scopeLabel})` : "퀴즈 세트 보완 중...");
-          await requestQuizBatch(
-            remainingMc > 0 ? Math.min(mcBatchLimit, remainingMc + 1) : 0,
-            remainingSa > 0 ? Math.min(saBatchLimit, remainingSa + 1) : 0,
-            rollingAvoidQuestions
-          );
-        }
-      }
-
-      if (nextMultipleChoice.length < targetMcCount || nextShortAnswer.length < targetSaCount) {
-        throw new Error("중복 문항을 제외하느라 충분한 새 문항을 만들지 못했습니다. 범위를 바꿔 다시 시도해 주세요.");
+        throw new Error(
+          buildQuizGenerationFailureMessage({
+            targetMcCount,
+            targetSaCount,
+            finalMcCount: nextMultipleChoice.length,
+            finalSaCount: nextShortAnswer.length,
+            batchDiagnostics,
+            enforceScopedEvidence,
+          })
+        );
       }
 
       const trimmedQuiz = {
@@ -5106,6 +5378,9 @@ function App() {
                 const targetDocId = selectedFileId || file?.name || "";
                 if (targetDocId) {
                   persistChapterRangeInput(targetDocId, autoChapterInput);
+                  void persistSharedChapterRangeInput(targetDocId, autoChapterInput, {
+                    syncState: String(selectedFileId || "").trim() === String(targetDocId || "").trim(),
+                  });
                 }
               } else {
                 autoChapterInput = "";
@@ -5203,7 +5478,26 @@ function App() {
             maxLengthPerRange: 14000,
             useOcr: false,
           }))?.chapters || [];
-        const hasScopedText = scopedSections.some((chapter) => String(chapter?.text || "").trim());
+        let hasScopedText = scopedSections.some((chapter) => String(chapter?.text || "").trim());
+        if (!hasScopedText) {
+          try {
+            setStatus(`${featureLabel}: 챕터 범위 OCR 텍스트 추출 중...`);
+            scopedSections =
+              (await extractPdfTextByRanges(file, targetChapters, {
+                maxLengthPerRange: 14000,
+                useOcr: true,
+                ocrLang: "kor+eng",
+                ocrScale: 1.35,
+                ocrMaxPixels: 1000000,
+                ocrPageOrder: "spread",
+                maxOcrPagesPerRange: 4,
+                onOcrProgress: (message) => setStatus(message),
+              }))?.chapters || [];
+            hasScopedText = scopedSections.some((chapter) => String(chapter?.text || "").trim());
+          } catch {
+            // Fall back to the already extracted base text below.
+          }
+        }
         if (!hasScopedText && fallbackChapterSourceText) {
           scopedSections = buildNonPdfChapterSectionsFromText(
             fallbackChapterSourceText,
@@ -5242,6 +5536,7 @@ function App() {
       pageInfo.total,
       pageInfo.used,
       persistChapterRangeInput,
+      persistSharedChapterRangeInput,
       resolveChapterRangeLimit,
       selectedFileId,
     ]
@@ -5547,6 +5842,9 @@ function App() {
       return;
     }
     persistChapterRangeInput(targetDocId, raw);
+    void persistSharedChapterRangeInput(targetDocId, raw, {
+      syncState: String(selectedFileId || "").trim() === String(targetDocId || "").trim(),
+    });
     setChapterRangeError("");
     setStatus(`챕터 범위를 저장했습니다. (${parsed.chapters.length} sections)`);
     setIsChapterRangeOpen(false);
@@ -5557,6 +5855,7 @@ function App() {
     pageInfo.total,
     pageInfo.used,
     persistChapterRangeInput,
+    persistSharedChapterRangeInput,
     resolveChapterRangeLimit,
     selectedFileId,
   ]);
@@ -7181,6 +7480,7 @@ function App() {
             theme={theme}
             user={user}
             onTierUpdated={refreshTier}
+            paymentReturnSignal={paymentReturnSignal}
           />
         </Suspense>
       )}

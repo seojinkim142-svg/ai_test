@@ -1,3 +1,4 @@
+import { Capacitor } from "@capacitor/core";
 import { useEffect, useRef, useState } from "react";
 import { confirmNicePayment, fetchNicePaymentsConfig } from "../services/nicepayments";
 import { getAccessToken } from "../services/supabase";
@@ -20,7 +21,27 @@ const cardPayPlans = {
 
 const NICEPAYMENTS_SCRIPT_ID = "nicepayments-js-sdk";
 const DEFAULT_NICEPAYMENTS_SCRIPT = "https://pay.nicepay.co.kr/v1/js/";
+const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
+const CARD_RETURN_QUERY_KEYS = ["nicePay", "np_token", "orderId", "amount", "message"];
 let niceScriptPromise = null;
+
+function appendNativeReturnMode(rawUrl, appOrigin) {
+  try {
+    const target = new URL(String(rawUrl || "").trim(), appOrigin);
+    if (IS_NATIVE_PLATFORM) {
+      target.searchParams.set("mode", "native");
+    }
+    return target.toString();
+  } catch {
+    return String(rawUrl || "").trim();
+  }
+}
+
+function getCardReturnKey(params) {
+  const parts = CARD_RETURN_QUERY_KEYS.map((key) => `${key}:${String(params.get(key) || "").trim()}`);
+  const hasValue = parts.some((entry) => !entry.endsWith(":"));
+  return hasValue ? parts.join("|") : "";
+}
 
 function loadNicePaymentsScript(src) {
   if (typeof window === "undefined") {
@@ -70,6 +91,7 @@ export function useCardPayment({
   user,
   selectedPlan,
   billingMonths = 1,
+  paymentReturnSignal = 0,
   onTierUpdated,
   setPaymentError,
   setPaymentNotice,
@@ -82,7 +104,7 @@ export function useCardPayment({
     returnUrl: "",
     scriptUrl: "",
   });
-  const handledCardReturnRef = useRef(false);
+  const handledCardReturnRef = useRef("");
   const runtimeConfigRequestedRef = useRef(false);
   const envCardClientId = String(import.meta.env.VITE_NICEPAYMENTS_CLIENT_ID || "").trim();
   const envScriptUrl = String(import.meta.env.VITE_NICEPAYMENTS_JS_URL || "").trim() || DEFAULT_NICEPAYMENTS_SCRIPT;
@@ -127,7 +149,6 @@ export function useCardPayment({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (handledCardReturnRef.current) return;
 
     const params = new URLSearchParams(window.location.search);
     const cardState = params.get("nicePay");
@@ -135,9 +156,10 @@ export function useCardPayment({
     const orderId = params.get("orderId");
     const amountParam = params.get("amount");
     const failMessage = params.get("message");
+    const handledKey = getCardReturnKey(params);
 
     if (!cardState && !token) return;
-    handledCardReturnRef.current = true;
+    if (handledKey && handledCardReturnRef.current === handledKey) return;
 
     const clearUrl = () => {
       const cleanUrl = `${window.location.origin}${window.location.pathname}`;
@@ -145,6 +167,7 @@ export function useCardPayment({
     };
 
     if (cardState === "fail") {
+      handledCardReturnRef.current = handledKey;
       setPaymentNotice("");
       setPaymentError(failMessage ? `나이스페이 결제 실패: ${failMessage}` : "나이스페이 결제가 실패했습니다.");
       localStorage.removeItem(CARD_PAYMENT_STORAGE_KEY);
@@ -154,12 +177,14 @@ export function useCardPayment({
     }
 
     if (cardState !== "success") {
+      handledCardReturnRef.current = handledKey;
       clearPaymentReturnPending();
       clearUrl();
       return;
     }
 
     if (!token || !orderId || !amountParam) {
+      handledCardReturnRef.current = handledKey;
       setPaymentError("결제 정보를 찾을 수 없습니다. 다시 시도해주세요.");
       clearPaymentReturnPending();
       clearUrl();
@@ -179,6 +204,7 @@ export function useCardPayment({
     const storedMonths = Number(stored.billingMonths ?? stored.months ?? 1);
 
     if (!Number.isFinite(amount) || amount <= 0) {
+      handledCardReturnRef.current = handledKey;
       setPaymentError("결제 금액 정보가 올바르지 않습니다. 다시 시도해주세요.");
       clearPaymentReturnPending();
       clearUrl();
@@ -186,11 +212,18 @@ export function useCardPayment({
     }
 
     if (storedAmount && storedAmount !== amount) {
+      handledCardReturnRef.current = handledKey;
       setPaymentError("결제 금액이 일치하지 않습니다. 다시 시도해주세요.");
       clearPaymentReturnPending();
       clearUrl();
       return;
     }
+
+    if (!user?.id) {
+      return;
+    }
+
+    handledCardReturnRef.current = handledKey;
 
     if (!user?.id) {
       setPaymentError("결제 확인에는 로그인이 필요합니다.");
@@ -249,6 +282,7 @@ export function useCardPayment({
   }, [
     normalizedBillingMonths,
     onTierUpdated,
+    paymentReturnSignal,
     selectedCardPlan?.tier,
     setPaymentError,
     setPaymentNotice,
@@ -337,7 +371,7 @@ export function useCardPayment({
         ? `${selectedCardPlan.orderName} x ${normalizedBillingMonths} months`
         : selectedCardPlan.orderName;
     const appOrigin = resolvePublicAppOrigin() || window.location.origin;
-    const fallbackReturnUrl = `${appOrigin}/api/nicepayments/return`;
+    const fallbackReturnUrl = appendNativeReturnMode(`${appOrigin}/api/nicepayments/return`, appOrigin);
     const configuredReturnUrl = envReturnUrl || runtimeCardConfig.returnUrl;
     let returnUrl = fallbackReturnUrl;
 
@@ -346,7 +380,7 @@ export function useCardPayment({
         const parsedReturnUrl = new URL(configuredReturnUrl, appOrigin);
         const isLocalhostReturn = ["localhost", "127.0.0.1"].includes(parsedReturnUrl.hostname);
         if (!import.meta.env.PROD || !isLocalhostReturn) {
-          returnUrl = parsedReturnUrl.toString();
+          returnUrl = appendNativeReturnMode(parsedReturnUrl.toString(), appOrigin);
         }
       } catch {
         returnUrl = fallbackReturnUrl;
