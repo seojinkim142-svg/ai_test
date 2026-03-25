@@ -2,14 +2,14 @@ import { Capacitor } from "@capacitor/core";
 import { MODEL } from "../constants";
 import { resolvePublicAppOrigin } from "../utils/appOrigin";
 
-const DIRECT_OPENAI_BASE_RE = /^https:\/\/api\.openai\.com(?:$|\/)/i;
+const DIRECT_DEEPSEEK_BASE_RE = /^https:\/\/api\.deepseek\.com(?:$|\/)/i;
 
 function trimTrailingSlash(value) {
   return String(value || "").trim().replace(/\/+$/, "");
 }
 
-function resolveOpenAiBaseUrl() {
-  const explicitBase = trimTrailingSlash(import.meta.env.VITE_OPENAI_BASE_URL);
+function resolveDeepSeekBaseUrl() {
+  const explicitBase = trimTrailingSlash(import.meta.env.VITE_DEEPSEEK_BASE_URL || import.meta.env.VITE_OPENAI_BASE_URL);
   if (explicitBase) return explicitBase;
 
   const publicAppOrigin = trimTrailingSlash(resolvePublicAppOrigin());
@@ -21,17 +21,17 @@ function resolveOpenAiBaseUrl() {
   return "/api/openai";
 }
 
-const OPENAI_BASE_URL = resolveOpenAiBaseUrl();
-const IS_DIRECT_OPENAI_BASE = DIRECT_OPENAI_BASE_RE.test(OPENAI_BASE_URL);
-const USES_DEV_PROXY = import.meta.env.DEV && OPENAI_BASE_URL.startsWith("/api/openai");
+const DEEPSEEK_BASE_URL = resolveDeepSeekBaseUrl();
+const IS_DIRECT_DEEPSEEK_BASE = DIRECT_DEEPSEEK_BASE_RE.test(DEEPSEEK_BASE_URL);
+const USES_DEV_PROXY = import.meta.env.DEV && DEEPSEEK_BASE_URL.startsWith("/api/openai");
 const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
-const USES_RELATIVE_BASE = OPENAI_BASE_URL.startsWith("/");
-const CHAT_URL = `${OPENAI_BASE_URL}/v1/chat/completions`;
+const USES_RELATIVE_BASE = DEEPSEEK_BASE_URL.startsWith("/");
+const CHAT_URL = `${DEEPSEEK_BASE_URL}/v1/chat/completions`;
 const TUTOR_FALLBACK_MODELS = [
   MODEL,
-  import.meta.env.VITE_OPENAI_TUTOR_MODEL || "",
-  "gpt-4.1-mini",
-  "gpt-4o-mini",
+  import.meta.env.VITE_DEEPSEEK_TUTOR_MODEL || import.meta.env.VITE_OPENAI_TUTOR_MODEL || "",
+  "deepseek-chat",
+  "deepseek-reasoner",
 ]
   .map((name) => String(name || "").trim())
   .filter(Boolean)
@@ -1548,6 +1548,32 @@ function fallbackOxItems(extractedText) {
     evidenceSnippet: "",
   }));
 }
+// Simple in-memory cache for quiz generation
+const quizCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+function getCacheKey(text, options) {
+  const hash = btoa(encodeURIComponent(text + JSON.stringify(options)));
+  return `quiz_${hash}`;
+}
+
+function getCachedResult(key) {
+  const entry = quizCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL) {
+    quizCache.delete(key);
+    return null;
+  }
+  return entry.result;
+}
+
+function setCachedResult(key, result) {
+  quizCache.set(key, {
+    result,
+    timestamp: Date.now()
+  });
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -1569,17 +1595,17 @@ function parseRetryAfterSeconds(response) {
 }
 
 async function postChatRequest(body, { retries = 1 } = {}) {
-  const apiKey = (import.meta.env.VITE_OPENAI_API_KEY || "").trim();
+  const apiKey = (import.meta.env.VITE_DEEPSEEK_API_KEY || import.meta.env.VITE_OPENAI_API_KEY || "").trim();
 
   if (IS_NATIVE_PLATFORM && USES_RELATIVE_BASE) {
     throw new Error(
-      "모바일 앱에서는 API 절대 경로가 필요합니다. `VITE_PUBLIC_APP_ORIGIN` 또는 `VITE_OPENAI_BASE_URL`을 설정한 뒤 APK를 다시 빌드해주세요."
+      "모바일 앱에서는 API 절대 경로가 필요합니다. `VITE_PUBLIC_APP_ORIGIN` 또는 `VITE_DEEPSEEK_BASE_URL`을 설정한 뒤 APK를 다시 빌드해주세요."
     );
   }
 
-  if ((IS_DIRECT_OPENAI_BASE || USES_DEV_PROXY) && !apiKey) {
+  if ((IS_DIRECT_DEEPSEEK_BASE || USES_DEV_PROXY) && !apiKey) {
     throw new Error(
-      "OpenAI API key is missing. Add `VITE_OPENAI_API_KEY` to your `.env` and restart the dev server."
+      "DeepSeek API key is missing. Add `VITE_DEEPSEEK_API_KEY` to your `.env` and restart the dev server."
     );
   }
 
@@ -1596,7 +1622,7 @@ async function postChatRequest(body, { retries = 1 } = {}) {
       body: JSON.stringify(body),
     });
   } catch (err) {
-    throw new Error(`OpenAI request failed: ${err.message || err}`);
+    throw new Error(`DeepSeek request failed: ${err.message || err}`);
   }
 
   if (response.status === 429) {
@@ -1630,7 +1656,7 @@ async function postChatRequest(body, { retries = 1 } = {}) {
       // Body was not JSON; keep raw text
     }
 
-    throw new Error(`OpenAI API error: ${response.status} ${message}`);
+    throw new Error(`DeepSeek API error: ${response.status} ${message}`);
   }
 
   return response.json();
@@ -1641,6 +1667,23 @@ export async function generateQuiz(
 ) {
   const mcCount = Math.max(0, Math.min(10, Number(multipleChoiceCount) || 0));
   const saCount = Math.max(0, Math.min(10, Number(shortAnswerCount) || 0));
+  
+  // 캐싱 키 생성
+  const cacheKey = getCacheKey(extractedText, { 
+    type: 'quiz', 
+    mcCount, 
+    saCount, 
+    avoidQuestions, 
+    scopeLabel 
+  });
+  
+  // 캐시 확인
+  const cached = getCachedResult(cacheKey);
+  if (cached) {
+    console.log('Quiz cache hit');
+    return cached;
+  }
+
   const prompt = buildQuizPrompt(extractedText, {
     multipleChoiceCount: mcCount,
     shortAnswerCount: saCount,
@@ -1673,11 +1716,16 @@ export async function generateQuiz(
     .map(normalizeGeneratedItem)
     .filter((item) => !isLowValueStudyPrompt(String(item?.question || item?.prompt || "").trim()))
     .filter(isObjectiveShortAnswerItem);
-  return {
+  
+  const result = {
     ...parsed,
     multipleChoice,
     shortAnswer,
   };
+  
+  // 캐시 저장
+  setCachedResult(cacheKey, result);
+  return result;
 }
 
 export async function generateHardQuiz(extractedText, { count = 3, avoidQuestions = [] } = {}) {

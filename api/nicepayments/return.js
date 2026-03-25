@@ -5,15 +5,20 @@ import {
   getRuntimeConfig,
   makeNiceApiUrl,
   parseRequestBody,
-  redirectToClient,
   safeEqual,
   sendJson,
 } from "../../lib/payments/nicepayments.js";
+import { redirectToPaymentClient } from "../../lib/payments/client-redirect.js";
 
-const failAndRedirect = (res, clientOrigin, message) => {
-  redirectToClient(res, clientOrigin, {
-    state: "fail",
-    message,
+const failAndRedirect = (req, res, clientOrigin, message) => {
+  redirectToPaymentClient({
+    req,
+    res,
+    clientOrigin,
+    params: {
+      nicePay: "fail",
+      message,
+    },
   });
 };
 
@@ -49,7 +54,7 @@ export default async function handler(req, res) {
   }
 
   if (!clientId || !secretKey) {
-    failAndRedirect(res, clientOrigin, "NICEPAYMENTS credentials are not set.");
+    failAndRedirect(req, res, clientOrigin, "NICEPAYMENTS credentials are not set.");
     return;
   }
 
@@ -57,14 +62,14 @@ export default async function handler(req, res) {
   try {
     body = await parseRequestBody(req);
   } catch {
-    failAndRedirect(res, clientOrigin, "Invalid return payload.");
+    failAndRedirect(req, res, clientOrigin, "Invalid return payload.");
     return;
   }
 
   const authResultCode = String(body.authResultCode || body.resultCode || "").trim();
   const authResultMsg = String(body.authResultMsg || body.resultMsg || "").trim();
   if (authResultCode !== "0000") {
-    failAndRedirect(res, clientOrigin, authResultMsg || "Payment authorization failed.");
+    failAndRedirect(req, res, clientOrigin, authResultMsg || "Payment authorization failed.");
     return;
   }
 
@@ -76,12 +81,12 @@ export default async function handler(req, res) {
   const responseClientId = String(body.clientId || clientId).trim();
 
   if (!tid || !orderId || !amount || !authToken || !signature) {
-    failAndRedirect(res, clientOrigin, "Required payment fields are missing.");
+    failAndRedirect(req, res, clientOrigin, "Required payment fields are missing.");
     return;
   }
 
   if (responseClientId !== clientId) {
-    failAndRedirect(res, clientOrigin, "Client ID does not match.");
+    failAndRedirect(req, res, clientOrigin, "Client ID does not match.");
     return;
   }
 
@@ -93,13 +98,13 @@ export default async function handler(req, res) {
   });
 
   if (!safeEqual(signature.toLowerCase(), expectedSignature.toLowerCase())) {
-    failAndRedirect(res, clientOrigin, "Signature verification failed.");
+    failAndRedirect(req, res, clientOrigin, "Signature verification failed.");
     return;
   }
 
   const amountNumber = Number(amount);
   if (!Number.isFinite(amountNumber) || amountNumber <= 0) {
-    failAndRedirect(res, clientOrigin, "Invalid payment amount.");
+    failAndRedirect(req, res, clientOrigin, "Invalid payment amount.");
     return;
   }
 
@@ -125,7 +130,7 @@ export default async function handler(req, res) {
 
     if (!confirmResponse.ok) {
       const message = String(data?.resultMsg || data?.message || data?.msg || "Payment confirmation failed.");
-      failAndRedirect(res, clientOrigin, message);
+      failAndRedirect(req, res, clientOrigin, message);
       return;
     }
 
@@ -145,13 +150,18 @@ export default async function handler(req, res) {
       secretKey
     );
 
-    redirectToClient(res, clientOrigin, {
-      state: "success",
-      token,
-      orderId: confirmedOrderId,
-      amount: confirmedAmount,
+    redirectToPaymentClient({
+      req,
+      res,
+      clientOrigin,
+      params: {
+        nicePay: "success",
+        np_token: token,
+        orderId: confirmedOrderId,
+        amount: confirmedAmount,
+      },
     });
   } catch (error) {
-    failAndRedirect(res, clientOrigin, `Payment confirmation request failed: ${error.message}`);
+    failAndRedirect(req, res, clientOrigin, `Payment confirmation request failed: ${error.message}`);
   }
 }

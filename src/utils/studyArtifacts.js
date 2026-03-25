@@ -4,6 +4,7 @@ const PARTIAL_SUMMARY_ARTIFACT_KEY = "__partial_summary_state_v1";
 const PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY = "__partial_summary_library_v1";
 const REVIEW_NOTES_ARTIFACT_KEY = "__review_notes_v1";
 const EXAM_CRAM_ARTIFACT_KEY = "__exam_cram_v1";
+const CHAPTER_RANGE_ARTIFACT_KEY = "__chapter_ranges_v1";
 const LEGACY_HIGHLIGHTS_WRAP_KEY = "__legacy_highlights_payload_v1";
 const MOJIBAKE_COMPAT_CHAR_RE = /[\uF900-\uFAFF]/;
 const REVIEW_NOTE_SOURCE_TYPES = new Set(["quiz_multiple_choice", "quiz_short_answer", "ox"]);
@@ -237,6 +238,18 @@ export function readExamCramFromHighlights(highlightsValue) {
   };
 }
 
+export function readChapterRangeInputFromHighlights(highlightsValue) {
+  const base = isPlainObject(highlightsValue) ? highlightsValue : null;
+  const rawState = base?.[CHAPTER_RANGE_ARTIFACT_KEY];
+  if (typeof rawState === "string") {
+    return String(rawState || "").trim();
+  }
+  if (!isPlainObject(rawState)) {
+    return "";
+  }
+  return String(rawState?.input || rawState?.value || "").trim();
+}
+
 export function writePartialSummaryBundleToHighlights(
   highlightsValue,
   {
@@ -321,6 +334,29 @@ export function writeExamCramToHighlights(highlightsValue, { content, scopeLabel
     };
   } else {
     delete base[EXAM_CRAM_ARTIFACT_KEY];
+  }
+
+  delete base.__instructor_emphasis_library_v1;
+  delete base.__instructor_emphasis_active_id_v1;
+  delete base.__instructor_emphasis_v1;
+
+  return Object.keys(base).length > 0 ? base : null;
+}
+
+export function writeChapterRangeInputToHighlights(highlightsValue, input = "") {
+  const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
+  if (!isPlainObject(highlightsValue) && highlightsValue != null) {
+    base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
+  }
+
+  const normalizedInput = String(input || "").trim();
+  if (normalizedInput) {
+    base[CHAPTER_RANGE_ARTIFACT_KEY] = {
+      input: normalizedInput,
+      updatedAt: new Date().toISOString(),
+    };
+  } else {
+    delete base[CHAPTER_RANGE_ARTIFACT_KEY];
   }
 
   delete base.__instructor_emphasis_library_v1;

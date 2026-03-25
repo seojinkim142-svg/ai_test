@@ -1,3 +1,4 @@
+import { Capacitor } from "@capacitor/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   chargeNicePaymentsSubscription,
@@ -10,6 +11,8 @@ import { clearPaymentReturnPending, markPaymentReturnPending } from "../utils/pa
 
 const NICE_BILLING_SCRIPT_ID = "nicepayments-billing-sdk";
 const DEFAULT_NICE_BILLING_SCRIPT = "https://pg-web.nicepay.co.kr/v3/common/js/nicepay-pgweb.js";
+const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
+const NICE_BILLING_RETURN_QUERY_KEYS = ["niceBilling", "trial", "orderId", "amount", "message"];
 
 const cardSubscriptionPlans = {
   Pro: {
@@ -25,6 +28,12 @@ const cardSubscriptionPlans = {
 };
 
 let billingScriptPromise = null;
+
+function getNiceBillingReturnKey(params) {
+  const parts = NICE_BILLING_RETURN_QUERY_KEYS.map((key) => `${key}:${String(params.get(key) || "").trim()}`);
+  const hasValue = parts.some((entry) => !entry.endsWith(":"));
+  return hasValue ? parts.join("|") : "";
+}
 
 function loadNiceBillingScript(src) {
   if (typeof window === "undefined") {
@@ -86,6 +95,7 @@ export function useNiceSubscription({
   user,
   selectedPlan,
   billingMonths = 1,
+  paymentReturnSignal = 0,
   enabled = true,
   proTrialEligible = false,
   onTierUpdated,
@@ -97,7 +107,7 @@ export function useNiceSubscription({
   const [isStartingSubscription, setIsStartingSubscription] = useState(false);
   const [isChargingSubscription, setIsChargingSubscription] = useState(false);
   const [isCancellingSubscription, setIsCancellingSubscription] = useState(false);
-  const handledReturnRef = useRef(false);
+  const handledReturnRef = useRef("");
 
   const selectedPlanConfig = cardSubscriptionPlans[selectedPlan];
   const normalizedBillingMonths =
@@ -162,15 +172,17 @@ export function useNiceSubscription({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (handledReturnRef.current) return;
 
     const params = new URLSearchParams(window.location.search);
     const billingState = params.get("niceBilling");
     const message = params.get("message");
     const trialMode = params.get("trial") === "1";
+    const handledKey = getNiceBillingReturnKey(params);
 
     if (!billingState) return;
-    handledReturnRef.current = true;
+    if (handledKey && handledReturnRef.current === handledKey) return;
+    if (billingState === "success" && !user?.id) return;
+    handledReturnRef.current = handledKey;
 
     const clearUrl = () => {
       const cleanUrl = `${window.location.origin}${window.location.pathname}`;
@@ -203,7 +215,7 @@ export function useNiceSubscription({
         clearUrl();
       }
     })();
-  }, [loadSubscriptionStatus, onTierUpdated, setPaymentError, setPaymentNotice]);
+  }, [loadSubscriptionStatus, onTierUpdated, paymentReturnSignal, setPaymentError, setPaymentNotice, user?.id]);
 
   const startSubscription = async ({ proTrial = false } = {}) => {
     const useProTrial = proTrial === true && canStartProTrial;
@@ -255,6 +267,7 @@ export function useNiceSubscription({
           billingMonths: subscriptionBillingMonths,
           itemName: selectedItemName,
           proTrial: useProTrial,
+          nativeReturn: IS_NATIVE_PLATFORM,
           buyerName: user?.user_metadata?.name || user?.email?.split("@")[0] || "user",
           buyerEmail: user?.email || "",
         },

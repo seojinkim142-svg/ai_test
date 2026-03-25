@@ -59,7 +59,7 @@ function createManualChunks(id) {
   return "vendor";
 }
 
-export default defineConfig(({ mode }) => {
+export default defineConfig(async ({ mode }) => {
   const root = process.cwd();
   const supabaseEnvPath = path.resolve(root, "supabase.env");
 
@@ -122,20 +122,93 @@ export default defineConfig(({ mode }) => {
     },
   };
 
+  // 번들 분석 플러그인 (개발 모드에서만)
+  let bundleAnalyzerPlugin = null;
+  if (mode === 'analyze') {
+    const { default: visualizer } = await import('rollup-plugin-visualizer');
+    bundleAnalyzerPlugin = visualizer({
+      filename: './dist/bundle-analysis.html',
+      open: true,
+      gzipSize: true,
+      brotliSize: true,
+    });
+  }
+
   return {
     define: {
       __APP_AUTH_ENABLED__: JSON.stringify(authEnabledFromBuildEnv),
+      __APP_MODE__: JSON.stringify(mode),
     },
-    plugins: [react({ jsxRuntime: "automatic" }), adSenseHtmlPlugin],
+    plugins: [
+      react({ 
+        jsxRuntime: "automatic",
+        babel: {
+          plugins: [
+            // 코드 스플리팅을 위한 동적 임포트 변환
+            ['babel-plugin-transform-imports', {
+              'lodash': {
+                transform: 'lodash/${member}',
+                preventFullImport: true
+              }
+            }]
+          ]
+        }
+      }), 
+      adSenseHtmlPlugin,
+      ...(bundleAnalyzerPlugin ? [bundleAnalyzerPlugin] : [])
+    ],
     esbuild: {
       jsx: "automatic",
+      // 트리 쉐이킹 최적화
+      treeShaking: true,
+      // 데드 코드 제거
+      minifyIdentifiers: mode === 'production',
+      minifySyntax: mode === 'production',
+      minifyWhitespace: mode === 'production',
     },
     build: {
+      // 소스맵 설정
+      sourcemap: mode === 'development' ? 'inline' : false,
+      // 청크 크기 경고 임계값
+      chunkSizeWarningLimit: 1000, // 1MB
+      // 빌드 출력 디렉토리
+      outDir: 'dist',
+      // 빈 디렉토리 정리
+      emptyOutDir: true,
       rollupOptions: {
         output: {
           manualChunks: createManualChunks,
+          // 청크 파일명 포맷
+          chunkFileNames: mode === 'production' 
+            ? 'assets/[name]-[hash].js' 
+            : 'assets/[name].js',
+          entryFileNames: mode === 'production'
+            ? 'assets/[name]-[hash].js'
+            : 'assets/[name].js',
+          assetFileNames: mode === 'production'
+            ? 'assets/[name]-[hash].[ext]'
+            : 'assets/[name].[ext]',
+          // 코드 스플리팅 최적화
+          experimentalMinChunkSize: 10000, // 10KB
         },
+        // 외부 의존성 제외 (CDN에서 로드)
+        external: [],
       },
+      // 최소 청크 크기
+      minify: mode === 'production' ? 'terser' : false,
+      terserOptions: mode === 'production' ? {
+        compress: {
+          drop_console: true,
+          drop_debugger: true,
+          pure_funcs: ['console.log', 'console.info', 'console.debug'],
+        },
+        mangle: {
+          safari10: true,
+        },
+        format: {
+          comments: false,
+        },
+      } : {},
     },
     server: {
       proxy: {
@@ -158,5 +231,37 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    // 개발 서버 최적화
+    preview: {
+      port: 4173,
+      strictPort: true,
+    },
+    // 캐싱 설정
+    cacheDir: './node_modules/.vite',
+    // CSS 최적화
+    css: {
+      devSourcemap: mode === 'development',
+      modules: {
+        localsConvention: 'camelCase',
+      },
+    },
+    // 동적 임포트 최적화
+    optimizeDeps: {
+      include: [
+        'react',
+        'react-dom',
+        'react-router-dom',
+        '@capacitor/core',
+        '@supabase/supabase-js',
+      ],
+      exclude: [
+        'pdfjs-dist',
+        'tesseract.js',
+      ],
+      // 강제 사전 번들링
+      force: mode === 'development',
+    },
+    // 환경 변수 노출
+    envPrefix: ['VITE_', 'APP_'],
   };
 });
