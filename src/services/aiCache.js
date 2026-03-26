@@ -3,6 +3,8 @@
  * Redis나 IndexedDB를 활용한 영구 캐싱 시스템
  */
 
+import { useCallback, useEffect, useState } from 'react';
+
 // 캐시 설정
 const CACHE_CONFIG = {
   // 캐시 TTL (Time To Live) - 기본 24시간

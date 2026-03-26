@@ -1,4 +1,3 @@
-/* global process */
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import dotenv from "dotenv";
@@ -59,6 +58,10 @@ function createManualChunks(id) {
   return "vendor";
 }
 
+function trimTrailingSlash(value) {
+  return String(value || "").trim().replace(/\/+$/, "");
+}
+
 export default defineConfig(async ({ mode }) => {
   const root = process.cwd();
   const supabaseEnvPath = path.resolve(root, "supabase.env");
@@ -88,6 +91,9 @@ export default defineConfig(async ({ mode }) => {
   // (e.g. Vercel Project Settings -> Environment Variables).
   const authEnabledFromBuildEnv =
     process.env.VITE_AUTH_ENABLED == null ? "" : String(process.env.VITE_AUTH_ENABLED);
+  const deepSeekProxyTarget =
+    trimTrailingSlash(process.env.VITE_DEEPSEEK_BASE_URL || process.env.DEEPSEEK_UPSTREAM_BASE_URL) ||
+    "https://api.deepseek.com";
   const adSensePublisherId =
     process.env.VITE_ADSENSE_PUBLISHER_ID == null ? "" : String(process.env.VITE_ADSENSE_PUBLISHER_ID).trim();
   const hasValidAdSensePublisherId = /^ca-pub-\d{16}$/.test(adSensePublisherId);
@@ -213,7 +219,7 @@ export default defineConfig(async ({ mode }) => {
     server: {
       proxy: {
         "/api/openai": {
-          target: "https://api.openai.com",
+          target: deepSeekProxyTarget,
           changeOrigin: true,
           rewrite: (p) => p.replace(/^\/api\/openai/, ""),
         },

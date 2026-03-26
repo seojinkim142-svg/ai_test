@@ -1,5 +1,4 @@
 // 목차 추출 알고리즘 테스트 스크립트
-import { extractChapterRangesFromToc } from './src/utils/pdf.js';
 
 // 테스트용 가상 PDF 파일 (실제 파일이 없으므로 구조만 테스트)
 async function testTocAlgorithm() {
