@@ -3,6 +3,7 @@ import { MODEL } from "../constants";
 import { resolvePublicAppOrigin } from "../utils/appOrigin";
 
 const DIRECT_DEEPSEEK_BASE_RE = /^https:\/\/api\.deepseek\.com(?:$|\/)/i;
+const DIRECT_OPENAI_BASE_RE = /^https:\/\/api\.openai\.com(?:$|\/)/i;
 
 function trimTrailingSlash(value) {
   return String(value || "").trim().replace(/\/+$/, "");
@@ -23,6 +24,7 @@ function resolveDeepSeekBaseUrl() {
 
 const DEEPSEEK_BASE_URL = resolveDeepSeekBaseUrl();
 const IS_DIRECT_DEEPSEEK_BASE = DIRECT_DEEPSEEK_BASE_RE.test(DEEPSEEK_BASE_URL);
+const IS_DIRECT_OPENAI_BASE = DIRECT_OPENAI_BASE_RE.test(DEEPSEEK_BASE_URL);
 const USES_DEV_PROXY = import.meta.env.DEV && DEEPSEEK_BASE_URL.startsWith("/api/openai");
 const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
 const USES_RELATIVE_BASE = DEEPSEEK_BASE_URL.startsWith("/");
@@ -1594,8 +1596,20 @@ function parseRetryAfterSeconds(response) {
   return null;
 }
 
+function resolveClientApiKey() {
+  if (IS_DIRECT_DEEPSEEK_BASE || USES_DEV_PROXY) {
+    return String(import.meta.env.VITE_DEEPSEEK_API_KEY || "").trim();
+  }
+
+  if (IS_DIRECT_OPENAI_BASE) {
+    return String(import.meta.env.VITE_OPENAI_API_KEY || "").trim();
+  }
+
+  return "";
+}
+
 async function postChatRequest(body, { retries = 1 } = {}) {
-  const apiKey = (import.meta.env.VITE_DEEPSEEK_API_KEY || import.meta.env.VITE_OPENAI_API_KEY || "").trim();
+  const apiKey = resolveClientApiKey();
 
   if (IS_NATIVE_PLATFORM && USES_RELATIVE_BASE) {
     throw new Error(
@@ -1606,6 +1620,12 @@ async function postChatRequest(body, { retries = 1 } = {}) {
   if ((IS_DIRECT_DEEPSEEK_BASE || USES_DEV_PROXY) && !apiKey) {
     throw new Error(
       "DeepSeek API key is missing. Add `VITE_DEEPSEEK_API_KEY` to your `.env` and restart the dev server."
+    );
+  }
+
+  if (IS_DIRECT_OPENAI_BASE && !apiKey) {
+    throw new Error(
+      "OpenAI API key is missing. Add `VITE_OPENAI_API_KEY` to your `.env` and restart the dev server."
     );
   }
 
