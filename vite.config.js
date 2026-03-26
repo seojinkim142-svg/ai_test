@@ -13,7 +13,7 @@ function createManualChunks(id) {
   if (!normalizedId.includes("/node_modules/")) return null;
 
   if (normalizedId.includes("/pdfjs-dist/") || normalizedId.includes("/tesseract.js/")) {
-    return "pdf-runtime";
+    return null;
   }
 
   if (normalizedId.includes("/jspdf/")) {
