@@ -743,6 +743,7 @@ function App() {
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [selectedFileId, setSelectedFileId] = useState(null);
+  const [pendingDocumentOpen, setPendingDocumentOpen] = useState(null);
   const [panelTab, setPanelTab] = useState("summary");
   const [splitPercent, setSplitPercent] = useState(50);
   const [isResizingSplit, setIsResizingSplit] = useState(false);
@@ -812,6 +813,7 @@ function App() {
   const loadUploadsRef = useRef(null);
   const loadUploadsRequestSeqRef = useRef(0);
   const loadFoldersRequestSeqRef = useRef(0);
+  const fileOpenRequestSeqRef = useRef(0);
   const detailContainerRef = useRef(null);
   const summaryRef = useRef(null);
   const mockExamPrintRef = useRef(null);
@@ -1044,10 +1046,12 @@ function App() {
   );
 
   const resetActiveDocumentState = useCallback(() => {
+    fileOpenRequestSeqRef.current += 1;
     if (pdfUrl) {
       URL.revokeObjectURL(pdfUrl);
     }
     setSelectedFileId(null);
+    setPendingDocumentOpen(null);
     setFile(null);
     setPdfUrl(null);
     setExtractedText("");
@@ -1074,6 +1078,7 @@ function App() {
     setOxSelections({});
     setOxExplanationOpen({});
     setThumbnailUrl(null);
+    setIsLoadingText(false);
     setPanelTab("summary");
     setMockExams([]);
     setActiveMockExamId(null);
@@ -2210,25 +2215,47 @@ function App() {
   const processSelectedFile = useCallback(
     async (item, { pushState = true } = {}) => {
       if (!item) return;
+      const requestSeq = fileOpenRequestSeqRef.current + 1;
+      fileOpenRequestSeqRef.current = requestSeq;
       let resolvedItem = item;
+      const nextDocId = resolvedItem.id;
+      setPendingDocumentOpen({
+        id: nextDocId,
+        name: String(resolvedItem?.name || resolvedItem?.file?.name || "문서").trim() || "문서",
+      });
       if (!resolvedItem.file) {
         try {
           resolvedItem = await ensureFileForItem(resolvedItem);
+          if (fileOpenRequestSeqRef.current !== requestSeq) return;
         } catch (err) {
+          if (fileOpenRequestSeqRef.current !== requestSeq) return;
+          setPendingDocumentOpen(null);
           setError(`파일을 불러오지 못했습니다. ${err.message}`);
           return;
         }
       }
-      if (!resolvedItem?.file) return;
+      if (!resolvedItem?.file) {
+        if (fileOpenRequestSeqRef.current === requestSeq) {
+          setPendingDocumentOpen(null);
+        }
+        return;
+      }
 
       const targetFile = normalizeSupportedFile(resolvedItem.file);
-      if (!(targetFile instanceof File)) return;
+      if (!(targetFile instanceof File)) {
+        if (fileOpenRequestSeqRef.current === requestSeq) {
+          setPendingDocumentOpen(null);
+        }
+        return;
+      }
       const targetFileKind = detectSupportedDocumentKind(targetFile);
       if (!targetFileKind) {
+        if (fileOpenRequestSeqRef.current === requestSeq) {
+          setPendingDocumentOpen(null);
+        }
         setError("지원하지 않는 파일 형식입니다. PDF, DOCX, PPTX만 지원합니다.");
         return;
       }
-      const nextDocId = resolvedItem.id;
       const savedChapterRangeInput = isPdfDocumentKind(targetFileKind)
         ? loadSavedChapterRangeInput(nextDocId)
         : "";
@@ -2313,16 +2340,17 @@ function App() {
       const artifactsPromise = loadArtifacts(nextDocId);
 
       try {
-      const [textResult, thumb, loaded] = await Promise.all([
-        extractDocumentText(targetFile, {
-          pageLimit: 30,
-          maxLength: 12000,
-          useOcr: false, // PDF 미리보기 로딩 시에는 OCR 사용 안함
-          ocrLang: "kor+eng",
-        }),
-        generateDocumentThumbnail(targetFile),
-        artifactsPromise,
-      ]);
+        const [textResult, thumb, loaded] = await Promise.all([
+          extractDocumentText(targetFile, {
+            pageLimit: 30,
+            maxLength: 12000,
+            useOcr: false, // PDF 미리보기 로딩 시에는 OCR 사용 안함
+            ocrLang: "kor+eng",
+          }),
+          generateDocumentThumbnail(targetFile),
+          artifactsPromise,
+        ]);
+        if (fileOpenRequestSeqRef.current !== requestSeq) return;
         const { text, pagesUsed, totalPages } = textResult;
         setExtractedText(text);
         setPreviewText(text);
@@ -2336,16 +2364,21 @@ function App() {
         setStatus(`텍스트 추출 완료 (${elapsedSeconds.toFixed(1)}s)`);
         setError("");
         await Promise.all([loadMockExams(nextDocId), loadFlashcards(nextDocId)]);
+        if (fileOpenRequestSeqRef.current !== requestSeq) return;
         if (loaded?.summary) {
           setStatus("Loaded saved summary.");
         }
       } catch (err) {
+        if (fileOpenRequestSeqRef.current !== requestSeq) return;
         setError(`문서 처리에 실패했습니다: ${err.message}`);
         setExtractedText("");
         setPreviewText("");
         setPageInfo({ used: 0, total: 0 });
       } finally {
-        setIsLoadingText(false);
+        if (fileOpenRequestSeqRef.current === requestSeq) {
+          setPendingDocumentOpen(null);
+          setIsLoadingText(false);
+        }
       }
     },
     [
@@ -2565,12 +2598,13 @@ function App() {
     ]
   );
 
-  const showDetail = Boolean(file && selectedFileId);
+  const showDetail = Boolean(selectedFileId || pendingDocumentOpen?.id);
   const shouldShowPremiumProfilePicker = Boolean(
     user && isPremiumTier && !loadingTier && showPremiumProfilePicker
   );
 
   const goBackToList = useCallback(() => {
+    fileOpenRequestSeqRef.current += 1;
     if (selectedFileId) {
       savePageProgressSnapshot({
         docId: selectedFileId,
@@ -2582,6 +2616,7 @@ function App() {
       URL.revokeObjectURL(pdfUrl);
     }
     setSelectedFileId(null);
+    setPendingDocumentOpen(null);
     setFile(null);
       setPdfUrl(null);
       setExtractedText("");
@@ -2634,6 +2669,7 @@ function App() {
     quizAutoRequestedRef.current = false;
     oxAutoRequestedRef.current = false;
     setArtifacts(null);
+    setIsLoadingText(false);
     resetQuizState();
     setStatus("?낅줈??紐⑸줉?쇰줈 ?뚯븘?붿뒿?덈떎.");
     setSelectedUploadIds([]);
@@ -2707,13 +2743,12 @@ function App() {
   const handleSelectFile = useCallback(
     async (item) => {
       try {
-        const ensured = await ensureFileForItemRef.current(item);
-        await processSelectedFileRef.current(ensured);
+        await processSelectedFileRef.current(item);
       } catch (err) {
         setError(`?좏깮???뚯씪???щ뒗 ???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       }
     },
-    [ensureFileForItemRef, processSelectedFileRef]
+    [processSelectedFileRef]
   );
 
 
@@ -5096,6 +5131,7 @@ function App() {
     splitStyle,
     pdfUrl,
     file,
+    pendingDocumentOpen,
     pageInfo,
     currentPage,
     handlePageChange,
