@@ -277,6 +277,7 @@ export default function DetailPage({
   handleGenerateExamCram,
   handleCreateReviewNotesMockExam,
   deleteQuiz,
+  deleteQuizItem,
   deleteOxQuestion,
   isLoadingOx,
   requestOxQuiz,
@@ -1463,6 +1464,8 @@ export default function DetailPage({
                         onSelectChoice={(qIdx, choiceIdx) => handleChoiceSelect(set.id, qIdx, choiceIdx)}
                         onShortAnswerChange={(idx, val) => handleShortAnswerChange(set.id, idx, val)}
                         onShortAnswerCheck={(idx) => handleShortAnswerCheck(set.id, idx)}
+                        onDeleteMultipleChoice={(qIdx) => deleteQuizItem(set.id, "multipleChoice", qIdx)}
+                        onDeleteShortAnswer={(qIdx) => deleteQuizItem(set.id, "shortAnswer", qIdx)}
                         onOxSelect={(idx, choice) => handleQuizOxSelect(set.id, idx, choice)}
                         onToggleOxExplanation={(idx) => handleToggleQuizOxExplanation(set.id, idx)}
                       />
@@ -1520,16 +1523,6 @@ export default function DetailPage({
                     : Array.isArray(oxItems) && oxItems.length > 0
                       ? "O/X 다시 생성"
                       : "O/X 생성"}
-                </button>
-                <button
-                  type="button"
-                  onClick={deleteQuiz}
-                  disabled={isLoadingQuiz || !Array.isArray(quizSets) || quizSets.length === 0}
-                  className="ghost-button w-full text-sm text-slate-200"
-                  data-ghost-size="xl"
-                  style={{ "--ghost-color": "148, 163, 184" }}
-                >
-                  퀴즈 삭제
                 </button>
               </div>
 
@@ -1737,4 +1730,5 @@ export default function DetailPage({
     </section>
   );
 }
+
 
