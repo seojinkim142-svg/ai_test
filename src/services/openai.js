@@ -193,12 +193,14 @@ You are a professor creating quiz questions from lecture material.
 
 [Rules]
 - Use only the selected chapter range shown below. Do not create questions from outside that range.
+- If a candidate question depends on content not explicitly present in the selected range, do not generate it.
 - Use document facts only as context; do not ask verbatim recall questions.
 - Questions must test understanding, comparison, application, misconception checks, or interpretation.
 - Avoid pure memorization prompts (raw URLs, names, single numbers).
 - If the document contains page tags like [p.12], first choose 1-2 tagged evidence passages and then write the question from that evidence only.
 - evidencePages must use only page numbers that actually appear in the provided page tags.
 - If the tagged evidence does not support the question, omit that item instead of using outside knowledge or other pages.
+- Never guess missing page numbers, and never assign a broad page range when the exact supporting page is unclear.
 - evidenceSnippet should be a short Korean source phrase copied or lightly normalized from the document so it can be highlighted later.
 - Short-answer items must have one exact, short answer only: a number, formula, term, concept name, or short phrase.
 - Do not generate essay-style prompts such as "설명하라", "서술하라", "논하라", "기술하라", or questions that require long prose.
@@ -258,6 +260,7 @@ You are creating high-difficulty mock exam items from the document.
 - If the document contains page tags like [p.12], select the supporting tagged evidence first and write the question from that evidence only.
 - evidencePages must reference only visible tagged pages.
 - If the tagged evidence does not support the question, omit that item instead of using outside knowledge or other pages.
+- Never guess missing page numbers, and never assign a broad page range when the exact supporting page is unclear.
 - evidenceSnippet should be a short source phrase copied or lightly normalized from the document.
 - Never ask textbook/preface metadata:
   target audience, whether exercises/cyber materials/code are included,
@@ -306,6 +309,7 @@ ${avoidBlock ? `- ${avoidBlock.replace(/\n/g, "\n  ")}` : ""}
 
 [Rules]
 0. Use only the selected chapter range above. Do not use content outside that range.
+0-1. If a statement cannot be supported by an explicit sentence inside the selected range, do not generate it.
 1. Maximum 10 items.
 2. Format: true/false.
 3. Base every item on explicit or strongly implied document content.
@@ -318,6 +322,7 @@ ${avoidBlock ? `- ${avoidBlock.replace(/\n/g, "\n  ")}` : ""}
 10. Include evidencePages and evidenceSnippet for every item.
 11. evidenceSnippet should be a short source phrase copied or lightly normalized from the document.
 12. If the tagged evidence does not support the statement, omit that item instead of using outside knowledge or other pages.
+12-1. Never guess missing page numbers, and never assign a broad page range when the exact supporting page is unclear.
 13. Exclude low-value metadata/trivia items:
    textbook target audience, supplement/material availability,
    author/publisher/contact, TOC/chapter structure.
