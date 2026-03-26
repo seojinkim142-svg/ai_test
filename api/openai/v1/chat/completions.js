@@ -125,7 +125,24 @@ const extractBearerToken = (authHeader) => {
 };
 
 const resolveServerApiKey = () =>
-  text(process.env.OPENAI_API_KEY || process.env.OPENAI_PROXY_API_KEY || process.env.VITE_OPENAI_API_KEY);
+  text(
+    process.env.DEEPSEEK_API_KEY ||
+      process.env.OPENAI_API_KEY ||
+      process.env.OPENAI_PROXY_API_KEY ||
+      process.env.VITE_DEEPSEEK_API_KEY ||
+      process.env.VITE_OPENAI_API_KEY
+  );
+
+const resolveUpstreamUrl = () =>
+  text(process.env.DEEPSEEK_UPSTREAM_URL || process.env.OPENAI_UPSTREAM_URL) ||
+  "https://api.deepseek.com/v1/chat/completions";
+
+const detectProviderName = (url) => {
+  const normalized = text(url).toLowerCase();
+  if (normalized.includes("deepseek")) return "DeepSeek";
+  if (normalized.includes("openai")) return "OpenAI";
+  return "LLM";
+};
 
 export default async function handler(req, res) {
   const allowOrigin = resolveAllowOrigin(req);
@@ -151,20 +168,20 @@ export default async function handler(req, res) {
 
   const incomingApiKey = extractBearerToken(req.headers.authorization);
   const apiKey = incomingApiKey || resolveServerApiKey();
+  const upstreamUrl = resolveUpstreamUrl();
+  const providerName = detectProviderName(upstreamUrl);
   if (!apiKey) {
     sendJson(
       res,
       500,
       {
         message:
-          "OpenAI API key is missing on server. Set OPENAI_API_KEY (or OPENAI_PROXY_API_KEY).",
+          `${providerName} API key is missing on server. Set ${providerName === "DeepSeek" ? "DEEPSEEK_API_KEY" : "OPENAI_API_KEY"}${providerName === "OpenAI" ? " (or OPENAI_PROXY_API_KEY)" : ""}.`,
       },
       allowOrigin
     );
     return;
   }
-
-  const upstreamUrl = text(process.env.OPENAI_UPSTREAM_URL) || "https://api.openai.com/v1/chat/completions";
 
   try {
     const upstream = await fetch(upstreamUrl, {
@@ -191,6 +208,6 @@ export default async function handler(req, res) {
 
     sendRaw(res, upstream.status, rawBody || "", allowOrigin);
   } catch (error) {
-    sendJson(res, 502, { message: `OpenAI proxy request failed: ${error.message}` }, allowOrigin);
+    sendJson(res, 502, { message: `${providerName} proxy request failed: ${error.message}` }, allowOrigin);
   }
 }

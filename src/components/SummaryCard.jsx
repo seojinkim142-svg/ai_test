@@ -355,6 +355,13 @@ function splitSummaryIntoPages(summary) {
   return packSectionChunksIntoPages(sectionChunks);
 }
 
+function isInteractiveElement(target) {
+  return (
+    target instanceof Element &&
+    Boolean(target.closest("a, button, input, textarea, select, label, summary, [contenteditable='true']"))
+  );
+}
+
 function SummaryCard({
   summary,
   renderExportPages = false,
@@ -367,10 +374,7 @@ function SummaryCard({
   );
   const hasSummary = normalizedSummary.length > 0;
   const [isExpanded, setIsExpanded] = useState(false);
-  const summaryKey = useMemo(
-    () => `${normalizedSummary.length}:${normalizedSummary.slice(0, 120)}`,
-    [normalizedSummary]
-  );
+  const summaryKey = normalizedSummary;
 
   const pages = useMemo(() => splitSummaryIntoPages(normalizedSummary), [normalizedSummary]);
   const [pageIndexBySummary, setPageIndexBySummary] = useState({});
@@ -453,6 +457,19 @@ function SummaryCard({
     typeof onResolveEvidence === "function" && typeof onJumpToEvidencePage === "function";
   const evidenceRequestKey = `${summaryKey}:${safePageIndex}`;
 
+  useEffect(() => {
+    setPageIndexBySummary((prev) => {
+      const current = prev[summaryKey] ?? 0;
+      const clamped = Math.max(0, Math.min(totalPages - 1, current));
+      if (current === clamped) return prev;
+
+      return {
+        ...prev,
+        [summaryKey]: clamped,
+      };
+    });
+  }, [summaryKey, totalPages]);
+
   const goPrev = useCallback(() => {
     setPageIndexBySummary((prev) => {
       const current = prev[summaryKey] ?? 0;
@@ -476,10 +493,7 @@ function SummaryCard({
   const handleSummaryPageClick = useCallback(
     (event) => {
       const target = event.target;
-      if (
-        target instanceof Element &&
-        target.closest("a, button, input, textarea, select, label, summary")
-      ) {
+      if (isInteractiveElement(target)) {
         return;
       }
 
@@ -511,21 +525,21 @@ function SummaryCard({
     [canGoNext, canGoPrev, goNext, goPrev]
   );
 
-  const handleNavPointerDown = useCallback(() => {}, []);
-
-  const handleNavClick = useCallback(() => {}, []);
-
   const handleCardKeyDown = useCallback(
     (event) => {
+      if (isInteractiveElement(event.target)) return;
+
       if (event.key === "ArrowLeft") {
+        if (!canGoPrev) return;
         event.preventDefault();
         goPrev();
       } else if (event.key === "ArrowRight") {
+        if (!canGoNext) return;
         event.preventDefault();
         goNext();
       }
     },
-    [goNext, goPrev]
+    [canGoNext, canGoPrev, goNext, goPrev]
   );
 
   useEffect(() => {
@@ -535,17 +549,21 @@ function SummaryCard({
     document.body.style.overflow = "hidden";
 
     const handleWindowKeyDown = (event) => {
+      if (isInteractiveElement(event.target)) return;
+
       if (event.key === "Escape") {
         event.preventDefault();
         setIsExpanded(false);
         return;
       }
       if (event.key === "ArrowLeft") {
+        if (!canGoPrev) return;
         event.preventDefault();
         goPrev();
         return;
       }
       if (event.key === "ArrowRight") {
+        if (!canGoNext) return;
         event.preventDefault();
         goNext();
       }
@@ -556,7 +574,7 @@ function SummaryCard({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener("keydown", handleWindowKeyDown);
     };
-  }, [goNext, goPrev, isExpanded]);
+  }, [canGoNext, canGoPrev, goNext, goPrev, isExpanded]);
 
   if (!hasSummary) return null;
 
@@ -586,29 +604,6 @@ function SummaryCard({
         tabIndex={0}
         onKeyDown={handleCardKeyDown}
       >
-        <div className="hidden">
-          <div className="mb-3 flex items-start justify-between gap-3">
-            <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-300">요약</p>
-              {totalPages > 1 && (
-                <p className="mt-1 text-[11px] text-slate-400">모바일에서는 전체 요약을 한 번에 크게 보여줍니다.</p>
-              )}
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsExpanded(true)}
-              className="ghost-button shrink-0 text-[11px] text-slate-200"
-              data-ghost-size="sm"
-              style={{ "--ghost-color": "148, 163, 184" }}
-            >
-              크게 보기
-            </button>
-          </div>
-          <div className="rounded-[1.5rem] border border-white/10 bg-slate-950/45 p-5 shadow-inner shadow-black/30">
-            {renderMarkdownPage(normalizedSummary, markdownComponents)}
-          </div>
-        </div>
-
         <div className="block">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs uppercase tracking-[0.2em] text-slate-300">요약</p>
@@ -640,8 +635,7 @@ function SummaryCard({
         <div className="relative w-full">
           <button
             type="button"
-            onPointerDown={(event) => handleNavPointerDown(event, goPrev)}
-            onClick={(event) => handleNavClick(event, goPrev)}
+            onClick={goPrev}
             disabled={!canGoPrev}
             aria-label="이전 요약 페이지"
             className="hidden ghost-button absolute left-1 top-1/2 z-20 h-8 w-8 -translate-y-1/2 text-xs text-slate-100 pointer-events-auto sm:h-9 sm:w-9"
@@ -663,8 +657,7 @@ function SummaryCard({
 
           <button
             type="button"
-            onPointerDown={(event) => handleNavPointerDown(event, goNext)}
-            onClick={(event) => handleNavClick(event, goNext)}
+            onClick={goNext}
             disabled={!canGoNext}
             aria-label="다음 요약 페이지"
             className="hidden ghost-button absolute right-1 top-1/2 z-20 h-8 w-8 -translate-y-1/2 text-xs text-slate-100 pointer-events-auto sm:h-9 sm:w-9"
