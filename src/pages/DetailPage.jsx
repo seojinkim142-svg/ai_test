@@ -1,24 +1,19 @@
-﻿import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import ReactMarkdown from "react-markdown";
-import { Suspense, lazy } from "react";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import { Capacitor } from "@capacitor/core";
-import { useState } from "react";
 import ActionsPanel from "../components/ActionsPanel";
-import {
-  MARKDOWN_MATH_REHYPE_PLUGINS,
-  MARKDOWN_MATH_REMARK_PLUGINS,
-  normalizeMathMarkdown,
-} from "../components/MathMarkdown";
-import EvidencePageLinks from "../components/EvidencePageLinks";
+import AiTutorPanel from "../components/AiTutorPanel";
+import FlashcardsPanel from "../components/FlashcardsPanel";
+import OxSection from "../components/OxSection";
 import PdfPreview from "../components/PdfPreview";
+import QuizSection from "../components/QuizSection";
+import SummaryCard from "../components/SummaryCard";
+import { useQuizMixCarousel } from "../hooks/useQuizMixCarousel";
 import { LETTERS } from "../constants";
-
-const AiTutorPanel = lazy(() => import("../components/AiTutorPanel"));
-const FlashcardsPanel = lazy(() => import("../components/FlashcardsPanel"));
-const OxSection = lazy(() => import("../components/OxSection"));
-const QuizSection = lazy(() => import("../components/QuizSection"));
-const ReviewNotesPanel = lazy(() => import("../components/ReviewNotesPanel"));
-const SummaryCard = lazy(() => import("../components/SummaryCard"));
 
 const MOCK_BARE_LATEX_RE =
   /\\(?:frac|dfrac|tfrac|sum|prod|int|sqrt|left|right|cdot|times|to|infty|leq?|geq?|neq?|approx|mathbb|mathbf|mathrm|text|lim)\b/;
@@ -144,33 +139,13 @@ function toMarkdownWithLatexMath(rawText) {
     })
     .join("\n");
 }
-
-function getTouchDistance(touches) {
-  if (!touches || touches.length < 2) return 0;
-  const [firstTouch, secondTouch] = touches;
-  const deltaX = Number(secondTouch?.clientX || 0) - Number(firstTouch?.clientX || 0);
-  const deltaY = Number(secondTouch?.clientY || 0) - Number(firstTouch?.clientY || 0);
-  return Math.hypot(deltaX, deltaY);
-}
-
-function PanelFallback({ label = "패널" }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
-      {label} 불러오는 중...
-    </div>
-  );
-}
-
 export default function DetailPage({
   detailContainerRef,
   splitStyle,
   pdfUrl,
-  documentRemoteUrl,
   file,
-  pendingDocumentOpen,
   pageInfo,
   currentPage,
-  activeEvidenceHighlight,
   handlePageChange,
   handleDragStart,
   panelTab,
@@ -179,8 +154,15 @@ export default function DetailPage({
   isLoadingSummary,
   isLoadingText,
   isFreeTier,
-  isPdfDocument = true,
   summary,
+  instructorEmphasisInput,
+  setInstructorEmphasisInput,
+  savedInstructorEmphases,
+  activeInstructorEmphasisId,
+  handleSaveInstructorEmphasis,
+  handleSelectInstructorEmphasis,
+  handleDeleteInstructorEmphasis,
+  cycleActiveInstructorEmphasis,
   partialSummary,
   partialSummaryRange,
   savedPartialSummaries,
@@ -211,10 +193,6 @@ export default function DetailPage({
   status,
   error,
   summaryRef,
-  jumpToEvidencePage,
-  resolveSummaryEvidence,
-  resolvePartialSummaryEvidence,
-  resolveMockExamEvidence,
   mockExams,
   mockExamMenuRef,
   mockExamMenuButtonRef,
@@ -244,50 +222,23 @@ export default function DetailPage({
   requestQuestions,
   quizChapterSelectionInput,
   setQuizChapterSelectionInput,
-  quizMixInput,
-  setQuizMixInput,
   quizMix,
-  quizMixError,
+  setQuizMix,
   quizSets,
-  reviewNotes,
-  reviewNoteSections,
-  reviewNotesSectionSelectionInput,
-  setReviewNotesSectionSelectionInput,
-  reviewNotesSectionError,
-  examCramItems,
-  examCramPendingCount,
-  examCramSectionError,
-  examCramReferenceCounts,
-  examCramHasAnySource,
-  examCramContent,
-  examCramUpdatedAt,
-  examCramScopeLabel,
-  examCramStatus,
-  examCramError,
-  isGeneratingExamCram,
-  resolveQuizEvidence,
   handleChoiceSelect,
   handleShortAnswerChange,
   handleShortAnswerCheck,
-  handleQuizOxSelect,
-  handleToggleQuizOxExplanation,
-  handleReviewNoteAttempt,
-  handleToggleReviewNoteResolved,
-  handleDeleteReviewNote,
-  handleGenerateExamCram,
-  handleCreateReviewNotesMockExam,
+  regenerateQuiz,
   deleteQuiz,
   deleteQuizItem,
-  deleteOxQuestion,
   isLoadingOx,
   requestOxQuiz,
   oxChapterSelectionInput,
   setOxChapterSelectionInput,
   regenerateOxQuiz,
   oxItems,
-  resolveOxEvidence,
   oxSelections,
-  handleOxSelect,
+  setOxSelections,
   oxExplanationOpen,
   setOxExplanationOpen,
   flashcards,
@@ -308,111 +259,29 @@ export default function DetailPage({
   handleSendTutorMessage,
   handleResetTutor,
 }) {
-  const normalizeChapterSelectionInput = (value) => String(value || "").replace(/\s+/g, "");
   const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
-  const clampMockExamZoom = useCallback(
-    (value) => Math.min(1.8, Math.max(0.75, Math.round((Number(value) || 1) * 100) / 100)),
+  const quizMixOptions = useMemo(
+    () => [
+      { multipleChoice: 5, shortAnswer: 0, label: "개관식 5 / 주관식 0" },
+      { multipleChoice: 4, shortAnswer: 1, label: "개관식 4 / 주관식 1" },
+      { multipleChoice: 3, shortAnswer: 2, label: "개관식 3 / 주관식 2" },
+      { multipleChoice: 2, shortAnswer: 3, label: "개관식 2 / 주관식 3" },
+      { multipleChoice: 1, shortAnswer: 4, label: "개관식 1 / 주관식 4" },
+      { multipleChoice: 0, shortAnswer: 5, label: "개관식 0 / 주관식 5" },
+    ],
     []
   );
-  const [mockExamZoom, setMockExamZoom] = useState(1);
-  const mockExamGestureRef = useRef({
-    isPinching: false,
-    didPinch: false,
-    startDistance: 0,
-    startZoom: 1,
+  const { quizMixScrollRef, handleQuizMixScroll } = useQuizMixCarousel({
+    quizMix,
+    quizMixOptions,
+    setQuizMix,
   });
-  const mockExamTapRef = useRef({
-    time: 0,
-    x: 0,
-    y: 0,
-  });
-  const quizQuestionTotal =
-    (Number(quizMix?.multipleChoice) || 0) + (Number(quizMix?.shortAnswer) || 0);
-  const quizMixHelperText = quizMixError
-    ? quizMixError
-    : "형식: 객관식-주관식 (예: 4-3)";
-  const handleMockExamTouchStart = useCallback(
-    (event) => {
-      if (!isNativePlatform) return;
-      const touches = event.touches;
-      if (!touches || touches.length !== 2) return;
-
-      const startDistance = getTouchDistance(touches);
-      if (!startDistance) return;
-
-      mockExamGestureRef.current = {
-        isPinching: true,
-        didPinch: false,
-        startDistance,
-        startZoom: mockExamZoom,
-      };
-      mockExamTapRef.current.time = 0;
-    },
-    [isNativePlatform, mockExamZoom]
-  );
-  const handleMockExamTouchMove = useCallback(
-    (event) => {
-      if (!isNativePlatform) return;
-      const touches = event.touches;
-      const gesture = mockExamGestureRef.current;
-      if (!touches || touches.length !== 2 || !gesture.isPinching || !gesture.startDistance) return;
-
-      const currentDistance = getTouchDistance(touches);
-      if (!currentDistance) return;
-
-      event.preventDefault();
-      gesture.didPinch = true;
-      setMockExamZoom(clampMockExamZoom(gesture.startZoom * (currentDistance / gesture.startDistance)));
-    },
-    [clampMockExamZoom, isNativePlatform]
-  );
-  const handleMockExamTouchEnd = useCallback(
-    (event) => {
-      if (!isNativePlatform) return;
-      const gesture = mockExamGestureRef.current;
-      if (gesture.isPinching && (!event.touches || event.touches.length < 2)) {
-        mockExamGestureRef.current = {
-          isPinching: false,
-          didPinch: false,
-          startDistance: 0,
-          startZoom: mockExamZoom,
-        };
-        if (gesture.didPinch) return;
-      }
-      if (gesture.didPinch) {
-        return;
-      }
-
-      if (event.changedTouches?.length !== 1) return;
-      const touch = event.changedTouches[0];
-      const now = Date.now();
-      const lastTap = mockExamTapRef.current;
-      const elapsed = now - Number(lastTap.time || 0);
-      const deltaX = Math.abs(Number(touch?.clientX || 0) - Number(lastTap.x || 0));
-      const deltaY = Math.abs(Number(touch?.clientY || 0) - Number(lastTap.y || 0));
-
-      if (elapsed > 0 && elapsed <= 280 && deltaX <= 24 && deltaY <= 24) {
-        setMockExamZoom(1);
-        mockExamTapRef.current = { time: 0, x: 0, y: 0 };
-        return;
-      }
-
-      mockExamTapRef.current = {
-        time: now,
-        x: Number(touch?.clientX || 0),
-        y: Number(touch?.clientY || 0),
-      };
-    },
-    [isNativePlatform, mockExamZoom]
-  );
-  const handleMockExamTouchCancel = useCallback(() => {
-    mockExamGestureRef.current = {
-      isPinching: false,
-      didPinch: false,
-      startDistance: 0,
-      startZoom: mockExamZoom,
-    };
-  }, [mockExamZoom]);
+  const normalizeChapterSelectionInput = (value) => String(value || "").replace(/\s+/g, "");
+  const truncateText = (value, maxLength = 30) => {
+    const normalized = String(value || "").trim();
+    if (normalized.length <= maxLength) return normalized;
+    return `${normalized.slice(0, maxLength)}...`;
+  };
   const mockMarkdownComponents = useMemo(
     () => ({
       p: ({ children }) => <p className="my-0 leading-relaxed">{children}</p>,
@@ -428,14 +297,14 @@ export default function DetailPage({
       if (!normalized) return null;
       return (
         <div
-          className={`mock-exam-rich-text summary-prose max-w-none min-w-0 break-words ${className}`}
+          className={`summary-prose max-w-none break-words [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto ${className}`}
         >
           <ReactMarkdown
-            remarkPlugins={MARKDOWN_MATH_REMARK_PLUGINS}
-            rehypePlugins={MARKDOWN_MATH_REHYPE_PLUGINS}
+            remarkPlugins={[remarkGfm, remarkMath]}
+            rehypePlugins={[rehypeKatex]}
             components={mockMarkdownComponents}
           >
-            {normalizeMathMarkdown(normalized)}
+            {normalized}
           </ReactMarkdown>
         </div>
       );
@@ -450,15 +319,15 @@ export default function DetailPage({
       const isMultiple = !isOx && !isShort;
 
       return (
-        <div key={`mock-exam-q-${number}`} className="min-w-0 space-y-2 overflow-hidden">
+        <div key={`mock-exam-q-${number}`} className="space-y-2">
           <p className="text-[13px] font-semibold text-black">{number}.</p>
           {renderMockRichText(item?.prompt, "text-[13px] text-black")}
           {isOx && <p className="text-[12px] text-black/80">1) O  2) X</p>}
-          {isShort && <p className="text-[12px] text-black/80">정답 ____________________</p>}
+          {isShort && <p className="text-[12px] text-black/80">답: ____________________</p>}
           {isMultiple && choices.length > 0 && (
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[12px] text-black/85">
               {choices.slice(0, 4).map((choice, idx) => (
-                <div key={`choice-${number}-${idx}`} className="mock-exam-choice min-w-0 flex gap-2 overflow-hidden">
+                <div key={`choice-${number}-${idx}`} className="flex gap-2">
                   <span className="w-4">{idx + 1})</span>
                   {renderMockRichText(choice, "min-w-0 flex-1 text-[12px] text-black/85")}
                 </div>
@@ -493,8 +362,6 @@ export default function DetailPage({
         answer: String(item?.answer || "-").trim() || "-",
         explanation: String(item?.explanation || "").trim(),
         evidence: String(item?.evidence || "").trim(),
-        prompt: String(item?.prompt || "").trim(),
-        evidencePages: Array.isArray(item?.evidencePages) ? item.evidencePages : [],
       }));
     }
 
@@ -508,17 +375,39 @@ export default function DetailPage({
       return {
         number: idx + 1,
         answer,
-        prompt: String(item?.prompt || "").trim(),
         explanation: String(persisted?.explanation || item?.explanation || "").trim(),
         evidence: String(persisted?.evidence || item?.evidence || "").trim(),
-        evidencePages: Array.isArray(item?.evidencePages) ? item.evidencePages : [],
       };
     });
   }, [activeMockExam?.payload?.answerSheet, mockExamOrderedItems]);
+  const emphasisTextareaRef = useRef(null);
+  const savedInstructorScrollRef = useRef(null);
+  const savedInstructorScrollTimerRef = useRef(null);
   const partialSummaryListRef = useRef(null);
+  const emphasisWheelRowHeight = 38;
+  const emphasisWheelViewportHeight = emphasisWheelRowHeight * 5;
+  const emphasisWheelCenterOffset = (emphasisWheelViewportHeight - emphasisWheelRowHeight) / 2;
+  const normalizedSavedInstructorEmphases = useMemo(
+    () => (Array.isArray(savedInstructorEmphases) ? savedInstructorEmphases : []),
+    [savedInstructorEmphases]
+  );
   const normalizedSavedPartialSummaries = useMemo(
     () => (Array.isArray(savedPartialSummaries) ? savedPartialSummaries : []),
     [savedPartialSummaries]
+  );
+  const activeInstructorEmphasis = useMemo(
+    () =>
+      normalizedSavedInstructorEmphases.find((item) => item.id === activeInstructorEmphasisId) ||
+      normalizedSavedInstructorEmphases[0] ||
+      null,
+    [activeInstructorEmphasisId, normalizedSavedInstructorEmphases]
+  );
+  const activeInstructorEmphasisIndex = useMemo(
+    () =>
+      activeInstructorEmphasis
+        ? normalizedSavedInstructorEmphases.findIndex((item) => item.id === activeInstructorEmphasis.id)
+        : -1,
+    [activeInstructorEmphasis, normalizedSavedInstructorEmphases]
   );
   const handleRequestSummary = useCallback(
     () => requestSummary({ force: true, replaceExisting: true }),
@@ -526,175 +415,123 @@ export default function DetailPage({
   );
 
   useEffect(() => {
+    const target = emphasisTextareaRef.current;
+    if (!target) return;
+    target.style.height = "auto";
+    const next = Math.max(44, Math.min(240, target.scrollHeight));
+    target.style.height = `${next}px`;
+    target.style.overflowY = target.scrollHeight > 240 ? "auto" : "hidden";
+  }, [instructorEmphasisInput]);
+
+  useEffect(() => {
+    return () => {
+      if (savedInstructorScrollTimerRef.current) {
+        clearTimeout(savedInstructorScrollTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleSavedInstructorWheelSelect = useCallback(() => {
+    const container = savedInstructorScrollRef.current;
+    if (!container || normalizedSavedInstructorEmphases.length === 0) return;
+    const nearestIndex = Math.max(
+      0,
+      Math.min(
+        normalizedSavedInstructorEmphases.length - 1,
+        Math.round(container.scrollTop / emphasisWheelRowHeight)
+      )
+    );
+    const nearest = normalizedSavedInstructorEmphases[nearestIndex];
+    if (!nearest || nearest.id === activeInstructorEmphasis?.id) return;
+    handleSelectInstructorEmphasis(nearest.id);
+  }, [
+    activeInstructorEmphasis?.id,
+    emphasisWheelRowHeight,
+    handleSelectInstructorEmphasis,
+    normalizedSavedInstructorEmphases,
+  ]);
+
+  const handleSavedInstructorWheelScroll = useCallback(() => {
+    if (savedInstructorScrollTimerRef.current) {
+      clearTimeout(savedInstructorScrollTimerRef.current);
+    }
+    savedInstructorScrollTimerRef.current = setTimeout(() => {
+      handleSavedInstructorWheelSelect();
+      savedInstructorScrollTimerRef.current = null;
+    }, 90);
+  }, [handleSavedInstructorWheelSelect]);
+
+  const handleSavedInstructorClick = useCallback(
+    (itemId) => {
+      handleSelectInstructorEmphasis(itemId);
+      emphasisTextareaRef.current?.focus();
+    },
+    [handleSelectInstructorEmphasis]
+  );
+
+  useEffect(() => {
+    const container = savedInstructorScrollRef.current;
+    if (!container || normalizedSavedInstructorEmphases.length === 0) return;
+    const targetIndex = activeInstructorEmphasisIndex >= 0 ? activeInstructorEmphasisIndex : 0;
+    const targetTop = Math.max(0, targetIndex * emphasisWheelRowHeight);
+    if (Math.abs(container.scrollTop - targetTop) < 1) return;
+    container.scrollTo({ top: targetTop, behavior: "smooth" });
+  }, [
+    activeInstructorEmphasisIndex,
+    emphasisWheelRowHeight,
+    normalizedSavedInstructorEmphases.length,
+  ]);
+
+  useEffect(() => {
     if (!isSavedPartialSummaryOpen) return;
     partialSummaryListRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [isSavedPartialSummaryOpen]);
-
-  useEffect(() => {
-    if (panelTab === "ox") {
-      setPanelTab("quiz");
-    }
-  }, [panelTab, setPanelTab]);
-
-  const panelItems = [
-    { id: "summary", label: "\uC694\uC57D" },
-    { id: "quiz", label: "\uD034\uC988" },
-    { id: "reviewNotes", label: "\uC624\uB2F5\uB178\uD2B8" },
-    { id: "mockExam", label: "\uBAA8\uC758\uACE0\uC0AC" },
-    { id: "flashcards", label: "\uCE74\uB4DC" },
-    { id: "tutor", label: "AI \uD29C\uD130" },
-  ];
-  const totalPageCount = Number(pageInfo?.total || pageInfo?.used || 0);
-  const isPendingWithoutFile = Boolean(pendingDocumentOpen && !file);
-  const pendingDocumentName = String(pendingDocumentOpen?.name || "문서").trim() || "문서";
-
-  if (isPendingWithoutFile) {
-    return (
-      <section
-        ref={detailContainerRef}
-        className="app-safe-bottom flex flex-col gap-4 lg:h-[clamp(70vh,calc(100vh-120px),90vh)] lg:flex-row lg:items-stretch lg:gap-0 lg:overflow-hidden"
-      >
-        <div
-          className="flex flex-col gap-3 lg:h-full lg:min-w-0 lg:flex-[0_0_var(--split-basis)] lg:overflow-y-auto"
-          style={splitStyle}
-        >
-          <div className="rounded-3xl border border-white/10 bg-white/[0.04] px-4 py-3 shadow-lg shadow-black/20 lg:hidden">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-300/75">
-                  Document
-                </p>
-                <p className="truncate text-sm font-semibold text-white">{pendingDocumentName}</p>
-              </div>
-              <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">
-                준비 중
-              </span>
-            </div>
-          </div>
-          <div className="flex h-[58svh] min-h-[24rem] flex-1 items-center justify-center rounded-3xl border border-white/10 bg-slate-950/70 px-6 text-center shadow-2xl shadow-black/40 sm:min-h-[72vh] lg:h-full lg:min-h-0">
-            <div className="max-w-sm">
-              <div className="mx-auto mb-4 h-12 w-12 animate-pulse rounded-2xl border border-emerald-300/20 bg-emerald-400/10" />
-              <p className="text-base font-semibold text-white">{pendingDocumentName}</p>
-              <p className="mt-2 text-sm text-slate-300">문서를 여는 중입니다.</p>
-              <p className="mt-2 text-xs text-slate-400">
-                원격 저장소에서 파일을 불러오고 미리보기를 준비하고 있습니다.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="hidden w-5 shrink-0 lg:block xl:w-6" />
-
-        <div className="flex min-w-0 flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
-          <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-5 shadow-lg shadow-black/30">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300/75">
-              Opening
-            </p>
-            <p className="mt-3 text-lg font-semibold text-white">{pendingDocumentName}</p>
-            <p className="mt-2 text-sm text-slate-300">
-              파일 준비가 끝나면 요약, 퀴즈, 오답노트 화면이 바로 표시됩니다.
-            </p>
-            <div className="mt-4 rounded-2xl border border-emerald-300/15 bg-emerald-400/5 px-4 py-3 text-sm text-emerald-100">
-              잠시만 기다려 주세요. 첫 진입에서는 원격 저장소 다운로드 때문에 시간이 조금 걸릴 수 있습니다.
-            </div>
-          </div>
-        </div>
-      </section>
-    );
-  }
 
 
   return (
     <section
       ref={detailContainerRef}
-      className="app-safe-bottom flex flex-col gap-4 lg:h-[clamp(70vh,calc(100vh-120px),90vh)] lg:flex-row lg:items-stretch lg:gap-0 lg:overflow-hidden"
+      className="flex flex-col gap-4 lg:h-[clamp(70vh,calc(100vh-120px),90vh)] lg:flex-row lg:items-stretch lg:gap-0 lg:overflow-hidden"
     >
       <div
-        className="flex flex-col gap-3 lg:h-full lg:min-w-0 lg:flex-[0_0_var(--split-basis)] lg:overflow-y-auto"
+        className="flex flex-col gap-3 lg:h-full lg:flex-[0_0_var(--split-basis)] lg:overflow-y-auto"
         style={splitStyle}
       >
-        <div className="rounded-3xl border border-white/10 bg-white/[0.04] px-4 py-3 shadow-lg shadow-black/20 lg:hidden">
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-300/75">
-                  Document
-                </p>
-                <p className="truncate text-sm font-semibold text-white">{file?.name || "Preview"}</p>
-              </div>
-              <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">
-                {currentPage} / {totalPageCount || "-"}
-              </span>
-            </div>
-            <div className="flex items-center justify-end gap-2 sm:hidden">
-              <button
-                type="button"
-                onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
-                disabled={currentPage <= 1}
-                className="ghost-button text-[11px] text-slate-200"
-                data-ghost-size="sm"
-                style={{ "--ghost-color": "148, 163, 184" }}
-              >
-                이전
-              </button>
-              <button
-                type="button"
-                onClick={() => handlePageChange(Math.min(totalPageCount || currentPage, currentPage + 1))}
-                disabled={currentPage >= totalPageCount}
-                className="ghost-button text-[11px] text-emerald-100"
-                data-ghost-size="sm"
-                style={{ "--ghost-color": "52, 211, 153" }}
-              >
-                다음
-              </button>
-            </div>
-          </div>
-        </div>
         <PdfPreview
           pdfUrl={pdfUrl}
-          documentUrl={documentRemoteUrl}
           file={file}
           pageInfo={pageInfo}
           currentPage={currentPage}
-          evidenceHighlight={activeEvidenceHighlight}
           onPageChange={handlePageChange}
-          previewText={extractedText}
-          isLoadingText={isLoadingText}
         />
       </div>
 
-      <div className="hidden w-5 shrink-0 cursor-col-resize items-stretch justify-center lg:flex xl:w-6">
-        <button
-          type="button"
+      <div className="hidden w-2 cursor-col-resize items-stretch justify-center lg:flex">
+        <div
+          className="h-full w-1 rounded-full bg-white/10 transition hover:bg-white/30"
           onPointerDown={handleDragStart}
           role="separator"
           aria-label="Resize panel"
-          aria-orientation="vertical"
-          className="group relative flex h-full w-full items-center justify-center bg-transparent outline-none"
-          style={{ touchAction: "none" }}
-        >
-          <span className="pointer-events-none absolute inset-y-2 left-1/2 w-px -translate-x-1/2 rounded-full bg-white/10 transition group-hover:bg-emerald-300/60 group-focus-visible:bg-emerald-300/60" />
-          <span className="pointer-events-none relative z-10 flex h-16 w-4 items-center justify-center rounded-full border border-white/10 bg-slate-950/85 shadow-lg shadow-black/30 transition group-hover:border-emerald-300/40 group-hover:bg-slate-900/95 group-focus-visible:border-emerald-300/50 group-focus-visible:bg-slate-900/95">
-            <span className="grid grid-cols-2 gap-1">
-              <span className="h-1 w-1 rounded-full bg-slate-300/80" />
-              <span className="h-1 w-1 rounded-full bg-slate-300/80" />
-              <span className="h-1 w-1 rounded-full bg-slate-300/80" />
-              <span className="h-1 w-1 rounded-full bg-slate-300/80" />
-            </span>
-          </span>
-        </button>
+        />
       </div>
 
-      <div className="flex min-w-0 flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
-        <div className="detail-tab-strip mobile-tab-row flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/85 p-1.5 shadow-lg shadow-black/30 md:grid md:grid-cols-6 md:px-3 md:py-2.5">
-          {panelItems.map((item) => {
+        <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
+        <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 sm:grid-cols-6 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
+          {[
+            { id: "summary", label: "\uC694\uC57D", type: "tab" },
+            { id: "quiz", label: "\uD034\uC988", type: "tab" },
+            { id: "ox", label: "O/X", type: "tab" },
+            { id: "mockExam", label: "\uBAA8\uC758\uACE0\uC0AC", type: "tab" },
+            { id: "flashcards", label: "\uCE74\uB4DC", type: "tab" },
+            { id: "tutor", label: "AI 튜터", type: "tab" },
+          ].map((item) => {
             const active = panelTab === item.id;
             return (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => setPanelTab(item.id)}
-                className="ghost-button min-w-[96px] shrink-0 text-xs text-slate-200 md:min-h-[46px] md:min-w-0 md:w-full md:text-[15px]"
+                className="ghost-button w-full text-sm text-slate-200"
                 data-ghost-size="sm"
                 data-ghost-active={active}
                 style={{ "--ghost-color": active ? "52, 211, 153" : "148, 163, 184" }}
@@ -705,9 +542,9 @@ export default function DetailPage({
           })}
         </div>
 
-        <div className="pb-20 pr-0 sm:flex-1 sm:overflow-auto sm:pb-2 sm:pr-1">
+        <div className="flex-1 overflow-auto pr-1 pb-1">
           {panelTab === "summary" && (
-            <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30 md:p-5">
+            <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
               <div className="flex items-center justify-between gap-3">
                 <p className="text-sm font-semibold text-emerald-200">요약</p>
                 <div className="flex flex-wrap justify-end gap-2">
@@ -723,12 +560,9 @@ export default function DetailPage({
                   <button
                     type="button"
                     onClick={() => {
-                      if (!isPdfDocument) return;
                       setIsPageSummaryOpen((prev) => !prev);
                       setPageSummaryError("");
                     }}
-                    disabled={!isPdfDocument}
-                    title={!isPdfDocument ? "PDF 문서에서만 사용할 수 있습니다." : undefined}
                     className="ghost-button text-xs text-slate-200"
                     style={{ "--ghost-color": "148, 163, 184" }}
                   >
@@ -846,8 +680,7 @@ export default function DetailPage({
                       <button
                         type="button"
                         onClick={handleAutoDetectChapterRanges}
-                        disabled={!isPdfDocument || isLoadingSummary || isLoadingText || isDetectingChapterRanges}
-                        title={!isPdfDocument ? "자동 목차 추출은 PDF에서만 지원됩니다." : undefined}
+                        disabled={isLoadingSummary || isLoadingText || isDetectingChapterRanges}
                         className="ghost-button text-xs text-slate-200"
                         data-ghost-size="sm"
                         style={{ "--ghost-color": "100, 116, 139" }}
@@ -868,11 +701,6 @@ export default function DetailPage({
                     <p className="text-xs text-slate-400">
                       목차 자동 추출 또는 직접 입력한 범위는 요약 생성 시 챕터 분할 기준으로 적용됩니다.
                     </p>
-                    {!isPdfDocument && (
-                      <p className="text-xs text-slate-400">
-                        비PDF 문서에서는 자동 목차 추출 없이, 입력한 범위를 기준으로 텍스트를 논리적으로 분할해 사용합니다.
-                      </p>
-                    )}
                   </div>
                   {chapterRangeError && (
                     <p className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-200 ring-1 ring-red-400/30">
@@ -881,9 +709,44 @@ export default function DetailPage({
                   )}
                 </div>
               )}
-              {/*
-                {false && (
-                  <div className="instructor-emphasis-wheel-shell mt-3 rounded-xl border border-white/10 bg-slate-900/35 p-2">
+              <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-100">
+                      {"\uAD50\uC218\uB2D8/\uAC15\uC0AC \uAC15\uC870 \uD3EC\uC778\uD2B8"}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {
+                        "\uD559\uC2B5 \uC911 \uBC18\uB4DC\uC2DC \uD655\uC778\uD558\uB77C\uACE0 \uD55C \uD3EC\uC778\uD2B8\uB97C \uBA54\uBAA8\uD558\uC138\uC694."
+                      }
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleSaveInstructorEmphasis()}
+                    className="ghost-button text-xs text-emerald-100"
+                    data-ghost-size="sm"
+                    style={{ "--ghost-color": "52, 211, 153" }}
+                  >
+                    {"\uC800\uC7A5"}
+                  </button>
+                </div>
+                <textarea
+                  ref={emphasisTextareaRef}
+                  value={instructorEmphasisInput}
+                  onChange={(event) => setInstructorEmphasisInput(event.target.value)}
+                  rows={1}
+                  maxLength={2000}
+                  placeholder={
+                    "\uC608) 3\uC7A5 \uC815\uB9AC \uBB38\uC81C\uB294 \uAE30\uCD9C \uD45C\uD604\uC744 \uADF8\uB300\uB85C \uBB3B\uB294\uB2E4. \uAD6C\uBD84 \uAC1C\uB150(A vs B)\uC744 \uBE44\uAD50\uD558\uB294 \uC720\uD615\uC774 \uC790\uC8FC \uB098\uC628\uB2E4."
+                  }
+                  className="mt-3 w-full resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm leading-relaxed text-slate-100 outline-none ring-1 ring-transparent transition focus:border-emerald-300/50 focus:ring-emerald-300/40"
+                />
+                <p className="mt-1 text-right text-[11px] text-slate-400">
+                  {String(instructorEmphasisInput || "").length}/2000
+                </p>
+                {normalizedSavedInstructorEmphases.length > 0 && (
+                  <div className="mt-3 rounded-xl border border-white/10 bg-slate-900/35 p-2">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-[11px] text-slate-300">
                         {`\uC800\uC7A5\uB41C \uAC15\uC870 \uD3EC\uC778\uD2B8 ${normalizedSavedInstructorEmphases.length}\uAC1C`}
@@ -899,14 +762,14 @@ export default function DetailPage({
                         선택 삭제
                       </button>
                     </div>
-                    <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="mt-2 flex items-center gap-2">
                       <div className="relative flex-1">
                         <div
-                          className="instructor-emphasis-wheel-focus pointer-events-none absolute inset-x-1 top-1/2 z-20 -translate-y-1/2 rounded-lg border border-emerald-300/45 bg-emerald-400/10 shadow-[0_0_18px_rgba(52,211,153,0.18)]"
+                          className="pointer-events-none absolute inset-x-1 top-1/2 z-20 -translate-y-1/2 rounded-lg border border-emerald-300/45 bg-emerald-400/10 shadow-[0_0_18px_rgba(52,211,153,0.18)]"
                           style={{ height: `${emphasisWheelRowHeight}px` }}
                         />
-                        <div className="instructor-emphasis-wheel-fade instructor-emphasis-wheel-fade-top pointer-events-none absolute inset-x-0 top-0 z-20 h-10 rounded-t-lg bg-gradient-to-b from-slate-950/95 to-transparent" />
-                        <div className="instructor-emphasis-wheel-fade instructor-emphasis-wheel-fade-bottom pointer-events-none absolute inset-x-0 bottom-0 z-20 h-10 rounded-b-lg bg-gradient-to-t from-slate-950/95 to-transparent" />
+                        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-10 rounded-t-lg bg-gradient-to-b from-slate-950/95 to-transparent" />
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-10 rounded-b-lg bg-gradient-to-t from-slate-950/95 to-transparent" />
                         <div
                           ref={savedInstructorScrollRef}
                           onScroll={handleSavedInstructorWheelScroll}
@@ -935,9 +798,9 @@ export default function DetailPage({
                                   type="button"
                                   data-emphasis-id={item.id}
                                   onClick={() => handleSavedInstructorClick(item.id)}
-                                  className={`instructor-emphasis-wheel-item mx-1 flex w-[calc(100%-0.5rem)] snap-center items-center gap-2 rounded-lg px-3 text-left text-xs transition ${
+                                  className={`mx-1 flex w-[calc(100%-0.5rem)] snap-center items-center gap-2 rounded-lg px-3 text-left text-xs transition ${
                                     isActive
-                                      ? "is-active bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-300/60"
+                                      ? "bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-300/60"
                                       : "text-slate-300 hover:bg-white/5"
                                   } ${distance >= 2 ? "opacity-35" : distance === 1 ? "opacity-70" : "opacity-100"}`}
                                   style={{ height: `${emphasisWheelRowHeight}px` }}
@@ -957,6 +820,7 @@ export default function DetailPage({
                           </div>
                         </div>
                       </div>
+                      <div className="flex h-[190px] shrink-0 flex-col items-center justify-center gap-1">
                         <button
                           type="button"
                           onClick={() => cycleActiveInstructorEmphasis(-1)}
@@ -966,7 +830,7 @@ export default function DetailPage({
                           style={{ "--ghost-color": "148, 163, 184", padding: 0 }}
                           aria-label="이전 강조"
                         >
-                          {"?"}
+                          {"˄"}
                         </button>
                         <button
                           type="button"
@@ -977,21 +841,22 @@ export default function DetailPage({
                           style={{ "--ghost-color": "148, 163, 184", padding: 0 }}
                           aria-label="다음 강조"
                         >
-                          {"?"}
+                          {"˅"}
                         </button>
                       </div>
                     </div>
+                    {activeInstructorEmphasis && (
+                      <p className="mt-2 text-[11px] text-emerald-200">
+                        {`\uD604\uC7AC \uC120\uD0DD: ${activeInstructorEmphasisIndex + 1}\uBC88`}
+                      </p>
+                    )}
+                  </div>
                 )}
-              */}
+              </div>
               {isLoadingSummary && <p className="mt-2 text-sm text-slate-300">{"\uC694\uC57D \uC0DD\uC131 \uC911..."}</p>}
               {!isLoadingSummary && summary && (
                 <div ref={summaryRef}>
-                  <Suspense fallback={<PanelFallback label="요약" />}>
-                    <SummaryCard
-                      summary={summary}
-                      renderExportPages={isExportingSummary}
-                    />
-                  </Suspense>
+                  <SummaryCard summary={summary} renderExportPages={isExportingSummary} />
                 </div>
               )}
               {!isLoadingSummary && !summary && (
@@ -1084,11 +949,7 @@ export default function DetailPage({
                   )}
 
                   {partialSummary ? (
-                    <Suspense fallback={<PanelFallback label="부분 요약" />}>
-                      <SummaryCard
-                        summary={partialSummary}
-                      />
-                    </Suspense>
+                    <SummaryCard summary={partialSummary} />
                   ) : (
                     <p className="mt-3 text-xs text-slate-400">
                       {
@@ -1124,7 +985,7 @@ export default function DetailPage({
                           normalizeChapterSelectionInput(event.target.value)
                         )
                       }
-                      placeholder="챕터 범위 (예: 3, 3-5, 1,3,5)"
+                      placeholder="챕터 범위 (예: 1-3,5)"
                       className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
                     />
                     <button
@@ -1224,7 +1085,7 @@ export default function DetailPage({
                     data-ghost-size="lg"
                     style={{ "--ghost-color": "99, 102, 241" }}
                   >
-                    PDF 다운로드
+                    PDF 저장
                   </button>
                   <button
                     type="button"
@@ -1244,16 +1105,6 @@ export default function DetailPage({
                     {mockExamError}
                   </p>
                 )}
-                {isNativePlatform && activeMockExam && mockExamOrderedItems.length > 0 && (
-                  <div className="rounded-2xl border border-white/10 bg-slate-900/55 px-3 py-3">
-                    <p className="text-xs font-semibold text-slate-200">
-                      문제지 배율 {Math.round(mockExamZoom * 100)}%
-                    </p>
-                    <p className="mt-1 text-[11px] text-slate-400">
-                      두 손가락으로 확대/축소하고, 두 번 탭하면 기본 크기로 돌아갑니다.
-                    </p>
-                  </div>
-                )}
 
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-100 overflow-auto">
                   {!activeMockExam && <p className="text-sm text-slate-400">선택된 모의고사가 없습니다.</p>}
@@ -1263,29 +1114,19 @@ export default function DetailPage({
                         <p className="text-sm text-slate-400">모의고사 문항이 없습니다.</p>
                       )}
                       {mockExamOrderedItems.length > 0 && (
-                        <div
-                          ref={mockExamPrintRef}
-                          className="flex flex-col items-center space-y-10"
-                          onTouchStart={handleMockExamTouchStart}
-                          onTouchMove={handleMockExamTouchMove}
-                          onTouchEnd={handleMockExamTouchEnd}
-                          onTouchCancel={handleMockExamTouchCancel}
-                          style={
-                            isNativePlatform
-                              ? {
-                                  zoom: mockExamZoom,
-                                  touchAction: "pan-x pan-y",
-                                }
-                              : undefined
-                          }
-                        >
+                        <div ref={mockExamPrintRef} className="space-y-10 flex flex-col items-center">
                           {mockExamPages.map((pageItems, pageIndex) => {
-                            const pageStart = pageIndex * 4 + 1;
+                            const isFourGrid = pageItems.length === 4;
+                            const pageStart = pageIndex === 0 ? 1 : pageIndex === 1 ? 5 : 9;
                             return (
                               <section
                                 key={`mock-exam-page-${pageIndex}`}
                                 className="mock-exam-page relative mx-auto bg-white text-black shadow-sm"
-                                style={{ width: "794px", minHeight: "1123px", padding: "44px 52px 48px" }}
+                                style={{
+                                  width: isNativePlatform ? "min(100%, 794px)" : "794px",
+                                  minHeight: "1123px",
+                                  padding: isNativePlatform ? "32px 24px 36px" : "44px 52px 48px",
+                                }}
                               >
                                 <div className="relative flex items-start justify-center">
                                   <h4 className="text-[18px] font-semibold">{activeMockExamTitle}</h4>
@@ -1295,18 +1136,20 @@ export default function DetailPage({
                                 </div>
                                 <div className="mt-3 border-t border-black" />
                                 <div
-                                  className="relative mt-6 grid grid-cols-2 gap-8"
+                                  className={`relative mt-6 grid gap-8 ${
+                                    isFourGrid ? "grid-cols-2 grid-rows-2" : "grid-cols-2"
+                                  }`}
                                   style={{
                                     minHeight: "900px",
-                                    gridAutoFlow: "row",
+                                    gridAutoFlow: isFourGrid ? "column" : "row",
                                   }}
                                 >
                                   <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-black/80" />
                                   {pageItems.map((item, idx) => {
-                                    const columnIndex = idx % 2;
+                                    const columnIndex = isFourGrid ? Math.floor(idx / 2) : idx % 2;
                                     const paddingClass = columnIndex === 0 ? "pr-6" : "pl-6";
                                     return (
-                                      <div key={`mock-exam-cell-${pageIndex}-${idx}`} className={`${paddingClass} min-w-0`}>
+                                      <div key={`mock-exam-cell-${pageIndex}-${idx}`} className={paddingClass}>
                                         {renderMockExamItem(item, pageStart + idx)}
                                       </div>
                                     );
@@ -1318,36 +1161,13 @@ export default function DetailPage({
                         </div>
                       )}
 
-                      {mockExamOrderedItems.length > 0 && (
-                        <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-                          <p className="text-sm font-semibold text-emerald-200">문항별 근거 페이지</p>
-                          <div className="mt-3 space-y-3">
-                            {mockExamOrderedItems.map((item, idx) => (
-                              <div key={`mock-exam-evidence-${idx}`} className="rounded-xl bg-white/5 px-3 py-3">
-                                <p className="text-xs font-semibold text-emerald-100">{idx + 1}번 문항</p>
-                                {item?.prompt && (
-                                  <div className="mt-1">
-                                    {renderMockRichText(item.prompt, "text-xs text-slate-200")}
-                                  </div>
-                                )}
-                                <EvidencePageLinks
-                                  requestKey={`mock:${idx}:${String(item?.prompt || "").trim()}`}
-                                  onResolveEvidence={() => resolveMockExamEvidence?.(item)}
-                                  onJumpToPage={jumpToEvidencePage}
-                                />
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
                       {showMockExamAnswers && (
                         <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
                           <p className="text-sm font-semibold text-emerald-200">정답/해설</p>
                           <div className="mt-3 space-y-2 text-xs text-slate-200">
                             {mockExamAnswerEntries.length === 0 && (
                               <p className="rounded-lg bg-white/5 px-3 py-2 text-slate-300">
-                                아직 답안 데이터가 없습니다.
+                                답지 데이터가 없습니다.
                               </p>
                             )}
                             {mockExamAnswerEntries.map((item, idx) => (
@@ -1402,12 +1222,12 @@ export default function DetailPage({
                   <input
                     type="text"
                     value={quizChapterSelectionInput}
-                    onChange={(event) => {
-                      const nextValue = normalizeChapterSelectionInput(event.target.value);
-                      setQuizChapterSelectionInput(nextValue);
-                      setOxChapterSelectionInput(nextValue);
-                    }}
-                    placeholder="챕터 범위 (예: 3, 3-5, 1,3,5)"
+                    onChange={(event) =>
+                      setQuizChapterSelectionInput(
+                        normalizeChapterSelectionInput(event.target.value)
+                      )
+                    }
+                    placeholder="챕터 범위 (예: 1-3,5)"
                     className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
                   />
                   <button
@@ -1425,129 +1245,103 @@ export default function DetailPage({
 
               <div className="rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-300">문항 비율</p>
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <input
-                    type="text"
-                    value={quizMixInput}
-                    onChange={(event) => setQuizMixInput(event.target.value)}
-                    disabled={isLoadingQuiz || isLoadingText}
-                    placeholder="객관식-주관식 예: 4-3"
-                    className={`w-full rounded-xl border bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition ${
-                      quizMixError
-                        ? "border-red-400/45 focus:border-red-300/60"
-                        : "border-white/15 focus:border-emerald-300/60"
-                    }`}
-                  />
+                <div
+                  ref={quizMixScrollRef}
+                  onScroll={handleQuizMixScroll}
+                  className="show-scrollbar mt-3 flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory scroll-smooth"
+                >
+                  {quizMixOptions.map((option, index) => {
+                    const isActive =
+                      quizMix?.multipleChoice === option.multipleChoice &&
+                      quizMix?.shortAnswer === option.shortAnswer;
+                    return (
+                      <button
+                        key={`mix-${option.multipleChoice}-${option.shortAnswer}`}
+                        data-mix-index={index}
+                        type="button"
+                        onClick={() => setQuizMix(option)}
+                        disabled={isLoadingQuiz || isLoadingText}
+                        aria-pressed={isActive}
+                        className={`w-full shrink-0 snap-center rounded-xl px-3 py-2 text-xs font-semibold ring-1 transition ${
+                          isActive
+                            ? "bg-emerald-500/20 text-emerald-100 ring-emerald-400/60"
+                            : "bg-white/5 text-slate-200 ring-white/10 hover:ring-emerald-300/40"
+                        }`}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
                 </div>
-                <p className={`mt-2 text-xs ${quizMixError ? "text-red-200" : "text-slate-400"}`}>
-                  {quizMixHelperText}
-                </p>
               </div>
 
               {quizSets.length > 0 && (
-                <Suspense fallback={<PanelFallback label="퀴즈" />}>
-                  <div className="space-y-4">
-                    {quizSets.map((set, idx) => (
-                      <QuizSection
-                        key={set.id}
-                        title={`퀴즈 세트 ${idx + 1}`}
-                        questions={set.questions}
-                        summary={null}
-                        onResolveEvidence={resolveQuizEvidence}
-                        onJumpToEvidencePage={jumpToEvidencePage}
-                        selectedChoices={set.selectedChoices}
-                        revealedChoices={set.revealedChoices}
-                        shortAnswerInput={set.shortAnswerInput}
-                        shortAnswerResult={set.shortAnswerResult}
-                        oxSelections={set.oxSelections}
-                        oxExplanationOpen={set.oxExplanationOpen}
-                        onSelectChoice={(qIdx, choiceIdx) => handleChoiceSelect(set.id, qIdx, choiceIdx)}
-                        onShortAnswerChange={(idx, val) => handleShortAnswerChange(set.id, idx, val)}
-                        onShortAnswerCheck={(idx) => handleShortAnswerCheck(set.id, idx)}
-                        onDeleteMultipleChoice={(qIdx) => deleteQuizItem(set.id, "multipleChoice", qIdx)}
-                        onDeleteShortAnswer={(qIdx) => deleteQuizItem(set.id, "shortAnswer", qIdx)}
-                        onOxSelect={(idx, choice) => handleQuizOxSelect(set.id, idx, choice)}
-                        onToggleOxExplanation={(idx) => handleToggleQuizOxExplanation(set.id, idx)}
-                      />
-                    ))}
-                  </div>
-                </Suspense>
+                <div className="space-y-4">
+                  {quizSets.map((set, idx) => (
+                    <QuizSection
+                      key={set.id}
+                      title={`퀴즈 세트 ${idx + 1}`}
+                      questions={set.questions}
+                      summary={null}
+                      selectedChoices={set.selectedChoices}
+                      revealedChoices={set.revealedChoices}
+                      shortAnswerInput={set.shortAnswerInput}
+                      shortAnswerResult={set.shortAnswerResult}
+                      onSelectChoice={(qIdx, choiceIdx) => handleChoiceSelect(set.id, qIdx, choiceIdx)}
+                      onShortAnswerChange={(idx, val) => handleShortAnswerChange(set.id, idx, val)}
+                      onShortAnswerCheck={(idx) => handleShortAnswerCheck(set.id, idx)}
+                        onDeleteMultipleChoice={(qIdx) => deleteQuizItem?.(set.id, "multipleChoice", qIdx)}
+                        onDeleteShortAnswer={(qIdx) => deleteQuizItem?.(set.id, "shortAnswer", qIdx)}
+                    />
+                  ))}
+                </div>
               )}
 
-              <p className="mt-4 text-xs text-slate-300">
-                현재 구성: 객관식 {quizMix?.multipleChoice ?? 0} / 주관식 {quizMix?.shortAnswer ?? 0}
-                {` (총 ${quizQuestionTotal}문항)`}
-              </p>
-
-              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <div className="mt-4 flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
                 <button
                   type="button"
                   onClick={requestQuestions}
-                  disabled={
-                    isLoadingQuiz ||
-                    isLoadingText ||
-                    Boolean(quizMixError) ||
-                    quizQuestionTotal <= 0 ||
-                    (isFreeTier && quizSets.length > 0)
-                  }
+                  disabled={isLoadingQuiz || isLoadingText || (isFreeTier && quizSets.length > 0)}
                   title={
                     isFreeTier && quizSets.length > 0
-                      ? "무료 티어에서는 퀴즈 세트를 1개만 생성할 수 없습니다."
-                      : quizMixError || undefined
+                      ? "무료 티어에서는 퀴즈를 재생성할 수 없습니다."
+                      : undefined
                   }
-                  className="ghost-button w-full text-sm text-emerald-100"
+                  className="ghost-button w-full max-w-[320px] text-sm text-emerald-100"
                   data-ghost-size="xl"
                   style={{ "--ghost-color": "16, 185, 129" }}
                 >
                   {isLoadingQuiz
-                    ? "퀴즈 생성 중..."
-                    : quizQuestionTotal > 0
-                      ? `퀴즈 바로 생성하기 (총 ${quizQuestionTotal}문항)`
-                      : "퀴즈 바로 생성하기"}
+                    ? "퀴즈 생성 중.."
+                    : `퀴즈 5문제 바로 생성하기 (객관식 ${quizMix?.multipleChoice ?? 0} / 주관식 ${quizMix?.shortAnswer ?? 0})`}
                 </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    (Array.isArray(oxItems) && oxItems.length > 0 ? regenerateOxQuiz : requestOxQuiz)({
-                      auto: false,
-                      chapterSelectionInputOverride: quizChapterSelectionInput,
-                    })
-                  }
-                  disabled={isLoadingOx || isLoadingText}
-                  className="ghost-button w-full text-sm text-emerald-100"
-                  data-ghost-size="xl"
-                  style={{ "--ghost-color": "16, 185, 129" }}
-                >
-                  {isLoadingOx
-                    ? "O/X 생성 중..."
-                    : Array.isArray(oxItems) && oxItems.length > 0
-                      ? "O/X 다시 생성"
-                      : "O/X 생성"}
-                </button>
+                {!isFreeTier && (
+                  <button
+                    type="button"
+                    onClick={regenerateQuiz}
+                    disabled={isLoadingQuiz || isLoadingText}
+                    className="ghost-button w-full text-sm text-emerald-100"
+                    data-ghost-size="xl"
+                    style={{ "--ghost-color": "16, 185, 129" }}
+                  >
+                    {isLoadingQuiz
+                      ? "퀴즈 재생성 중..."
+                      : "퀴즈 재생성(덮어쓰기)"}
+                  </button>
+                )}
+                {quizSets.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={deleteQuiz}
+                    disabled={isLoadingQuiz || isLoadingText}
+                    className="ghost-button w-full max-w-[320px] text-sm text-slate-100"
+                    data-ghost-size="xl"
+                    style={{ "--ghost-color": "148, 163, 184" }}
+                  >
+                    퀴즈 전체 삭제
+                  </button>
+                )}
               </div>
-
-              {Array.isArray(oxItems) && oxItems.length > 0 && (
-                <div className="mt-4">
-                  <Suspense fallback={<PanelFallback label="O/X 퀴즈" />}>
-                    <OxSection
-                      title="O/X 퀴즈"
-                      items={oxItems}
-                      onResolveEvidence={resolveOxEvidence}
-                      onJumpToEvidencePage={jumpToEvidencePage}
-                      onDeleteItem={deleteOxQuestion}
-                      selections={oxSelections}
-                      explanationsOpen={oxExplanationOpen}
-                      onSelect={handleOxSelect}
-                      onToggleExplanation={(qIdx) =>
-                        setOxExplanationOpen((prev) => ({
-                          ...prev,
-                          [qIdx]: !prev?.[qIdx],
-                        }))
-                      }
-                    />
-                  </Suspense>
-                </div>
-              )}
             </>
           )}
 
@@ -1578,7 +1372,7 @@ export default function DetailPage({
                         normalizeChapterSelectionInput(event.target.value)
                       )
                     }
-                    placeholder="챕터 범위 (예: 3, 3-5, 1,3,5)"
+                    placeholder="챕터 범위 (예: 1-3,5)"
                     className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
                   />
                   <button
@@ -1613,60 +1407,31 @@ export default function DetailPage({
                   data-ghost-size="xl"
                   style={{ "--ghost-color": "16, 185, 129" }}
                 >
-                  {isLoadingOx ? "O/X 재생성 중..." : "O/X 퀴즈 재생성 (덮어쓰기)"}
+                  {isLoadingOx ? "O/X 재생성 중..." : "O/X 퀴즈 재생성(덮어쓰기)"}
                 </button>
               </div>
 
               {oxItems && oxItems.length > 0 && (
-                <Suspense fallback={<PanelFallback label="O/X 퀴즈" />}>
-                  <OxSection
-                    title="O/X 퀴즈"
-                    items={oxItems}
-                    onResolveEvidence={resolveOxEvidence}
-                    onJumpToEvidencePage={jumpToEvidencePage}
-                    onDeleteItem={deleteOxQuestion}
-                    selections={oxSelections}
-                    explanationsOpen={oxExplanationOpen}
-                    onSelect={handleOxSelect}
-                    onToggleExplanation={(qIdx) =>
-                      setOxExplanationOpen((prev) => ({
-                        ...prev,
-                        [qIdx]: !prev?.[qIdx],
-                      }))
-                    }
-                  />
-                </Suspense>
+                <OxSection
+                  title="O/X 퀴즈"
+                  items={oxItems}
+                  selections={oxSelections}
+                  explanationsOpen={oxExplanationOpen}
+                  onSelect={(qIdx, choice) =>
+                    setOxSelections((prev) => ({
+                      ...prev,
+                      [qIdx]: choice,
+                    }))
+                  }
+                  onToggleExplanation={(qIdx) =>
+                    setOxExplanationOpen((prev) => ({
+                      ...prev,
+                      [qIdx]: !prev?.[qIdx],
+                    }))
+                  }
+                />
               )}
             </div>
-          )}
-
-          {panelTab === "reviewNotes" && (
-            <Suspense fallback={<PanelFallback label="복습 노트" />}>
-              <ReviewNotesPanel
-                items={reviewNotes}
-                availableSections={reviewNoteSections}
-                sectionSelectionInput={reviewNotesSectionSelectionInput}
-                onSectionSelectionChange={setReviewNotesSectionSelectionInput}
-                sectionSelectionError={reviewNotesSectionError}
-                examCramItems={examCramItems}
-                examCramPendingCount={examCramPendingCount}
-                examCramSectionError={examCramSectionError}
-                examCramReferenceCounts={examCramReferenceCounts}
-                examCramHasAnySource={examCramHasAnySource}
-                examCramContent={examCramContent}
-                examCramUpdatedAt={examCramUpdatedAt}
-                examCramScopeLabel={examCramScopeLabel}
-                examCramStatus={examCramStatus}
-                examCramError={examCramError}
-                onSubmitAttempt={handleReviewNoteAttempt}
-                onJumpToEvidencePage={jumpToEvidencePage}
-                onDelete={handleDeleteReviewNote}
-                onGenerateExamCram={handleGenerateExamCram}
-                onCreateMockExam={handleCreateReviewNotesMockExam}
-                isCreatingMockExam={isGeneratingMockExam}
-                isGeneratingExamCram={isGeneratingExamCram}
-              />
-            </Suspense>
           )}
 
           {panelTab === "flashcards" && (
@@ -1681,7 +1446,7 @@ export default function DetailPage({
                         normalizeChapterSelectionInput(event.target.value)
                       )
                     }
-                    placeholder="챕터 범위 (예: 3, 3-5, 1,3,5)"
+                    placeholder="챕터 범위 (예: 1-3,5)"
                     className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
                   />
                   <button
@@ -1696,34 +1461,30 @@ export default function DetailPage({
                   </button>
                 </div>
               </div>
-              <Suspense fallback={<PanelFallback label="플래시카드" />}>
-                <FlashcardsPanel
-                  cards={flashcards}
-                  isLoading={isLoadingFlashcards}
-                  onAdd={handleAddFlashcard}
-                  onDelete={handleDeleteFlashcard}
-                  onGenerate={handleGenerateFlashcards}
-                  isGenerating={isGeneratingFlashcards}
-                  canGenerate={Boolean(file && selectedFileId && extractedText && !isLoadingText)}
-                  status={flashcardStatus}
-                  error={flashcardError}
-                />
-              </Suspense>
+              <FlashcardsPanel
+                cards={flashcards}
+                isLoading={isLoadingFlashcards}
+                onAdd={handleAddFlashcard}
+                onDelete={handleDeleteFlashcard}
+                onGenerate={handleGenerateFlashcards}
+                isGenerating={isGeneratingFlashcards}
+                canGenerate={Boolean(file && selectedFileId && extractedText && !isLoadingText)}
+                status={flashcardStatus}
+                error={flashcardError}
+              />
             </div>
           )}
           {panelTab === "tutor" && (
-            <Suspense fallback={<PanelFallback label="AI 튜터" />}>
-              <AiTutorPanel
-                messages={tutorMessages}
-                isLoading={isTutorLoading}
-                error={tutorError}
-                canChat={!tutorNotice}
-                notice={tutorNotice}
-                fileName={file?.name || ""}
-                onSend={handleSendTutorMessage}
-                onReset={handleResetTutor}
-              />
-            </Suspense>
+            <AiTutorPanel
+              messages={tutorMessages}
+              isLoading={isTutorLoading}
+              error={tutorError}
+              canChat={!tutorNotice}
+              notice={tutorNotice}
+              fileName={file?.name || ""}
+              onSend={handleSendTutorMessage}
+              onReset={handleResetTutor}
+            />
           )}
         </div>
       </div>
