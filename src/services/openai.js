@@ -9,6 +9,18 @@ function trimTrailingSlash(value) {
   return String(value || "").trim().replace(/\/+$/, "");
 }
 
+function isAppProxyBaseUrl(value) {
+  const normalized = trimTrailingSlash(value);
+  if (!normalized) return false;
+  if (normalized === "/api/openai") return true;
+
+  try {
+    return new URL(normalized).pathname === "/api/openai";
+  } catch {
+    return false;
+  }
+}
+
 function resolveDeepSeekBaseUrl() {
   const explicitBase = trimTrailingSlash(import.meta.env.VITE_DEEPSEEK_BASE_URL || import.meta.env.VITE_OPENAI_BASE_URL);
   if (explicitBase) return explicitBase;
@@ -25,7 +37,8 @@ function resolveDeepSeekBaseUrl() {
 const DEEPSEEK_BASE_URL = resolveDeepSeekBaseUrl();
 const IS_DIRECT_DEEPSEEK_BASE = DIRECT_DEEPSEEK_BASE_RE.test(DEEPSEEK_BASE_URL);
 const IS_DIRECT_OPENAI_BASE = DIRECT_OPENAI_BASE_RE.test(DEEPSEEK_BASE_URL);
-const USES_DEV_PROXY = import.meta.env.DEV && DEEPSEEK_BASE_URL.startsWith("/api/openai");
+const USES_APP_PROXY = isAppProxyBaseUrl(DEEPSEEK_BASE_URL);
+const USES_DEV_PROXY = import.meta.env.DEV && USES_APP_PROXY;
 const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
 const USES_RELATIVE_BASE = DEEPSEEK_BASE_URL.startsWith("/");
 const CHAT_URL = `${DEEPSEEK_BASE_URL}/v1/chat/completions`;
@@ -1597,7 +1610,7 @@ function parseRetryAfterSeconds(response) {
 }
 
 function resolveClientApiKey() {
-  if (IS_DIRECT_DEEPSEEK_BASE || USES_DEV_PROXY) {
+  if (IS_DIRECT_DEEPSEEK_BASE || USES_APP_PROXY) {
     return String(import.meta.env.VITE_DEEPSEEK_API_KEY || "").trim();
   }
 
