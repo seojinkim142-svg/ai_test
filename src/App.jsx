@@ -1,7 +1,6 @@
 ﻿import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
 import StartPage from "./pages/StartPage";
-import { useAdMobBanner } from "./hooks/useAdMobBanner";
 import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
 import { useUserTier } from "./hooks/useUserTier";
 import { usePageProgressCache } from "./hooks/usePageProgressCache";
@@ -19,7 +18,6 @@ import {
   createFolder,
   listFolders,
   deleteFolder,
-  renameFolder,
   deleteUpload,
   saveUploadMetadata,
   listUploads,
@@ -32,7 +30,6 @@ import {
   getPremiumProfileStateFromUser,
   savePremiumProfileState,
 } from "./services/supabase";
-import { notifyFeedbackEmail } from "./services/feedback";
 import {
   extractPdfText,
   extractPdfTextByRanges,
@@ -48,12 +45,7 @@ import {
   isSupportedUploadFile,
   normalizeSupportedDocumentFile,
 } from "./utils/document";
-import {
-  createRichTextPdfFile,
-  createTextPdfFile,
-  exportMockAnswerSheetToPdf,
-  exportPagedElementToPdf,
-} from "./utils/pdfExport";
+import { exportMockAnswerSheetToPdf, exportPagedElementToPdf } from "./utils/pdfExport";
 import {
   PDF_MAX_SIZE_BY_TIER,
   DEFAULT_PREMIUM_PROFILE_PIN,
@@ -79,10 +71,7 @@ import {
   sanitizePremiumProfilePin,
   formatMockExamTitle,
   chunkMockExamPages,
-  toSortedUniquePages,
-  areNumberArraysEqual,
 } from "./utils/appStateHelpers";
-import { clearPaymentReturnPending, readPaymentReturnPending } from "./utils/paymentReturn";
 import {
   resolveAnswerIndex,
   resolveShortAnswerText,
@@ -94,58 +83,14 @@ import {
   getQuizPromptText,
   getOxPromptText,
   getMockExamPromptText,
+  collectQuestionTextsFromQuizSets,
   collectQuestionTextsFromOxItems,
   collectQuestionTextsFromMockExams,
   createQuestionKeySet,
-  normalizeQuestionKey,
   isLowValueStudyPrompt,
   pushUniqueByQuestionKey,
   pickRandomUniqueByQuestionKey,
 } from "./utils/questionDedupe";
-import { findEvidenceMatches } from "./utils/evidenceMatcher";
-import {
-  buildChapterRangeStorageKey,
-  buildFolderAggregateDocId,
-  buildFolderAggregateThumbnail,
-  buildStoragePathCandidates,
-  createPlaceholderPdfFile,
-  createLocalEntityId,
-  FOLDER_AGGREGATE_MAX_LENGTH,
-  FOLDER_AGGREGATE_MAX_LENGTH_PER_FILE,
-  isFolderAggregateDocId,
-  isSafeStoragePathForReuse,
-  parseFolderAggregateDocId,
-} from "./utils/appShared";
-import {
-  formatPartialSummaryDefaultName,
-  readExamCramFromHighlights,
-  readChapterRangeInputFromHighlights,
-  normalizeReviewNoteEntries,
-  readReviewNotesFromHighlights,
-  normalizeSavedPartialSummaryEntries,
-  readPartialSummaryBundleFromHighlights,
-  sanitizeUiText,
-  writeChapterRangeInputToHighlights,
-  writeExamCramToHighlights,
-  writePartialSummaryBundleToHighlights,
-  writeReviewNotesToHighlights,
-} from "./utils/studyArtifacts";
-import {
-  buildTutorPageCandidates,
-  detectTutorSectionPageRange,
-  extractTutorProblemTokenCandidates,
-  extractTutorSectionCandidates,
-  parseChapterNumberSelectionInput,
-  resolveTutorReplyText,
-} from "./utils/tutorHelpers";
-import {
-  collectExamCramQuizItems,
-  createQuizSetState,
-  EXAM_CRAM_PREVIEW_LIMIT,
-  isMissingFeedbackTableError,
-  REVIEW_NOTE_MOCK_EXAM_LIMIT,
-  sortReviewNotesByRecentWrong,
-} from "./utils/appFeatureHelpers";
 
 const AuthPanel = lazy(() => import("./components/AuthPanel"));
 const Header = lazy(() => import("./components/Header"));
@@ -153,151 +98,626 @@ const LoginBackground = lazy(() => import("./components/LoginBackground"));
 const PaymentPage = lazy(() => import("./components/PaymentPage"));
 const DetailPage = lazy(() => import("./pages/DetailPage"));
 const PremiumProfilePicker = lazy(() => import("./components/PremiumProfilePicker"));
-const SettingsDialog = lazy(() => import("./components/SettingsDialog"));
-const FOLDER_AGGREGATE_META_KEY = "__folder_aggregate_meta_v1";
-const FEEDBACK_CATEGORY_OPTIONS = [
-  { value: "general", label: "\uC77C\uBC18" },
-  { value: "bug", label: "\uBC84\uADF8 \uC81C\uBCF4" },
-  { value: "feature", label: "\uAE30\uB2A5 \uC81C\uC548" },
-  { value: "ux", label: "\uC0AC\uC6A9\uC131 \uC758\uACAC" },
-];
-const DEFAULT_QUIZ_MIX = Object.freeze({
-  multipleChoice: 4,
-  shortAnswer: 2,
-});
-const DEFAULT_QUIZ_MIX_INPUT = `${DEFAULT_QUIZ_MIX.multipleChoice}-${DEFAULT_QUIZ_MIX.shortAnswer}`;
-const PAYMENT_RETURN_QUERY_KEYS = ["pg_token", "kakaoPay", "nicePay", "niceBilling", "np_token", "message", "orderId", "amount", "trial"];
-const NATIVE_APP_PLUGIN =
-  Capacitor.isNativePlatform() && Capacitor.isPluginAvailable("App") ? Capacitor.registerPlugin("App") : null;
 
-function getInitialSplitPercent() {
-  if (typeof window === "undefined") return 50;
-  if (!Capacitor.isNativePlatform()) return 50;
-  const width = Number(window.innerWidth || window.screen?.width || 0);
-  const height = Number(window.innerHeight || window.screen?.height || 0);
-  const shorterSide = Math.min(width, height);
-  const longerSide = Math.max(width, height);
-  return shorterSide >= 700 && longerSide >= 1000 ? 56 : 50;
-}
+function buildStoragePathCandidates(rawPath) {
+  const source = String(rawPath || "").trim();
+  if (!source) return [];
 
-function readPaymentReturnParams(rawUrl) {
-  const value = String(rawUrl || "").trim();
-  if (!value) return null;
+  const seen = new Set();
+  const candidates = [];
+  const addCandidate = (value) => {
+    const normalized = String(value || "")
+      .trim()
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "");
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    candidates.push(normalized);
+  };
 
-  let parsed;
-  try {
-    parsed = new URL(value);
-  } catch {
-    return null;
-  }
+  addCandidate(source);
 
-  const params = new URLSearchParams();
-  PAYMENT_RETURN_QUERY_KEYS.forEach((key) => {
-    const paramValue = parsed.searchParams.get(key);
-    if (paramValue != null && String(paramValue).trim()) {
-      params.set(key, String(paramValue).trim());
+  if (/%[0-9A-Fa-f]{2}/.test(source)) {
+    try {
+      addCandidate(decodeURIComponent(source));
+    } catch {
+      // Ignore malformed escape sequences.
     }
-  });
+  }
 
-  return params.toString() ? params : null;
+  try {
+    const decoded = decodeURI(source);
+    addCandidate(decoded);
+    addCandidate(encodeURI(decoded));
+  } catch {
+    // Ignore malformed URI sequences.
+  }
+
+  addCandidate(encodeURI(source));
+  return candidates;
 }
 
-function parseQuizMixInput(value) {
-  const raw = String(value || "").trim();
-  if (!raw) {
-    return {
-      mix: null,
-      total: 0,
-      error: "문항 비율을 입력해주세요. 형식: 객관식-주관식 (예: 4-3)",
-    };
+function isSafeStoragePathForReuse(rawPath) {
+  const value = String(rawPath || "").trim();
+  if (!value) return false;
+  if (value.includes("%")) return false;
+  return /^[\x20-\x7E]+$/.test(value);
+}
+
+const CHAPTER_RANGE_STORAGE_PREFIX = "zeusian:chapter-ranges:v1";
+const PARTIAL_SUMMARY_ARTIFACT_KEY = "__partial_summary_state_v1";
+const PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY = "__partial_summary_library_v1";
+const INSTRUCTOR_EMPHASIS_ARTIFACT_KEY = "__instructor_emphasis_v1";
+const INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY = "__instructor_emphasis_library_v1";
+const INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY = "__instructor_emphasis_active_id_v1";
+const LEGACY_HIGHLIGHTS_WRAP_KEY = "__legacy_highlights_payload_v1";
+const INSTRUCTOR_EMPHASIS_MAX_LENGTH = 2000;
+const MOJIBAKE_COMPAT_CHAR_RE = /[\uF900-\uFAFF]/;
+
+function normalizeInstructorEmphasisInput(value) {
+  const normalized = String(value || "")
+    .replace(/\r\n/g, "\n")
+    .split("\0")
+    .join("")
+    .trim();
+  if (!normalized) return "";
+  if (normalized.length <= INSTRUCTOR_EMPHASIS_MAX_LENGTH) return normalized;
+  return normalized.slice(0, INSTRUCTOR_EMPHASIS_MAX_LENGTH).trim();
+}
+
+function hasMojibakeText(value) {
+  const text = String(value || "");
+  if (!text) return false;
+  if (text.includes("\uFFFD")) return true;
+  if (MOJIBAKE_COMPAT_CHAR_RE.test(text)) return true;
+  if (/[?]{2,}/.test(text) && /[\u3131-\uD79D]/.test(text)) return true;
+  return false;
+}
+
+function sanitizeUiText(value, fallback = "") {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (!hasMojibakeText(text)) return text;
+  return String(fallback || "").trim();
+}
+
+function createLocalEntityId(prefix) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function buildChapterRangeStorageKey({ userId, scopeId, docId }) {
+  const normalizedDocId = String(docId || "").trim();
+  if (!normalizedDocId) return "";
+  const normalizedUserId = String(userId || "guest").trim() || "guest";
+  const normalizedScopeId = String(scopeId || "default").trim() || "default";
+  return `${CHAPTER_RANGE_STORAGE_PREFIX}:${normalizedUserId}:${normalizedScopeId}:${normalizedDocId}`;
+}
+
+function formatPartialSummaryDefaultName(dateInput) {
+  const date = dateInput ? new Date(dateInput) : new Date();
+  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 16).replace("T", " ");
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+}
+
+function normalizeSavedPartialSummaryEntries(input) {
+  const list = Array.isArray(input) ? input : [];
+  const normalized = [];
+  for (const entry of list) {
+    const summaryText = String(entry?.summary || "").trim();
+    if (!summaryText) continue;
+
+    const createdAtSource = String(entry?.createdAt || "").trim();
+    const updatedAtSource = String(entry?.updatedAt || "").trim();
+    const createdAtDate = new Date(createdAtSource || Date.now());
+    const updatedAtDate = new Date(updatedAtSource || createdAtDate.getTime());
+    const createdAt = Number.isNaN(createdAtDate.getTime())
+      ? new Date().toISOString()
+      : createdAtDate.toISOString();
+    const updatedAt = Number.isNaN(updatedAtDate.getTime())
+      ? createdAt
+      : updatedAtDate.toISOString();
+    const id =
+      typeof entry?.id === "string" && entry.id.trim() ? entry.id.trim() : createPremiumProfileId();
+    const nameRaw = String(entry?.name || "");
+    const name = nameRaw.trim() || formatPartialSummaryDefaultName(createdAt);
+    const range = String(entry?.range || "").trim();
+
+    normalized.push({
+      id,
+      name,
+      summary: summaryText,
+      range,
+      createdAt,
+      updatedAt,
+    });
   }
 
-  const parts = raw
-    .split(/[^0-9]+/)
-    .filter(Boolean)
+  normalized.sort((left, right) => {
+    const l = new Date(left.updatedAt).getTime() || 0;
+    const r = new Date(right.updatedAt).getTime() || 0;
+    return r - l;
+  });
+  return normalized;
+}
+
+function normalizeSavedInstructorEmphasisEntries(input) {
+  const list = Array.isArray(input) ? input : [];
+  const normalized = [];
+  for (const entry of list) {
+    const text = normalizeInstructorEmphasisInput(entry?.text);
+    if (!text) continue;
+
+    const createdAtSource = String(entry?.createdAt || "").trim();
+    const updatedAtSource = String(entry?.updatedAt || "").trim();
+    const createdAtDate = new Date(createdAtSource || Date.now());
+    const updatedAtDate = new Date(updatedAtSource || createdAtDate.getTime());
+    const createdAt = Number.isNaN(createdAtDate.getTime())
+      ? new Date().toISOString()
+      : createdAtDate.toISOString();
+    const updatedAt = Number.isNaN(updatedAtDate.getTime())
+      ? createdAt
+      : updatedAtDate.toISOString();
+    const id =
+      typeof entry?.id === "string" && entry.id.trim() ? entry.id.trim() : createPremiumProfileId();
+    normalized.push({
+      id,
+      text,
+      createdAt,
+      updatedAt,
+    });
+  }
+
+  normalized.sort((left, right) => {
+    const l = new Date(left.updatedAt).getTime() || 0;
+    const r = new Date(right.updatedAt).getTime() || 0;
+    return r - l;
+  });
+  return normalized;
+}
+
+function buildTutorPageCandidates(prompt, totalPages) {
+  const text = String(prompt || "");
+  const maxPages = Number.parseInt(totalPages, 10);
+  if (!text || !Number.isFinite(maxPages) || maxPages <= 0) return [];
+
+  const pages = new Set();
+  const addPage = (page) => {
+    const parsed = Number.parseInt(page, 10);
+    if (!Number.isFinite(parsed)) return;
+    if (parsed < 1 || parsed > maxPages) return;
+    pages.add(parsed);
+  };
+  const addRange = (start, end, cap = 18) => {
+    const parsedStart = Number.parseInt(start, 10);
+    const parsedEnd = Number.parseInt(end, 10);
+    if (!Number.isFinite(parsedStart) || !Number.isFinite(parsedEnd)) return;
+    const lo = Math.max(1, Math.min(parsedStart, parsedEnd));
+    const hi = Math.min(maxPages, Math.max(parsedStart, parsedEnd));
+    let count = 0;
+    for (let page = lo; page <= hi; page += 1) {
+      addPage(page);
+      count += 1;
+      if (count >= cap) break;
+    }
+  };
+  const addWindow = (center, before = 1, after = 2) => {
+    const parsed = Number.parseInt(center, 10);
+    if (!Number.isFinite(parsed)) return;
+    for (let page = parsed - before; page <= parsed + after; page += 1) {
+      addPage(page);
+    }
+  };
+
+  const pageRangeRe = /(\d{1,4})\s*(?:-|~|to|부터)\s*(\d{1,4})\s*(?:p|page|페이지|쪽)?/gi;
+  for (const match of text.matchAll(pageRangeRe)) {
+    addRange(match[1], match[2]);
+  }
+
+  const pageFromRe = /(\d{1,4})\s*(?:p|page|페이지|쪽)\s*(?:부터|이후)?/gi;
+  for (const match of text.matchAll(pageFromRe)) {
+    const base = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(base)) continue;
+    addRange(base, Math.min(maxPages, base + 10), 12);
+  }
+
+  const pageSuffixRe = /(\d{1,4})\s*(?:p|page|페이지|쪽)/gi;
+  for (const match of text.matchAll(pageSuffixRe)) {
+    addWindow(match[1], 1, 2);
+  }
+
+  const pagePrefixRe = /(?:p|page|페이지|쪽)\s*(\d{1,4})/gi;
+  for (const match of text.matchAll(pagePrefixRe)) {
+    addWindow(match[1], 1, 2);
+  }
+
+  return [...pages].sort((a, b) => a - b).slice(0, 24);
+}
+
+function escapeRegex(source) {
+  return String(source || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function extractTutorSectionCandidates(prompt) {
+  const text = String(prompt || "");
+  if (!text) return [];
+  const found = text.match(/\b\d+(?:\.\d+){1,3}\b/g) || [];
+  const unique = [];
+  const seen = new Set();
+  for (const token of found) {
+    const normalized = String(token || "").trim();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    unique.push(normalized);
+    if (unique.length >= 4) break;
+  }
+  return unique;
+}
+
+function extractTutorProblemTokenCandidates(prompt) {
+  const text = String(prompt || "");
+  if (!text) return [];
+
+  const found = [];
+  const add = (value) => {
+    const token = String(value || "").trim();
+    if (!token) return;
+    if (!found.includes(token)) found.push(token);
+  };
+
+  const patterns = [
+    /(?:문제|question|q\.?)\s*(\d{1,3}(?:\.\d{1,3})?)/gi,
+    /(\d{1,3}(?:\.\d{1,3})?)\s*번\s*(?:문제|question)?/gi,
+  ];
+  for (const re of patterns) {
+    for (const match of text.matchAll(re)) {
+      add(match?.[1]);
+      if (found.length >= 4) return found;
+    }
+  }
+  return found;
+}
+
+function incrementSectionToken(sectionToken) {
+  const parts = String(sectionToken || "")
+    .split(".")
     .map((part) => Number.parseInt(part, 10));
+  if (!parts.length || parts.some((value) => !Number.isFinite(value) || value < 0)) return "";
+  parts[parts.length - 1] += 1;
+  return parts.join(".");
+}
 
-  if (parts.length !== 2 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
-    return {
-      mix: null,
-      total: 0,
-      error: "문항 비율은 객관식-주관식 형식으로 입력해주세요. 예: 4-3",
-    };
+function buildTutorSectionBoundaryPatterns(sectionToken) {
+  const token = String(sectionToken || "").trim();
+  if (!token) return [];
+  const patterns = [];
+
+  const nextSibling = incrementSectionToken(token);
+  if (nextSibling) {
+    patterns.push(new RegExp(`(?:^|[^0-9])${escapeRegex(nextSibling)}(?:[^0-9]|$)`, "i"));
   }
 
-  const [multipleChoice, shortAnswer] = parts;
-  const total = multipleChoice + shortAnswer;
-  if (total <= 0) {
-    return {
-      mix: null,
-      total: 0,
-      error: "최소 1문항 이상 입력해주세요.",
-    };
+  const parts = token.split(".").map((part) => Number.parseInt(part, 10));
+  if (parts.length >= 2 && Number.isFinite(parts[0])) {
+    const nextMajor = parts[0] + 1;
+    patterns.push(
+      new RegExp(
+        [
+          `\\b${nextMajor}\\.\\d+\\b`,
+          `\\bchapter\\s*${nextMajor}\\b`,
+          `\\bchap\\.?\\s*${nextMajor}\\b`,
+          `\\bch\\.?\\s*${nextMajor}\\b`,
+          `\\bsection\\s*${nextMajor}\\b`,
+          `\\bsec\\.?\\s*${nextMajor}\\b`,
+          `제\\s*${nextMajor}\\s*장`,
+          `${nextMajor}\\s*장`,
+        ].join("|"),
+        "i"
+      )
+    );
   }
 
+  return patterns;
+}
+
+function detectTutorSectionPageRange(pageEntries, sectionToken) {
+  const pages = Array.isArray(pageEntries) ? pageEntries : [];
+  const token = String(sectionToken || "").trim();
+  if (!pages.length || !token) return null;
+
+  const targetRe = new RegExp(`(?:^|[^0-9])${escapeRegex(token)}(?:[^0-9]|$)`, "i");
+  const startIndex = pages.findIndex((entry) => targetRe.test(String(entry?.text || "")));
+  if (startIndex < 0) return null;
+
+  const boundaryPatterns = buildTutorSectionBoundaryPatterns(token);
+  let endIndex = pages.length - 1;
+  for (let idx = startIndex + 1; idx < pages.length; idx += 1) {
+    const text = String(pages[idx]?.text || "");
+    if (!text) continue;
+    if (boundaryPatterns.some((pattern) => pattern.test(text))) {
+      endIndex = Math.max(startIndex, idx - 1);
+      break;
+    }
+  }
+
+  const startPage = Number.parseInt(pages[startIndex]?.pageNumber, 10);
+  const endPage = Number.parseInt(pages[endIndex]?.pageNumber, 10);
+  if (!Number.isFinite(startPage) || !Number.isFinite(endPage)) return null;
   return {
-    mix: {
-      multipleChoice,
-      shortAnswer,
-    },
-    total,
-    error: "",
+    section: token,
+    startPage,
+    endPage: Math.max(startPage, endPage),
   };
 }
 
-function sumQuizBatchMetric(batches, key) {
-  return (Array.isArray(batches) ? batches : []).reduce((total, batch) => {
-    const value = Number(batch?.[key]) || 0;
-    return total + value;
-  }, 0);
+function extractTutorEvidenceEntries(rawEvidenceText) {
+  const source = String(rawEvidenceText || "");
+  if (!source) return [];
+  const entries = [];
+  const re = /\[p\.(\d+)\]\s*\n([\s\S]*?)(?=\n\s*\[p\.\d+\]\s*\n|$)/gi;
+  for (const match of source.matchAll(re)) {
+    const pageNumber = Number.parseInt(match?.[1], 10);
+    const text = String(match?.[2] || "").replace(/\s+/g, " ").trim();
+    if (!Number.isFinite(pageNumber) || !text) continue;
+    entries.push({ pageNumber, text });
+  }
+  return entries;
 }
 
-function buildQuizGenerationFailureMessage({
-  targetMcCount = 0,
-  targetSaCount = 0,
-  finalMcCount = 0,
-  finalSaCount = 0,
-  batchDiagnostics = [],
-  enforceScopedEvidence = false,
-}) {
-  const batches = Array.isArray(batchDiagnostics) ? batchDiagnostics : [];
-  if (!batches.length) {
-    return "충분한 새 문항을 만들지 못했습니다. 범위를 바꿔 다시 시도해 주세요.";
+function buildTutorForcedFallbackAnswer(question, rawEvidenceText) {
+  const entries = extractTutorEvidenceEntries(rawEvidenceText);
+  if (!entries.length) {
+    return "\uB2F5\uBCC0 \uC0DD\uC131\uC774 \uBD88\uC548\uC815\uD574 \uBB38\uC11C \uBCF8\uBB38 \uADFC\uAC70\uB97C \uBC14\uB85C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uAC19\uC740 \uC9C8\uBB38\uC744 \uB2E4\uC2DC \uBCF4\uB0B4\uC8FC\uC2DC\uBA74 \uC989\uC2DC \uC7AC\uC2DC\uB3C4\uD558\uACA0\uC2B5\uB2C8\uB2E4.";
   }
 
-  const requestedMc = sumQuizBatchMetric(batches, "requestMcCount");
-  const requestedSa = sumQuizBatchMetric(batches, "requestSaCount");
-  const candidateMc = sumQuizBatchMetric(batches, "candidateMcCount");
-  const candidateSa = sumQuizBatchMetric(batches, "candidateSaCount");
-  const recoveredMc = sumQuizBatchMetric(batches, "recoveredMcCount");
-  const recoveredSa = sumQuizBatchMetric(batches, "recoveredSaCount");
-  const scopedOutMc = sumQuizBatchMetric(batches, "scopedOutMcCount");
-  const scopedOutSa = sumQuizBatchMetric(batches, "scopedOutSaCount");
-  const notAcceptedMc = sumQuizBatchMetric(batches, "notAcceptedMcCount");
-  const notAcceptedSa = sumQuizBatchMetric(batches, "notAcceptedSaCount");
+  const terms = String(question || "")
+    .toLowerCase()
+    .match(/[0-9a-z\uAC00-\uD7A3.]+/g);
+  const keywords = (terms || []).filter((token) => token.length >= 2).slice(0, 12);
 
-  const detailLines = [
-    `객관식 ${finalMcCount}/${targetMcCount}, 주관식 ${finalSaCount}/${targetSaCount}만 확보했습니다.`,
-    `객관식 후보: 요청 ${requestedMc}개 -> 유효 후보 ${candidateMc}개 -> 최종 채택 ${finalMcCount}개`,
-    `주관식 후보: 요청 ${requestedSa}개 -> 유효 후보 ${candidateSa}개 -> 최종 채택 ${finalSaCount}개`,
+  const scored = entries
+    .map((entry, index) => {
+      const lower = entry.text.toLowerCase();
+      let score = 0;
+      for (const token of keywords) {
+        if (lower.includes(token)) score += token.includes(".") ? 3 : 1;
+      }
+      return { ...entry, index, score };
+    })
+    .sort((a, b) => b.score - a.score || a.index - b.index);
+
+  const selected = scored.slice(0, Math.min(3, scored.length));
+  const lines = [
+    "\uBAA8\uB378 \uC751\uB2F5\uC774 \uBE44\uC5B4 \uBB38\uC11C \uBCF8\uBB38 \uADFC\uAC70 \uAE30\uC900\uC73C\uB85C \uD575\uC2EC \uB0B4\uC6A9\uC744 \uBA3C\uC800 \uC815\uB9AC\uD569\uB2C8\uB2E4.",
   ];
+  for (const item of selected) {
+    const snippet = item.text.length > 280 ? `${item.text.slice(0, 280)}...` : item.text;
+    lines.push(`- p.${item.pageNumber}: ${snippet}`);
+  }
+  lines.push(
+    "\uC6D0\uD558\uC2DC\uBA74 \uC704 \uADFC\uAC70 \uD398\uC774\uC9C0\uB97C \uAE30\uC900\uC73C\uB85C \uC9C8\uBB38\uD558\uC2E0 \uD56D\uBAA9\uC744 \uB2E8\uACC4\uBCC4\uB85C \uC774\uC5B4\uC11C \uC790\uC138\uD788 \uC124\uBA85\uD558\uACA0\uC2B5\uB2C8\uB2E4."
+  );
+  return lines.join("\n");
+}
 
-  if (recoveredMc > 0 || recoveredSa > 0) {
-    detailLines.push(`근거 페이지 재탐색으로 객관식 ${recoveredMc}개, 주관식 ${recoveredSa}개의 문항 근거를 복구했습니다.`);
+function resolveTutorReplyText(rawReply, { question, rawEvidenceText }) {
+  const reply = String(rawReply || "").trim();
+  const invalidPatterns = [
+    /\uBAA8\uB378(?:\uC774)?\s*\uBE48\s*\uC751\uB2F5/iu,
+    /\uAC19\uC740\s*\uC9C8\uBB38\uC744\s*\uD55C\s*\uBC88\s*\uB354/iu,
+    /\uC9C8\uBB38\uC744\s*\uC870\uAE08\s*\uB354\s*\uAD6C\uCCB4/iu,
+    /\uC9C0\uAE08\uC740\s*\uB2F5\uBCC0\uC744\s*\uC0DD\uC131\uD558\uC9C0\s*\uBABB/iu,
+    /\uC694\uCCAD\s*\uAD6C\uAC04.*\uB2E4\uC2DC\s*\uC77D/iu,
+  ];
+  if (!reply || invalidPatterns.some((pattern) => pattern.test(reply))) {
+    return buildTutorForcedFallbackAnswer(question, rawEvidenceText);
   }
-  if (enforceScopedEvidence && (scopedOutMc > 0 || scopedOutSa > 0)) {
-    detailLines.push(
-      `선택 범위/근거 페이지 검증에서 객관식 ${scopedOutMc}개, 주관식 ${scopedOutSa}개가 제외됐습니다.`
-    );
-  }
-  if (notAcceptedMc > 0 || notAcceptedSa > 0) {
-    detailLines.push(`중복 또는 목표 개수 초과로 객관식 ${notAcceptedMc}개, 주관식 ${notAcceptedSa}개가 제외됐습니다.`);
-  }
-  if (candidateMc < requestedMc || candidateSa < requestedSa) {
-    detailLines.push("OpenAI 응답에서 유효 후보 수 자체가 요청 수보다 적었습니다.");
+  return reply;
+}
+
+function parseChapterNumberSelectionInput(rawInput, chapters) {
+  const available = Array.isArray(chapters) ? chapters : [];
+  const chapterNumbers = available
+    .map((chapter) => Number.parseInt(chapter?.chapterNumber, 10))
+    .filter((num) => Number.isFinite(num) && num > 0);
+  const chapterNumberSet = new Set(chapterNumbers);
+  if (!chapterNumbers.length) {
+    return { chapterNumbers: [], error: "?ㅼ젙??踰붿쐞?먯꽌 ?ъ슜?????덈뒗 梨뺥꽣媛 ?놁뒿?덈떎." };
   }
 
-  return detailLines.join(" ");
+  const cleaned = String(rawInput || "").replace(/\s+/g, "");
+  if (!cleaned) {
+    return { chapterNumbers, error: "" };
+  }
+
+  const selected = new Set();
+  const tokens = cleaned.split(",").filter(Boolean);
+  for (const token of tokens) {
+    if (token.includes("-")) {
+      const [startRaw, endRaw] = token.split("-");
+      const start = Number.parseInt(startRaw, 10);
+      const end = Number.parseInt(endRaw, 10);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0 || start > end) {
+        return { chapterNumbers: [], error: `?섎せ??梨뺥꽣 踰붿쐞?낅땲?? "${token}"` };
+      }
+      for (let chapterNumber = start; chapterNumber <= end; chapterNumber += 1) {
+        selected.add(chapterNumber);
+      }
+    } else {
+      const chapterNumber = Number.parseInt(token, 10);
+      if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) {
+        return { chapterNumbers: [], error: `?섎せ??梨뺥꽣 踰덊샇?낅땲?? "${token}"` };
+      }
+      selected.add(chapterNumber);
+    }
+  }
+
+  const filtered = [...selected]
+    .filter((num) => chapterNumberSet.has(num))
+    .sort((left, right) => left - right);
+
+  if (!filtered.length) {
+    return {
+      chapterNumbers: [],
+      error: `No matching chapters found in configured range. Available: ${chapterNumbers.join(", ")}`,
+    };
+  }
+  return { chapterNumbers: filtered, error: "" };
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readPartialSummaryBundleFromHighlights(highlightsValue) {
+  const base = isPlainObject(highlightsValue) ? highlightsValue : null;
+  const rawState = isPlainObject(base?.[PARTIAL_SUMMARY_ARTIFACT_KEY])
+    ? base[PARTIAL_SUMMARY_ARTIFACT_KEY]
+    : null;
+  const summary = String(rawState?.summary || "").trim();
+  const range = String(rawState?.range || "").trim();
+  const libraryRaw = base?.[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY];
+  const library = normalizeSavedPartialSummaryEntries(libraryRaw);
+  const instructorLibraryRaw = base?.[INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY];
+  const instructorEmphasisLibrary = normalizeSavedInstructorEmphasisEntries(instructorLibraryRaw);
+  const rawInstructorEmphasis = base?.[INSTRUCTOR_EMPHASIS_ARTIFACT_KEY];
+  const legacyInstructorText = normalizeInstructorEmphasisInput(
+    typeof rawInstructorEmphasis === "string" ? rawInstructorEmphasis : rawInstructorEmphasis?.text
+  );
+  let mergedInstructorLibrary = instructorEmphasisLibrary;
+  if (!mergedInstructorLibrary.length && legacyInstructorText) {
+    const nowIso = new Date().toISOString();
+    mergedInstructorLibrary = [
+      {
+        id: createPremiumProfileId(),
+        text: legacyInstructorText,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      },
+    ];
+  }
+  const requestedActiveId = String(base?.[INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY] || "").trim();
+  const activeInstructorEmphasisId =
+    mergedInstructorLibrary.find((item) => item.id === requestedActiveId)?.id ||
+    mergedInstructorLibrary[0]?.id ||
+    "";
+  const instructorEmphasis =
+    mergedInstructorLibrary.find((item) => item.id === activeInstructorEmphasisId)?.text || "";
+  return {
+    summary,
+    range,
+    library,
+    instructorEmphasisLibrary: mergedInstructorLibrary,
+    activeInstructorEmphasisId,
+    instructorEmphasis,
+  };
+}
+
+function writePartialSummaryBundleToHighlights(
+  highlightsValue,
+  {
+    summary,
+    range,
+    library,
+    instructorEmphasis,
+    instructorEmphasisLibrary,
+    activeInstructorEmphasisId,
+  } = {}
+) {
+  const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
+  if (!isPlainObject(highlightsValue) && highlightsValue != null) {
+    base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
+  }
+
+  const existingSummaryState = isPlainObject(base?.[PARTIAL_SUMMARY_ARTIFACT_KEY])
+    ? base[PARTIAL_SUMMARY_ARTIFACT_KEY]
+    : null;
+  const normalizedSummary =
+    summary === undefined
+      ? String(existingSummaryState?.summary || "").trim()
+      : String(summary || "").trim();
+  const normalizedRange =
+    range === undefined ? String(existingSummaryState?.range || "").trim() : String(range || "").trim();
+  const normalizedLibrary = normalizeSavedPartialSummaryEntries(
+    library === undefined ? base?.[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY] : library
+  );
+  const currentInstructorLibrary = normalizeSavedInstructorEmphasisEntries(
+    base?.[INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY]
+  );
+  const explicitInstructorLibrary = normalizeSavedInstructorEmphasisEntries(instructorEmphasisLibrary);
+  let normalizedInstructorLibrary =
+    instructorEmphasisLibrary === undefined ? currentInstructorLibrary : explicitInstructorLibrary;
+  const normalizedInstructorEmphasis = normalizeInstructorEmphasisInput(instructorEmphasis);
+  if (instructorEmphasis !== undefined) {
+    if (normalizedInstructorEmphasis) {
+      const nowIso = new Date().toISOString();
+      const newItem = {
+        id: createPremiumProfileId(),
+        text: normalizedInstructorEmphasis,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      normalizedInstructorLibrary = normalizeSavedInstructorEmphasisEntries([
+        newItem,
+        ...normalizedInstructorLibrary,
+      ]);
+    } else {
+      normalizedInstructorLibrary = [];
+    }
+  }
+  const requestedActiveId = String(activeInstructorEmphasisId || "").trim();
+  const normalizedActiveInstructorEmphasisId =
+    normalizedInstructorLibrary.find((item) => item.id === requestedActiveId)?.id ||
+    normalizedInstructorLibrary[0]?.id ||
+    "";
+  const activeInstructorText =
+    normalizedInstructorLibrary.find((item) => item.id === normalizedActiveInstructorEmphasisId)?.text || "";
+
+  if (normalizedSummary) {
+    base[PARTIAL_SUMMARY_ARTIFACT_KEY] = {
+      summary: normalizedSummary,
+      range: normalizedRange,
+      updatedAt: new Date().toISOString(),
+    };
+  } else {
+    delete base[PARTIAL_SUMMARY_ARTIFACT_KEY];
+  }
+
+  if (normalizedLibrary.length > 0) {
+    base[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY] = normalizedLibrary;
+  } else {
+    delete base[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY];
+  }
+
+  if (normalizedInstructorLibrary.length > 0) {
+    base[INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY] = normalizedInstructorLibrary;
+  } else {
+    delete base[INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY];
+  }
+
+  if (normalizedActiveInstructorEmphasisId) {
+    base[INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY] = normalizedActiveInstructorEmphasisId;
+  } else {
+    delete base[INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY];
+  }
+
+  if (activeInstructorText) {
+    base[INSTRUCTOR_EMPHASIS_ARTIFACT_KEY] = {
+      text: activeInstructorText,
+      updatedAt: new Date().toISOString(),
+    };
+  } else {
+    delete base[INSTRUCTOR_EMPHASIS_ARTIFACT_KEY];
+  }
+
+  return Object.keys(base).length > 0 ? base : null;
 }
 
 function App() {
@@ -306,7 +726,6 @@ function App() {
   const [previewText, setPreviewText] = useState("");
   const [pageInfo, setPageInfo] = useState({ used: 0, total: 0 });
   const [pdfUrl, setPdfUrl] = useState(null);
-  const [documentRemoteUrl, setDocumentRemoteUrl] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [isLoadingText, setIsLoadingText] = useState(false);
@@ -316,7 +735,7 @@ function App() {
   const [theme, setTheme] = useState("dark");
   const [summary, setSummary] = useState("");
   const [quizSets, setQuizSets] = useState([]);
-  const [quizMixInput, setQuizMixInput] = useState(DEFAULT_QUIZ_MIX_INPUT);
+  const [quizMix, setQuizMix] = useState({ multipleChoice: 4, shortAnswer: 1 });
   const [oxItems, setOxItems] = useState(null);
   const [oxSelections, setOxSelections] = useState({});
   const [oxExplanationOpen, setOxExplanationOpen] = useState({});
@@ -324,14 +743,11 @@ function App() {
   const [thumbnailUrl, setThumbnailUrl] = useState(null);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [selectedFileId, setSelectedFileId] = useState(null);
-  const [pendingDocumentOpen, setPendingDocumentOpen] = useState(null);
   const [panelTab, setPanelTab] = useState("summary");
-  const [splitPercent, setSplitPercent] = useState(() => getInitialSplitPercent());
+  const [splitPercent, setSplitPercent] = useState(50);
   const [isResizingSplit, setIsResizingSplit] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
-  const [paymentReturnSignal, setPaymentReturnSignal] = useState(0);
-  const [showSettings, setShowSettings] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showGuestIntro, setShowGuestIntro] = useState(() => !AUTH_ENABLED);
   const [currentPage, setCurrentPage] = useState(1);
@@ -365,15 +781,10 @@ function App() {
   const [partialSummary, setPartialSummary] = useState("");
   const [partialSummaryRange, setPartialSummaryRange] = useState("");
   const [savedPartialSummaries, setSavedPartialSummaries] = useState([]);
-  const [reviewNotes, setReviewNotes] = useState([]);
+  const [instructorEmphasisInput, setInstructorEmphasisInput] = useState("");
+  const [savedInstructorEmphases, setSavedInstructorEmphases] = useState([]);
+  const [activeInstructorEmphasisId, setActiveInstructorEmphasisId] = useState("");
   const [isSavedPartialSummaryOpen, setIsSavedPartialSummaryOpen] = useState(false);
-  const [reviewNotesChapterSelectionInput, setReviewNotesChapterSelectionInput] = useState("");
-  const [examCramContent, setExamCramContent] = useState("");
-  const [examCramUpdatedAt, setExamCramUpdatedAt] = useState("");
-  const [examCramScopeLabel, setExamCramScopeLabel] = useState("");
-  const [isGeneratingExamCram, setIsGeneratingExamCram] = useState(false);
-  const [examCramStatus, setExamCramStatus] = useState("");
-  const [examCramError, setExamCramError] = useState("");
   const [quizChapterSelectionInput, setQuizChapterSelectionInput] = useState("");
   const [oxChapterSelectionInput, setOxChapterSelectionInput] = useState("");
   const [flashcardChapterSelectionInput, setFlashcardChapterSelectionInput] = useState("");
@@ -383,9 +794,6 @@ function App() {
   const [chapterRangeError, setChapterRangeError] = useState("");
   const [isDetectingChapterRanges, setIsDetectingChapterRanges] = useState(false);
   const [artifacts, setArtifacts] = useState(null);
-  const [summaryEvidencePageCandidates, setSummaryEvidencePageCandidates] = useState([]);
-  const [partialSummaryEvidencePageCandidates, setPartialSummaryEvidencePageCandidates] = useState([]);
-  const [activeEvidenceHighlight, setActiveEvidenceHighlight] = useState(null);
   const downloadCacheRef = useRef(new Map()); // storagePath -> { file, thumbnail, remoteUrl, bucket }
   const backfillInProgressRef = useRef(false);
   const summaryRequestedRef = useRef(false);
@@ -393,16 +801,9 @@ function App() {
   const tutorPageTextCacheRef = useRef(new Map()); // docId:page -> { text, ocrUsed }
   const tutorSectionRangeCacheRef = useRef(new Map()); // docId:section:anchor -> range
   const chapterScopeTextCacheRef = useRef(new Map()); // scoped key -> text
-  const chapterSectionTextCacheRef = useRef(new Map()); // docId::chapterConfig -> extracted chapter sections
-  const pageTaggedSourceTextCacheRef = useRef(new Map()); // docId:pages:options -> tagged source text
   const extractTextForChapterSelectionRef = useRef(null);
   const chapterOneStartPageCacheRef = useRef(new Map()); // docId -> chapter 1 start page
   const questionSourceTextCacheRef = useRef(new Map()); // docId:chapter1 -> source text
-  const evidenceMatchCacheRef = useRef(new Map()); // docId:query:candidates -> evidence pages/snippet
-  const docArtifactsCacheRef = useRef(new Map()); // docId -> artifacts snapshot
-  const artifactsHighlightsRef = useRef(null);
-  const folderAggregateCacheRef = useRef(new Map()); // folderId -> { signature, item }
-  const folderAggregateBuildRef = useRef(new Map()); // folderId -> Promise<item>
   const quizAutoRequestedRef = useRef(false);
   const oxAutoRequestedRef = useRef(false);
   const isDraggingRef = useRef(false);
@@ -411,10 +812,8 @@ function App() {
   const loadUploadsRef = useRef(null);
   const loadUploadsRequestSeqRef = useRef(0);
   const loadFoldersRequestSeqRef = useRef(0);
-  const fileOpenRequestSeqRef = useRef(0);
   const detailContainerRef = useRef(null);
   const summaryRef = useRef(null);
-  const reviewNotesRef = useRef([]);
   const mockExamPrintRef = useRef(null);
   const mockExamMenuRef = useRef(null);
   const mockExamMenuButtonRef = useRef(null);
@@ -441,7 +840,6 @@ function App() {
   const [premiumSpaceMode, setPremiumSpaceMode] = useState(PREMIUM_SPACE_MODE_PROFILE);
   const premiumProfileHydratedRef = useRef(false);
   const premiumProfileSyncSignatureRef = useRef("");
-  const handledPaymentReturnUrlRef = useRef("");
   const safeStatus = useMemo(() => sanitizeUiText(status, ""), [status]);
   const safeError = useMemo(() => sanitizeUiText(error, "오류가 발생했습니다."), [error]);
   const safePageSummaryError = useMemo(
@@ -468,21 +866,6 @@ function App() {
     () => sanitizeUiText(flashcardError, "플래시카드 처리 중 오류가 발생했습니다."),
     [flashcardError]
   );
-  const safeExamCramStatus = useMemo(
-    () => sanitizeUiText(examCramStatus, "시험 직전 정리가 준비되었습니다."),
-    [examCramStatus]
-  );
-  const safeExamCramError = useMemo(
-    () => sanitizeUiText(examCramError, "시험 직전 정리 처리 중 오류가 발생했습니다."),
-    [examCramError]
-  );
-  const activeDocumentKind = useMemo(() => detectSupportedDocumentKind(file), [file]);
-  const isCurrentPdfDocument = useMemo(() => {
-    if (isPdfDocumentKind(activeDocumentKind)) return true;
-    const fileType = String(file?.type || "").trim().toLowerCase();
-    const fileName = String(file?.name || "").trim().toLowerCase();
-    return Boolean(pdfUrl) || fileType.includes("pdf") || fileName.endsWith(".pdf");
-  }, [activeDocumentKind, file, pdfUrl]);
   const safeTutorError = useMemo(
     () => sanitizeUiText(tutorError, "튜터 응답 처리 중 오류가 발생했습니다."),
     [tutorError]
@@ -495,9 +878,6 @@ function App() {
   const shouldForceNativeAuthEntry = AUTH_ENABLED && isNativePlatform && authReady && !user;
   const shouldRenderAuthScreen = AUTH_ENABLED && !user && (showAuth || shouldForceNativeAuthEntry);
   const canReturnHomeFromAuth = showAuth && !shouldForceNativeAuthEntry;
-  const shouldShowFreeBannerAd = isFreeTier && isNativePlatform && !shouldRenderAuthScreen && !showPayment;
-  const { bannerHeight } = useAdMobBanner({ enabled: shouldShowFreeBannerAd });
-  const appBannerOffset = shouldShowFreeBannerAd ? bannerHeight : 0;
   const buildHistoryState = useCallback(
     (override = null) => {
       if (override && typeof override === "object") {
@@ -520,31 +900,6 @@ function App() {
         return;
       }
       window.history.replaceState(nextState, "", url);
-    },
-    [buildHistoryState]
-  );
-  const applyPaymentReturnUrl = useCallback(
-    (rawUrl) => {
-      if (typeof window === "undefined" || !window.history) return false;
-
-      const paymentParams = readPaymentReturnParams(rawUrl);
-      if (!paymentParams) return false;
-
-      const handledKey = paymentParams.toString();
-      if (handledKey && handledPaymentReturnUrlRef.current === handledKey) {
-        setShowPayment(true);
-        return true;
-      }
-
-      handledPaymentReturnUrlRef.current = handledKey;
-
-      const nextSearch = paymentParams.toString();
-      const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}`;
-      window.history.replaceState(buildHistoryState(), document.title, nextUrl);
-      clearPaymentReturnPending();
-      setShowPayment(true);
-      setPaymentReturnSignal((value) => value + 1);
-      return true;
     },
     [buildHistoryState]
   );
@@ -605,31 +960,12 @@ function App() {
     setShowAuth(true);
   }, []);
 
-  const openSettings = useCallback(() => {
-    setShowSettings(true);
-  }, []);
-
-  const closeSettings = useCallback(() => {
-    setShowSettings(false);
-  }, []);
-
   const closeAuth = useCallback(() => {
     setShowAuth(false);
   }, []);
 
   const openBilling = useCallback(() => {
     setShowPayment(true);
-  }, []);
-
-  const openBillingFromSettings = useCallback(() => {
-    setShowSettings(false);
-    setShowPayment(true);
-  }, []);
-
-  const openAuthFromSettings = useCallback(() => {
-    setShowSettings(false);
-    if (!AUTH_ENABLED) return;
-    setShowAuth(true);
   }, []);
 
   const handleOpenFeedbackDialog = useCallback(() => {
@@ -641,15 +977,6 @@ function App() {
     setFeedbackError("");
     setIsFeedbackDialogOpen(true);
   }, [openAuth, user]);
-
-  const handleOpenFeedbackFromSettings = useCallback(() => {
-    setShowSettings(false);
-    handleOpenFeedbackDialog();
-  }, [handleOpenFeedbackDialog]);
-
-  const handleThemeChange = useCallback((nextTheme) => {
-    setTheme(nextTheme === "light" ? "light" : "dark");
-  }, []);
 
   const handleCloseFeedbackDialog = useCallback(() => {
     if (isSubmittingFeedback) return;
@@ -715,53 +1042,6 @@ function App() {
     },
     [getChapterRangeStorageKey]
   );
-  const persistSharedChapterRangeInput = useCallback(
-    async (docId, value, { syncState = false } = {}) => {
-      const normalizedDocId = String(docId || "").trim();
-      if (!user || !normalizedDocId) return;
-
-      const currentDocId = String(selectedFileId || "").trim();
-      const cachedArtifacts = docArtifactsCacheRef.current.get(normalizedDocId);
-      const currentArtifacts =
-        normalizedDocId === currentDocId
-          ? {
-              ...(cachedArtifacts || {}),
-              ...(artifacts || {}),
-              highlights:
-                artifactsHighlightsRef.current ??
-                artifacts?.highlights ??
-                cachedArtifacts?.highlights ??
-                null,
-            }
-          : cachedArtifacts || {};
-      const nextHighlights = writeChapterRangeInputToHighlights(currentArtifacts?.highlights, value);
-      const nextArtifacts = {
-        ...currentArtifacts,
-        highlights: nextHighlights,
-      };
-
-      docArtifactsCacheRef.current.set(normalizedDocId, nextArtifacts);
-      if (syncState && normalizedDocId === currentDocId) {
-        setArtifacts(nextArtifacts);
-        artifactsHighlightsRef.current = nextHighlights || null;
-      }
-
-      try {
-        await saveDocArtifacts({
-          userId: user.id,
-          docId: normalizedDocId,
-          summary: nextArtifacts.summary,
-          quiz: nextArtifacts.quiz,
-          ox: nextArtifacts.ox,
-          highlights: nextHighlights,
-        });
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.warn("Failed to persist shared chapter ranges", err);
-      }
-    },
-    [artifacts, selectedFileId, user]
-  );
 
   const resetActiveDocumentState = useCallback(() => {
     if (pdfUrl) {
@@ -777,8 +1057,9 @@ function App() {
     setPartialSummary("");
     setPartialSummaryRange("");
     setSavedPartialSummaries([]);
-    setSummaryEvidencePageCandidates([]);
-    setPartialSummaryEvidencePageCandidates([]);
+    setInstructorEmphasisInput("");
+    setSavedInstructorEmphases([]);
+    setActiveInstructorEmphasisId("");
     setIsSavedPartialSummaryOpen(false);
     setQuizChapterSelectionInput("");
     setOxChapterSelectionInput("");
@@ -787,10 +1068,7 @@ function App() {
     tutorPageTextCacheRef.current.clear();
     tutorSectionRangeCacheRef.current.clear();
     chapterScopeTextCacheRef.current.clear();
-    chapterSectionTextCacheRef.current.clear();
-    pageTaggedSourceTextCacheRef.current.clear();
     summaryContextCacheRef.current.clear();
-    evidenceMatchCacheRef.current.clear();
     setQuizSets([]);
     setOxItems(null);
     setOxSelections({});
@@ -1275,71 +1553,6 @@ function App() {
     [isFolderFeatureEnabled, user, folders, isPremiumTier, premiumScopeProfileId, premiumOwnerProfileId]
   );
 
-  const handleRenameFolder = useCallback(
-    async (folderId, name) => {
-      if (!isFolderFeatureEnabled) return;
-      if (!folderId || folderId === "all") return;
-      if (!user) {
-        setError("먼저 로그인해 주세요.");
-        return;
-      }
-
-      const trimmedFolderId = String(folderId || "").trim();
-      const trimmedName = String(name || "").trim();
-      if (!trimmedName) return;
-      if (isPremiumTier && !premiumScopeProfileId) {
-        setError("폴더 이름을 바꾸기 전에 프리미엄 프로필을 선택해 주세요.");
-        return;
-      }
-
-      const targetFolder = folders.find((folder) => folder.id?.toString() === trimmedFolderId);
-      if (!targetFolder) {
-        setError("변경할 폴더를 찾지 못했습니다.");
-        return;
-      }
-      if (targetFolder.name === trimmedName) {
-        setStatus("폴더 이름이 이미 같습니다.");
-        return;
-      }
-      if (folders.some((folder) => folder.id?.toString() !== trimmedFolderId && folder.name === trimmedName)) {
-        setStatus("같은 이름의 폴더가 이미 있습니다.");
-        return;
-      }
-
-      try {
-        const storedName =
-          isPremiumTier && premiumScopeProfileId
-            ? encodePremiumScopeValue(trimmedName, premiumScopeProfileId)
-            : trimmedName;
-        const updated = await renameFolder({
-          userId: user.id,
-          folderId: trimmedFolderId,
-          name: storedName,
-        });
-        const decoded = decodePremiumScopeValue(updated?.name || storedName);
-        const ownerProfileId = isPremiumTier
-          ? decoded.ownerProfileId || premiumOwnerProfileId || premiumScopeProfileId
-          : null;
-        setFolders((prev) =>
-          prev.map((folder) =>
-            folder.id?.toString() === trimmedFolderId
-              ? {
-                  ...folder,
-                  ...updated,
-                  name: decoded.value || trimmedName,
-                  ownerProfileId,
-                }
-              : folder
-          )
-        );
-        setStatus("폴더 이름을 변경했습니다.");
-      } catch (err) {
-        setError(`폴더 이름 변경에 실패했습니다: ${err.message}`);
-      }
-    },
-    [folders, isFolderFeatureEnabled, isPremiumTier, premiumOwnerProfileId, premiumScopeProfileId, user]
-  );
-
   const handleDeleteFolder = useCallback(
     async (folderId) => {
       if (!isFolderFeatureEnabled) return;
@@ -1493,24 +1706,25 @@ function App() {
     [isFolderFeatureEnabled, user, uploadedFiles, isPremiumTier, folders]
   );
 
+  const toggleTheme = useCallback(() => {
+    setTheme((prev) => (prev === "light" ? "dark" : "light"));
+  }, []);
+
   const shortPreview = useMemo(
     () => (previewText.length > 700 ? `${previewText.slice(0, 700)}...` : previewText),
     [previewText]
   );
-  const parsedQuizMix = useMemo(() => parseQuizMixInput(quizMixInput), [quizMixInput]);
-  const quizMix = parsedQuizMix.mix;
-  const quizMixError = parsedQuizMix.error;
 
   const tutorNotice = useMemo(() => {
     if (!file || !selectedFileId) {
-      return "튜터 채팅을 사용하려면 PDF를 먼저 열어주세요.";
+      return "?쒗꽣 梨꾪똿???ъ슜?섎젮硫?PDF瑜?癒쇱? ?댁뼱二쇱꽭??"
     }
     if (isLoadingText) {
-      return "PDF 텍스트 추출이 아직 진행 중입니다. 잠시만 기다려 주세요.";
+      return "PDF ?띿뒪??異붿텧???꾩쭅 吏꾪뻾 以묒엯?덈떎. ?좎떆留?湲곕떎?ㅼ＜?몄슂."
     }
     const trimmed = (extractedText || "").trim();
     if (!trimmed) {
-      return "PDF에서 추출된 텍스트가 없습니다.";
+      return "??PDF?먯꽌 異붿텧???띿뒪?멸? ?놁뒿?덈떎."
     }
     return "";
   }, [extractedText, file, isLoadingText, selectedFileId]);
@@ -1525,52 +1739,12 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
-    if (showPayment || shouldRenderAuthScreen) {
-      setShowSettings(false);
-    }
-  }, [showPayment, shouldRenderAuthScreen]);
-
-  useEffect(() => {
     if (typeof window === "undefined") return;
-    const pendingPaymentReturn = readPaymentReturnPending();
-
-    if (applyPaymentReturnUrl(window.location.href) || pendingPaymentReturn) {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("pg_token") || params.get("kakaoPay") || params.get("nicePay") || params.get("np_token")) {
       setShowPayment(true);
-      if (!readPaymentReturnParams(window.location.href) && pendingPaymentReturn) {
-        clearPaymentReturnPending();
-      }
     }
-  }, [applyPaymentReturnUrl]);
-
-  useEffect(() => {
-    if (!isNativePlatform || !NATIVE_APP_PLUGIN) return undefined;
-
-    let cancelled = false;
-    let listenerHandle = null;
-
-    (async () => {
-      try {
-        if (typeof NATIVE_APP_PLUGIN.getLaunchUrl === "function") {
-          const launchData = await NATIVE_APP_PLUGIN.getLaunchUrl();
-          if (!cancelled) {
-            applyPaymentReturnUrl(launchData?.url);
-          }
-        }
-
-        listenerHandle = await NATIVE_APP_PLUGIN.addListener("appUrlOpen", ({ url }) => {
-          if (cancelled) return;
-          applyPaymentReturnUrl(url);
-        });
-      } catch (err) {
-        console.warn("Native payment callback listener setup failed:", err);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      listenerHandle?.remove?.();
-    };
-  }, [applyPaymentReturnUrl, isNativePlatform]);
+  }, []);
 
   useEffect(() => {
     if (!AUTH_ENABLED || !authReady || user || typeof window === "undefined") return;
@@ -1767,70 +1941,52 @@ function App() {
 
   const loadArtifacts = useCallback(
     async (docId) => {
-      const normalizedDocId = String(docId || "").trim();
-      if (!supabase || !user || !normalizedDocId) {
+      if (!supabase || !user || !docId) {
         setArtifacts(null);
-        setReviewNotes([]);
-        reviewNotesRef.current = [];
-        artifactsHighlightsRef.current = null;
-        setExamCramContent("");
-        setExamCramUpdatedAt("");
-        setExamCramScopeLabel("");
         return null;
       }
       try {
-        const data = await fetchDocArtifacts({ userId: user.id, docId: normalizedDocId });
+        const data = await fetchDocArtifacts({ userId: user.id, docId });
         const mapped = {
           summary: data?.summary || null,
           quiz: data?.quiz_json || null,
           ox: data?.ox_json || null,
           highlights: data?.highlights_json || null,
         };
-        docArtifactsCacheRef.current.set(normalizedDocId, mapped);
         const partialBundle = readPartialSummaryBundleFromHighlights(mapped.highlights);
-        const reviewNoteEntries = readReviewNotesFromHighlights(mapped.highlights);
-        const examCramBundle = readExamCramFromHighlights(mapped.highlights);
+        const activeInstructorText = normalizeInstructorEmphasisInput(
+          partialBundle.instructorEmphasisLibrary.find(
+            (item) => item.id === partialBundle.activeInstructorEmphasisId
+          )?.text
+        );
         setArtifacts(mapped);
-        artifactsHighlightsRef.current = mapped.highlights || null;
         setPartialSummary(partialBundle.summary);
         setPartialSummaryRange(partialBundle.range);
         setSavedPartialSummaries(partialBundle.library);
-        setReviewNotes(reviewNoteEntries);
-        setExamCramContent(examCramBundle.content);
-        setExamCramUpdatedAt(examCramBundle.updatedAt || "");
-        setExamCramScopeLabel(examCramBundle.scopeLabel);
-        reviewNotesRef.current = reviewNoteEntries;
+        setInstructorEmphasisInput(activeInstructorText);
+        setSavedInstructorEmphases(partialBundle.instructorEmphasisLibrary);
+        setActiveInstructorEmphasisId(partialBundle.activeInstructorEmphasisId);
         setIsSavedPartialSummaryOpen(false);
         if (mapped.summary) {
           setSummary(mapped.summary);
-          summaryContextCacheRef.current.set(normalizedDocId, String(mapped.summary || "").trim());
           summaryRequestedRef.current = true;
         }
-        if (mapped.quiz || mapped.ox) {
-          const normalizedQuiz = normalizeQuizPayload(mapped.quiz || {});
-          const cachedOxItems =
-            normalizedQuiz.ox.length > 0
-              ? normalizedQuiz.ox
-              : Array.isArray(mapped.ox?.items)
-                ? mapped.ox.items
-                : [];
-          const quizWithoutOx = {
-            multipleChoice: normalizedQuiz.multipleChoice,
-            shortAnswer: normalizedQuiz.shortAnswer,
-            ox: [],
+        if (mapped.quiz) {
+          const normalizedQuiz = normalizeQuizPayload(mapped.quiz);
+          const cachedSet = {
+            id: `quiz-cached-${docId}`,
+            questions: normalizedQuiz,
+            selectedChoices: {},
+            revealedChoices: {},
+            shortAnswerInput: {},
+            shortAnswerResult: {},
           };
-          const hasQuizItems =
-            quizWithoutOx.multipleChoice.length > 0 || quizWithoutOx.shortAnswer.length > 0;
-          setQuizSets(
-            hasQuizItems
-              ? [createQuizSetState(quizWithoutOx, `quiz-cached-${normalizedDocId}`)]
-              : []
-          );
-          setOxItems(cachedOxItems);
-          setOxSelections({});
-          setOxExplanationOpen({});
-          quizAutoRequestedRef.current = hasQuizItems;
-          oxAutoRequestedRef.current = cachedOxItems.length > 0;
+          setQuizSets([cachedSet]);
+          quizAutoRequestedRef.current = true;
+        }
+        if (mapped.ox) {
+          setOxItems(mapped.ox?.items || []);
+          oxAutoRequestedRef.current = true;
         }
         return mapped;
       } catch (err) {
@@ -1894,11 +2050,6 @@ function App() {
       setIsSigningOut(false);
     }
   }, [authSignOut, refreshSession]);
-
-  const handleSignOutFromSettings = useCallback(async () => {
-    setShowSettings(false);
-    await handleSignOut();
-  }, [handleSignOut]);
 
   useEffect(() => {
     if (user) {
@@ -2020,18 +2171,18 @@ function App() {
       }
       const name = item.name || item.file?.name || "document.pdf";
       const fileObj = normalizeSupportedFile(new File([blob], name, { type: blob.type || "" }));
-      const thumb = item.thumbnail || null;
+      const thumb = await generateDocumentThumbnail(fileObj);
       const enriched = {
         ...item,
         file: fileObj,
-        thumbnail: thumb,
+        thumbnail: item.thumbnail || thumb,
         remoteUrl: signed || null,
         path: resolvedStoragePath,
         bucket,
       };
       const cachePayload = {
         file: fileObj,
-        thumbnail: thumb,
+        thumbnail: item.thumbnail || thumb,
         remoteUrl: signed || null,
         path: resolvedStoragePath,
         bucket,
@@ -2059,48 +2210,25 @@ function App() {
   const processSelectedFile = useCallback(
     async (item, { pushState = true } = {}) => {
       if (!item) return;
-      const requestSeq = fileOpenRequestSeqRef.current + 1;
-      fileOpenRequestSeqRef.current = requestSeq;
       let resolvedItem = item;
-      const isFolderAggregate = Boolean(resolvedItem?.folderAggregate);
-      const nextDocId = resolvedItem.id;
-      setPendingDocumentOpen({
-        id: nextDocId,
-        name: String(resolvedItem?.name || resolvedItem?.file?.name || "문서").trim() || "문서",
-      });
-      if (!isFolderAggregate && !resolvedItem.file) {
+      if (!resolvedItem.file) {
         try {
           resolvedItem = await ensureFileForItem(resolvedItem);
-          if (fileOpenRequestSeqRef.current !== requestSeq) return;
         } catch (err) {
-          if (fileOpenRequestSeqRef.current !== requestSeq) return;
-          setPendingDocumentOpen(null);
           setError(`파일을 불러오지 못했습니다. ${err.message}`);
           return;
         }
       }
-      if (!resolvedItem?.file) {
-        if (fileOpenRequestSeqRef.current === requestSeq) {
-          setPendingDocumentOpen(null);
-        }
-        return;
-      }
+      if (!resolvedItem?.file) return;
 
-      const targetFile = isFolderAggregate ? resolvedItem.file : normalizeSupportedFile(resolvedItem.file);
-      if (!(targetFile instanceof File)) {
-        if (fileOpenRequestSeqRef.current === requestSeq) {
-          setPendingDocumentOpen(null);
-        }
-        return;
-      }
+      const targetFile = normalizeSupportedFile(resolvedItem.file);
+      if (!(targetFile instanceof File)) return;
       const targetFileKind = detectSupportedDocumentKind(targetFile);
       if (!targetFileKind) {
-        if (fileOpenRequestSeqRef.current === requestSeq) {
-          setPendingDocumentOpen(null);
-        }
         setError("지원하지 않는 파일 형식입니다. PDF, DOCX, PPTX만 지원합니다.");
         return;
       }
+      const nextDocId = resolvedItem.id;
       const savedChapterRangeInput = isPdfDocumentKind(targetFileKind)
         ? loadSavedChapterRangeInput(nextDocId)
         : "";
@@ -2130,10 +2258,8 @@ function App() {
         URL.revokeObjectURL(pdfUrl);
       }
       setPdfUrl(isPdfDocumentKind(targetFileKind) ? URL.createObjectURL(targetFile) : null);
-      setDocumentRemoteUrl(isFolderAggregate ? "" : String(resolvedItem.remoteUrl || "").trim());
       setFile(targetFile);
       setSelectedFileId(nextDocId);
-      setPendingDocumentOpen(null);
       setPanelTab("summary");
       resetQuizState();
       summaryRequestedRef.current = false;
@@ -2143,22 +2269,17 @@ function App() {
       setPartialSummary("");
       setPartialSummaryRange("");
       setSavedPartialSummaries([]);
-      setSummaryEvidencePageCandidates([]);
-      setPartialSummaryEvidencePageCandidates([]);
+      setInstructorEmphasisInput("");
+      setSavedInstructorEmphases([]);
+      setActiveInstructorEmphasisId("");
       setIsSavedPartialSummaryOpen(false);
       setQuizChapterSelectionInput("");
       setOxChapterSelectionInput("");
-      setOxItems(null);
-      setOxSelections({});
-      setOxExplanationOpen({});
       setFlashcardChapterSelectionInput("");
       setMockExamChapterSelectionInput("");
       tutorPageTextCacheRef.current.clear();
       tutorSectionRangeCacheRef.current.clear();
       chapterScopeTextCacheRef.current.clear();
-      chapterSectionTextCacheRef.current.clear();
-      pageTaggedSourceTextCacheRef.current.clear();
-      evidenceMatchCacheRef.current.clear();
       setArtifacts(null);
       const extractStart =
         typeof performance !== "undefined" && typeof performance.now === "function"
@@ -2192,114 +2313,45 @@ function App() {
       const artifactsPromise = loadArtifacts(nextDocId);
 
       try {
-        let loaded = null;
-        if (isFolderAggregate) {
-          loaded = await artifactsPromise;
-          if (fileOpenRequestSeqRef.current !== requestSeq) return;
-          const aggregateText = String(resolvedItem.aggregateText || "").trim();
-          const aggregatePageInfo = resolvedItem.aggregatePageInfo || { used: 0, total: 0 };
-          const aggregateThumbnail = resolvedItem.aggregateThumbnail || resolvedItem.thumbnail || null;
-          setExtractedText(aggregateText);
-          setPreviewText(aggregateText);
-          setSummary(aggregateText);
-          summaryRequestedRef.current = Boolean(aggregateText);
-          setPageInfo({
-            used: Number(aggregatePageInfo.used) || 0,
-            total: Number(aggregatePageInfo.total) || 0,
-          });
-          setThumbnailUrl(aggregateThumbnail);
-        } else {
-          const textExtractOptions = {
+        const [textResult, thumb, loaded] = await Promise.all([
+          extractDocumentText(targetFile, {
             pageLimit: 30,
             maxLength: 12000,
-            useOcr: false,
-          };
-          const thumbnailPromise =
-            isNativePlatform && isPdfDocumentKind(targetFileKind)
-              ? Promise.resolve(resolvedItem.thumbnail || null)
-              : generateDocumentThumbnail(targetFile);
-          const [loadedArtifacts, initialTextResult, thumb] = await Promise.all([
-            artifactsPromise,
-            extractDocumentText(targetFile, textExtractOptions),
-            thumbnailPromise,
-          ]);
-          if (fileOpenRequestSeqRef.current !== requestSeq) return;
-          loaded = loadedArtifacts;
-          const hasSavedStudyArtifacts = Boolean(
-            loadedArtifacts?.summary || loadedArtifacts?.quiz || loadedArtifacts?.ox
-          );
-          let textResult = initialTextResult;
-          const initialText = String(initialTextResult?.text || "").trim();
-
-          if (
-            isPdfDocumentKind(targetFileKind) &&
-            !hasSavedStudyArtifacts &&
-            !initialText &&
-            !isNativePlatform
-          ) {
-            textResult = await extractDocumentText(targetFile, {
-              ...textExtractOptions,
-              useOcr: true,
-              ocrLang: "kor+eng",
-              onOcrProgress: (message) => setStatus(message),
-            });
-            if (fileOpenRequestSeqRef.current !== requestSeq) return;
-          }
-
-          const { text, pagesUsed, totalPages } = textResult;
-          setExtractedText(text);
-          setPreviewText(text);
-          setPageInfo({ used: pagesUsed, total: totalPages });
-          setThumbnailUrl(thumb || resolvedItem.thumbnail || null);
-        }
-        const sharedChapterRangeInput = readChapterRangeInputFromHighlights(loaded?.highlights);
-        const resolvedChapterRangeInput = sharedChapterRangeInput || savedChapterRangeInput;
-        if (resolvedChapterRangeInput !== savedChapterRangeInput && nextDocId) {
-          persistChapterRangeInput(nextDocId, resolvedChapterRangeInput);
-        }
-        if (!sharedChapterRangeInput && savedChapterRangeInput && user) {
-          void persistSharedChapterRangeInput(nextDocId, savedChapterRangeInput);
-        }
-        setChapterRangeInput(resolvedChapterRangeInput);
+            useOcr: isPdfDocumentKind(targetFileKind),
+            ocrLang: "kor+eng",
+            onOcrProgress: (message) => setStatus(message),
+          }),
+          generateDocumentThumbnail(targetFile),
+          artifactsPromise,
+        ]);
+        const { text, pagesUsed, totalPages } = textResult;
+        setExtractedText(text);
+        setPreviewText(text);
+        setPageInfo({ used: pagesUsed, total: totalPages });
+        setThumbnailUrl(thumb);
         const extractEnd =
           typeof performance !== "undefined" && typeof performance.now === "function"
             ? performance.now()
             : Date.now();
         const elapsedSeconds = Math.max(0, (extractEnd - extractStart) / 1000);
-        setStatus(
-          isFolderAggregate
-            ? `폴더 전체 요약본 준비 완료 (${elapsedSeconds.toFixed(1)}s)`
-            : `텍스트 추출 완료 (${elapsedSeconds.toFixed(1)}s)`
-        );
+        setStatus(`텍스트 추출 완료 (${elapsedSeconds.toFixed(1)}s)`);
         setError("");
         await Promise.all([loadMockExams(nextDocId), loadFlashcards(nextDocId)]);
-        if (fileOpenRequestSeqRef.current !== requestSeq) return;
         if (loaded?.summary) {
-          setStatus(isFolderAggregate ? "저장된 폴더 요약을 불러왔습니다." : "Loaded saved summary.");
+          setStatus("Loaded saved summary.");
         }
       } catch (err) {
-        if (fileOpenRequestSeqRef.current !== requestSeq) return;
-        setError(
-          isFolderAggregate
-            ? `폴더 전체 요약본을 준비하지 못했습니다: ${err.message}`
-            : `문서 처리에 실패했습니다: ${err.message}`
-        );
-        setDocumentRemoteUrl("");
+        setError(`문서 처리에 실패했습니다: ${err.message}`);
         setExtractedText("");
         setPreviewText("");
         setPageInfo({ used: 0, total: 0 });
       } finally {
-        if (fileOpenRequestSeqRef.current === requestSeq) {
-          setPendingDocumentOpen(null);
-          setIsLoadingText(false);
-        }
+        setIsLoadingText(false);
       }
     },
     [
       currentPage,
       ensureFileForItem,
-      fileOpenRequestSeqRef,
-      isNativePlatform,
       loadSavedChapterRangeInput,
       loadArtifacts,
       loadFlashcards,
@@ -2307,11 +2359,8 @@ function App() {
       loadPageProgressSnapshot,
       normalizeSupportedFile,
       pdfUrl,
-      persistChapterRangeInput,
-      persistSharedChapterRangeInput,
       savePageProgressSnapshot,
       selectedFileId,
-      user,
       visitedPages,
     ]
   );
@@ -2491,18 +2540,6 @@ function App() {
       }
 
       fileInput.value = "";
-      if (successfulUploads.length > 0 && activeFolderId) {
-        if (AUTH_ENABLED && user) {
-          await loadUploadsRef.current?.();
-        }
-        setStatus(
-          successfulUploads.length === 1
-            ? "폴더에 파일을 추가했습니다."
-            : `폴더에 ${successfulUploads.length}개 파일을 추가했습니다.`
-        );
-        return;
-      }
-
       const firstReadyUpload = successfulUploads.find((item) => item?.file);
       if (firstReadyUpload) {
         await processSelectedFile(firstReadyUpload);
@@ -2529,13 +2566,12 @@ function App() {
     ]
   );
 
-  const showDetail = Boolean(selectedFileId || pendingDocumentOpen?.id);
+  const showDetail = Boolean(file && selectedFileId);
   const shouldShowPremiumProfilePicker = Boolean(
     user && isPremiumTier && !loadingTier && showPremiumProfilePicker
   );
 
   const goBackToList = useCallback(() => {
-    fileOpenRequestSeqRef.current += 1;
     if (selectedFileId) {
       savePageProgressSnapshot({
         docId: selectedFileId,
@@ -2547,10 +2583,8 @@ function App() {
       URL.revokeObjectURL(pdfUrl);
     }
     setSelectedFileId(null);
-    setPendingDocumentOpen(null);
     setFile(null);
       setPdfUrl(null);
-      setDocumentRemoteUrl("");
       setExtractedText("");
     setPreviewText("");
     setPageInfo({ used: 0, total: 0 });
@@ -2558,8 +2592,9 @@ function App() {
     setPartialSummary("");
     setPartialSummaryRange("");
     setSavedPartialSummaries([]);
-    setSummaryEvidencePageCandidates([]);
-    setPartialSummaryEvidencePageCandidates([]);
+    setInstructorEmphasisInput("");
+    setSavedInstructorEmphases([]);
+    setActiveInstructorEmphasisId("");
     setIsSavedPartialSummaryOpen(false);
     setQuizChapterSelectionInput("");
     setOxChapterSelectionInput("");
@@ -2568,9 +2603,6 @@ function App() {
     tutorPageTextCacheRef.current.clear();
     tutorSectionRangeCacheRef.current.clear();
     chapterScopeTextCacheRef.current.clear();
-    chapterSectionTextCacheRef.current.clear();
-    pageTaggedSourceTextCacheRef.current.clear();
-    evidenceMatchCacheRef.current.clear();
       setMockExams([]);
       setMockExamStatus("");
       setMockExamError("");
@@ -2672,407 +2704,32 @@ function App() {
   const goBackToListRef = useRef(goBackToList);
   const processSelectedFileRef = useRef(processSelectedFile);
   const ensureFileForItemRef = useRef(ensureFileForItem);
-  const selectedFileIdRef = useRef(selectedFileId);
-
-  const buildFolderAggregatePreviewItem = useCallback(
-    async (folderId) => {
-      const normalizedFolderId = String(folderId || "").trim();
-      if (!normalizedFolderId) {
-        throw new Error("폴더 ID가 없습니다.");
-      }
-
-      const cached = folderAggregateCacheRef.current.get(normalizedFolderId);
-      if (cached?.item) {
-        return cached.item;
-      }
-
-      const targetFolder = folders.find((folder) => folder.id?.toString() === normalizedFolderId);
-      if (!targetFolder) {
-        throw new Error("선택한 폴더를 찾지 못했습니다.");
-      }
-
-      const folderItems = (uploadedFilesRef.current || []).filter(
-        (item) => item.folderId?.toString() === normalizedFolderId
-      );
-      if (!folderItems.length) {
-        throw new Error("이 폴더에 문서가 없습니다.");
-      }
-
-      const folderName = String(targetFolder.name || "폴더").trim() || "폴더";
-      const aggregateTitle = `${folderName} 전체 요약본`;
-      const aggregateDocId = buildFolderAggregateDocId(normalizedFolderId);
-      const totalSize = folderItems.reduce((sum, item) => sum + (Number(item?.size) || 0), 0);
-      let savedArtifacts = docArtifactsCacheRef.current.get(aggregateDocId) || null;
-
-      if (!savedArtifacts && user?.id) {
-        try {
-          const fetched = await fetchDocArtifacts({ userId: user.id, docId: aggregateDocId });
-          savedArtifacts = {
-            summary: fetched?.summary || null,
-            quiz: fetched?.quiz_json || null,
-            ox: fetched?.ox_json || null,
-            highlights: fetched?.highlights_json || null,
-          };
-          docArtifactsCacheRef.current.set(aggregateDocId, savedArtifacts);
-        } catch (err) {
-          // eslint-disable-next-line no-console
-          console.warn("folder aggregate preview artifact skipped", err);
-        }
-      }
-
-      const savedSummary = String(savedArtifacts?.summary || "").trim();
-      const placeholderFile = createPlaceholderPdfFile(`${aggregateTitle}.pdf`, [
-        "Folder summary",
-        savedSummary ? "Opening saved summary..." : "Preparing summary...",
-      ]);
-      return {
-        id: aggregateDocId,
-        file: placeholderFile,
-        name: aggregateTitle,
-        size: totalSize,
-        thumbnail: buildFolderAggregateThumbnail(folderName),
-        folderAggregate: true,
-        folderId: normalizedFolderId,
-        folderName,
-        aggregateText: savedSummary || "폴더 전체 요약본을 준비 중입니다. 잠시만 기다려주세요.",
-        aggregatePageInfo: { used: 1, total: 1 },
-        aggregateThumbnail: buildFolderAggregateThumbnail(folderName),
-        aggregateSourceCount: 0,
-        aggregateTotalCount: folderItems.length,
-        aggregateMissingSummaryCount: 0,
-        aggregateTruncated: false,
-      };
-    },
-    [folders, user?.id]
-  );
-
-  const buildFolderAggregateSelectionItem = useCallback(
-    async (folderId) => {
-      const normalizedFolderId = String(folderId || "").trim();
-      if (!normalizedFolderId) {
-        throw new Error("폴더 ID가 없습니다.");
-      }
-
-      const existingBuild = folderAggregateBuildRef.current.get(normalizedFolderId);
-      if (existingBuild) {
-        return existingBuild;
-      }
-
-      const buildPromise = (async () => {
-        const targetFolder = folders.find((folder) => folder.id?.toString() === normalizedFolderId);
-        if (!targetFolder) {
-          throw new Error("선택한 폴더를 찾지 못했습니다.");
-        }
-
-        const folderItems = (uploadedFilesRef.current || []).filter(
-          (item) => item.folderId?.toString() === normalizedFolderId
-        );
-        if (!folderItems.length) {
-          throw new Error("이 폴더에 문서가 없습니다.");
-        }
-
-        const folderName = String(targetFolder.name || "폴더").trim() || "폴더";
-        const aggregateTitle = `${folderName} 전체 요약본`;
-        const aggregateDocId = buildFolderAggregateDocId(normalizedFolderId);
-        const totalSize = folderItems.reduce((sum, item) => sum + (Number(item?.size) || 0), 0);
-        const summarySections = [];
-        const missingSummaryNames = [];
-        let consumedLength = 0;
-        let truncated = false;
-
-        setStatus("파일별 요약을 불러오는 중...");
-        const perFileArtifacts = await Promise.all(
-          folderItems.map(async (sourceItem) => {
-            const sourceDocId = String(sourceItem?.id || "").trim();
-            if (!sourceDocId) return null;
-
-            const cachedArtifacts = docArtifactsCacheRef.current.get(sourceDocId);
-            if (cachedArtifacts) {
-              return cachedArtifacts;
-            }
-
-            if (!user?.id) return null;
-            try {
-              const fetched = await fetchDocArtifacts({ userId: user.id, docId: sourceDocId });
-              const mapped = {
-                summary: fetched?.summary || null,
-                quiz: fetched?.quiz_json || null,
-                ox: fetched?.ox_json || null,
-                highlights: fetched?.highlights_json || null,
-              };
-              docArtifactsCacheRef.current.set(sourceDocId, mapped);
-              return mapped;
-            } catch (err) {
-              // eslint-disable-next-line no-console
-              console.warn("folder aggregate summary artifact skipped", err);
-              return null;
-            }
-          })
-        );
-
-        for (let index = 0; index < folderItems.length; index += 1) {
-          const sourceItem = folderItems[index];
-          const savedSummary = String(perFileArtifacts[index]?.summary || "").trim();
-          if (!savedSummary) {
-            missingSummaryNames.push(sourceItem?.name || `문서 ${index + 1}`);
-            continue;
-          }
-
-          const remaining = FOLDER_AGGREGATE_MAX_LENGTH - consumedLength;
-          if (remaining <= 0) {
-            truncated = true;
-            break;
-          }
-
-          let summaryText = savedSummary;
-          if (summaryText.length > FOLDER_AGGREGATE_MAX_LENGTH_PER_FILE) {
-            summaryText = `${summaryText.slice(0, FOLDER_AGGREGATE_MAX_LENGTH_PER_FILE).trim()}\n\n(이하 생략)`;
-          }
-          if (summaryText.length > remaining) {
-            summaryText = summaryText.slice(0, remaining).trim();
-            truncated = true;
-          }
-          if (!summaryText) continue;
-
-          summarySections.push({
-            id: sourceItem.id || `folder-summary-${index + 1}`,
-            chapterNumber: summarySections.length + 1,
-            chapterTitle: sourceItem.name || `문서 ${index + 1}`,
-            pageStart: summarySections.length + 1,
-            pageEnd: summarySections.length + 1,
-            pagesPerChunk: 1,
-            text: summaryText,
-          });
-          consumedLength += summaryText.length;
-        }
-
-        if (!summarySections.length) {
-          throw new Error("폴더 전체 요약본을 만들려면 먼저 폴더 안 문서들에서 개별 요약을 생성해주세요.");
-        }
-
-        const signature = JSON.stringify({
-          folderName,
-          sections: summarySections.map((section) => ({
-            id: section.id,
-            title: section.chapterTitle,
-            text: section.text,
-          })),
-          missingSummaryNames,
-          truncated,
-        });
-        const cached = folderAggregateCacheRef.current.get(normalizedFolderId);
-        if (cached?.signature === signature && cached?.item) {
-          return cached.item;
-        }
-
-        let savedAggregateArtifacts = docArtifactsCacheRef.current.get(aggregateDocId) || null;
-        if (!savedAggregateArtifacts && user?.id) {
-          try {
-            const fetched = await fetchDocArtifacts({
-              userId: user.id,
-              docId: aggregateDocId,
-            });
-            savedAggregateArtifacts = {
-              summary: fetched?.summary || null,
-              quiz: fetched?.quiz_json || null,
-              ox: fetched?.ox_json || null,
-              highlights: fetched?.highlights_json || null,
-            };
-            docArtifactsCacheRef.current.set(aggregateDocId, savedAggregateArtifacts);
-          } catch (err) {
-            // eslint-disable-next-line no-console
-            console.warn("folder aggregate artifact skipped", err);
-          }
-        }
-
-        const savedFolderSummary = String(savedAggregateArtifacts?.summary || "").trim();
-        const savedAggregateMeta =
-          savedAggregateArtifacts?.highlights &&
-          typeof savedAggregateArtifacts.highlights === "object" &&
-          !Array.isArray(savedAggregateArtifacts.highlights)
-            ? savedAggregateArtifacts.highlights?.[FOLDER_AGGREGATE_META_KEY]
-            : null;
-        const canReuseSavedFolderSummary =
-          savedFolderSummary &&
-          savedAggregateMeta &&
-          String(savedAggregateMeta?.sourceSignature || "").trim() === signature;
-
-        let aggregateText = savedFolderSummary;
-        if (!canReuseSavedFolderSummary) {
-          setStatus("파일별 요약을 바탕으로 폴더 전체 요약을 생성 중...");
-          const { generateSummary } = await getOpenAiService();
-          aggregateText = await generateSummary("", {
-            scope: `${folderName} 폴더 전체`,
-            chapterized: true,
-            chapterSections: summarySections,
-          });
-
-          const coverageNotes = [];
-          if (missingSummaryNames.length > 0) {
-            const previewNames = missingSummaryNames.slice(0, 5).join(", ");
-            const suffix = missingSummaryNames.length > 5 ? " 외" : "";
-            coverageNotes.push(
-              `이번 폴더 통합 요약에서는 저장된 개별 요약이 없는 파일 ${missingSummaryNames.length}개를 제외했습니다: ${previewNames}${suffix}`
-            );
-          }
-          if (truncated) {
-            coverageNotes.push("파일별 요약 길이가 길어 일부 내용은 축약해 반영했습니다.");
-          }
-          if (coverageNotes.length > 0) {
-            aggregateText = `${String(aggregateText || "").trim()}\n\n---\n${coverageNotes.join("\n")}`.trim();
-          }
-
-          if (user?.id) {
-            const preservedHighlights =
-              savedAggregateArtifacts?.highlights &&
-              typeof savedAggregateArtifacts.highlights === "object" &&
-              !Array.isArray(savedAggregateArtifacts.highlights)
-                ? { ...savedAggregateArtifacts.highlights }
-                : {};
-            preservedHighlights[FOLDER_AGGREGATE_META_KEY] = {
-              sourceSignature: signature,
-              sourceCount: summarySections.length,
-              totalCount: folderItems.length,
-              missingSummaryCount: missingSummaryNames.length,
-              truncated,
-              updatedAt: new Date().toISOString(),
-            };
-            await saveDocArtifacts({
-              userId: user.id,
-              docId: aggregateDocId,
-              summary: aggregateText,
-              highlights: preservedHighlights,
-            });
-            docArtifactsCacheRef.current.set(aggregateDocId, {
-              ...(savedAggregateArtifacts || {}),
-              summary: aggregateText,
-              highlights: preservedHighlights,
-            });
-          }
-        }
-
-        let aggregatePdfResult;
-        try {
-          aggregatePdfResult = await createRichTextPdfFile(aggregateText, {
-            filename: `${aggregateTitle}.pdf`,
-            title: aggregateTitle,
-          });
-        } catch (richPdfError) {
-          console.warn("rich summary PDF export failed, falling back to plain text PDF", richPdfError);
-          aggregatePdfResult = await createTextPdfFile(aggregateText, {
-            filename: `${aggregateTitle}.pdf`,
-            title: aggregateTitle,
-          });
-        }
-
-        const { file: aggregateFile, pageCount: aggregatePageCount } = aggregatePdfResult;
-        const aggregateThumbnail = await generateDocumentThumbnail(aggregateFile);
-        const aggregateItem = {
-          id: aggregateDocId,
-          file: aggregateFile,
-          name: aggregateTitle,
-          size: totalSize,
-          thumbnail: aggregateThumbnail,
-          folderAggregate: true,
-          folderId: normalizedFolderId,
-          folderName,
-          aggregateText,
-          aggregatePageInfo: {
-            used: Number(aggregatePageCount) || 1,
-            total: Number(aggregatePageCount) || 1,
-          },
-          aggregateThumbnail,
-          aggregateSourceCount: summarySections.length,
-          aggregateTotalCount: folderItems.length,
-          aggregateMissingSummaryCount: missingSummaryNames.length,
-          aggregateTruncated: truncated,
-        };
-
-        folderAggregateCacheRef.current.set(normalizedFolderId, {
-          signature,
-          item: aggregateItem,
-        });
-        return aggregateItem;
-      })();
-
-      folderAggregateBuildRef.current.set(normalizedFolderId, buildPromise);
-      try {
-        return await buildPromise;
-      } finally {
-        if (folderAggregateBuildRef.current.get(normalizedFolderId) === buildPromise) {
-          folderAggregateBuildRef.current.delete(normalizedFolderId);
-        }
-      }
-    },
-    [folders, getOpenAiService, user?.id]
-  );
 
   const handleSelectFile = useCallback(
     async (item) => {
       try {
-        await processSelectedFileRef.current(item);
+        const ensured = await ensureFileForItemRef.current(item);
+        await processSelectedFileRef.current(ensured);
       } catch (err) {
         setError(`?좏깮???뚯씪???щ뒗 ???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       }
     },
-    [processSelectedFileRef]
-  );
-
-  const handleSelectFolderSummary = useCallback(
-    async (folderId, { pushState = true } = {}) => {
-      try {
-        setError("");
-        setStatus("폴더 전체 요약본을 여는 중...");
-        const normalizedFolderId = String(folderId || "").trim();
-        const aggregateDocId = buildFolderAggregateDocId(normalizedFolderId);
-        const previewItem = await buildFolderAggregatePreviewItem(normalizedFolderId);
-        await processSelectedFileRef.current(previewItem, { pushState });
-
-        buildFolderAggregateSelectionItem(normalizedFolderId)
-          .then(async (aggregateItem) => {
-            if (!aggregateItem) return;
-            if (selectedFileIdRef.current !== aggregateDocId) return;
-            const isSameFile =
-              aggregateItem.file === previewItem.file &&
-              String(aggregateItem.aggregateText || "").trim() ===
-                String(previewItem.aggregateText || "").trim();
-            if (isSameFile) return;
-            await processSelectedFileRef.current(aggregateItem, { pushState: false });
-          })
-          .catch((err) => {
-            if (selectedFileIdRef.current === aggregateDocId) {
-              setError(`폴더 전체 요약본을 준비하지 못했습니다: ${err.message}`);
-            }
-          });
-      } catch (err) {
-        setError(`폴더 전체 요약본을 여는 데 실패했습니다: ${err.message}`);
-      }
-    },
-    [buildFolderAggregatePreviewItem, buildFolderAggregateSelectionItem]
+    [ensureFileForItemRef, processSelectedFileRef]
   );
 
 
   const persistArtifacts = useCallback(
     async (partial) => {
       if (!user || !selectedFileId) return;
-      const normalizedDocId = String(selectedFileId || "").trim();
       const merged = {
         ...(artifacts || {}),
         ...partial,
       };
       setArtifacts(merged);
-      artifactsHighlightsRef.current = merged.highlights || null;
-      if (normalizedDocId) {
-        docArtifactsCacheRef.current.set(normalizedDocId, merged);
-      }
-      if (Object.prototype.hasOwnProperty.call(partial || {}, "summary")) {
-        folderAggregateCacheRef.current.clear();
-        folderAggregateBuildRef.current.clear();
-      }
       try {
         await saveDocArtifacts({
           userId: user.id,
-          docId: normalizedDocId,
+          docId: selectedFileId,
           summary: merged.summary,
           quiz: merged.quiz,
           ox: merged.ox,
@@ -3098,54 +2755,123 @@ function App() {
     [artifacts?.highlights, persistArtifacts, savedPartialSummaries]
   );
 
-  const persistExamCramBundle = useCallback(
-    ({ content = "", scopeLabel = "", updatedAt = new Date().toISOString() } = {}) => {
-      const nextHighlights = writeExamCramToHighlights(artifacts?.highlights, {
-        content,
-        scopeLabel,
-        updatedAt,
+  const persistInstructorEmphasisState = useCallback(
+    ({ library = savedInstructorEmphases, activeId = activeInstructorEmphasisId } = {}) => {
+      const nextHighlights = writePartialSummaryBundleToHighlights(artifacts?.highlights, {
+        instructorEmphasisLibrary: library,
+        activeInstructorEmphasisId: activeId,
       });
       persistArtifacts({ highlights: nextHighlights });
     },
-    [artifacts?.highlights, persistArtifacts]
+    [activeInstructorEmphasisId, artifacts?.highlights, persistArtifacts, savedInstructorEmphases]
   );
 
-  useEffect(() => {
-    reviewNotesRef.current = Array.isArray(reviewNotes) ? reviewNotes : [];
-  }, [reviewNotes]);
+  const handleSaveInstructorEmphasis = useCallback(
+    ({ value } = {}) => {
+      const nextValue =
+        value === undefined
+          ? normalizeInstructorEmphasisInput(instructorEmphasisInput)
+          : normalizeInstructorEmphasisInput(value);
+      if (!nextValue) {
+        setStatus("\uC800\uC7A5\uD560 \uAC15\uC870 \uD3EC\uC778\uD2B8\uB97C \uC785\uB825\uD574\uC8FC\uC138\uC694.");
+        return;
+      }
 
-  useEffect(() => {
-    artifactsHighlightsRef.current = artifacts?.highlights || null;
-  }, [artifacts?.highlights]);
+      const existing = savedInstructorEmphases.find((item) => item.text === nextValue);
+      if (existing) {
+        setActiveInstructorEmphasisId(existing.id);
+        setInstructorEmphasisInput("");
+        persistInstructorEmphasisState({
+          library: savedInstructorEmphases,
+          activeId: existing.id,
+        });
+        setStatus("\uC774\uBBF8 \uC800\uC7A5\uB41C \uAC15\uC870 \uD3EC\uC778\uD2B8\uB97C \uC120\uD0DD\uD588\uC2B5\uB2C8\uB2E4.");
+        return;
+      }
 
-  useEffect(() => {
-    reviewNotesRef.current = [];
-    setReviewNotes([]);
-    setReviewNotesChapterSelectionInput("");
-    setIsGeneratingExamCram(false);
-    setExamCramContent("");
-    setExamCramUpdatedAt("");
-    setExamCramScopeLabel("");
-    setExamCramStatus("");
-    setExamCramError("");
-  }, [selectedFileId]);
+      const nowIso = new Date().toISOString();
+      const newItem = {
+        id: createPremiumProfileId(),
+        text: nextValue,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      const nextLibrary = normalizeSavedInstructorEmphasisEntries([
+        newItem,
+        ...(Array.isArray(savedInstructorEmphases) ? savedInstructorEmphases : []),
+      ]);
+      setSavedInstructorEmphases(nextLibrary);
+      setActiveInstructorEmphasisId(newItem.id);
+      setInstructorEmphasisInput("");
+      persistInstructorEmphasisState({ library: nextLibrary, activeId: newItem.id });
+      setStatus("\uAC15\uC870 \uD3EC\uC778\uD2B8\uB97C \uBCC4\uB3C4 \uD56D\uBAA9\uC73C\uB85C \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.");
+    },
+    [instructorEmphasisInput, persistInstructorEmphasisState, savedInstructorEmphases]
+  );
+
+  const handleSelectInstructorEmphasis = useCallback(
+    (itemId) => {
+      const targetId = String(itemId || "").trim();
+      if (!targetId) return;
+      const found = savedInstructorEmphases.find((item) => item.id === targetId);
+      if (!found) return;
+      setActiveInstructorEmphasisId(targetId);
+      setInstructorEmphasisInput(found.text);
+      persistInstructorEmphasisState({ library: savedInstructorEmphases, activeId: targetId });
+    },
+    [persistInstructorEmphasisState, savedInstructorEmphases]
+  );
+
+  const handleDeleteInstructorEmphasis = useCallback(
+    (itemId) => {
+      const targetId = String(itemId || "").trim();
+      if (!targetId) return;
+      const nextLibrary = (Array.isArray(savedInstructorEmphases) ? savedInstructorEmphases : []).filter(
+        (item) => item.id !== targetId
+      );
+      const nextActiveId =
+        targetId === activeInstructorEmphasisId ? nextLibrary[0]?.id || "" : activeInstructorEmphasisId;
+      const nextActiveItem = nextLibrary.find((item) => item.id === nextActiveId) || null;
+      setSavedInstructorEmphases(nextLibrary);
+      setActiveInstructorEmphasisId(nextActiveId);
+      setInstructorEmphasisInput(nextActiveItem?.text || "");
+      persistInstructorEmphasisState({ library: nextLibrary, activeId: nextActiveId });
+      setStatus("\uAC15\uC870 \uD3EC\uC778\uD2B8 \uD56D\uBAA9\uC744 \uC0AD\uC81C\uD588\uC2B5\uB2C8\uB2E4.");
+    },
+    [activeInstructorEmphasisId, persistInstructorEmphasisState, savedInstructorEmphases]
+  );
+
+  const cycleActiveInstructorEmphasis = useCallback(
+    (direction = 1) => {
+      const list = Array.isArray(savedInstructorEmphases) ? savedInstructorEmphases : [];
+      if (list.length <= 1) return;
+      const currentIndex = list.findIndex((item) => item.id === activeInstructorEmphasisId);
+      const start = currentIndex >= 0 ? currentIndex : 0;
+      const step = Number(direction) >= 0 ? 1 : -1;
+      const nextIndex = (start + step + list.length) % list.length;
+      const nextId = list[nextIndex]?.id || "";
+      if (!nextId) return;
+      handleSelectInstructorEmphasis(nextId);
+    },
+    [activeInstructorEmphasisId, handleSelectInstructorEmphasis, savedInstructorEmphases]
+  );
+
+  const getEffectiveInstructorEmphasisText = useCallback(() => {
+    const draft = normalizeInstructorEmphasisInput(instructorEmphasisInput);
+    if (draft) return draft;
+    const active = (Array.isArray(savedInstructorEmphases) ? savedInstructorEmphases : []).find(
+      (item) => item.id === activeInstructorEmphasisId
+    );
+    return normalizeInstructorEmphasisInput(active?.text);
+  }, [activeInstructorEmphasisId, instructorEmphasisInput, savedInstructorEmphases]);
 
   useEffect(() => {
     uploadedFilesRef.current = uploadedFiles;
   }, [uploadedFiles]);
 
   useEffect(() => {
-    folderAggregateCacheRef.current.clear();
-    folderAggregateBuildRef.current.clear();
-  }, [folders, uploadedFiles]);
-
-  useEffect(() => {
     goBackToListRef.current = goBackToList;
   }, [goBackToList]);
-
-  useEffect(() => {
-    selectedFileIdRef.current = selectedFileId;
-  }, [selectedFileId]);
 
   useEffect(() => {
     processSelectedFileRef.current = processSelectedFile;
@@ -3254,13 +2980,6 @@ function App() {
       }
 
       if (state?.view === "detail" && state.fileId) {
-        if (isFolderAggregateDocId(state.fileId)) {
-          const folderId = parseFolderAggregateDocId(state.fileId);
-          if (folderId) {
-            handleSelectFolderSummary(folderId, { pushState: false });
-            return;
-          }
-        }
         const target = uploadedFilesRef.current.find((f) => f.id === state.fileId);
         if (target) {
           processSelectedFileRef.current(target, { pushState: false });
@@ -3285,7 +3004,7 @@ function App() {
 
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [consumeOverlayBack, handleSelectFolderSummary, isNativePlatform, showDetail, updateHistoryState]);
+  }, [consumeOverlayBack, isNativePlatform, showDetail, updateHistoryState]);
 
   const handleDragStart = useCallback((event) => {
     if (typeof event?.button === "number" && event.button !== 0) return;
@@ -3348,7 +3067,7 @@ function App() {
   };
 
   const resolveChapterOneStartPage = useCallback(async () => {
-    if (!file || !isCurrentPdfDocument) return 1;
+    if (!file || !isPdfDocumentKind(detectSupportedDocumentKind(file))) return 1;
     const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
     if (!Number.isFinite(totalPages) || totalPages <= 0) return 1;
 
@@ -3398,539 +3117,7 @@ function App() {
 
     chapterOneStartPageCacheRef.current.set(docKey, 1);
     return 1;
-  }, [chapterRangeInput, file, isCurrentPdfDocument, pageInfo?.total, pageInfo?.used, selectedFileId]);
-
-  const buildBoundedPageRange = useCallback(
-    (start, end, cap = 180) => {
-      const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
-      if (!Number.isFinite(totalPages) || totalPages <= 0) return [];
-      const lo = Math.max(1, Math.min(totalPages, Number.parseInt(start, 10) || 1));
-      const hi = Math.max(lo, Math.min(totalPages, Number.parseInt(end, 10) || lo));
-      const pages = [];
-      for (let page = lo; page <= hi; page += 1) {
-        pages.push(page);
-        if (pages.length >= cap) break;
-      }
-      return pages;
-    },
-    [pageInfo?.total, pageInfo?.used]
-  );
-
-  const buildPageCandidatesFromRanges = useCallback(
-    (ranges, cap = 180) => {
-      const pages = [];
-      for (const range of Array.isArray(ranges) ? ranges : []) {
-        const nextPages = buildBoundedPageRange(range?.pageStart, range?.pageEnd, Math.max(1, cap - pages.length));
-        pages.push(...nextPages);
-        if (pages.length >= cap) break;
-      }
-      return toSortedUniquePages(pages).slice(0, cap);
-    },
-    [buildBoundedPageRange]
-  );
-
-  const getDefaultSummaryEvidencePages = useCallback(() => {
-    const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
-    if (!Number.isFinite(totalPages) || totalPages <= 0) return [];
-    const upperBound = Math.min(totalPages, Math.max(Number(pageInfo?.used || 0), 80));
-    return buildBoundedPageRange(1, upperBound, 180);
-  }, [buildBoundedPageRange, pageInfo?.total, pageInfo?.used]);
-
-  const loadEvidencePageEntries = useCallback(
-    async (requestedPages, { useOcr = false, maxCharsPerPage = 4200 } = {}) => {
-      if (!file || !isCurrentPdfDocument) return [];
-      const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
-      const normalizedPages = toSortedUniquePages(requestedPages);
-      if (!normalizedPages.length) return [];
-
-      const entriesByPage = new Map();
-      const missing = [];
-      const pageCacheKey = (pageNumber) => `${docKey}:${pageNumber}`;
-
-      for (const pageNumber of normalizedPages) {
-        const cached = tutorPageTextCacheRef.current.get(pageCacheKey(pageNumber));
-        const shouldReloadForOcr =
-          useOcr &&
-          (!cached || !cached.ocrUsed || String(cached.text || "").trim().length < 180);
-        if (!cached || !String(cached.text || "").trim() || shouldReloadForOcr) {
-          missing.push(pageNumber);
-          continue;
-        }
-        entriesByPage.set(pageNumber, {
-          pageNumber,
-          text: String(cached.text || "").trim(),
-          ocrUsed: Boolean(cached.ocrUsed),
-        });
-      }
-
-      if (missing.length > 0) {
-        const fetched = await extractPdfPageTexts(file, missing, {
-          useOcr,
-          ocrLang: "kor+eng",
-          maxCharsPerPage,
-        });
-        for (const pageEntry of fetched?.pages || []) {
-          const pageNumber = Number.parseInt(pageEntry?.pageNumber, 10);
-          const text = String(pageEntry?.text || "").trim();
-          if (!Number.isFinite(pageNumber) || !text) continue;
-          const payload = {
-            pageNumber,
-            text,
-            ocrUsed: Boolean(pageEntry?.ocrUsed),
-          };
-          tutorPageTextCacheRef.current.set(pageCacheKey(pageNumber), {
-            text,
-            ocrUsed: payload.ocrUsed,
-          });
-          entriesByPage.set(pageNumber, payload);
-        }
-      }
-
-      return normalizedPages.map((pageNumber) => entriesByPage.get(pageNumber)).filter((entry) => entry?.text);
-    },
-    [file, isCurrentPdfDocument, selectedFileId]
-  );
-
-  const buildPageTaggedSourceText = useCallback(
-    async (
-      baseText,
-      candidatePages,
-      {
-        maxPages = 18,
-        maxCharsPerPage = 900,
-        maxTotalChars = 15000,
-        includeFallbackText = true,
-      } = {}
-    ) => {
-      const fallbackText = String(baseText || "").trim();
-      const allPages = toSortedUniquePages(candidatePages);
-      const normalizedPages =
-        allPages.length <= maxPages
-          ? allPages
-          : Array.from(
-              new Set(
-                Array.from({ length: maxPages }, (_, index) => {
-                  if (maxPages <= 1) return allPages[0];
-                  const ratio = index / (maxPages - 1);
-                  const mappedIndex = Math.round(ratio * (allPages.length - 1));
-                  return allPages[mappedIndex];
-                })
-              )
-            );
-      if (!normalizedPages.length || !file || !isCurrentPdfDocument) {
-        return fallbackText;
-      }
-      const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
-      const fallbackKey = includeFallbackText
-        ? `${fallbackText.length}:${fallbackText.slice(0, 160)}`
-        : "no-fallback";
-      const cacheKey = [
-        docKey,
-        normalizedPages.join(","),
-        maxCharsPerPage,
-        maxTotalChars,
-        includeFallbackText ? 1 : 0,
-        fallbackKey,
-      ].join("::");
-      const cached = pageTaggedSourceTextCacheRef.current.get(cacheKey);
-      if (typeof cached === "string" && cached.trim()) {
-        return cached;
-      }
-
-      let entries = await loadEvidencePageEntries(normalizedPages, {
-        useOcr: false,
-        maxCharsPerPage,
-      });
-      if (!entries.length) {
-        return fallbackText;
-      }
-
-      const blocks = [];
-      let totalChars = 0;
-      for (const entry of entries) {
-        const pageNumber = Number.parseInt(entry?.pageNumber, 10);
-        const compactText = String(entry?.text || "")
-          .replace(/\r\n/g, "\n")
-          .replace(/\n{2,}/g, "\n")
-          .replace(/[ \t]{2,}/g, " ")
-          .trim()
-          .slice(0, maxCharsPerPage);
-        if (!Number.isFinite(pageNumber) || !compactText) continue;
-
-        const block = `[p.${pageNumber}]\n${compactText}`;
-        if (totalChars + block.length > maxTotalChars && blocks.length > 0) break;
-        blocks.push(block);
-        totalChars += block.length + 2;
-      }
-
-      let taggedContext = blocks.join("\n\n").trim();
-      if (!taggedContext) {
-        return fallbackText;
-      }
-
-      if (includeFallbackText && fallbackText) {
-        const remaining = Math.max(0, maxTotalChars - taggedContext.length - 24);
-        if (remaining >= 600) {
-          taggedContext = `${taggedContext}\n\n[overall_context]\n${fallbackText.slice(0, remaining)}`.trim();
-        }
-      }
-
-      pageTaggedSourceTextCacheRef.current.set(cacheKey, taggedContext);
-      return taggedContext;
-    },
-    [file, isCurrentPdfDocument, loadEvidencePageEntries, selectedFileId]
-  );
-
-  const resolveEvidenceForText = useCallback(
-    async (queryText, { candidatePages = [], fallbackPages = [], fallbackEnd = 120, maxMatches = 3 } = {}) => {
-      if (!file || !isCurrentPdfDocument) {
-        return { pages: [], snippet: "" };
-      }
-
-      const normalizedQuery = String(queryText || "").trim();
-      if (!normalizedQuery) {
-        return { pages: [], snippet: "" };
-      }
-
-      const fallbackList =
-        Array.isArray(fallbackPages) && fallbackPages.length > 0
-          ? toSortedUniquePages(fallbackPages)
-          : buildBoundedPageRange(1, fallbackEnd, 180);
-      const normalizedCandidatePages =
-        Array.isArray(candidatePages) && candidatePages.length > 0
-          ? toSortedUniquePages(candidatePages)
-          : fallbackList;
-      if (!normalizedCandidatePages.length) {
-        return { pages: [], snippet: "" };
-      }
-
-      const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
-      const queryKey = normalizeQuestionKey(normalizedQuery).slice(0, 220);
-      const cacheKey = `${docKey}:${queryKey}:${normalizedCandidatePages.join(",")}`;
-      const cached = evidenceMatchCacheRef.current.get(cacheKey);
-      if (cached) return cached;
-
-      let entries = await loadEvidencePageEntries(normalizedCandidatePages, {
-        useOcr: false,
-      });
-      let matches = findEvidenceMatches(normalizedQuery, entries, { limit: maxMatches });
-      if (matches.length === 0) {
-        matches = findEvidenceMatches(normalizedQuery, entries, {
-          limit: maxMatches,
-          minScore: 4,
-        });
-      }
-      if (matches.length === 0) {
-        entries = await loadEvidencePageEntries(normalizedCandidatePages, {
-          useOcr: true,
-        });
-        matches = findEvidenceMatches(normalizedQuery, entries, { limit: maxMatches });
-        if (matches.length === 0) {
-          matches = findEvidenceMatches(normalizedQuery, entries, {
-            limit: maxMatches,
-            minScore: 4,
-          });
-        }
-      }
-
-      const result = {
-        pages: matches.map((item) => ({
-          pageNumber: item.pageNumber,
-          snippet: item.snippet,
-        })),
-        snippet: String(matches[0]?.snippet || "").trim(),
-      };
-      evidenceMatchCacheRef.current.set(cacheKey, result);
-      return result;
-    },
-    [buildBoundedPageRange, file, isCurrentPdfDocument, loadEvidencePageEntries, selectedFileId]
-  );
-
-  useEffect(() => {
-    if (!isCurrentPdfDocument) {
-      setPartialSummaryEvidencePageCandidates((prev) => (prev.length ? [] : prev));
-      return;
-    }
-
-    const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
-    if (!Number.isFinite(totalPages) || totalPages <= 0 || !String(partialSummaryRange || "").trim()) {
-      setPartialSummaryEvidencePageCandidates((prev) => (prev.length ? [] : prev));
-      return;
-    }
-
-    const parsed = parsePageSelectionInput(partialSummaryRange, totalPages);
-    const nextPages = parsed.error ? [] : toSortedUniquePages(parsed.pages);
-    setPartialSummaryEvidencePageCandidates((prev) =>
-      areNumberArraysEqual(prev, nextPages) ? prev : nextPages
-    );
-  }, [isCurrentPdfDocument, pageInfo?.total, pageInfo?.used, partialSummaryRange]);
-
-  useEffect(() => {
-    setActiveEvidenceHighlight(null);
-  }, [selectedFileId, file]);
-
-  const jumpToEvidencePage = useCallback(
-    (pageNumber, snippet = "", label = "") => {
-      if (!isCurrentPdfDocument) return;
-      const normalizedPage = Number.parseInt(pageNumber, 10);
-      if (!Number.isFinite(normalizedPage) || normalizedPage <= 0) return;
-      setActiveEvidenceHighlight({
-        pageNumber: normalizedPage,
-        snippet: String(snippet || "").trim(),
-        label: String(label || "").trim(),
-        requestId: `${normalizedPage}:${Date.now()}`,
-      });
-      handlePageChange(normalizedPage);
-    },
-    [handlePageChange, isCurrentPdfDocument]
-  );
-
-  const resolveSummaryEvidence = useCallback(
-    async (pageText) =>
-      resolveEvidenceForText(pageText, {
-        candidatePages: summaryEvidencePageCandidates,
-        fallbackPages: getDefaultSummaryEvidencePages(),
-        fallbackEnd: Math.max(Number(pageInfo?.used || 0), 80),
-      }),
-    [
-      getDefaultSummaryEvidencePages,
-      pageInfo?.used,
-      resolveEvidenceForText,
-      summaryEvidencePageCandidates,
-    ]
-  );
-
-  const buildQuizEvidenceQuery = useCallback((question) => {
-    if (!question || typeof question !== "object") return "";
-    const prompt = String(question?.question || question?.prompt || "").trim();
-    const explanation = String(question?.explanation || "").trim();
-    const answer = String(question?.answer || "").trim();
-    const choices = Array.isArray(question?.choices) ? question.choices : [];
-    const answerIndex = Number.isFinite(question?.answerIndex) ? question.answerIndex : -1;
-    const correctChoice =
-      answerIndex >= 0 && answerIndex < choices.length ? String(choices[answerIndex] || "").trim() : "";
-    const fallbackChoices =
-      !correctChoice && choices.length > 0
-        ? choices
-            .map((choice) => String(choice || "").trim())
-            .filter(Boolean)
-            .slice(0, 4)
-        : [];
-
-    return [prompt, correctChoice, answer, explanation, ...fallbackChoices]
-      .map((part) => String(part || "").trim())
-      .filter(Boolean)
-      .join(" ");
-  }, []);
-
-  const buildOxEvidenceQuery = useCallback((item) => {
-    if (!item || typeof item !== "object") return "";
-    const prompt = String(item?.statement || item?.prompt || item?.question || "").trim();
-    const explanation = String(item?.explanation || "").trim();
-    const evidence = String(item?.evidence || "").trim();
-    const answerText =
-      item?.answer === true || String(item?.answer || "").trim().toUpperCase() === "O"
-        ? "O 참 true"
-        : item?.answer === false || String(item?.answer || "").trim().toUpperCase() === "X"
-          ? "X 거짓 false"
-          : "";
-    return [prompt, answerText, explanation, evidence]
-      .map((part) => String(part || "").trim())
-      .filter(Boolean)
-      .join(" ");
-  }, []);
-
-  const buildMockExamEvidenceQuery = useCallback((item) => {
-    if (!item || typeof item !== "object") return "";
-    const prompt = String(item?.prompt || item?.question || item?.statement || "").trim();
-    const explanation = String(item?.explanation || "").trim();
-    const evidence = String(item?.evidence || "").trim();
-    const choices = Array.isArray(item?.choices) ? item.choices : [];
-    const answerIndex = Number.isFinite(item?.answerIndex) ? item.answerIndex : -1;
-    const correctChoice =
-      answerIndex >= 0 && answerIndex < choices.length ? String(choices[answerIndex] || "").trim() : "";
-    const answer = String(item?.answer || "").trim();
-    return [prompt, correctChoice, answer, explanation, evidence]
-      .map((part) => String(part || "").trim())
-      .filter(Boolean)
-      .join(" ");
-  }, []);
-
-  const parseExplicitEvidencePages = useCallback((value) => {
-    const pages = [];
-    const source = String(value || "");
-    for (const match of source.matchAll(/(?:p\.?\s*|page\s*|페이지\s*|쪽\s*)(\d{1,4})/gi)) {
-      const pageNumber = Number.parseInt(match?.[1], 10);
-      if (Number.isFinite(pageNumber) && pageNumber > 0) {
-        pages.push(pageNumber);
-      }
-    }
-    return toSortedUniquePages(pages);
-  }, []);
-
-  const buildStoredEvidenceResult = useCallback(
-    (item) => {
-      if (!item || typeof item !== "object") return null;
-
-      const evidenceObject =
-        item?.evidence && typeof item.evidence === "object" && !Array.isArray(item.evidence)
-          ? item.evidence
-          : null;
-      const evidenceText = typeof item?.evidence === "string" ? item.evidence : "";
-      const evidencePages = toSortedUniquePages([
-        ...(Array.isArray(item?.evidencePages) ? item.evidencePages : []),
-        ...(Array.isArray(evidenceObject?.pages) ? evidenceObject.pages : []),
-        ...parseExplicitEvidencePages(item?.evidenceLabel),
-        ...parseExplicitEvidencePages(item?.evidenceSnippet),
-        ...parseExplicitEvidencePages(evidenceText),
-        ...parseExplicitEvidencePages(evidenceObject?.label),
-        ...parseExplicitEvidencePages(evidenceObject?.snippet),
-      ]);
-      const evidenceLabel = String(item?.evidenceLabel || evidenceObject?.label || "").trim();
-      const evidenceSnippet = String(
-        item?.evidenceSnippet || evidenceObject?.snippet || evidenceText || ""
-      ).trim();
-      const snippet = evidenceSnippet || evidenceLabel;
-
-      if (!evidencePages.length && !snippet) return null;
-
-      return {
-        pages: evidencePages.map((pageNumber) => ({
-          pageNumber,
-          snippet,
-          label: evidenceLabel,
-        })),
-        snippet,
-      };
-    },
-    [parseExplicitEvidencePages]
-  );
-
-  const clampEvidencePagesToScope = useCallback((pages, allowedPages) => {
-    const normalizedAllowed = toSortedUniquePages(allowedPages);
-    const normalizedPages = toSortedUniquePages(pages);
-    if (!normalizedAllowed.length) return normalizedPages;
-    const allowedSet = new Set(normalizedAllowed);
-    return normalizedPages.filter((pageNumber) => allowedSet.has(pageNumber));
-  }, []);
-
-  const filterGeneratedItemsToScope = useCallback(
-    (items, allowedPages) => {
-      const normalizedAllowed = toSortedUniquePages(allowedPages);
-      if (!normalizedAllowed.length) {
-        return Array.isArray(items) ? items : [];
-      }
-
-      return (Array.isArray(items) ? items : [])
-        .map((item) => {
-          const nextEvidencePages = clampEvidencePagesToScope(item?.evidencePages, normalizedAllowed);
-          if (!nextEvidencePages.length) return null;
-          return {
-            ...item,
-            evidencePages: nextEvidencePages,
-          };
-        })
-        .filter(Boolean);
-    },
-    [clampEvidencePagesToScope]
-  );
-
-  const repairGeneratedQuizItemsToScope = useCallback(
-    (items, allowedPages) => {
-      const normalizedAllowed = toSortedUniquePages(allowedPages);
-      const list = Array.isArray(items) ? items : [];
-      if (!normalizedAllowed.length || !list.length) {
-        return list;
-      }
-
-      return list
-        .map((item) => {
-          if (!item || typeof item !== "object") return null;
-
-          const directPages = clampEvidencePagesToScope(item?.evidencePages, normalizedAllowed);
-          if (!directPages.length) return null;
-          return {
-            ...item,
-            evidencePages: directPages,
-            evidenceLabel:
-              String(item?.evidenceLabel || "").trim() || `p.${directPages.join(", ")}`,
-          };
-        })
-        .filter(Boolean);
-    },
-    [clampEvidencePagesToScope]
-  );
-
-  const resolvePartialSummaryEvidence = useCallback(
-    async (pageText) => {
-      const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
-      const parsed =
-        totalPages > 0 && String(partialSummaryRange || "").trim()
-          ? parsePageSelectionInput(partialSummaryRange, totalPages)
-          : { error: "", pages: [] };
-      const fallbackPages = partialSummaryEvidencePageCandidates.length
-        ? partialSummaryEvidencePageCandidates
-        : parsed.error
-          ? []
-          : toSortedUniquePages(parsed.pages);
-
-      return resolveEvidenceForText(pageText, {
-        candidatePages: fallbackPages,
-        fallbackPages,
-        fallbackEnd: Number(pageInfo?.used || 0) || 30,
-      });
-    },
-    [
-      pageInfo?.total,
-      pageInfo?.used,
-      partialSummaryEvidencePageCandidates,
-      partialSummaryRange,
-      resolveEvidenceForText,
-    ]
-  );
-
-  const resolveQuizEvidence = useCallback(
-    async (question) => {
-      const stored = buildStoredEvidenceResult(question);
-      const storedPages = Array.isArray(stored?.pages) ? stored.pages.map((entry) => entry?.pageNumber) : [];
-      if (storedPages.length && String(stored?.snippet || "").trim()) {
-        return stored;
-      }
-      return resolveEvidenceForText(buildQuizEvidenceQuery(question), {
-        candidatePages: storedPages.length ? storedPages : question?.evidencePages,
-        fallbackEnd: 120,
-      });
-    },
-    [buildQuizEvidenceQuery, buildStoredEvidenceResult, resolveEvidenceForText]
-  );
-
-  const resolveOxEvidence = useCallback(
-    async (item) => {
-      const stored = buildStoredEvidenceResult(item);
-      if (stored?.pages?.length) {
-        return stored;
-      }
-      return resolveEvidenceForText(buildOxEvidenceQuery(item), {
-        candidatePages: item?.evidencePages,
-        fallbackEnd: 120,
-      });
-    },
-    [buildOxEvidenceQuery, buildStoredEvidenceResult, resolveEvidenceForText]
-  );
-
-  const resolveMockExamEvidence = useCallback(
-    async (item) => {
-      const stored = buildStoredEvidenceResult(item);
-      if (stored?.pages?.length) {
-        return stored;
-      }
-      return resolveEvidenceForText(buildMockExamEvidenceQuery(item), {
-        candidatePages: item?.evidencePages,
-        fallbackEnd: 120,
-      });
-    },
-    [buildMockExamEvidenceQuery, buildStoredEvidenceResult, resolveEvidenceForText]
-  );
+  }, [chapterRangeInput, file, pageInfo?.total, pageInfo?.used, selectedFileId]);
 
   const resolveQuestionSourceText = useCallback(
     async ({ featureLabel, chapterSelectionInput, baseText }) => {
@@ -3947,74 +3134,53 @@ function App() {
         return {
           text: String(scoped?.text || "").trim(),
           scopeLabel: String(scoped?.scopeLabel || "").trim(),
-          pageCandidates: toSortedUniquePages(scoped?.pageCandidates),
         };
       }
 
       let sourceText = String(baseText || "").trim();
-      if (!file || !isCurrentPdfDocument) {
-        return { text: sourceText, scopeLabel: "", pageCandidates: [] };
+      if (!file || !isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+        return { text: sourceText, scopeLabel: "" };
       }
 
       const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
       if (!Number.isFinite(totalPages) || totalPages <= 0) {
-        return { text: sourceText, scopeLabel: "", pageCandidates: [] };
+        return { text: sourceText, scopeLabel: "" };
       }
 
       const chapterOneStartPage = await resolveChapterOneStartPage();
       if (!Number.isFinite(chapterOneStartPage) || chapterOneStartPage <= 1) {
-        return { text: sourceText, scopeLabel: "", pageCandidates: [] };
+        return { text: sourceText, scopeLabel: "" };
       }
 
       const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
-      const cachedSummaryText = String(summaryContextCacheRef.current.get(docKey) || "").trim();
-      const usedSummaryCache = cachedSummaryText.length > sourceText.length;
-      if (usedSummaryCache) {
-        sourceText = cachedSummaryText;
-      }
       const cacheKey = `${docKey}:chapter1:${chapterOneStartPage}`;
       const cachedText = questionSourceTextCacheRef.current.get(cacheKey);
       if (typeof cachedText === "string" && cachedText.trim().length > 80) {
-        const cachedPages = buildBoundedPageRange(chapterOneStartPage, chapterOneStartPage + 119, 120);
         return {
           text: cachedText,
           scopeLabel: `chapter 1+ (p.${chapterOneStartPage}~)`,
-          pageCandidates: cachedPages,
         };
       }
 
       const pageEnd = Math.min(totalPages, chapterOneStartPage + 119);
-      const pages = buildBoundedPageRange(chapterOneStartPage, pageEnd, 120);
-      const initialPageBudget = Math.max(0, Number(pageInfo?.used || 0));
-      const hasBaseText = sourceText.length >= 600;
-      if (hasBaseText && (initialPageBudget >= chapterOneStartPage || usedSummaryCache)) {
-        return {
-          text: sourceText,
-          scopeLabel: "",
-          pageCandidates: pages,
-        };
+      const pages = [];
+      for (let page = chapterOneStartPage; page <= pageEnd; page += 1) {
+        pages.push(page);
       }
       setStatus(`${featureLabel}: 챕터 1 이전 머릿말을 제외하고 텍스트를 준비 중...`);
 
-      const extracted = await extractPdfTextFromPages(file, pages, 52000, {
+      let extracted = await extractPdfTextFromPages(file, pages, 52000, {
         useOcr: false,
       });
       let filteredText = String(extracted?.text || "").trim();
       let filteredApplied = false;
-      if (!filteredText && !sourceText) {
-        try {
-          setStatus(`${featureLabel}: 챕터 1 이후 본문 OCR 텍스트를 추출하는 중...`);
-          const ocrExtracted = await extractPdfTextFromPages(file, pages.slice(0, 18), 52000, {
-            useOcr: true,
-            ocrLang: "kor+eng",
-            ocrScale: 1.35,
-            ocrMaxPixels: 1000000,
-            onOcrProgress: (message) => setStatus(message),
-          });
-          filteredText = String(ocrExtracted?.text || "").trim();
-        } catch {
-          // Keep the existing extracted source text.
-        }
+      if (!filteredText) {
+        extracted = await extractPdfTextFromPages(file, pages, 52000, {
+          useOcr: true,
+          ocrLang: "kor+eng",
+          onOcrProgress: (message) => setStatus(message),
+        });
+        filteredText = String(extracted?.text || "").trim();
       }
       if (filteredText) {
         questionSourceTextCacheRef.current.set(cacheKey, filteredText);
@@ -4025,28 +3191,15 @@ function App() {
       return {
         text: sourceText,
         scopeLabel: filteredApplied ? `chapter 1+ (p.${chapterOneStartPage}~)` : "",
-        pageCandidates: filteredApplied || sourceText ? pages : [],
       };
     },
-    [
-      buildBoundedPageRange,
-      file,
-      isCurrentPdfDocument,
-      pageInfo?.used,
-      pageInfo?.total,
-      resolveChapterOneStartPage,
-      selectedFileId,
-    ]
+    [file, pageInfo?.total, pageInfo?.used, resolveChapterOneStartPage, selectedFileId]
   );
 
   const requestQuestions = async ({ force = false } = {}) => {
     if (isLoadingQuiz && !force) return;
     if (!file) {
       setError("먼저 PDF를 열어주세요.");
-      return;
-    }
-    if (!quizMix) {
-      setError(quizMixError || "문항 비율을 다시 확인해주세요.");
       return;
     }
     if (isFreeTier && quizSets.length > 0) {
@@ -4058,7 +3211,8 @@ function App() {
       return;
     }
     const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
-    const isPdfSource = isCurrentPdfDocument;
+    const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
+    const instructorEmphasisText = getEffectiveInstructorEmphasisText();
 
     if (!extractedText && !chapterSelectionRaw && !isPdfSource) {
       setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
@@ -4077,14 +3231,6 @@ function App() {
       });
       const quizSourceText = String(scopedSource?.text || "").trim();
       const scopeLabel = String(scopedSource?.scopeLabel || "").trim();
-      const evidencePages = toSortedUniquePages(scopedSource?.pageCandidates);
-      const enforceScopedEvidence = isCurrentPdfDocument && evidencePages.length > 0;
-      const generationSourceText = await buildPageTaggedSourceText(quizSourceText, evidencePages, {
-        maxPages: 10,
-        maxCharsPerPage: 720,
-        maxTotalChars: 9000,
-        includeFallbackText: !chapterSelectionRaw,
-      });
       if (!quizSourceText) {
         throw new Error("챕터 1 이후 텍스트를 찾지 못했습니다. 챕터 범위를 먼저 설정해주세요.");
       }
@@ -4092,174 +3238,72 @@ function App() {
         setStatus(`퀴즈 세트 생성 중... (${scopeLabel})`);
       }
 
-      const promptAvoidQuestionTexts = [];
-      const seenQuestionKeys = createQuestionKeySet();
+      const historicalQuizTexts = collectQuestionTextsFromQuizSets(quizSets);
+      const historicalMockTexts = collectQuestionTextsFromMockExams(mockExams);
+      const avoidQuestionTexts = dedupeQuestionTexts([...historicalQuizTexts, ...historicalMockTexts]).slice(0, 80);
+      const seenQuestionKeys = createQuestionKeySet(avoidQuestionTexts);
 
       const targetMcCount = Math.max(0, Number(quizMix.multipleChoice) || 0);
       const targetSaCount = Math.max(0, Number(quizMix.shortAnswer) || 0);
-      const targetTotalCount = targetMcCount + targetSaCount;
-      if (targetTotalCount <= 0) {
-        throw new Error("최소 1문항 이상 입력해주세요.");
-      }
-      const mcBatchLimit = 10;
-      const saBatchLimit = 10;
       const nextMultipleChoice = [];
       const nextShortAnswer = [];
 
       const { generateQuiz } = await getOpenAiService();
-      const generationInput = generationSourceText || quizSourceText;
-      const batchDiagnostics = [];
-      const appendQuizBatch = (quizResult, { requestMcCount = 0, requestSaCount = 0 } = {}) => {
-        const quiz = normalizeQuizPayload(quizResult);
-        const candidateMultipleChoice = Array.isArray(quiz.multipleChoice) ? quiz.multipleChoice : [];
-        const candidateShortAnswer = Array.isArray(quiz.shortAnswer) ? quiz.shortAnswer : [];
-        const scopeReadyMultipleChoice = enforceScopedEvidence
-          ? repairGeneratedQuizItemsToScope(candidateMultipleChoice, evidencePages)
-          : candidateMultipleChoice;
-        const scopeReadyShortAnswer = enforceScopedEvidence
-          ? repairGeneratedQuizItemsToScope(candidateShortAnswer, evidencePages)
-          : candidateShortAnswer;
-        const scopedMultipleChoice = scopeReadyMultipleChoice;
-        const scopedShortAnswer = scopeReadyShortAnswer;
-        const mcBefore = nextMultipleChoice.length;
-        const saBefore = nextShortAnswer.length;
+      const maxAttempts = 3;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        if (nextMultipleChoice.length >= targetMcCount && nextShortAnswer.length >= targetSaCount) break;
+
+        const requestMcCount = Math.min(5, Math.max(targetMcCount - nextMultipleChoice.length, 1) + 1);
+        const requestSaCount = Math.min(5, Math.max(targetSaCount - nextShortAnswer.length, 0) + 1);
+
+        const quiz = normalizeQuizPayload(
+          await generateQuiz(quizSourceText, {
+            multipleChoiceCount: requestMcCount,
+            shortAnswerCount: requestSaCount,
+            instructorEmphasis: instructorEmphasisText,
+            avoidQuestions: avoidQuestionTexts,
+          })
+        );
 
         pushUniqueByQuestionKey(
           nextMultipleChoice,
-          scopedMultipleChoice,
+          Array.isArray(quiz.multipleChoice) ? quiz.multipleChoice : [],
           getQuizPromptText,
           seenQuestionKeys,
           targetMcCount
         );
         pushUniqueByQuestionKey(
           nextShortAnswer,
-          scopedShortAnswer,
+          Array.isArray(quiz.shortAnswer) ? quiz.shortAnswer : [],
           getQuizPromptText,
           seenQuestionKeys,
           targetSaCount
         );
 
-        const addedMc = nextMultipleChoice.length - mcBefore;
-        const addedSa = nextShortAnswer.length - saBefore;
-        return {
-          requestMcCount,
-          requestSaCount,
-          candidateMcCount: candidateMultipleChoice.length,
-          candidateSaCount: candidateShortAnswer.length,
-          recoveredMcCount: Math.max(0, scopeReadyMultipleChoice.length - candidateMultipleChoice.length),
-          recoveredSaCount: Math.max(0, scopeReadyShortAnswer.length - candidateShortAnswer.length),
-          scopedOutMcCount: Math.max(0, scopeReadyMultipleChoice.length - scopedMultipleChoice.length),
-          scopedOutSaCount: Math.max(0, scopeReadyShortAnswer.length - scopedShortAnswer.length),
-          notAcceptedMcCount: Math.max(0, scopedMultipleChoice.length - addedMc),
-          notAcceptedSaCount: Math.max(0, scopedShortAnswer.length - addedSa),
-          addedMc,
-          addedSa,
-        };
-      };
-      const requestQuizBatch = async (requestMcCount, requestSaCount, avoidQuestions) => {
-        if (requestMcCount <= 0 && requestSaCount <= 0) {
-          return { addedMc: 0, addedSa: 0 };
-        }
-        const quizResult = await generateQuiz(generationInput, {
-          multipleChoiceCount: requestMcCount,
-          shortAnswerCount: requestSaCount,
-          avoidQuestions,
-          scopeLabel,
-        });
-        const batchResult = appendQuizBatch(quizResult, { requestMcCount, requestSaCount });
-        batchDiagnostics.push(batchResult);
-        return batchResult;
-      };
-
-      const plannedBatchCount = Math.max(
-        1,
-        Math.ceil(targetMcCount / mcBatchLimit),
-        Math.ceil(targetSaCount / saBatchLimit)
-      );
-      const maxBatchAttempts = plannedBatchCount + (enforceScopedEvidence ? 2 : 1);
-      const stallLimit = enforceScopedEvidence ? 2 : 1;
-      const overfetchBase = enforceScopedEvidence ? 2 : 1;
-      let rollingAvoidQuestions = [...promptAvoidQuestionTexts];
-      let consecutiveNoProgress = 0;
-      for (let batchIndex = 0; batchIndex < maxBatchAttempts; batchIndex += 1) {
-        if (nextMultipleChoice.length >= targetMcCount && nextShortAnswer.length >= targetSaCount) {
-          break;
-        }
-
-        const remainingMc = Math.max(0, targetMcCount - nextMultipleChoice.length);
-        const remainingSa = Math.max(0, targetSaCount - nextShortAnswer.length);
-        const extraMc = remainingMc > 0 ? Math.min(3, overfetchBase + batchIndex) : 0;
-        const extraSa = remainingSa > 0 ? Math.min(3, overfetchBase + batchIndex) : 0;
-        const requestMcCount =
-          remainingMc > 0
-            ? Math.min(mcBatchLimit, remainingMc + extraMc)
-            : 0;
-        const requestSaCount =
-          remainingSa > 0
-            ? Math.min(saBatchLimit, remainingSa + extraSa)
-            : 0;
-
-        if (batchIndex > 0) {
-          setStatus(scopeLabel ? `퀴즈 세트 보완 중... (${scopeLabel})` : "퀴즈 세트 보완 중...");
-        }
-
-        const { addedMc, addedSa } = await requestQuizBatch(
-          requestMcCount,
-          requestSaCount,
-          rollingAvoidQuestions
-        );
-        rollingAvoidQuestions = mergeQuestionHistory(
-          rollingAvoidQuestions,
+        const mergedAvoidQuestions = mergeQuestionHistory(
+          avoidQuestionTexts,
           [...nextMultipleChoice.map(getQuizPromptText), ...nextShortAnswer.map(getQuizPromptText)],
-          24
+          120
         );
-
-        if (addedMc === 0 && addedSa === 0) {
-          consecutiveNoProgress += 1;
-          if (consecutiveNoProgress >= stallLimit) {
-            break;
-          }
-          continue;
-        }
-        consecutiveNoProgress = 0;
+        avoidQuestionTexts.splice(0, avoidQuestionTexts.length, ...mergedAvoidQuestions);
       }
 
       if (nextMultipleChoice.length < targetMcCount || nextShortAnswer.length < targetSaCount) {
-        throw new Error(
-          buildQuizGenerationFailureMessage({
-            targetMcCount,
-            targetSaCount,
-            finalMcCount: nextMultipleChoice.length,
-            finalSaCount: nextShortAnswer.length,
-            batchDiagnostics,
-            enforceScopedEvidence,
-          })
-        );
+        throw new Error("중복 문항을 제외하느라 충분한 새 문항을 만들지 못했습니다. 범위를 바꿔 다시 시도해 주세요.");
       }
 
       const trimmedQuiz = {
-        multipleChoice: nextMultipleChoice.slice(0, targetMcCount).map((item) => ({
-          ...item,
-          evidencePages: enforceScopedEvidence
-            ? clampEvidencePagesToScope(item?.evidencePages, evidencePages)
-            : toSortedUniquePages(
-                Array.isArray(item?.evidencePages) && item.evidencePages.length
-                  ? item.evidencePages
-                  : evidencePages
-              ),
-        })),
-        shortAnswer: nextShortAnswer.slice(0, targetSaCount).map((item) => ({
-          ...item,
-          evidencePages: enforceScopedEvidence
-            ? clampEvidencePagesToScope(item?.evidencePages, evidencePages)
-            : toSortedUniquePages(
-                Array.isArray(item?.evidencePages) && item.evidencePages.length
-                  ? item.evidencePages
-                  : evidencePages
-              ),
-        })),
+        multipleChoice: nextMultipleChoice.slice(0, targetMcCount),
+        shortAnswer: nextShortAnswer.slice(0, targetSaCount),
       };
-      const newSet = createQuizSetState(trimmedQuiz);
+      const newSet = {
+        id: `quiz-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        questions: trimmedQuiz,
+        selectedChoices: {},
+        revealedChoices: {},
+        shortAnswerInput: {},
+        shortAnswerResult: {},
+      };
       setQuizSets((prev) => [...prev, newSet]);
       setStatus(scopeLabel ? `퀴즈 세트가 생성되었습니다. (${scopeLabel})` : "퀴즈 세트가 생성되었습니다.");
       setUsageCounts((prev) => ({ ...prev, quiz: prev.quiz + 1 }));
@@ -4303,19 +3347,15 @@ function App() {
             const sourceItems = Array.isArray(questions?.[normalizedSection])
               ? questions[normalizedSection]
               : [];
-            if (normalizedIndex >= sourceItems.length) {
-              return set;
-            }
+            if (normalizedIndex >= sourceItems.length) return set;
 
             deleted = true;
-            const nextQuestions = {
-              ...questions,
-              [normalizedSection]: sourceItems.filter((_, idx) => idx !== normalizedIndex),
-            };
-
             return {
               ...set,
-              questions: nextQuestions,
+              questions: {
+                ...questions,
+                [normalizedSection]: sourceItems.filter((_, idx) => idx !== normalizedIndex),
+              },
             };
           })
           .filter((set) => {
@@ -4336,373 +3376,34 @@ function App() {
     [persistArtifacts]
   );
 
-  const reindexOxStateMap = (value, removedIndex) =>
-    Object.entries(value || {}).reduce((next, [key, entryValue]) => {
-      const numericKey = Number.parseInt(key, 10);
-      if (!Number.isFinite(numericKey) || numericKey === removedIndex) return next;
-      next[numericKey > removedIndex ? numericKey - 1 : numericKey] = entryValue;
-      return next;
-    }, {});
-
-  const handleDeleteOxQuestion = async (questionIndex) => {
-    if (isLoadingOx) return;
-    const currentItems = Array.isArray(oxItems) ? oxItems : [];
-    const normalizedIndex = Number.parseInt(questionIndex, 10);
-    if (
-      !Number.isFinite(normalizedIndex) ||
-      normalizedIndex < 0 ||
-      normalizedIndex >= currentItems.length
-    ) {
+  const regenerateQuiz = async () => {
+    if (isLoadingQuiz) return;
+    if (!file) {
+      setError("먼저 PDF를 열어주세요.");
       return;
     }
-
-    const nextItems = currentItems.filter((_, idx) => idx !== normalizedIndex);
-    const nextSelections = reindexOxStateMap(oxSelections, normalizedIndex);
-    const nextExplanationOpen = reindexOxStateMap(oxExplanationOpen, normalizedIndex);
-
-    oxAutoRequestedRef.current = nextItems.length > 0;
-    setOxItems(nextItems.length > 0 ? nextItems : null);
-    setOxSelections(nextSelections);
-    setOxExplanationOpen(nextExplanationOpen);
-    setQuizSets((prev) =>
-      (Array.isArray(prev) ? prev : []).map((set) => {
-        const normalizedQuestions = normalizeQuizPayload(set?.questions || {});
-        return {
-          ...set,
-          questions: {
-            ...normalizedQuestions,
-            ox: normalizedQuestions.ox.filter((_, idx) => idx !== normalizedIndex),
-          },
-          oxSelections: reindexOxStateMap(set?.oxSelections, normalizedIndex),
-          oxExplanationOpen: reindexOxStateMap(set?.oxExplanationOpen, normalizedIndex),
-        };
-      })
-    );
-    setStatus(nextItems.length > 0 ? "O/X 문제를 삭제했습니다." : "마지막 O/X 문제를 삭제했습니다.");
+    if (isFreeTier) {
+      setError("무료 플랜에서는 퀴즈 세트를 다시 생성할 수 없습니다.");
+      return;
+    }
+    if (hasReached("maxQuiz")) {
+      setError("현재 요금제의 퀴즈 생성 한도에 도달했습니다.");
+      return;
+    }
+    const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
+    if (!extractedText && !chapterSelectionRaw && !isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+      setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
+      return;
+    }
+    quizAutoRequestedRef.current = true;
+    resetQuizState();
+    setStatus("퀴즈 세트를 초기화하고 다시 생성하는 중...");
     setError("");
-    await persistArtifacts({
-      ox: nextItems.length > 0 ? { items: nextItems } : null,
-    });
+    await persistArtifacts({ quiz: null });
+    await requestQuestions({ force: true });
   };
 
-  const persistReviewNotes = useCallback(
-    (updater) => {
-      const base = Array.isArray(reviewNotesRef.current) ? reviewNotesRef.current : [];
-      const nextRaw = typeof updater === "function" ? updater(base) : updater;
-      const next = normalizeReviewNoteEntries(nextRaw);
-      reviewNotesRef.current = next;
-      setReviewNotes(next);
-      const nextHighlights = writeReviewNotesToHighlights(artifactsHighlightsRef.current, next);
-      artifactsHighlightsRef.current = nextHighlights;
-      persistArtifacts({ highlights: nextHighlights });
-      return next;
-    },
-    [persistArtifacts]
-  );
-
-  const createBaseReviewNote = useCallback(
-    ({
-      sourceType,
-      sourceLabel,
-      prompt,
-      explanation = "",
-      evidencePages = [],
-      evidenceSnippet = "",
-      evidenceLabel = "",
-    }) => {
-      const promptText = String(prompt || "").trim();
-      const questionKey = normalizeQuestionKey(promptText);
-      const now = new Date().toISOString();
-      return {
-        id: `${sourceType}:${questionKey}`,
-        sourceType,
-        sourceLabel,
-        questionKey,
-        prompt: promptText,
-        explanation: String(explanation || "").trim(),
-        evidencePages: toSortedUniquePages(Array.isArray(evidencePages) ? evidencePages : []),
-        evidenceSnippet: String(evidenceSnippet || "").trim(),
-        evidenceLabel: String(evidenceLabel || "").trim(),
-        wrongCount: 1,
-        reviewCount: 0,
-        resolved: false,
-        createdAt: now,
-        updatedAt: now,
-        lastWrongAt: now,
-        lastCorrectAt: null,
-        hiddenAt: null,
-      };
-    },
-    []
-  );
-
-  const upsertWrongReviewNote = useCallback(
-    (note) => {
-      if (!note?.questionKey || !note?.sourceType) return;
-      const now = new Date().toISOString();
-      persistReviewNotes((prev) => {
-        const list = Array.isArray(prev) ? prev : [];
-        const existingIndex = list.findIndex(
-          (item) => item?.sourceType === note.sourceType && item?.questionKey === note.questionKey
-        );
-        if (existingIndex < 0) {
-          return [
-            {
-              ...note,
-              createdAt: note.createdAt || now,
-              updatedAt: now,
-              lastWrongAt: now,
-              lastCorrectAt: note.lastCorrectAt || null,
-            },
-            ...list,
-          ];
-        }
-
-        const existing = list[existingIndex];
-        const next = [...list];
-        next[existingIndex] = {
-          ...existing,
-          ...note,
-          id: existing.id || note.id,
-          createdAt: existing.createdAt || note.createdAt || now,
-          updatedAt: now,
-          lastWrongAt: now,
-          wrongCount: Math.max(1, Number(existing?.wrongCount || 0) + 1),
-          reviewCount: Number(existing?.reviewCount || 0),
-          resolved: false,
-          hiddenAt: null,
-        };
-        return next;
-      });
-    },
-    [persistReviewNotes]
-  );
-
-  const markReviewNoteCorrectByPrompt = useCallback(
-    (sourceType, prompt, userAnswerText = "", userAnswerValue = "") => {
-      const questionKey = normalizeQuestionKey(prompt);
-      if (!questionKey) return;
-      const now = new Date().toISOString();
-      persistReviewNotes((prev) =>
-        (Array.isArray(prev) ? prev : []).map((item) =>
-          item?.sourceType === sourceType && item?.questionKey === questionKey
-            ? {
-                ...item,
-                userAnswerText: String(userAnswerText || "").trim() || item.userAnswerText,
-                userAnswerValue:
-                  userAnswerValue !== undefined && userAnswerValue !== null && userAnswerValue !== ""
-                    ? userAnswerValue
-                    : item.userAnswerValue,
-                resolved: true,
-                updatedAt: now,
-                lastCorrectAt: now,
-              }
-            : item
-        )
-      );
-    },
-    [persistReviewNotes]
-  );
-
-  const handleReviewNoteAttempt = useCallback(
-    (item, attempt) => {
-      if (!item?.id || !attempt) return;
-      const now = new Date().toISOString();
-      persistReviewNotes((prev) =>
-        (Array.isArray(prev) ? prev : []).map((note) => {
-          if (note?.id !== item.id) return note;
-          if (attempt.isCorrect) {
-            return {
-              ...note,
-              userAnswerText: String(attempt.userAnswerText || "").trim() || note.userAnswerText,
-              userAnswerValue:
-                attempt.userAnswerValue !== undefined ? attempt.userAnswerValue : note.userAnswerValue,
-              resolved: true,
-              reviewCount: Number(note?.reviewCount || 0) + 1,
-              updatedAt: now,
-              lastCorrectAt: now,
-            };
-          }
-          return {
-            ...note,
-            userAnswerText: String(attempt.userAnswerText || "").trim() || note.userAnswerText,
-            userAnswerValue:
-              attempt.userAnswerValue !== undefined ? attempt.userAnswerValue : note.userAnswerValue,
-            resolved: false,
-            wrongCount: Math.max(1, Number(note?.wrongCount || 0) + 1),
-            reviewCount: Number(note?.reviewCount || 0) + 1,
-            updatedAt: now,
-            lastWrongAt: now,
-          };
-        })
-      );
-    },
-    [persistReviewNotes]
-  );
-
-  const handleToggleReviewNoteResolved = useCallback(
-    (noteId, resolved) => {
-      if (!noteId) return;
-      const now = new Date().toISOString();
-      persistReviewNotes((prev) =>
-        (Array.isArray(prev) ? prev : []).map((item) =>
-          item?.id === noteId
-            ? {
-                ...item,
-                resolved: Boolean(resolved),
-                updatedAt: now,
-                lastCorrectAt: resolved ? now : item.lastCorrectAt,
-              }
-            : item
-        )
-      );
-    },
-    [persistReviewNotes]
-  );
-
-  const handleDeleteReviewNote = useCallback(
-    (noteId) => {
-      if (!noteId) return;
-      const now = new Date().toISOString();
-      persistReviewNotes((prev) =>
-        (Array.isArray(prev) ? prev : []).map((item) =>
-          item?.id === noteId
-            ? {
-                ...item,
-                hiddenAt: now,
-                updatedAt: now,
-              }
-            : item
-        )
-      );
-    },
-    [persistReviewNotes]
-  );
-
-  const handleOxSelect = useCallback(
-    (qIdx, choice) => {
-      const currentSelection = oxSelections?.[qIdx];
-      if (currentSelection === "o" || currentSelection === "x") return;
-
-      setOxSelections((prev) => ({
-        ...prev,
-        [qIdx]: choice,
-      }));
-
-      const item = Array.isArray(oxItems) ? oxItems[qIdx] : null;
-      if (!item || (choice !== "o" && choice !== "x")) return;
-
-      const expected = item.answer === true ? "o" : "x";
-      const userAnswerText = choice === "o" ? "O" : "X";
-      const prompt = String(item?.statement || item?.prompt || item?.question || "").trim();
-      if (choice === expected) {
-        markReviewNoteCorrectByPrompt("ox", prompt, userAnswerText, choice === "o");
-        return;
-      }
-
-      upsertWrongReviewNote({
-        ...createBaseReviewNote({
-          sourceType: "ox",
-          sourceLabel: "O/X",
-          prompt,
-          explanation: item?.explanation,
-          evidencePages: item?.evidencePages,
-          evidenceSnippet: item?.evidenceSnippet || item?.evidence,
-          evidenceLabel: item?.evidenceLabel || "",
-        }),
-        correctAnswerText: item.answer ? "O" : "X",
-        correctAnswerValue: Boolean(item.answer),
-        userAnswerText,
-        userAnswerValue: choice === "o",
-      });
-    },
-    [
-      createBaseReviewNote,
-      markReviewNoteCorrectByPrompt,
-      oxItems,
-      oxSelections,
-      setOxSelections,
-      upsertWrongReviewNote,
-    ]
-  );
-
-  const handleQuizOxSelect = useCallback(
-    (setId, qIdx, choice) => {
-      const targetSet = quizSets.find((set) => set.id === setId);
-      const currentSelection = targetSet?.oxSelections?.[qIdx];
-      if (currentSelection === "o" || currentSelection === "x") return;
-
-      setQuizSets((prev) =>
-        prev.map((set) =>
-          set.id === setId
-            ? {
-                ...set,
-                oxSelections: { ...set.oxSelections, [qIdx]: choice },
-              }
-            : set
-        )
-      );
-
-      const items = Array.isArray(targetSet?.questions?.ox) ? targetSet.questions.ox : [];
-      const item = items[qIdx];
-      if (!item || (choice !== "o" && choice !== "x")) return;
-
-      const expected = item.answer === true ? "o" : "x";
-      const userAnswerText = choice === "o" ? "O" : "X";
-      const prompt = String(item?.statement || item?.prompt || item?.question || "").trim();
-      if (choice === expected) {
-        markReviewNoteCorrectByPrompt("ox", prompt, userAnswerText, choice === "o");
-        return;
-      }
-
-      upsertWrongReviewNote({
-        ...createBaseReviewNote({
-          sourceType: "ox",
-          sourceLabel: "O/X",
-          prompt,
-          explanation: item?.explanation,
-          evidencePages: item?.evidencePages,
-          evidenceSnippet: item?.evidenceSnippet || item?.evidence,
-          evidenceLabel: item?.evidenceLabel || "",
-        }),
-        correctAnswerText: item.answer ? "O" : "X",
-        correctAnswerValue: Boolean(item.answer),
-        userAnswerText,
-        userAnswerValue: choice === "o",
-      });
-    },
-    [
-      createBaseReviewNote,
-      markReviewNoteCorrectByPrompt,
-      quizSets,
-      upsertWrongReviewNote,
-    ]
-  );
-
-  const handleToggleQuizOxExplanation = useCallback((setId, qIdx) => {
-    setQuizSets((prev) =>
-      prev.map((set) =>
-        set.id === setId
-          ? {
-              ...set,
-              oxExplanationOpen: {
-                ...set.oxExplanationOpen,
-                [qIdx]: !set?.oxExplanationOpen?.[qIdx],
-              },
-            }
-          : set
-      )
-    );
-  }, []);
-
   const handleChoiceSelect = (setId, qIdx, choiceIdx) => {
-    const targetSet = quizSets.find((set) => set.id === setId);
-    const multipleChoice = Array.isArray(targetSet?.questions?.multipleChoice)
-      ? targetSet.questions.multipleChoice
-      : [];
-    const question = multipleChoice[qIdx];
-    if (targetSet?.revealedChoices?.[qIdx]) return;
-
     setQuizSets((prev) =>
       prev.map((set) =>
         set.id === setId
@@ -4714,36 +3415,6 @@ function App() {
           : set
       )
     );
-
-    if (!question) return;
-
-    const choices = Array.isArray(question?.choices) ? question.choices : [];
-    const prompt = String(question?.question || question?.prompt || "").trim();
-    const selectedChoiceText = String(choices?.[choiceIdx] || "").trim();
-    const answerIndex = Number.isFinite(question?.answerIndex) ? question.answerIndex : -1;
-    const correctChoiceText = String(choices?.[answerIndex] || "").trim();
-    if (choiceIdx === answerIndex) {
-      markReviewNoteCorrectByPrompt("quiz_multiple_choice", prompt, selectedChoiceText, choiceIdx);
-      return;
-    }
-
-    upsertWrongReviewNote({
-      ...createBaseReviewNote({
-        sourceType: "quiz_multiple_choice",
-        sourceLabel: "객관식",
-        prompt,
-        explanation: question?.explanation,
-        evidencePages: question?.evidencePages,
-        evidenceSnippet: question?.evidenceSnippet,
-        evidenceLabel: question?.evidenceLabel,
-      }),
-      choices,
-      answerIndex,
-      correctAnswerText: correctChoiceText,
-      correctAnswerValue: answerIndex,
-      userAnswerText: selectedChoiceText,
-      userAnswerValue: choiceIdx,
-    });
   };
 
   const handleShortAnswerChange = (setId, idx, value) => {
@@ -4757,58 +3428,25 @@ function App() {
   };
 
   const handleShortAnswerCheck = (setId, idx) => {
-    const targetSet = quizSets.find((set) => set.id === setId);
-    const shortAnswers = Array.isArray(targetSet?.questions?.shortAnswer)
-      ? targetSet.questions.shortAnswer
-      : [];
-    const target = shortAnswers[idx];
-    if (!target?.answer) return;
-
-    const user = String(targetSet?.shortAnswerInput?.[idx] || "").trim().toLowerCase();
-    const answer = String(target.answer).trim().toLowerCase();
-    const normalizedUser = user.replace(/\s+/g, "");
-    const normalizedAnswer = answer.replace(/\s+/g, "");
-    const existingResult = targetSet?.shortAnswerResult?.[idx];
-    if (existingResult?.submittedValue === normalizedUser) return;
-    const isCorrect = normalizedUser === normalizedAnswer;
-
     setQuizSets((prev) =>
       prev.map((set) => {
         const shortAnswers = Array.isArray(set.questions?.shortAnswer) ? set.questions.shortAnswer : [];
         const target = shortAnswers[idx];
         if (set.id !== setId || !target?.answer) return set;
+        const user = String(set.shortAnswerInput?.[idx] || "").trim().toLowerCase();
+        const answer = String(target.answer).trim().toLowerCase();
+        const normalizedUser = user.replace(/\s+/g, "");
+        const normalizedAnswer = answer.replace(/\s+/g, "");
+        const isCorrect = normalizedUser === normalizedAnswer;
         return {
           ...set,
           shortAnswerResult: {
             ...set.shortAnswerResult,
-            [idx]: { isCorrect, answer: target.answer, submittedValue: normalizedUser },
+            [idx]: { isCorrect, answer: target.answer },
           },
         };
       })
     );
-
-    const prompt = String(target?.question || target?.prompt || "").trim();
-    const userAnswerText = String(targetSet?.shortAnswerInput?.[idx] || "").trim();
-    if (isCorrect) {
-      markReviewNoteCorrectByPrompt("quiz_short_answer", prompt, userAnswerText, userAnswerText);
-      return;
-    }
-
-    upsertWrongReviewNote({
-      ...createBaseReviewNote({
-        sourceType: "quiz_short_answer",
-        sourceLabel: "주관식",
-        prompt,
-        explanation: target?.explanation,
-        evidencePages: target?.evidencePages,
-        evidenceSnippet: target?.evidenceSnippet,
-        evidenceLabel: target?.evidenceLabel,
-      }),
-      correctAnswerText: String(target?.answer || "").trim(),
-      correctAnswerValue: String(target?.answer || "").trim(),
-      userAnswerText,
-      userAnswerValue: userAnswerText,
-    });
   };
 
   const buildAdaptiveChapterSummaryRanges = (chapters) => {
@@ -4850,619 +3488,55 @@ function App() {
     return expanded;
   };
 
-  const resolveChapterRangeLimit = useCallback(
-    (rawInput) => {
-      const pageLimit = Number(pageInfo.total || pageInfo.used || 0);
-      if (isCurrentPdfDocument) {
-        return pageLimit;
-      }
-      let inferredLimit = 0;
-
-      String(rawInput || "")
-        .split(/[\n,;]+/)
-        .map((token) => token.trim())
-        .filter(Boolean)
-        .forEach((token) => {
-          const compact = token.replace(/\s+/g, "");
-          let matched =
-            compact.match(/^(\d+)[:=](\d+)-(\d+)$/i) ||
-            compact.match(/^ch(?:apter)?(\d+)[:=](\d+)-(\d+)$/i);
-          if (matched) {
-            inferredLimit = Math.max(inferredLimit, Number.parseInt(matched[3], 10) || 0);
-            return;
-          }
-
-          matched = compact.match(/^(\d+)-(\d+)$/);
-          if (matched) {
-            inferredLimit = Math.max(inferredLimit, Number.parseInt(matched[2], 10) || 0);
-          }
-        });
-
-      return Math.max(pageLimit, inferredLimit);
-    },
-    [isCurrentPdfDocument, pageInfo.total, pageInfo.used]
-  );
-
-  const configuredReviewSections = useMemo(() => {
-    const raw = String(chapterRangeInput || "").trim();
-    if (!raw) return [];
-    const limit = resolveChapterRangeLimit(raw);
-    if (!limit) return [];
-    const parsed = parseChapterRangeSelectionInput(raw, limit);
-    if (parsed.error) return [];
-    return (Array.isArray(parsed.chapters) ? parsed.chapters : [])
-      .map((chapter, index) => {
-        const chapterNumber = Number.parseInt(chapter?.chapterNumber, 10);
-        const pageStart = Number.parseInt(chapter?.pageStart, 10);
-        const pageEnd = Number.parseInt(chapter?.pageEnd, 10);
-        if (!Number.isFinite(pageStart) || !Number.isFinite(pageEnd) || pageStart <= 0 || pageEnd < pageStart) {
-          return null;
-        }
-        const normalizedChapterNumber =
-          Number.isFinite(chapterNumber) && chapterNumber > 0 ? chapterNumber : index + 1;
-        return {
-          id: String(chapter?.id || `review-section-${normalizedChapterNumber}`),
-          chapterNumber: normalizedChapterNumber,
-          pageStart,
-          pageEnd,
-          label: `\uC139\uC158 ${normalizedChapterNumber}`,
-          detailLabel: `\uC139\uC158 ${normalizedChapterNumber} \u00B7 ${pageStart}-${pageEnd}p`,
-        };
-      })
-      .filter(Boolean);
-  }, [chapterRangeInput, resolveChapterRangeLimit]);
-
-  const reviewNotesWithSections = useMemo(() => {
-    const notes = Array.isArray(reviewNotes) ? reviewNotes : [];
-    return notes.map((item) => {
-      const evidencePages = toSortedUniquePages(item?.evidencePages);
-      const matchedSections = configuredReviewSections.filter((section) =>
-        evidencePages.some((pageNumber) => pageNumber >= section.pageStart && pageNumber <= section.pageEnd)
-      );
-      const sectionNumbers = matchedSections.map((section) => section.chapterNumber);
-      const sectionLabels = matchedSections.map((section) => section.detailLabel);
-      return {
-        ...item,
-        sectionNumbers,
-        sectionLabels,
-      };
-    });
-  }, [configuredReviewSections, reviewNotes]);
-
-  const selectReviewNotesBySection = useCallback(
-    (items, chapterSelectionInput = "") => {
-      const list = (Array.isArray(items) ? items : []).filter((item) => !item?.hiddenAt);
-      const cleaned = String(chapterSelectionInput || "").trim();
-      if (!cleaned) {
-        return {
-          items: list,
-          error: "",
-          selectedSectionNumbers: [],
-        };
-      }
-      if (!configuredReviewSections.length) {
-        return {
-          items: list,
-          error: "\uBA3C\uC800 \uC694\uC57D \uD0ED\uC5D0\uC11C \uCC55\uD130 \uBC94\uC704\uB97C \uC124\uC815\uD574\uC8FC\uC138\uC694.",
-          selectedSectionNumbers: [],
-        };
-      }
-
-      const selected = parseChapterNumberSelectionInput(cleaned, configuredReviewSections);
-      if (selected.error) {
-        return {
-          items: list,
-          error: "챕터 범위를 다시 확인해주세요. (예: 3, 3-5, 1,3,5)",
-          selectedSectionNumbers: [],
-        };
-      }
-
-      const selectedNumberSet = new Set(selected.chapterNumbers);
-      return {
-        items: list.filter((item) =>
-          Array.isArray(item?.sectionNumbers) &&
-          item.sectionNumbers.some((chapterNumber) => selectedNumberSet.has(chapterNumber))
-        ),
-        error: "",
-        selectedSectionNumbers: selected.chapterNumbers,
-      };
-    },
-    [configuredReviewSections]
-  );
-
-  const reviewNotesPanelState = useMemo(() => {
-    const filtered = selectReviewNotesBySection(reviewNotesWithSections, reviewNotesChapterSelectionInput);
-    return {
-      ...filtered,
-      items: sortReviewNotesByRecentWrong(filtered.items),
-    };
-  }, [reviewNotesChapterSelectionInput, reviewNotesWithSections, selectReviewNotesBySection]);
-
-  const examCramQuizItems = useMemo(() => collectExamCramQuizItems(quizSets), [quizSets]);
-
-  const examCramState = useMemo(() => {
-    const filtered = selectReviewNotesBySection(reviewNotesWithSections, reviewNotesChapterSelectionInput);
-    const pendingNotes = sortReviewNotesByRecentWrong(filtered.items.filter((item) => !item?.resolved));
-    const recentPending = pendingNotes.slice(0, EXAM_CRAM_PREVIEW_LIMIT);
-    const summaryReference = String(summary || partialSummary || "").trim();
-    const oxReferenceCount = Array.isArray(oxItems) ? oxItems.length : 0;
-    return {
-      ...filtered,
-      items: recentPending,
-      pendingCount: pendingNotes.length,
-      referenceCounts: {
-        summary: summaryReference ? 1 : 0,
-        quiz: examCramQuizItems.length,
-        ox: oxReferenceCount,
-        reviewNotes: pendingNotes.length,
-      },
-      hasAnySource:
-        Boolean(summaryReference) ||
-        examCramQuizItems.length > 0 ||
-        oxReferenceCount > 0 ||
-        pendingNotes.length > 0,
-    };
-  }, [
-    examCramQuizItems,
-    oxItems,
-    partialSummary,
-    reviewNotesChapterSelectionInput,
-    reviewNotesWithSections,
-    selectReviewNotesBySection,
-    summary,
-  ]);
-
-  const handleGenerateExamCram = useCallback(
-    async ({ chapterSelectionInput = "" } = {}) => {
-      if (isGeneratingExamCram) return;
-      if (!selectedFileId) {
-        setExamCramError("먼저 문서를 선택해 주세요.");
-        setExamCramStatus("");
-        return;
-      }
-
-      const scoped = selectReviewNotesBySection(reviewNotesWithSections, chapterSelectionInput);
-      if (scoped.error) {
-        setExamCramError(scoped.error);
-        setExamCramStatus("");
-        return;
-      }
-
-      const summaryText = String(summary || partialSummary || "").trim();
-      const quizReferenceItems = examCramQuizItems.slice(0, 12);
-      const oxReferenceItems = (Array.isArray(oxItems) ? oxItems : []).slice(0, 10);
-      const reviewNoteReferences = sortReviewNotesByRecentWrong(
-        scoped.items.filter((item) => item && !item.resolved)
-      ).slice(0, 10);
-      const hasSources =
-        Boolean(summaryText) ||
-        quizReferenceItems.length > 0 ||
-        oxReferenceItems.length > 0 ||
-        reviewNoteReferences.length > 0;
-
-      if (!hasSources) {
-        setExamCramError("먼저 요약, 퀴즈, O/X, 오답노트 중 하나를 준비해주세요.");
-        setExamCramStatus("");
-        return;
-      }
-
-      const scopeLabel = scoped.selectedSectionNumbers.length
-        ? `섹션 ${scoped.selectedSectionNumbers.join(", ")} 기준`
-        : "";
-
-      setIsGeneratingExamCram(true);
-      setExamCramError("");
-      setExamCramStatus(scopeLabel ? `시험 직전 AI 정리 생성 중... (${scopeLabel})` : "시험 직전 AI 정리 생성 중...");
-
-      try {
-        const ai = await getOpenAiService();
-        const generated = await ai.generateExamCramSheet({
-          summaryText,
-          oxItems: oxReferenceItems,
-          quizItems: quizReferenceItems,
-          reviewNotes: reviewNoteReferences,
-          scopeLabel,
-        });
-        const trimmed = String(generated || "").trim();
-        if (!trimmed) {
-          throw new Error("AI가 비어 있는 정리를 반환했습니다.");
-        }
-
-        const nextUpdatedAt = new Date().toISOString();
-        setExamCramContent(trimmed);
-        setExamCramUpdatedAt(nextUpdatedAt);
-        setExamCramScopeLabel(scopeLabel);
-        setExamCramStatus(scopeLabel ? `시험 직전 AI 정리가 준비되었습니다. (${scopeLabel})` : "시험 직전 AI 정리가 준비되었습니다.");
-        persistExamCramBundle({
-          content: trimmed,
-          scopeLabel,
-          updatedAt: nextUpdatedAt,
-        });
-      } catch (err) {
-        setExamCramError(`시험 직전 AI 정리 생성에 실패했습니다: ${err.message}`);
-        setExamCramStatus("");
-      } finally {
-        setIsGeneratingExamCram(false);
-      }
-    },
-    [
-      examCramQuizItems,
-      getOpenAiService,
-      isGeneratingExamCram,
-      oxItems,
-      partialSummary,
-      persistExamCramBundle,
-      reviewNotesWithSections,
-      selectReviewNotesBySection,
-      selectedFileId,
-      summary,
-    ]
-  );
-
-  const handleCreateReviewNotesMockExam = useCallback(
-    async ({
-      chapterSelectionInput = "",
-      titlePrefix = "\uC624\uB2F5\uB178\uD2B8",
-      sourceKind = "review_notes",
-      statusLabel = "\uC624\uB2F5\uB178\uD2B8",
-    } = {}) => {
-      if (isGeneratingMockExam) return;
-
-      const notes = Array.isArray(reviewNotesWithSections) ? reviewNotesWithSections : [];
-      const scoped = selectReviewNotesBySection(notes, chapterSelectionInput);
-      if (scoped.error) {
-        setMockExamError(scoped.error);
-        setMockExamStatus("");
-        return;
-      }
-
-      const pendingNotes = sortReviewNotesByRecentWrong(
-        scoped.items.filter((item) => item && !item.resolved)
-      );
-
-      if (!pendingNotes.length) {
-        setMockExamError(
-          scoped.selectedSectionNumbers.length > 0
-            ? "\uC120\uD0DD\uD55C \uC139\uC158\uC5D0 \uBCF5\uC2B5\uD560 \uCD5C\uADFC \uC624\uB2F5\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."
-            : "\uC624\uB2F5\uB178\uD2B8\uC5D0 \uBCF5\uC2B5\uD560 \uCD5C\uADFC \uC624\uB2F5\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."
-        );
-        setMockExamStatus("");
-        return;
-      }
-
-      if (AUTH_ENABLED && !user) {
-        setMockExamError("먼저 로그인해 주세요.");
-        setMockExamStatus("");
-        return;
-      }
-      if (!selectedFileId) {
-        setMockExamError("먼저 문서를 선택해 주세요.");
-        setMockExamStatus("");
-        return;
-      }
-
-      setIsGeneratingMockExam(true);
-      setMockExamError("");
-      setMockExamStatus(`${statusLabel} \uBAA8\uC758\uACE0\uC0AC \uC0DD\uC131 \uC911...`);
-
-      try {
-        const examItems = pendingNotes.slice(0, REVIEW_NOTE_MOCK_EXAM_LIMIT).map((note, index) => {
-          const base = {
-            order: index + 1,
-            prompt: String(note?.prompt || "").trim(),
-            explanation: String(note?.explanation || "").trim(),
-            evidencePages: toSortedUniquePages(note?.evidencePages),
-            evidenceSnippet: String(note?.evidenceSnippet || "").trim(),
-            evidenceLabel: String(note?.evidenceLabel || "").trim(),
-            evidence: String(note?.evidenceLabel || note?.evidenceSnippet || "").trim(),
-          };
-
-          if (note?.sourceType === "ox") {
-            return {
-              ...base,
-              type: "ox",
-              answer: note?.correctAnswerValue === true,
-            };
-          }
-
-          if (note?.sourceType === "quiz_short_answer") {
-            return {
-              ...base,
-              type: "quiz-short",
-              answer: String(note?.correctAnswerText || "").trim(),
-            };
-          }
-
-          return {
-            ...base,
-            type: "quiz",
-            choices: Array.isArray(note?.choices) ? note.choices : [],
-            answerIndex: Number.isFinite(note?.answerIndex) ? note.answerIndex : null,
-          };
-        });
-
-        const answerSheet = buildMockExamAnswerSheet(examItems);
-        const now = new Date();
-        const dateStamp = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
-        const nextIndex = mockExams.length + 1;
-        const title = `${dateStamp} ${titlePrefix} \uBAA8\uC758\uACE0\uC0AC ${nextIndex}`;
-        const payload = {
-          title,
-          items: examItems,
-          answerSheet,
-          source: {
-            kind: sourceKind,
-            totalReviewNotes: pendingNotes.length,
-            sectionNumbers: scoped.selectedSectionNumbers,
-            recentOnly: true,
-          },
-          generatedAt: now.toISOString(),
-        };
-
-        const saved = user
-          ? await saveMockExam({
-              userId: user.id,
-              docId: selectedFileId,
-              docName: file?.name || "",
-              title,
-              totalQuestions: examItems.length,
-              payload,
-            })
-          : {
-              id: createLocalEntityId("mock-exam"),
-              doc_id: selectedFileId,
-              doc_name: file?.name || "",
-              title,
-              total_questions: examItems.length,
-              payload,
-              created_at: now.toISOString(),
-            };
-
-        setMockExams((prev) => [saved, ...prev]);
-        setActiveMockExamId(saved.id);
-        setShowMockExamAnswers(false);
-        setPanelTab("mockExam");
-        setMockExamStatus(
-          `${examItems.length}\uBB38\uD56D ${statusLabel} \uBAA8\uC758\uACE0\uC0AC\uB97C \uB9CC\uB4E4\uC5C8\uC2B5\uB2C8\uB2E4.`
-        );
-      } catch (err) {
-        setMockExamError(
-          `${statusLabel} \uBAA8\uC758\uACE0\uC0AC \uC0DD\uC131\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: ${err.message}`
-        );
-        setMockExamStatus("");
-      } finally {
-        setIsGeneratingMockExam(false);
-      }
-    },
-    [
-      file?.name,
-      isGeneratingMockExam,
-      mockExams.length,
-      reviewNotesWithSections,
-      selectReviewNotesBySection,
-      selectedFileId,
-      user,
-    ]
-  );
-
-  const extractNonPdfSlideSections = useCallback((sourceText) => {
-    const normalizedText = String(sourceText || "").replace(/\r\n/g, "\n").trim();
-    if (!normalizedText) return [];
-
-    const matches = [...normalizedText.matchAll(/^\[Slide\s+(\d+)\]\s*$/gim)];
-    if (!matches.length) return [];
-
-    return matches
-      .map((match, index) => {
-        const slideNumber = Number.parseInt(match[1], 10);
-        if (!Number.isFinite(slideNumber) || slideNumber <= 0) return null;
-        const contentStart = (match.index || 0) + match[0].length;
-        const nextMatchIndex = index + 1 < matches.length ? matches[index + 1].index : normalizedText.length;
-        const contentEnd = Number.isFinite(nextMatchIndex) ? nextMatchIndex : normalizedText.length;
-        const text = normalizedText.slice(contentStart, contentEnd).trim();
-        if (!text) return null;
-        return {
-          slideNumber,
-          text,
-        };
-      })
-      .filter(Boolean);
-  }, []);
-
-  const loadExtendedNonPdfSourceText = useCallback(
-    async ({ featureLabel = "문서", targetUnitCount = 0 } = {}) => {
-      const baseText = String(extractedText || "").trim();
-      if (!file || isCurrentPdfDocument) {
-        return baseText;
-      }
-
-      const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
-      const cachedText = String(summaryContextCacheRef.current.get(docKey) || "").trim();
-      const currentText = cachedText.length > baseText.length ? cachedText : baseText;
-      const hasExpandedCache = cachedText.length > baseText.length + 256;
-      const slideSections = extractNonPdfSlideSections(currentText);
-      const maxSlideNumber = slideSections.reduce(
-        (maxNumber, section) => Math.max(maxNumber, Number(section?.slideNumber) || 0),
-        0
-      );
-      const likelyInitialCap = !hasExpandedCache && baseText.length >= 11500;
-      const needsMoreSlideCoverage =
-        activeDocumentKind === "pptx" &&
-        Number(targetUnitCount) > 0 &&
-        maxSlideNumber > 0 &&
-        maxSlideNumber < Number(targetUnitCount);
-
-      if (!likelyInitialCap && !needsMoreSlideCoverage) {
-        return currentText;
-      }
-
-      const normalizedTargetUnitCount = Math.max(
-        1,
-        Number(targetUnitCount) || 0,
-        Number(pageInfo.total || pageInfo.used || 0)
-      );
-      const targetMaxLength =
-        activeDocumentKind === "pptx"
-          ? Math.min(240000, Math.max(24000, normalizedTargetUnitCount * 1800, currentText.length * 3))
-          : Math.min(180000, Math.max(24000, normalizedTargetUnitCount * 1600, currentText.length * 3));
-
-      setStatus(`${featureLabel}: 문서 전체 텍스트를 준비 중...`);
-      try {
-        const extended = await extractDocumentText(file, {
-          maxLength: targetMaxLength,
-        });
-        const extendedText = String(extended?.text || "").trim();
-        if (extendedText.length > currentText.length) {
-          summaryContextCacheRef.current.set(docKey, extendedText);
-          return extendedText;
-        }
-      } catch {
-        // Fall back to the already extracted non-PDF text.
-      }
-
-      if (currentText && currentText.length > cachedText.length) {
-        summaryContextCacheRef.current.set(docKey, currentText);
-      }
-      return currentText;
-    },
-    [
-      activeDocumentKind,
-      extractNonPdfSlideSections,
-      extractedText,
-      file,
-      isCurrentPdfDocument,
-      pageInfo.total,
-      pageInfo.used,
-      selectedFileId,
-    ]
-  );
-
-  const buildNonPdfChapterSectionsFromText = useCallback((sourceText, ranges, totalUnits) => {
-    const normalizedText = String(sourceText || "").replace(/\r\n/g, "\n").trim();
-    if (!normalizedText) return [];
-
-    const slideSections = extractNonPdfSlideSections(normalizedText);
-    const list = Array.isArray(ranges) ? [...ranges] : [];
-    list.sort((left, right) => (Number(left?.pageStart) || 0) - (Number(right?.pageStart) || 0));
-    if (!list.length) return [];
-
-    if (slideSections.length) {
-      return list
-        .map((range, index) => {
-          const pageStart = Math.max(1, Number.parseInt(range?.pageStart, 10) || 1);
-          const pageEnd = Math.max(pageStart, Number.parseInt(range?.pageEnd, 10) || pageStart);
-          const text = slideSections
-            .filter((section) => section.slideNumber >= pageStart && section.slideNumber <= pageEnd)
-            .map((section) => `[Slide ${section.slideNumber}]\n${section.text}`)
-            .join("\n\n")
-            .trim();
-          if (!text) return null;
-
-          const chapterNumber = Number.parseInt(range?.chapterNumber, 10) || index + 1;
-          return {
-            ...range,
-            chapterNumber,
-            chapterTitle: String(range?.chapterTitle || `챕터 ${chapterNumber}`).trim(),
-            pageStart,
-            pageEnd,
-            text,
-          };
-        })
-        .filter(Boolean);
-    }
-
-    const safeTotalUnits = Math.max(
-      1,
-      Number(totalUnits) || 0,
-      ...list.map((range) => Number.parseInt(range?.pageEnd, 10) || 0)
-    );
-    let previousEndOffset = 0;
-    return list
-      .map((range, index) => {
-        const pageStart = Math.max(1, Number.parseInt(range?.pageStart, 10) || 1);
-        const pageEnd = Math.max(pageStart, Number.parseInt(range?.pageEnd, 10) || pageStart);
-        let startOffset = Math.floor(((pageStart - 1) / safeTotalUnits) * normalizedText.length);
-        let endOffset = Math.ceil((pageEnd / safeTotalUnits) * normalizedText.length);
-
-        startOffset = Math.max(previousEndOffset, Math.min(startOffset, Math.max(normalizedText.length - 1, 0)));
-        endOffset = Math.max(startOffset + 1, Math.min(normalizedText.length, endOffset));
-
-        if (index === list.length - 1) {
-          endOffset = normalizedText.length;
-        }
-
-        const text = normalizedText.slice(startOffset, endOffset).trim();
-        previousEndOffset = endOffset;
-        if (!text) return null;
-
-        const chapterNumber = Number.parseInt(range?.chapterNumber, 10) || index + 1;
-        return {
-          ...range,
-          chapterNumber,
-          chapterTitle: String(range?.chapterTitle || `챕터 ${chapterNumber}`).trim(),
-          pageStart,
-          pageEnd,
-          text,
-        };
-      })
-      .filter(Boolean);
-  }, [extractNonPdfSlideSections]);
-
   const extractTextForChapterSelection = useCallback(
     async ({ featureLabel, chapterSelectionInput }) => {
       if (!file) {
-        throw new Error("먼저 문서를 열어주세요.");
+        throw new Error("먼저 PDF를 열어주세요.");
+      }
+      if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+        throw new Error("챕터/페이지 범위 기능은 PDF에서만 지원됩니다.");
       }
 
       let chapterConfigRaw = String(chapterRangeInput || "").trim();
       if (!chapterConfigRaw) {
+        const totalPages = pageInfo.total || pageInfo.used || 0;
         let autoChapterInput = "";
-        if (isCurrentPdfDocument) {
-          const totalPages = pageInfo.total || pageInfo.used || 0;
-          try {
-            setStatus(`${featureLabel}: 챕터 범위를 자동 탐색 중...`);
-            const detected = await extractChapterRangesFromToc(file, {
-              maxScanPages: totalPages ? Math.min(totalPages, 30) : 24,
-            });
-            const chapters = Array.isArray(detected?.chapters) ? detected.chapters : [];
-            autoChapterInput = chapters
-              .map((chapter, index) => {
-                const start = Number.parseInt(chapter?.pageStart, 10);
-                const end = Number.parseInt(chapter?.pageEnd, 10);
-                if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end < start) return "";
-                return `${index + 1}:${start}-${end}`;
-              })
-              .filter(Boolean)
-              .join("\n");
+        try {
+          setStatus(`${featureLabel}: 챕터 범위를 자동 탐색 중...`);
+          const detected = await extractChapterRangesFromToc(file, {
+            maxScanPages: totalPages ? Math.min(totalPages, 30) : 24,
+          });
+          const chapters = Array.isArray(detected?.chapters) ? detected.chapters : [];
+          autoChapterInput = chapters
+            .map((chapter, index) => {
+              const start = Number.parseInt(chapter?.pageStart, 10);
+              const end = Number.parseInt(chapter?.pageEnd, 10);
+              if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end < start) return "";
+              return `${index + 1}:${start}-${end}`;
+            })
+            .filter(Boolean)
+            .join("\n");
 
-            if (autoChapterInput) {
-              const limit = totalPages || Number(detected?.totalPages) || 0;
-              const parsedAuto = parseChapterRangeSelectionInput(autoChapterInput, limit);
-              if (!parsedAuto.error && parsedAuto.chapters.length > 0) {
-                setChapterRangeInput(autoChapterInput);
-                setChapterRangeError("");
-                const targetDocId = selectedFileId || file?.name || "";
-                if (targetDocId) {
-                  persistChapterRangeInput(targetDocId, autoChapterInput);
-                  void persistSharedChapterRangeInput(targetDocId, autoChapterInput, {
-                    syncState: String(selectedFileId || "").trim() === String(targetDocId || "").trim(),
-                  });
-                }
-              } else {
-                autoChapterInput = "";
+          if (autoChapterInput) {
+            const limit = totalPages || Number(detected?.totalPages) || 0;
+            const parsedAuto = parseChapterRangeSelectionInput(autoChapterInput, limit);
+            if (!parsedAuto.error && parsedAuto.chapters.length > 0) {
+              setChapterRangeInput(autoChapterInput);
+              setChapterRangeError("");
+              const targetDocId = selectedFileId || file?.name || "";
+              if (targetDocId) {
+                persistChapterRangeInput(targetDocId, autoChapterInput);
               }
+            } else {
+              autoChapterInput = "";
             }
-          } catch {
-            autoChapterInput = "";
           }
+        } catch {
+          autoChapterInput = "";
         }
 
         if (!autoChapterInput) {
-          throw new Error(
-            isCurrentPdfDocument
-              ? "먼저 챕터 범위를 설정해주세요. 요약 탭의 챕터 범위 설정에서 다시 시도해주세요."
-              : "비PDF 문서는 자동 목차 추출이 없어 직접 챕터 범위를 입력해야 합니다."
-          );
+          throw new Error("먼저 챕터 범위를 설정해주세요. 요약 탭의 챕터 범위 설정에서 다시 시도해주세요.");
         }
         chapterConfigRaw = autoChapterInput;
       }
@@ -5471,7 +3545,7 @@ function App() {
         throw new Error("먼저 챕터 범위를 설정해주세요.");
       }
 
-      const totalPages = resolveChapterRangeLimit(chapterConfigRaw);
+      const totalPages = pageInfo.total || pageInfo.used || 0;
       const parsedChapters = parseChapterRangeSelectionInput(chapterConfigRaw, totalPages);
       if (parsedChapters.error) {
         setChapterRangeError(parsedChapters.error);
@@ -5494,87 +3568,22 @@ function App() {
         throw new Error("선택한 챕터에 해당하는 범위가 없습니다.");
       }
 
-      const normalizedSelection = String(selected.normalizedInput || selectedNumbers.join(",")).trim();
-      const scopeLabel = normalizedSelection ? `챕터 ${normalizedSelection}` : "";
-      const pageCandidates = buildPageCandidatesFromRanges(targetChapters, 180);
-      const docKey = selectedFileId || file?.name || "doc";
-      const sectionCacheKey = `${docKey}::${chapterConfigRaw}`;
-      const cacheKey = `${sectionCacheKey}::${normalizedSelection}`;
+      const normalizedSelection = selectedNumbers.join(",");
+      const scopeLabel = `chapter ${normalizedSelection}`;
+      const cacheKey = `${selectedFileId || file?.name || "doc"}::${chapterConfigRaw}::${normalizedSelection}`;
       const cached = chapterScopeTextCacheRef.current.get(cacheKey);
       if (cached) {
-        return { text: cached, scopeLabel, pageCandidates };
-      }
-      const cachedChapterSections = Array.isArray(chapterSectionTextCacheRef.current.get(sectionCacheKey))
-        ? chapterSectionTextCacheRef.current.get(sectionCacheKey)
-        : [];
-      if (cachedChapterSections.length) {
-        const cachedScopedText = cachedChapterSections
-          .filter((chapter) => selectedNumberSet.has(Number.parseInt(chapter?.chapterNumber, 10)))
-          .map((chapter) => {
-            const chapterNumber = Number.parseInt(chapter?.chapterNumber, 10);
-            const title = chapterNumber > 0 ? `챕터 ${chapterNumber}` : "챕터";
-            const text = String(chapter?.text || "").trim();
-            if (!text) return "";
-            return `## ${title}\n${text}`;
-          })
-          .filter(Boolean)
-          .join("\n\n");
-        if (cachedScopedText.trim()) {
-          chapterScopeTextCacheRef.current.set(cacheKey, cachedScopedText);
-          return { text: cachedScopedText, scopeLabel, pageCandidates };
-        }
+        return { text: cached, scopeLabel };
       }
 
       setStatus(`${featureLabel}: 챕터 범위 텍스트 추출 중...`);
-      const nonPdfSourceText = isCurrentPdfDocument
-        ? ""
-        : await loadExtendedNonPdfSourceText({
-            featureLabel,
-            targetUnitCount: totalPages,
-          });
-      const cachedSummarySourceText = String(
-        summaryContextCacheRef.current.get(String(selectedFileId || file?.name || "").trim()) || ""
-      ).trim();
-      const fallbackChapterSourceText =
-        String(extractedText || "").trim() || cachedSummarySourceText;
-      let scopedSections = [];
-      if (isCurrentPdfDocument) {
-        scopedSections =
-          (await extractPdfTextByRanges(file, targetChapters, {
-            maxLengthPerRange: 14000,
-            useOcr: false,
-          }))?.chapters || [];
-        let hasScopedText = scopedSections.some((chapter) => String(chapter?.text || "").trim());
-        if (!hasScopedText) {
-          try {
-            setStatus(`${featureLabel}: 챕터 범위 OCR 텍스트 추출 중...`);
-            scopedSections =
-              (await extractPdfTextByRanges(file, targetChapters, {
-                maxLengthPerRange: 14000,
-                useOcr: true,
-                ocrLang: "kor+eng",
-                ocrScale: 1.35,
-                ocrMaxPixels: 1000000,
-                ocrPageOrder: "spread",
-                maxOcrPagesPerRange: 4,
-                onOcrProgress: (message) => setStatus(message),
-              }))?.chapters || [];
-            hasScopedText = scopedSections.some((chapter) => String(chapter?.text || "").trim());
-          } catch {
-            // Fall back to the already extracted base text below.
-          }
-        }
-        if (!hasScopedText && fallbackChapterSourceText) {
-          scopedSections = buildNonPdfChapterSectionsFromText(
-            fallbackChapterSourceText,
-            targetChapters,
-            totalPages
-          );
-        }
-      } else {
-        scopedSections = buildNonPdfChapterSectionsFromText(nonPdfSourceText, targetChapters, totalPages);
-      }
-      const scopedText = scopedSections
+      const chapterExtraction = await extractPdfTextByRanges(file, targetChapters, {
+        maxLengthPerRange: 14000,
+        useOcr: true,
+        ocrLang: "kor+eng",
+        onOcrProgress: (message) => setStatus(message),
+      });
+      const scopedText = (chapterExtraction?.chapters || [])
         .map((chapter) => {
           const chapterNumber = Number.parseInt(chapter?.chapterNumber, 10);
           const title = chapterNumber > 0 ? `챕터 ${chapterNumber}` : "챕터";
@@ -5589,21 +3598,14 @@ function App() {
       }
 
       chapterScopeTextCacheRef.current.set(cacheKey, scopedText);
-      return { text: scopedText, scopeLabel, pageCandidates };
+      return { text: scopedText, scopeLabel };
     },
     [
-      buildPageCandidatesFromRanges,
       chapterRangeInput,
-      buildNonPdfChapterSectionsFromText,
-      extractedText,
       file,
-      isCurrentPdfDocument,
-      loadExtendedNonPdfSourceText,
       pageInfo.total,
       pageInfo.used,
       persistChapterRangeInput,
-      persistSharedChapterRangeInput,
-      resolveChapterRangeLimit,
       selectedFileId,
     ]
   );
@@ -5616,7 +3618,8 @@ function App() {
     const shouldReplaceExisting = replaceExisting && hasExistingSummary;
     if (isLoadingSummary || (!force && summaryRequestedRef.current && !shouldReplaceExisting)) return;
     const hasManualChapterConfig = Boolean(String(chapterRangeInput || "").trim());
-    const isPdfSource = isCurrentPdfDocument;
+    const instructorEmphasisText = getEffectiveInstructorEmphasisText();
+    const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
     if (!file) {
       setError("먼저 PDF를 열어주세요.");
       return;
@@ -5625,7 +3628,7 @@ function App() {
       setError("현재 요금제의 요약 생성 한도에 도달했습니다.");
       return;
     }
-    if (!extractedText && !hasManualChapterConfig && !isPdfSource) {
+    if (!extractedText && !hasManualChapterConfig) {
       setError("추출된 텍스트가 없습니다. 챕터 범위를 입력하거나 PDF 텍스트 추출을 먼저 실행해주세요.");
       return;
     }
@@ -5646,45 +3649,34 @@ function App() {
       const chapterConfigRaw = String(chapterRangeInput || "").trim();
       let customChapterSections = null;
       if (chapterConfigRaw) {
-        const totalPages = resolveChapterRangeLimit(chapterConfigRaw);
+        if (!isPdfSource) {
+          throw new Error("챕터 범위 요약은 PDF에서만 지원됩니다. 챕터 범위를 비우고 다시 시도해주세요.");
+        }
+        const totalPages = pageInfo.total || pageInfo.used || 0;
         const parsedChapters = parseChapterRangeSelectionInput(chapterConfigRaw, totalPages);
         if (parsedChapters.error) {
           setChapterRangeError(parsedChapters.error);
           throw new Error(parsedChapters.error);
         }
-        const chapterRangesForSummary = isPdfSource
-          ? buildAdaptiveChapterSummaryRanges(parsedChapters.chapters)
-          : parsedChapters.chapters;
-        if (!chapterRangesForSummary.length) {
-          throw new Error("요약에 사용할 수 있는 챕터 범위가 없습니다.");
+        const adaptiveChapterRanges = buildAdaptiveChapterSummaryRanges(parsedChapters.chapters);
+        if (!adaptiveChapterRanges.length) {
+          throw new Error("적응형 분할에 사용할 수 있는 챕터 범위가 없습니다.");
         }
         const pagesPerChunkById = new Map(
-          chapterRangesForSummary.map((range) => [
-            String(range.id),
-            Number(range.pagesPerChunk) ||
-              Math.max(1, (Number(range?.pageEnd) || 0) - (Number(range?.pageStart) || 0) + 1),
-          ])
+          adaptiveChapterRanges.map((range) => [String(range.id), Number(range.pagesPerChunk) || 1])
         );
         setStatus("설정한 챕터 범위의 텍스트를 추출하는 중...");
-        const nonPdfSourceText = isPdfSource
-          ? ""
-          : await loadExtendedNonPdfSourceText({
-              featureLabel: "요약",
-              targetUnitCount: totalPages,
-            });
-        const extractedChapters = isPdfSource
-          ? (await extractPdfTextByRanges(file, chapterRangesForSummary, {
-              maxLengthPerRange: 14000,
-              useOcr: true,
-              ocrLang: "kor+eng",
-              ocrScale: 1.35,
-              ocrMaxPixels: 1000000,
-              ocrPageOrder: "spread",
-              maxOcrPagesPerRange: 4,
-              onOcrProgress: (message) => setStatus(message),
-            }))?.chapters || []
-          : buildNonPdfChapterSectionsFromText(nonPdfSourceText, chapterRangesForSummary, totalPages);
-        customChapterSections = extractedChapters
+        const chapterExtraction = await extractPdfTextByRanges(file, adaptiveChapterRanges, {
+          maxLengthPerRange: 14000,
+          useOcr: true,
+          ocrLang: "kor+eng",
+          ocrScale: 1.35,
+          ocrMaxPixels: 1000000,
+          ocrPageOrder: "spread",
+          maxOcrPagesPerRange: 4,
+          onOcrProgress: (message) => setStatus(message),
+        });
+        customChapterSections = (chapterExtraction?.chapters || [])
           .map((chapter) => ({
             id: chapter.id,
             chapterNumber: chapter.chapterNumber,
@@ -5700,37 +3692,9 @@ function App() {
         if (!customChapterSections.length) {
           throw new Error("설정한 챕터 범위에서 텍스트를 추출하지 못했습니다.");
         }
-        const chapterSectionsCacheKey = `${selectedFileId || file?.name || "doc"}::${chapterConfigRaw}`;
-        chapterSectionTextCacheRef.current.set(
-          chapterSectionsCacheKey,
-          customChapterSections.map((chapter) => ({
-            chapterNumber: chapter.chapterNumber,
-            pageStart: chapter.pageStart,
-            pageEnd: chapter.pageEnd,
-            text: String(chapter.text || "").trim(),
-          }))
-        );
-        const combinedChapterText = customChapterSections
-          .map((chapter) => {
-            const chapterNumber = Number.parseInt(chapter?.chapterNumber, 10);
-            const title = chapterNumber > 0 ? `챕터 ${chapterNumber}` : "챕터";
-            const text = String(chapter?.text || "").trim();
-            if (!text) return "";
-            return `## ${title}\n${text}`;
-          })
-          .filter(Boolean)
-          .join("\n\n");
-        const summaryCacheKey = String(selectedFileId || file?.name || "").trim();
-        if (summaryCacheKey && combinedChapterText) {
-          const previous = String(summaryContextCacheRef.current.get(summaryCacheKey) || "").trim();
-          if (combinedChapterText.length > previous.length) {
-            summaryContextCacheRef.current.set(summaryCacheKey, combinedChapterText);
-          }
-        }
       }
 
       let summarySourceText = extractedText;
-      let nextSummaryEvidencePages = isPdfSource ? getDefaultSummaryEvidencePages() : [];
       if (!customChapterSections) {
         const summaryCacheKey = selectedFileId || file?.name || null;
         const cachedSummaryText = summaryCacheKey
@@ -5746,56 +3710,12 @@ function App() {
             const extendedText = String(extended?.text || "").trim();
             if (extendedText.length > summarySourceText.length) {
               summarySourceText = extendedText;
-              nextSummaryEvidencePages = buildBoundedPageRange(1, Number(extended?.pagesUsed || 80), 180);
               summaryContextCacheRef.current.set(summaryCacheKey, extendedText);
             }
           } catch {
             // fallback to already extracted text
           }
         }
-
-        if (!String(summarySourceText || "").trim() && file && isPdfSource) {
-          try {
-            setStatus("요약용 OCR 텍스트를 추출하는 중...");
-            const ocrExtended = await extractPdfText(file, 80, 50000, {
-              useOcr: true,
-              ocrLang: "kor+eng",
-              ocrScale: 1.35,
-              ocrMaxPixels: 1000000,
-              ocrPageOrder: "spread",
-              maxOcrPages: 18,
-              onOcrProgress: (message) => setStatus(message),
-            });
-            const ocrText = String(ocrExtended?.text || "").trim();
-            if (ocrText) {
-              summarySourceText = ocrText;
-              nextSummaryEvidencePages = buildBoundedPageRange(
-                1,
-                Number(ocrExtended?.pagesUsed || 80),
-                180
-              );
-              if (summaryCacheKey) {
-                summaryContextCacheRef.current.set(summaryCacheKey, ocrText);
-              }
-              setExtractedText((prev) => {
-                const previous = String(prev || "").trim();
-                return ocrText.length > previous.length ? ocrText : prev;
-              });
-              setPreviewText((prev) => {
-                const previous = String(prev || "").trim();
-                return ocrText.length > previous.length ? ocrText : prev;
-              });
-            }
-          } catch {
-            // fallback to existing extracted text only
-          }
-        }
-      } else if (isPdfSource) {
-        nextSummaryEvidencePages = buildPageCandidatesFromRanges(customChapterSections, 180);
-      }
-
-      if (!String(summarySourceText || "").trim() && !customChapterSections) {
-        throw new Error("요약에 사용할 텍스트를 추출하지 못했습니다.");
       }
 
       setStatus("AI로 요약을 생성하는 중...");
@@ -5805,10 +3725,12 @@ function App() {
             scope: "사용자 지정 챕터 범위",
             chapterized: true,
             chapterSections: customChapterSections,
+            instructorEmphasis: instructorEmphasisText,
           })
-        : await generateSummary(summarySourceText);
+        : await generateSummary(summarySourceText, {
+            instructorEmphasis: instructorEmphasisText,
+          });
       setSummary(summarized);
-      setSummaryEvidencePageCandidates(nextSummaryEvidencePages);
       setUsageCounts((prev) => ({ ...prev, summary: prev.summary + 1 }));
       setStatus("요약이 생성되었습니다.");
       persistArtifacts({ summary: summarized });
@@ -5825,11 +3747,11 @@ function App() {
   const handleAutoDetectChapterRanges = useCallback(async () => {
     if (isDetectingChapterRanges || isLoadingSummary || isLoadingText) return;
     if (!file) {
-      setChapterRangeError("먼저 문서를 열어주세요.");
+      setChapterRangeError("먼저 PDF를 열어주세요.");
       return;
     }
-    if (!isCurrentPdfDocument) {
-      setChapterRangeError("목차 자동 감지는 PDF에서만 지원됩니다. 비PDF 문서는 직접 범위를 입력해주세요.");
+    if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+      setChapterRangeError("목차 자동 감지는 PDF에서만 지원됩니다.");
       return;
     }
 
@@ -5882,7 +3804,6 @@ function App() {
     }
   }, [
     file,
-    isCurrentPdfDocument,
     isDetectingChapterRanges,
     isLoadingSummary,
     isLoadingText,
@@ -5891,12 +3812,16 @@ function App() {
   ]);
 
   const handleConfirmChapterRanges = useCallback(() => {
+    if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+      setChapterRangeError("챕터 범위 설정은 PDF에서만 지원됩니다.");
+      return;
+    }
     const raw = String(chapterRangeInput || "").trim();
     if (!raw) {
       setChapterRangeError("먼저 챕터 범위를 입력해주세요.");
       return;
     }
-    const totalPages = resolveChapterRangeLimit(raw);
+    const totalPages = pageInfo.total || pageInfo.used || 0;
     const parsed = parseChapterRangeSelectionInput(raw, totalPages);
     if (parsed.error) {
       setChapterRangeError(parsed.error);
@@ -5904,31 +3829,25 @@ function App() {
     }
     const targetDocId = selectedFileId || file?.name || "";
     if (!targetDocId) {
-      setChapterRangeError("먼저 문서를 열어주세요.");
+      setChapterRangeError("먼저 PDF를 열어주세요.");
       return;
     }
     persistChapterRangeInput(targetDocId, raw);
-    void persistSharedChapterRangeInput(targetDocId, raw, {
-      syncState: String(selectedFileId || "").trim() === String(targetDocId || "").trim(),
-    });
     setChapterRangeError("");
     setStatus(`챕터 범위를 저장했습니다. (${parsed.chapters.length} sections)`);
     setIsChapterRangeOpen(false);
   }, [
     chapterRangeInput,
     file,
-    isCurrentPdfDocument,
     pageInfo.total,
     pageInfo.used,
     persistChapterRangeInput,
-    persistSharedChapterRangeInput,
-    resolveChapterRangeLimit,
     selectedFileId,
   ]);
 
   const handleSummaryByPages = useCallback(async () => {
     if (isPageSummaryLoading || isLoadingSummary) return;
-    if (!isCurrentPdfDocument) {
+    if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) {
       setPageSummaryError("페이지 범위 요약은 PDF에서만 지원됩니다.");
       return;
     }
@@ -5973,10 +3892,10 @@ function App() {
       const summarized = await generateSummary(extracted.text, {
         scope: "선택 범위에서 추출한 텍스트",
         chapterized: false,
+        instructorEmphasis: getEffectiveInstructorEmphasisText(),
       });
       setPartialSummary(summarized);
       setPartialSummaryRange(selectionLabel);
-      setPartialSummaryEvidencePageCandidates(toSortedUniquePages(parsed.pages));
       const nowIso = new Date().toISOString();
       const currentSaved = Array.isArray(savedPartialSummaries) ? savedPartialSummaries : [];
       const duplicate = currentSaved.find(
@@ -6023,12 +3942,12 @@ function App() {
   }, [
     file,
     getOpenAiService,
-    isCurrentPdfDocument,
     isLoadingSummary,
     isPageSummaryLoading,
     pageInfo.total,
     pageInfo.used,
     pageSummaryInput,
+    getEffectiveInstructorEmphasisText,
     persistPartialSummaryBundle,
     savedPartialSummaries,
     selectedFileId,
@@ -6186,7 +4105,7 @@ function App() {
     }
   }, [summary, file, isExportingSummary]);
 
-  const requestOxQuiz = async ({ auto = false, force = false, chapterSelectionInputOverride = "" } = {}) => {
+  const requestOxQuiz = async ({ auto = false, force = false } = {}) => {
     if (isLoadingOx && !force) return;
     if (!file) {
       setError("먼저 PDF를 열어주세요.");
@@ -6196,13 +4115,9 @@ function App() {
       setError("현재 요금제의 O/X 생성 한도에 도달했습니다.");
       return;
     }
-    const chapterSelectionRaw = String(
-      chapterSelectionInputOverride || oxChapterSelectionInput || quizChapterSelectionInput || ""
-    ).trim();
-    if (chapterSelectionRaw !== String(oxChapterSelectionInput || "").trim()) {
-      setOxChapterSelectionInput(chapterSelectionRaw);
-    }
-    const isPdfSource = isCurrentPdfDocument;
+    const chapterSelectionRaw = String(oxChapterSelectionInput || "").trim();
+    const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
+    const instructorEmphasisText = getEffectiveInstructorEmphasisText();
     if (!extractedText && !chapterSelectionRaw && !isPdfSource) {
       setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
       return;
@@ -6219,14 +4134,6 @@ function App() {
       });
       const oxSourceText = String(scopedSource?.text || "").trim();
       const scopeLabel = String(scopedSource?.scopeLabel || "").trim();
-      const evidencePages = toSortedUniquePages(scopedSource?.pageCandidates);
-      const enforceScopedEvidence = isCurrentPdfDocument && evidencePages.length > 0;
-      const generationSourceText = await buildPageTaggedSourceText(oxSourceText, evidencePages, {
-        maxPages: 20,
-        maxCharsPerPage: 950,
-        maxTotalChars: 15000,
-        includeFallbackText: false,
-      });
       if (!oxSourceText) {
         throw new Error("챕터 1 이후 텍스트를 찾지 못했습니다. 챕터 범위를 먼저 설정해주세요.");
       }
@@ -6240,27 +4147,16 @@ function App() {
       const seenQuestionKeys = createQuestionKeySet(avoidStatementTexts);
 
       const { generateOxQuiz } = await getOpenAiService();
-      const ox = await generateOxQuiz(generationSourceText || oxSourceText, {
+      const ox = await generateOxQuiz(oxSourceText, {
+        instructorEmphasis: instructorEmphasisText,
         avoidStatements: avoidStatementTexts,
-        count: 2,
-        scopeLabel,
       });
       const rawItems = Array.isArray(ox?.items) ? ox.items : [];
-      const scopedRawItems = enforceScopedEvidence ? filterGeneratedItemsToScope(rawItems, evidencePages) : rawItems;
-      const qualityRawItems = scopedRawItems
-        .filter((item) => !isLowValueStudyPrompt(getOxPromptText(item)))
-        .map((item) => ({
-          ...item,
-          evidencePages: enforceScopedEvidence
-            ? clampEvidencePagesToScope(item?.evidencePages, evidencePages)
-            : toSortedUniquePages(
-                Array.isArray(item?.evidencePages) && item.evidencePages.length
-                  ? item.evidencePages
-                  : evidencePages
-              ),
-        }));
+      const qualityRawItems = rawItems.filter(
+        (item) => !isLowValueStudyPrompt(getOxPromptText(item))
+      );
       const items = [];
-      pushUniqueByQuestionKey(items, qualityRawItems, getOxPromptText, seenQuestionKeys, 2);
+      pushUniqueByQuestionKey(items, qualityRawItems, getOxPromptText, seenQuestionKeys, 10);
 
       if (ox?.debug || items.length === 0) {
         setOxItems([]);
@@ -6279,11 +4175,7 @@ function App() {
       setOxExplanationOpen({});
       setStatus(scopeLabel ? `O/X 문제가 생성되었습니다. (${scopeLabel})` : "O/X 문제가 생성되었습니다.");
       setUsageCounts((prev) => ({ ...prev, ox: prev.ox + 1 }));
-      persistArtifacts({
-        ox: {
-          items,
-        },
-      });
+      persistArtifacts({ ox });
     } catch (err) {
       setError(`O/X 문제 생성에 실패했습니다: ${err.message}`);
     } finally {
@@ -6291,7 +4183,7 @@ function App() {
     }
   };
 
-  const regenerateOxQuiz = async ({ chapterSelectionInputOverride = "" } = {}) => {
+  const regenerateOxQuiz = async () => {
     if (isLoadingOx) return;
     if (!file) {
       setError("먼저 PDF를 열어주세요.");
@@ -6301,24 +4193,18 @@ function App() {
       setError("현재 요금제의 O/X 생성 한도에 도달했습니다.");
       return;
     }
-    const chapterSelectionRaw = String(
-      chapterSelectionInputOverride || oxChapterSelectionInput || quizChapterSelectionInput || ""
-    ).trim();
-    if (chapterSelectionRaw !== String(oxChapterSelectionInput || "").trim()) {
-      setOxChapterSelectionInput(chapterSelectionRaw);
-    }
-    if (!extractedText && !chapterSelectionRaw && !isCurrentPdfDocument) {
+    const chapterSelectionRaw = String(oxChapterSelectionInput || "").trim();
+    if (!extractedText && !chapterSelectionRaw && !isPdfDocumentKind(detectSupportedDocumentKind(file))) {
       setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
       return;
     }
     oxAutoRequestedRef.current = true;
     setOxItems(null);
-    setOxSelections({});
-    setOxExplanationOpen({});
+      setOxSelections({});
     setStatus("O/X를 초기화하고 다시 생성하는 중...");
     setError("");
     await persistArtifacts({ ox: null });
-    await requestOxQuiz({ auto: false, force: true, chapterSelectionInputOverride: chapterSelectionRaw });
+    await requestOxQuiz({ auto: false, force: true });
   };
 
   const handleAddFlashcard = useCallback(
@@ -6491,20 +4377,20 @@ function App() {
       const trimmed = String(prompt || "").trim();
       if (!trimmed || isTutorLoading) return;
       if (!file || !selectedFileId) {
-        setTutorError("먼저 PDF를 열어주세요.");
+        setTutorError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
         return;
       }
-      if (!isCurrentPdfDocument) {
+      if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) {
         setTutorError("AI 튜터의 페이지 근거 모드는 PDF에서만 지원됩니다.");
         return;
       }
       if (isLoadingText) {
-        setTutorError("PDF 텍스트 추출이 아직 진행 중입니다. 잠시만 기다려 주세요.");
+        setTutorError("PDF ?띿뒪??異붿텧???꾩쭅 吏꾪뻾 以묒엯?덈떎. ?좎떆留?湲곕떎?ㅼ＜?몄슂.");
         return;
       }
       const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
       if (!totalPages) {
-        setTutorError("페이지 정보를 읽지 못했습니다. PDF를 다시 열어주세요.");
+        setTutorError("?섏씠吏 ?뺣낫瑜??쎌? 紐삵뻽?듬땲?? PDF瑜??ㅼ떆 ?댁뼱二쇱꽭??");
         return;
       }
 
@@ -6593,7 +4479,7 @@ function App() {
           .filter((entry) => entry && entry.text);
       };
 
-      setStatus("질문 관련 본문 페이지를 검색하는 중...");
+      setStatus("吏덈Ц 愿??蹂몃Ц ?섏씠吏瑜?寃?됲븯??以?..");
       const narrowScanPages = buildPageRange(anchorPage - 20, anchorPage + 90, 130);
       const broadScanPages = buildPageRange(anchorPage - 70, anchorPage + 220, 260);
 
@@ -6655,7 +4541,7 @@ function App() {
         maxCharsPerPage: 5200,
       });
       if (!finalEntries.length) {
-        setTutorError("질문 관련 본문 페이지에서 텍스트를 찾지 못했습니다. PDF를 다시 열어주세요.");
+        setTutorError("吏덈Ц 愿??蹂몃Ц ?섏씠吏?먯꽌 ?띿뒪?몃? 李얠? 紐삵뻽?듬땲?? PDF瑜??ㅼ떆 ?댁뼱二쇱꽭??");
         setStatus("");
         return;
       }
@@ -6703,7 +4589,7 @@ function App() {
         });
         setTutorMessages((prev) => [...prev, { role: "assistant", content: safeReply }]);
       } catch (err) {
-        setTutorError(`AI 튜터 응답 생성에 실패했습니다: ${err.message}`);
+        setTutorError(`AI ?쒗꽣 ?듬? ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       } finally {
         setIsTutorLoading(false);
         setStatus("");
@@ -6714,7 +4600,6 @@ function App() {
       file,
       getOpenAiService,
       isLoadingText,
-      isCurrentPdfDocument,
       isTutorLoading,
       pageInfo?.total,
       selectedFileId,
@@ -6739,11 +4624,9 @@ function App() {
 
     const chapterSelectionRaw = String(mockExamChapterSelectionInput || "").trim();
     const hasChapterScope = Boolean(chapterSelectionRaw);
-    const isPdfSource = isCurrentPdfDocument;
+    const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
     let sourceText = "";
     let scopeLabel = "";
-    let scopeEvidencePages = [];
-    let generationSourceText = "";
     try {
       const scopedSource = await resolveQuestionSourceText({
         featureLabel: "모의고사",
@@ -6752,13 +4635,6 @@ function App() {
       });
       sourceText = String(scopedSource?.text || "").trim();
       scopeLabel = String(scopedSource?.scopeLabel || "").trim();
-      scopeEvidencePages = toSortedUniquePages(scopedSource?.pageCandidates);
-      generationSourceText = await buildPageTaggedSourceText(sourceText, scopeEvidencePages, {
-        maxPages: 24,
-        maxCharsPerPage: 950,
-        maxTotalChars: 17000,
-        includeFallbackText: !hasChapterScope,
-      });
     } catch (err) {
       setMockExamError(String(err?.message || "모의고사 텍스트 추출에 실패했습니다."));
       return;
@@ -6778,7 +4654,6 @@ function App() {
 
     try {
       const ai = await getOpenAiService();
-      const enforceScopedEvidence = isCurrentPdfDocument && scopeEvidencePages.length > 0;
       let oxPool = (Array.isArray(oxItems) ? oxItems : []).filter(
         (item) => !isLowValueStudyPrompt(getOxPromptText(item))
       );
@@ -6787,59 +4662,34 @@ function App() {
       const avoidMockQuestionTexts = dedupeQuestionTexts(historicalMockTexts).slice(0, 120);
       const usedMockQuestionKeys = createQuestionKeySet(avoidMockQuestionTexts);
 
-      const shouldGeneratePoolsFromSource = hasChapterScope || isPdfSource || Boolean(sourceText);
+      const shouldGeneratePoolsFromSource = hasChapterScope || isPdfSource;
       if (shouldGeneratePoolsFromSource) {
         if (scopeLabel) {
           setMockExamStatus(`모의고사 생성 중 (${scopeLabel})...`);
         }
+        const instructorEmphasisText = getEffectiveInstructorEmphasisText();
 
         const [oxResult, quizResult] = await Promise.all([
-          ai.generateOxQuiz(generationSourceText || sourceText, {
+          ai.generateOxQuiz(sourceText, {
+            instructorEmphasis: instructorEmphasisText,
             avoidStatements: avoidMockQuestionTexts,
-            scopeLabel,
           }),
-          ai.generateQuiz(generationSourceText || sourceText, {
+          ai.generateQuiz(sourceText, {
             multipleChoiceCount: 4,
             shortAnswerCount: 1,
+            instructorEmphasis: instructorEmphasisText,
             avoidQuestions: avoidMockQuestionTexts,
-            scopeLabel,
           }),
         ]);
 
-        const scopedOxItems = enforceScopedEvidence
-          ? filterGeneratedItemsToScope(Array.isArray(oxResult?.items) ? oxResult.items : [], scopeEvidencePages)
-          : Array.isArray(oxResult?.items)
-            ? oxResult.items
-            : [];
-        oxPool = scopedOxItems
-          .map((item) => ({
-            ...item,
-            evidencePages: enforceScopedEvidence
-              ? clampEvidencePagesToScope(item?.evidencePages, scopeEvidencePages)
-              : toSortedUniquePages(
-                  Array.isArray(item?.evidencePages) && item.evidencePages.length
-                    ? item.evidencePages
-                    : scopeEvidencePages
-                ),
-          }))
-          .filter((item) => !isLowValueStudyPrompt(getOxPromptText(item)));
+        oxPool = (Array.isArray(oxResult?.items) ? oxResult.items : []).filter(
+          (item) => !isLowValueStudyPrompt(getOxPromptText(item))
+        );
         const normalizedQuiz = normalizeQuizPayload(quizResult);
-        const scopedMultipleChoice = enforceScopedEvidence
-          ? filterGeneratedItemsToScope(
-              Array.isArray(normalizedQuiz?.multipleChoice) ? normalizedQuiz.multipleChoice : [],
-              scopeEvidencePages
-            )
-          : Array.isArray(normalizedQuiz?.multipleChoice)
-            ? normalizedQuiz.multipleChoice
-            : [];
-        const scopedShortAnswers = enforceScopedEvidence
-          ? filterGeneratedItemsToScope(
-              Array.isArray(normalizedQuiz?.shortAnswer) ? normalizedQuiz.shortAnswer : [],
-              scopeEvidencePages
-            )
-          : Array.isArray(normalizedQuiz?.shortAnswer)
-            ? normalizedQuiz.shortAnswer
-            : [];
+        const scopedMultipleChoice = Array.isArray(normalizedQuiz?.multipleChoice)
+          ? normalizedQuiz.multipleChoice
+          : [];
+        const scopedShortAnswers = Array.isArray(normalizedQuiz?.shortAnswer) ? normalizedQuiz.shortAnswer : [];
 
         scopedMultipleChoice.forEach((question) => {
           const prompt = String(question?.question || "").trim();
@@ -6857,16 +4707,6 @@ function App() {
               choices,
             }),
             explanation,
-            evidencePages: enforceScopedEvidence
-              ? clampEvidencePagesToScope(question?.evidencePages, scopeEvidencePages)
-              : toSortedUniquePages(
-                  Array.isArray(question?.evidencePages) && question.evidencePages.length
-                    ? question.evidencePages
-                    : scopeEvidencePages
-                ),
-            evidenceSnippet: String(question?.evidenceSnippet || "").trim(),
-            evidenceLabel: String(question?.evidenceLabel || "").trim(),
-            evidence: String(question?.evidence || "").trim(),
           });
         });
         scopedShortAnswers.forEach((item) => {
@@ -6879,16 +4719,6 @@ function App() {
             prompt,
             answer: resolveShortAnswerText(item?.answer, explanation),
             explanation,
-            evidencePages: enforceScopedEvidence
-              ? clampEvidencePagesToScope(item?.evidencePages, scopeEvidencePages)
-              : toSortedUniquePages(
-                  Array.isArray(item?.evidencePages) && item.evidencePages.length
-                    ? item.evidencePages
-                    : scopeEvidencePages
-                ),
-            evidenceSnippet: String(item?.evidenceSnippet || "").trim(),
-            evidenceLabel: String(item?.evidenceLabel || "").trim(),
-            evidence: String(item?.evidence || "").trim(),
           });
         });
       } else {
@@ -6911,10 +4741,6 @@ function App() {
                 choices,
               }),
               explanation,
-              evidencePages: toSortedUniquePages(question?.evidencePages),
-              evidenceSnippet: String(question?.evidenceSnippet || "").trim(),
-              evidenceLabel: String(question?.evidenceLabel || "").trim(),
-              evidence: String(question?.evidence || "").trim(),
             });
           });
           shortAnswers.forEach((item) => {
@@ -6927,10 +4753,6 @@ function App() {
               prompt,
               answer: resolveShortAnswerText(item?.answer, explanation),
               explanation,
-              evidencePages: toSortedUniquePages(item?.evidencePages),
-              evidenceSnippet: String(item?.evidenceSnippet || "").trim(),
-              evidenceLabel: String(item?.evidenceLabel || "").trim(),
-              evidence: String(item?.evidence || "").trim(),
             });
           });
         });
@@ -6962,22 +4784,17 @@ function App() {
 
       const hardCount = Math.max(3, 10 - (pickedOx.length + pickedQuiz.length));
       const hardItems = [];
-      const maxHardAttempts = enforceScopedEvidence ? 4 : 3;
+      const maxHardAttempts = 3;
       for (let attempt = 0; attempt < maxHardAttempts; attempt += 1) {
         if (hardItems.length >= hardCount) break;
         const requestCount = Math.min(10, hardCount + attempt * 2 + 1);
-        const hardGenerationSource = generationSourceText || sourceText;
-        const hardResult = await ai.generateHardQuiz(hardGenerationSource, {
+        const hardResult = await ai.generateHardQuiz(sourceText, {
           count: requestCount,
           avoidQuestions: avoidMockQuestionTexts,
         });
-        const rawHardItems = (
-          enforceScopedEvidence
-            ? filterGeneratedItemsToScope(Array.isArray(hardResult?.items) ? hardResult.items : [], scopeEvidencePages)
-            : Array.isArray(hardResult?.items)
-              ? hardResult.items
-              : []
-        ).filter((item) => !isLowValueStudyPrompt(String(item?.question || "").trim()));
+        const rawHardItems = (Array.isArray(hardResult?.items) ? hardResult.items : []).filter(
+          (item) => !isLowValueStudyPrompt(String(item?.question || "").trim())
+        );
         pushUniqueByQuestionKey(
           hardItems,
           rawHardItems,
@@ -7003,9 +4820,6 @@ function App() {
         answer: item?.answer === true ? "O" : "X",
         explanation: String(item?.explanation || "").trim(),
         evidence: String(item?.evidence || "").trim(),
-        evidencePages: toSortedUniquePages(item?.evidencePages),
-        evidenceSnippet: String(item?.evidenceSnippet || "").trim(),
-        evidenceLabel: String(item?.evidenceLabel || "").trim(),
       }));
 
       const mappedQuiz = pickedQuiz.map((item) => ({ ...item }));
@@ -7020,16 +4834,6 @@ function App() {
           choices: Array.isArray(item?.choices) ? item.choices : [],
         }),
         explanation: String(item?.explanation || "").trim(),
-        evidencePages: enforceScopedEvidence
-          ? clampEvidencePagesToScope(item?.evidencePages, scopeEvidencePages)
-          : toSortedUniquePages(
-              Array.isArray(item?.evidencePages) && item.evidencePages.length
-                ? item.evidencePages
-                : scopeEvidencePages
-            ),
-        evidenceSnippet: String(item?.evidenceSnippet || "").trim(),
-        evidenceLabel: String(item?.evidenceLabel || "").trim(),
-        evidence: String(item?.evidence || "").trim(),
       }));
 
       const examItems = [...mappedOx, ...mappedQuiz, ...mappedHard].map((item, idx) => ({
@@ -7095,7 +4899,6 @@ function App() {
   }, [
     extractedText,
     file,
-    isCurrentPdfDocument,
     isGeneratingMockExam,
     isLoadingText,
     oxItems,
@@ -7103,8 +4906,8 @@ function App() {
     quizSets,
     mockExamChapterSelectionInput,
     selectedFileId,
-    buildPageTaggedSourceText,
     getOpenAiService,
+    getEffectiveInstructorEmphasisText,
     resolveQuestionSourceText,
     user,
   ]);
@@ -7192,7 +4995,7 @@ function App() {
       setIsSubmittingFeedback(true);
       setFeedbackError("");
       try {
-        const feedbackPayload = {
+        await saveUserFeedback({
           userId: user.id,
           category: feedbackCategory,
           content: trimmedFeedback,
@@ -7204,64 +5007,11 @@ function App() {
             totalPages: pageInfo?.total || pageInfo?.used || null,
             tier,
           },
-        };
-        let savedFeedback = false;
-        let emailedFeedback = false;
-        let skippedEmail = false;
-        let saveError = null;
-        let notifyError = null;
-
-        try {
-          await saveUserFeedback(feedbackPayload);
-          savedFeedback = true;
-        } catch (error) {
-          saveError = error;
-          console.warn("Feedback database save failed:", error);
-        }
-
-        try {
-          const notifyResult = await notifyFeedbackEmail({
-            userId: user.id,
-            userEmail: user.email || "",
-            category: feedbackCategory,
-            content: trimmedFeedback,
-            docId: selectedFileId || null,
-            docName: file?.name || "",
-            panel: panelTab || "",
-            metadata: {
-              currentPage,
-              totalPages: pageInfo?.total || pageInfo?.used || null,
-              tier,
-            },
-          });
-          emailedFeedback = Boolean(notifyResult?.ok);
-          skippedEmail = Boolean(notifyResult?.skipped);
-        } catch (error) {
-          notifyError = error;
-          console.warn("Feedback email notification failed:", error);
-        }
-
-        if (!savedFeedback && !emailedFeedback) {
-          if (isMissingFeedbackTableError(saveError) && skippedEmail) {
-            throw new Error(
-              "Supabase에 user_feedback 테이블이 아직 없습니다. 테이블을 먼저 만들거나 메일 알림을 설정해주세요."
-            );
-          }
-          throw saveError || notifyError || new Error("피드백 저장 또는 메일 전송에 실패했습니다.");
-        }
-
+        });
         setIsFeedbackDialogOpen(false);
         setFeedbackCategory("general");
         setFeedbackInput("");
-        if (savedFeedback && emailedFeedback) {
-          setStatus("\uD53C\uB4DC\uBC31\uC774 \uC800\uC7A5\uB418\uACE0 \uBA54\uC77C\uB85C \uC804\uB2EC\uB418\uC5C8\uC2B5\uB2C8\uB2E4.");
-        } else if (savedFeedback) {
-          setStatus("\uD53C\uB4DC\uBC31\uC774 \uC800\uC7A5\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uAC10\uC0AC\uD569\uB2C8\uB2E4.");
-        } else {
-          setStatus(
-            "\uD53C\uB4DC\uBC31\uC774 \uBA54\uC77C\uB85C \uC804\uB2EC\uB418\uC5C8\uC2B5\uB2C8\uB2E4. DB \uC800\uC7A5\uC740 \uAC74\uB108\uB6F0\uC5C8\uC2B5\uB2C8\uB2E4."
-          );
-        }
+        setStatus("\uD53C\uB4DC\uBC31\uC774 \uC804\uC1A1\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uAC10\uC0AC\uD569\uB2C8\uB2E4.");
       } catch (err) {
         setFeedbackError(`\uD53C\uB4DC\uBC31 \uC804\uC1A1\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: ${err.message}`);
       } finally {
@@ -7327,9 +5077,7 @@ function App() {
     folders,
     selectedFolderId,
     onSelectFolder: handleSelectFolder,
-    onSelectFolderSummary: handleSelectFolderSummary,
     onCreateFolder: handleCreateFolder,
-    onRenameFolder: handleRenameFolder,
     onDeleteFolder: handleDeleteFolder,
     selectedUploadIds,
     onToggleUploadSelect: handleToggleUploadSelect,
@@ -7348,12 +5096,9 @@ function App() {
     detailContainerRef,
     splitStyle,
     pdfUrl,
-    documentRemoteUrl,
     file,
-    pendingDocumentOpen,
     pageInfo,
     currentPage,
-    activeEvidenceHighlight,
     handlePageChange,
     handleDragStart,
     panelTab,
@@ -7362,8 +5107,15 @@ function App() {
     isLoadingSummary,
     isLoadingText,
     isFreeTier,
-    isPdfDocument: isCurrentPdfDocument,
     summary,
+    instructorEmphasisInput,
+    setInstructorEmphasisInput,
+    savedInstructorEmphases,
+    activeInstructorEmphasisId,
+    handleSaveInstructorEmphasis,
+    handleSelectInstructorEmphasis,
+    handleDeleteInstructorEmphasis,
+    cycleActiveInstructorEmphasis,
     partialSummary,
     partialSummaryRange,
     savedPartialSummaries,
@@ -7396,10 +5148,6 @@ function App() {
     status: safeStatus,
     error: safeError,
     summaryRef,
-    jumpToEvidencePage,
-    resolveSummaryEvidence,
-    resolvePartialSummaryEvidence,
-    resolveMockExamEvidence,
     mockExams,
     mockExamMenuRef,
     mockExamMenuButtonRef,
@@ -7429,50 +5177,22 @@ function App() {
     requestQuestions,
     quizChapterSelectionInput,
     setQuizChapterSelectionInput,
-    quizMixInput,
-    setQuizMixInput,
     quizMix,
-    quizMixError,
+    setQuizMix,
     quizSets,
-    reviewNotes: reviewNotesPanelState.items,
-    reviewNoteSections: configuredReviewSections,
-    reviewNotesSectionSelectionInput: reviewNotesChapterSelectionInput,
-    setReviewNotesSectionSelectionInput: setReviewNotesChapterSelectionInput,
-    reviewNotesSectionError: reviewNotesPanelState.error,
-    examCramItems: examCramState.items,
-    examCramPendingCount: examCramState.pendingCount,
-    examCramSectionError: examCramState.error,
-    examCramReferenceCounts: examCramState.referenceCounts,
-    examCramHasAnySource: examCramState.hasAnySource,
-    examCramContent,
-    examCramUpdatedAt,
-    examCramScopeLabel,
-    examCramStatus: safeExamCramStatus,
-    examCramError: safeExamCramError,
-    isGeneratingExamCram,
-    resolveQuizEvidence,
+    deleteQuiz: handleDeleteQuiz,
+    deleteQuizItem: handleDeleteQuizItem,
     handleChoiceSelect,
     handleShortAnswerChange,
     handleShortAnswerCheck,
-    handleQuizOxSelect,
-    handleToggleQuizOxExplanation,
-    handleReviewNoteAttempt,
-    handleToggleReviewNoteResolved,
-    handleDeleteReviewNote,
-    handleGenerateExamCram,
-    handleCreateReviewNotesMockExam,
-    deleteQuiz: handleDeleteQuiz,
-    deleteQuizItem: handleDeleteQuizItem,
-    deleteOxQuestion: handleDeleteOxQuestion,
+    regenerateQuiz,
     isLoadingOx,
     requestOxQuiz,
     oxChapterSelectionInput,
     setOxChapterSelectionInput,
     regenerateOxQuiz,
     oxItems,
-    resolveOxEvidence,
     oxSelections,
-    handleOxSelect,
     setOxSelections,
     oxExplanationOpen,
     setOxExplanationOpen,
@@ -7537,41 +5257,13 @@ function App() {
       {showPayment && (
         <Suspense fallback={null}>
           <PaymentPage
-            onClose={() => {
-              clearPaymentReturnPending();
-              setShowPayment(false);
-            }}
+            onClose={() => setShowPayment(false)}
             currentTier={tier}
             currentTierExpiresAt={tierExpiresAt}
             currentTierRemainingDays={tierRemainingDays}
             theme={theme}
             user={user}
             onTierUpdated={refreshTier}
-            paymentReturnSignal={paymentReturnSignal}
-          />
-        </Suspense>
-      )}
-      {showSettings && (
-        <Suspense fallback={null}>
-          <SettingsDialog
-            onClose={closeSettings}
-            theme={theme}
-            onThemeChange={handleThemeChange}
-            user={user}
-            authEnabled={AUTH_ENABLED}
-            currentTier={tier}
-            currentTierExpiresAt={tierExpiresAt}
-            currentTierRemainingDays={tierRemainingDays}
-            loadingTier={loadingTier}
-            activeProfile={activePremiumProfile}
-            premiumSpaceMode={premiumSpaceMode}
-            onOpenBilling={AUTH_ENABLED ? openBillingFromSettings : null}
-            onOpenFeedbackDialog={AUTH_ENABLED ? handleOpenFeedbackFromSettings : null}
-            onOpenLogin={AUTH_ENABLED ? openAuthFromSettings : null}
-            onSignOut={handleSignOutFromSettings}
-            signingOut={isSigningOut}
-            onRefresh={user ? handleManualSync : null}
-            isRefreshing={isManualSyncing}
           />
         </Suspense>
       )}
@@ -7692,38 +5384,22 @@ function App() {
             <p className={`mt-1 text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
               {"\uBC84\uADF8, \uAE30\uB2A5 \uC81C\uC548, \uC0AC\uC6A9\uC131 \uAC1C\uC120 \uC758\uACAC\uC744 \uC790\uC720\uB86D\uAC8C \uB0A8\uACA8 \uC8FC\uC138\uC694."}
             </p>
-            <p className={`mt-2 text-[11px] leading-5 ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
-              {"\uD53C\uB4DC\uBC31\uC740 \uD604\uC7AC \uB0B4\uBD80 \uC218\uC9D1\uD568\uC5D0 \uC800\uC7A5\uB418\uACE0, \uAD00\uB9AC\uC790 \uBA54\uC77C \uC54C\uB9BC\uC774 \uC124\uC815\uB41C \uACBD\uC6B0 \uBA54\uC77C\uB85C\uB3C4 \uC804\uB2EC\uB429\uB2C8\uB2E4."}
-            </p>
             <div className="mt-4 space-y-3">
-              <div
-                className="grid grid-cols-2 gap-2"
-                role="group"
-                aria-label={"\uD53C\uB4DC\uBC31 \uBD84\uB958"}
+              <select
+                name="feedback-category"
+                value={feedbackCategory}
+                onChange={(event) => setFeedbackCategory(event.target.value)}
+                className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
+                  theme === "light"
+                    ? "border-slate-300 bg-white text-slate-900"
+                    : "border-white/15 bg-white/5 text-slate-100"
+                }`}
               >
-                {FEEDBACK_CATEGORY_OPTIONS.map((option) => {
-                  const isActive = feedbackCategory === option.value;
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setFeedbackCategory(option.value)}
-                      aria-pressed={isActive}
-                      className={`rounded-xl border px-3 py-2 text-left text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/45 ${
-                        isActive
-                          ? theme === "light"
-                            ? "border-emerald-500 bg-emerald-50 text-emerald-950"
-                            : "border-emerald-300/70 bg-emerald-400/12 text-emerald-100"
-                          : theme === "light"
-                            ? "border-slate-300 bg-white text-slate-700 hover:border-emerald-300 hover:text-slate-900"
-                            : "border-white/15 bg-white/5 text-slate-200 hover:border-emerald-300/35 hover:text-white"
-                      }`}
-                    >
-                      {option.label}
-                    </button>
-                  );
-                })}
-              </div>
+                <option value="general">{"\uC77C\uBC18"}</option>
+                <option value="bug">{"\uBC84\uADF8 \uC81C\uBCF4"}</option>
+                <option value="feature">{"\uAE30\uB2A5 \uC81C\uC548"}</option>
+                <option value="ux">{"\uC0AC\uC6A9\uC131 \uC758\uACAC"}</option>
+              </select>
               <textarea
                 name="feedback-message"
                 value={feedbackInput}
@@ -7782,19 +5458,19 @@ function App() {
         </div>
       )}
 
-      <main
-        className="app-banner-offset relative z-10 mx-auto flex w-full max-w-none flex-col gap-4 px-3 py-3 sm:px-4 sm:py-4 lg:px-6"
-        style={{ "--app-banner-offset": `${appBannerOffset}px` }}
-      >
+      <main className="relative z-10 mx-auto flex w-full max-w-none flex-col gap-4 py-4">
         {showHeader && (
           <Suspense fallback={null}>
             <Header
               user={user}
+              onSignOut={handleSignOut}
+              signingOut={isSigningOut}
               theme={theme}
               onGoHome={showDetail ? goBackToList : null}
+              onOpenFeedbackDialog={AUTH_ENABLED ? handleOpenFeedbackDialog : null}
               onOpenBilling={openBilling}
-              onOpenSettings={openSettings}
               showBilling={AUTH_ENABLED}
+              onToggleTheme={toggleTheme}
               onOpenLogin={openAuth}
               authEnabled={AUTH_ENABLED}
               isPremiumTier={isPremiumTier}
@@ -7829,6 +5505,7 @@ function App() {
 }
 
 export default App;
+
 
 
 
