@@ -1,5 +1,3 @@
-/* global process, Buffer */
-
 const text = (value) => String(value ?? "").trim();
 const NATIVE_APP_ORIGINS = new Set(["http://localhost", "https://localhost", "capacitor://localhost"]);
 
@@ -124,15 +122,6 @@ const extractBearerToken = (authHeader) => {
   return match ? text(match[1]) : "";
 };
 
-const resolveServerApiKey = () =>
-  text(
-    process.env.DEEPSEEK_API_KEY ||
-      process.env.OPENAI_API_KEY ||
-      process.env.OPENAI_PROXY_API_KEY ||
-      process.env.VITE_DEEPSEEK_API_KEY ||
-      process.env.VITE_OPENAI_API_KEY
-  );
-
 const resolveUpstreamUrl = () =>
   text(process.env.DEEPSEEK_UPSTREAM_URL || process.env.OPENAI_UPSTREAM_URL) ||
   "https://api.deepseek.com/v1/chat/completions";
@@ -142,6 +131,24 @@ const detectProviderName = (url) => {
   if (normalized.includes("deepseek")) return "DeepSeek";
   if (normalized.includes("openai")) return "OpenAI";
   return "LLM";
+};
+
+const resolveServerApiKey = (providerName) => {
+  if (providerName === "DeepSeek") {
+    return text(process.env.DEEPSEEK_API_KEY || process.env.VITE_DEEPSEEK_API_KEY);
+  }
+
+  if (providerName === "OpenAI") {
+    return text(process.env.OPENAI_API_KEY || process.env.OPENAI_PROXY_API_KEY || process.env.VITE_OPENAI_API_KEY);
+  }
+
+  return text(
+    process.env.DEEPSEEK_API_KEY ||
+      process.env.OPENAI_API_KEY ||
+      process.env.OPENAI_PROXY_API_KEY ||
+      process.env.VITE_DEEPSEEK_API_KEY ||
+      process.env.VITE_OPENAI_API_KEY
+  );
 };
 
 export default async function handler(req, res) {
@@ -166,10 +173,11 @@ export default async function handler(req, res) {
     return;
   }
 
-  const incomingApiKey = extractBearerToken(req.headers.authorization);
-  const apiKey = incomingApiKey || resolveServerApiKey();
   const upstreamUrl = resolveUpstreamUrl();
   const providerName = detectProviderName(upstreamUrl);
+  const incomingApiKey = extractBearerToken(req.headers.authorization);
+  const serverApiKey = resolveServerApiKey(providerName);
+  const apiKey = serverApiKey || incomingApiKey;
   if (!apiKey) {
     sendJson(
       res,
