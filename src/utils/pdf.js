@@ -233,13 +233,17 @@ async function runWithOcrWorker(lang, progressLogger, task) {
   return run;
 }
 
-const TOC_HEADER_RE = /(?:table\s+of\s+contents|contents|\uBAA9\uCC28|\uCC28\uB840)/i;
-const TOC_HEADER_LINE_RE = /^\s*(?:table\s+of\s+contents|contents?|\uBAA9\uCC28|\uCC28\uB840)\s*$/i;
-const CHAPTER_LIKE_TITLE_RE =
-  /(?:^|\s)(?:chapter|chap\.?|ch\.?|part|unit)\s*[0-9ivxlcdm]+|(?:^|\s)(?:\uC81C\s*)?\d+\s*(?:\uC7A5|\uC808)|(?:^|\s)\d+(?:\.\d+){1,3}|^(?:\d{1,3}|[ivxlcdm]{1,8})(?:[.)]|\s+-|\s+)/i;
+// 확장된 목차 헤더 패턴 (다국어 지원)
+const TOC_HEADER_RE = /(?:table\s+of\s+contents|contents|toc|\uBAA9\uCC28|\uCC28\uB840|\u76EE\u6B21|\u76EE\u9304|\u518A\u9996|\u7B2C\d+\u7AE0|\u7AE0\u8282)/i;
+const TOC_HEADER_LINE_RE = /^\s*(?:table\s+of\s+contents|contents?|toc|\uBAA9\uCC28|\uCC28\uB840|\u76EE\u6B21|\u76EE\u9304|\u518A\u9996)\s*$/i;
 
+// 확장된 챕터 제목 패턴 (다양한 형식 지원)
+const CHAPTER_LIKE_TITLE_RE =
+  /(?:^|\s)(?:chapter|chap\.?|ch\.?|part|unit|section|sec\.?|lecture|lec\.?|lesson|module|topic)\s*[0-9ivxlcdm]+(?:\.[0-9]+)?(?:\s*[-:]\s*)?|(?:^|\s)(?:\uC81C\s*)?\d+(?:\.\d+)*\s*(?:\uC7A5|\uC808|\uBD80|\uC11C|\uC810|\uAC8C|\uC2DC|\uC5D0|\uC5D0\uC11C)|\u7B2C\d+\u7AE0|\u7B2C\d+\u8282|(?:^|\s)\d+(?:\.\d+){1,3}|^(?:\d{1,3}|[ivxlcdm]{1,8})(?:[.)]|\s*[-:]\s*|\s+)/i;
+
+// 섹션/부록 등 목차 항목이 아닌 단어 패턴
 const SECTION_WORD_STOP_RE =
-  /\b(?:section|sec\.?|appendix|reference|references|index|preface|foreword)\b|\uBD80\uB85D|\uCC38\uACE0\uBB38\uD5CC|\uCC3E\uC544\uBCF4\uAE30|\uC11C\uBB38/i;
+  /\b(?:section|sec\.?|appendix|appendices|reference|references|bibliography|index|preface|foreword|acknowledgements|abstract|summary|glossary)\b|\uBD80\uB85D|\uCC38\uACE0\uBB38\uD5CC|\uCC3E\uC544\uBCF4\uAE30|\uC11C\uBB38|\uC5D0\uD50C\uB9AC\uC2A4|\uC778\uB371\uC2A4|\uC5B4\uB514\uC11C|\uC57D\uC5B4|\uC57D\uC5B4\uB4E4|\uC57D\uC5B4\uC0AC\uC804|\uC57D\uC5B4\uC0AC\uC804\uB4E4/i;
 
 function sanitizeTocTitle(raw) {
   return String(raw || "")
@@ -412,8 +416,12 @@ async function extractPageLines(page) {
   return lines;
 }
 
-const TOC_PAGE_NUMBER_RE = /(\d{1,4})\s*$/;
+// 확장된 페이지 번호 패턴 (다양한 형식 지원)
+const TOC_PAGE_NUMBER_RE = /(?:p\.?\s*|pp\.?\s*|page\s*|쪽\s*|\u30DA\u30FC\u30B8\s*)?(\d{1,4})\s*$/i;
 const TOC_LEADER_RE = /[.\u2024\u2025\u2026\u00b7\u30fb\u2022_-]{2,}/;
+
+// 목차 항목 패턴 (점선, 공백, 탭 등 다양한 구분자)
+const TOC_ITEM_SEPARATOR_RE = /[.\u2024\u2025\u2026\u00b7\u30fb\u2022_-]{2,}|\s{3,}|\t+/;
 
 function normalizeParsedTocTitle(rawTitle) {
   return sanitizeTocTitle(
@@ -465,13 +473,30 @@ function countTocKeywordHits(text) {
 
   let hits = 0;
   const lower = raw.toLowerCase();
-  if (lower.includes("table of contents")) hits += 2;
-
+  
+  // 영어 목차 키워드
+  if (lower.includes("table of contents")) hits += 3;
+  if (lower.includes("contents")) hits += 2;
+  if (lower.includes("toc")) hits += 1;
+  
   const englishMatches = lower.match(/\bcontents?\b/g);
-  if (englishMatches) hits += Math.min(2, englishMatches.length);
+  if (englishMatches) hits += Math.min(3, englishMatches.length);
 
+  // 한국어 목차 키워드
   const koreanMatches = raw.match(/\uBAA9\uCC28|\uCC28\uB840/g);
-  if (koreanMatches) hits += Math.min(3, koreanMatches.length * 2);
+  if (koreanMatches) hits += Math.min(4, koreanMatches.length * 2);
+
+  // 일본어 목차 키워드
+  const japaneseMatches = raw.match(/\u76EE\u6B21|\u76EE\u9304|\u518A\u9996/g);
+  if (japaneseMatches) hits += Math.min(3, japaneseMatches.length * 2);
+
+  // 중국어 목차 키워드
+  const chineseMatches = raw.match(/\u76EE\u5F55|\u518A\u9996|\u7B2C\d+\u7AE0/g);
+  if (chineseMatches) hits += Math.min(3, chineseMatches.length * 2);
+
+  // 챕터/파트 관련 키워드
+  const chapterKeywords = lower.match(/\b(chapter|chap|ch|part|unit|section|sec)\b\.?\s*\d+/g);
+  if (chapterKeywords) hits += Math.min(3, chapterKeywords.length);
 
   return hits;
 }
@@ -483,6 +508,7 @@ function analyzeTocPage(lines, pageText) {
   let parsedLineCount = 0;
   let chapterLikeCount = 0;
   let leaderLineCount = 0;
+  let totalConfidence = 0;
   const parsedLooseEntries = [];
 
   for (const line of safeLines) {
@@ -493,29 +519,71 @@ function analyzeTocPage(lines, pageText) {
     parsedLineCount += 1;
     if (parsedLoose.chapterLike) chapterLikeCount += 1;
     if (parsedLoose.hasLeaderDots) leaderLineCount += 1;
+    totalConfidence += parsedLoose.confidence || 0;
   }
 
+  // 향상된 점수 계산 시스템
   let score = 0;
-  score += Math.min(6, keywordHits);
-  score += Math.min(4, headerLineHits * 2);
-  score += Math.min(5, parsedLineCount);
-  score += Math.min(4, chapterLikeCount);
-  if (leaderLineCount >= 2) score += 2;
+  
+  // 키워드 점수 (최대 8점)
+  score += Math.min(8, keywordHits * 1.5);
+  
+  // 헤더 라인 점수 (최대 6점)
+  score += Math.min(6, headerLineHits * 3);
+  
+  // 파싱된 라인 수 점수 (최대 10점)
+  if (parsedLineCount > 0) {
+    score += Math.min(10, parsedLineCount * 2);
+  }
+  
+  // 챕터 라이크 항목 점수 (최대 8점)
+  score += Math.min(8, chapterLikeCount * 2);
+  
+  // 리더 도트 점수 (최대 4점)
+  if (leaderLineCount >= 2) {
+    score += Math.min(4, leaderLineCount);
+  }
+  
+  // 평균 신뢰도 점수 (최대 5점)
+  if (parsedLineCount > 0) {
+    const avgConfidence = totalConfidence / parsedLineCount;
+    score += Math.min(5, avgConfidence * 1.5);
+  }
+  
+  // 페이지 번호 패턴 점수 (연속적인 페이지 번호 감지)
+  const pageNumbers = parsedLooseEntries.map(e => e.pageStart).sort((a, b) => a - b);
+  let sequentialScore = 0;
+  if (pageNumbers.length >= 3) {
+    let sequentialCount = 1;
+    for (let i = 1; i < pageNumbers.length; i++) {
+      if (pageNumbers[i] === pageNumbers[i-1] + 1 || 
+          pageNumbers[i] > pageNumbers[i-1]) {
+        sequentialCount++;
+      }
+    }
+    if (sequentialCount >= 3) {
+      sequentialScore = Math.min(4, (sequentialCount / pageNumbers.length) * 4);
+    }
+  }
+  score += sequentialScore;
 
+  // 목차 페이지 여부 결정 (더 정교한 휴리스틱)
   const looksTocPage =
-    score >= 7 ||
-    (keywordHits >= 2 && parsedLineCount >= 2) ||
-    chapterLikeCount >= 3 ||
-    leaderLineCount >= 3;
+    score >= 12 ||  // 총점 기준
+    (keywordHits >= 3 && parsedLineCount >= 3) ||  // 키워드와 항목 수 기준
+    (chapterLikeCount >= 4 && parsedLineCount >= 4) ||  // 챕터 항목 기준
+    (leaderLineCount >= 4 && parsedLineCount >= 3) ||  // 리더 도트 기준
+    (keywordHits >= 2 && chapterLikeCount >= 3 && parsedLineCount >= 3);  // 복합 기준
 
   return {
     signals: {
-      score,
+      score: Math.round(score * 10) / 10,  // 소수점 첫째 자리까지
       keywordHits,
       headerLineHits,
       parsedLineCount,
       chapterLikeCount,
       leaderLineCount,
+      sequentialScore: Math.round(sequentialScore * 10) / 10,
       looksTocPage,
     },
     parsedLooseEntries,
