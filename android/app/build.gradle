@@ -1,11 +1,5 @@
 apply plugin: 'com.android.application'
 
-def admobAppId = (
-    project.findProperty("ADMOB_APP_ID")
-        ?: System.getenv("ADMOB_APP_ID")
-        ?: "ca-app-pub-3940256099942544~3347511713"
-).toString()
-
 android {
     namespace "com.tjwls.examstudyai"
     compileSdk rootProject.ext.compileSdkVersion
@@ -13,10 +7,9 @@ android {
         applicationId "com.tjwls.examstudyai"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.0.1"
+        versionCode 1
+        versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        resValue "string", "admob_app_id", admobAppId
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -25,8 +18,7 @@ android {
     }
     buildTypes {
         release {
-            minifyEnabled true
-            shrinkResources true
+            minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }

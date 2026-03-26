@@ -2313,17 +2313,16 @@ function App() {
       const artifactsPromise = loadArtifacts(nextDocId);
 
       try {
-        const [textResult, thumb, loaded] = await Promise.all([
-          extractDocumentText(targetFile, {
-            pageLimit: 30,
-            maxLength: 12000,
-            useOcr: isPdfDocumentKind(targetFileKind),
-            ocrLang: "kor+eng",
-            onOcrProgress: (message) => setStatus(message),
-          }),
-          generateDocumentThumbnail(targetFile),
-          artifactsPromise,
-        ]);
+      const [textResult, thumb, loaded] = await Promise.all([
+        extractDocumentText(targetFile, {
+          pageLimit: 30,
+          maxLength: 12000,
+          useOcr: false, // PDF 미리보기 로딩 시에는 OCR 사용 안함
+          ocrLang: "kor+eng",
+        }),
+        generateDocumentThumbnail(targetFile),
+        artifactsPromise,
+      ]);
         const { text, pagesUsed, totalPages } = textResult;
         setExtractedText(text);
         setPreviewText(text);
