@@ -6,6 +6,96 @@ Zeusian.ai is an AI-powered PDF study assistant built with React + Vite. The app
 
 Use `Zeusian.ai` as the primary product name in UI copy, SEO metadata, and documentation. Keep `Zeusian` only where a legacy identifier or an external integration explicitly requires it.
 
+## Planned Code Improvements (App.jsx Refactoring)
+
+Based on recent code review of `src/App.jsx`, the following improvements are planned to enhance maintainability, performance, and code quality:
+
+### 1. Code Structure Optimization
+
+**Problem Identified:**
+- App.jsx is a massive single file (~2,500+ lines) containing all application logic
+- 30+ utility functions defined outside the component
+- Complex state management with 50+ useState hooks and 10+ useRef hooks
+
+**Improvement Plan:**
+
+**Priority 1: Utility Function Separation**
+- Move `buildStoragePathCandidates` ~ `writePartialSummaryBundleToHighlights` functions to separate files
+- Group related functions by feature:
+  - `src/utils/tutorHelpers.js` (already exists)
+  - `src/utils/chapterRangeHelpers.js`
+  - `src/utils/fileHelpers.js`
+  - `src/utils/summaryHelpers.js`
+
+**Priority 2: Custom Hook Extraction**
+- File upload and management logic → `useFileManagement`
+- Quiz state management → `useQuizState`
+- Tutor chat → `useTutorChat`
+- Premium profile → `usePremiumProfile`
+
+**Priority 3: Component Splitting**
+- Auth-related UI and logic → `AuthContainer` component
+- File list and selection logic → `FileManager` component
+- Settings and profile management → `ProfileManager` component
+
+### 2. Performance Optimization
+
+**Performance Issues:**
+- Excessive use of `useMemo`/`useCallback` may cause performance degradation
+- Potential unnecessary re-renders
+- Memory leak risks from improperly cleaned up refs and event listeners
+
+**Optimization Strategies:**
+1. **Remove unnecessary useMemo/useCallback**
+   - Profile with React DevTools to identify actual performance bottlenecks
+   - Keep only those that provide measurable performance benefits
+
+2. **Event listener optimization**
+   - Remove duplicate event listeners
+   - Ensure proper cleanup in useEffect dependencies
+
+3. **Memory leak prevention**
+   - Proper initialization and cleanup of ref objects
+   - Implement async task cancellation mechanisms
+
+### 3. Code Quality Enhancements
+
+**Type Safety:**
+- Consider TypeScript migration for better type safety
+- Add PropTypes or JSDoc comments for critical functions
+
+**Testability:**
+- Extract pure functions for easier unit testing
+- Add comprehensive test coverage
+
+**Error Handling:**
+- Implement consistent error handling patterns
+- Add user-friendly error messages with recovery options
+
+### 4. Implementation Roadmap
+
+**Phase 1 (Immediate):**
+1. Create utility function files and move related functions
+2. Extract 2-3 most critical custom hooks
+3. Add basic TypeScript interfaces for core data structures
+
+**Phase 2 (Short-term):**
+1. Split App.jsx into 3-4 logical components
+2. Implement comprehensive error boundaries
+3. Add performance monitoring for critical paths
+
+**Phase 3 (Medium-term):**
+1. Consider lightweight state management (Zustand/Jotai)
+2. Optimize bundle splitting further
+3. Implement comprehensive testing suite
+
+### 5. Expected Benefits
+
+- **Maintainability**: Easier to locate and modify specific features
+- **Performance**: Reduced bundle size and optimized re-renders
+- **Developer Experience**: Better code organization and debugging
+- **Scalability**: Foundation for adding new features without bloating App.jsx
+
 ## Recent Changes
 
 Recent app changes that are already reflected in the current codebase:
@@ -393,145 +483,4 @@ Current phone-specific behavior is mainly defined for screens narrower than `640
   - Phone detail content uses normal page scrolling; tablet/desktop keep the inner panel scroll layout.
 
 - Summary UI:
-  - The default summary view is the paged card layout.
-  - `크게 보기` is intentionally shown only on phones and hidden on web/tablet.
-
-- PDF preview in APK / native runtime:
-  - Native builds use the PDF.js canvas renderer in `src/components/PdfPreview.jsx`.
-  - Phone navigation supports previous/next buttons, page jump, and swipe/wheel-assisted page movement.
-  - A render-request guard is applied so moving to the next page does not redraw the previous page over the new one.
-
-- Desktop / tablet expectations:
-  - Header and detail tabs follow the desktop/tablet layout.
-  - The current phone-specific styling should not be treated as the default web layout.
-
-Key files related to current phone behavior:
-
-- `src/index.css`
-- `src/components/FileUpload.jsx`
-- `src/components/Header.jsx`
-- `src/components/PdfPreview.jsx`
-- `src/components/SummaryCard.jsx`
-- `src/pages/DetailPage.jsx`
-
-## Auth Toggle
-
-Use `VITE_AUTH_ENABLED` to switch login/auth UI on or off.
-
-```bash
-# disable auth (default)
-VITE_AUTH_ENABLED=false
-
-# enable auth
-VITE_AUTH_ENABLED=true
-```
-
-- Team-shared default (committed to Git): change `AUTH_DEFAULT_ENABLED` in `src/config/auth.js`.
-- `VITE_AUTH_ENABLED` is read only from the build environment variable.
-- In this project, `.env` / `supabase.env` values for `VITE_AUTH_ENABLED` are intentionally ignored.
-
-### Vercel
-
-Set this in **Project Settings -> Environment Variables**:
-
-```bash
-VITE_AUTH_ENABLED=true
-```
-
-or
-
-```bash
-VITE_AUTH_ENABLED=false
-```
-
-Important:
-- `VITE_AUTH_ENABLED` is a **build-time** variable in Vite.
-- After changing it in Vercel, you must **redeploy** for the change to take effect.
-- Set it for the correct target (`Production` / `Preview` / `Development`) in Vercel.
-
-## Vercel Function Limit
-
-This project is kept compatible with the Vercel Hobby plan's **12 Serverless Functions per deployment** limit.
-
-- Only real HTTP entrypoints should live under `api/`.
-- Shared server logic must live under `lib/`, not `api/`.
-- Subscription endpoints are consolidated behind dynamic route files so the public URLs stay the same while the function count stays low.
-
-Current server entrypoints under `api/`:
-
-- `/api/kakaopay/ready`
-- `/api/kakaopay/approve`
-- `/api/kakaopay/subscription/[action]`
-- `/api/nicepayments/config`
-- `/api/nicepayments/confirm`
-- `/api/nicepayments/return`
-- `/api/nicepayments/subscription/[action]`
-- `/api/openai/v1/chat/completions`
-
-Notes:
-
-- `api/kakaopay/subscription/[action].js` handles `status`, `charge`, and `inactive`.
-- `api/nicepayments/subscription/[action].js` handles `prepare`, `return`, `status`, `charge`, and `inactive`.
-- If you add new server code, prefer extending an existing grouped route or adding shared code in `lib/` before creating a new file under `api/`.
-
-## Start Flow
-
-The app now uses different first-entry behavior for web and APK builds when auth is enabled.
-
-- Web:
-  - Opens the intro/start page first.
-  - Login opens only after the user presses the start/login action, or when `/?auth=1` is used.
-- Android APK (Capacitor):
-  - Opens the login screen first on app launch.
-  - The intro/start page is not shown before login.
-
-Current implementation notes:
-- Path-based promo pages (`/start`, `/intro`, `/landing`) still render the intro-only page on the web.
-- Native app login-first behavior is handled in `src/App.jsx`.
-
-## Tier Expiry (Pro/Premium)
-
-Paid tiers are now time-bound using `user_tiers.tier_expires_at`.
-
-1. Run SQL once in Supabase SQL Editor:
-
-```sql
--- file: database/user_tiers_expiry.sql
-```
-
-2. Configure server env vars (Vercel Project Settings -> Environment Variables):
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- `SUPABASE_USER_TIER_TABLE` (optional, default: `user_tiers`)
-
-3. App behavior:
-- `setUserTier({ userId, tier: "pro" | "premium" })` sets expiry to +1 month.
-- If the user already has the same paid tier and it is still active, the next payment extends from the current expiry (not from now).
-- `getUserTierStatus({ userId })` returns:
-  - `tier`
-  - `tierExpiresAt`
-  - `tierRemainingDays`
-- If expiry is passed, user is downgraded to `free` automatically on read.
-- Payment approval endpoints (`/api/kakaopay/approve`, `/api/nicepayments/confirm`) now update tier server-side after payment verification.
-
-4. Optional overrides:
-- `setUserTier({ ..., expiresAt })` to set an exact expiry timestamp.
-- `setUserTier({ ..., extendMonths })` to use a custom extension term.
-
-## KakaoPay Secret Key Setup
-
-Use **Secret key** from Supabase/Vercel-style server env, never in client code.
-
-1. KakaoPay Developers -> ??-> API ?ㅼ뿉??Admin/Secret key ?뺤씤
-2. Server env (Vercel Environment Variables) ?ㅼ젙:
-   - `KAKAOPAY_SECRET_KEY`
-   - `KAKAOPAY_CID`
-3. 諛고룷/?쒕쾭 ?ъ떆????寃곗젣 以鍮?API(`/api/kakaopay/ready`) ?몄텧 ?뺤씤
-
-Notes:
-- `VITE_` ?묐몢?щ줈 ?ｌ쑝硫?釉뚮씪?곗????몄텧?⑸땲?? 鍮꾨??ㅻ뒗 `VITE_` ?놁씠 ?쒕쾭 ?꾩슜?쇰줈 ?ｌ뼱???⑸땲??
-
-## PDF Page Controls (Native Only)
-
-- The custom Prev / Next / Move controls are shown only in native apps (Android/iOS, Capacitor).
-- On the web, custom controls are hidden and the browser's built-in PDF viewer behavior is used.
+  - The default summary view is the paged
