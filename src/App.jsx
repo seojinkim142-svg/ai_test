@@ -3835,11 +3835,12 @@ function App() {
           if (!item || typeof item !== "object") return null;
 
           const directPages = clampEvidencePagesToScope(item?.evidencePages, normalizedAllowed);
-          const nextPages = directPages.length ? directPages : normalizedAllowed;
+          if (!directPages.length) return null;
           return {
             ...item,
-            evidencePages: nextPages,
-            evidenceLabel: String(item?.evidenceLabel || "").trim() || `p.${nextPages.join(", ")}`,
+            evidencePages: directPages,
+            evidenceLabel:
+              String(item?.evidenceLabel || "").trim() || `p.${directPages.join(", ")}`,
           };
         })
         .filter(Boolean);
