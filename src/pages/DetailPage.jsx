@@ -144,6 +144,7 @@ export default function DetailPage({
   splitStyle,
   pdfUrl,
   file,
+  pendingDocumentOpen,
   pageInfo,
   currentPage,
   handlePageChange,
@@ -409,6 +410,10 @@ export default function DetailPage({
         : -1,
     [activeInstructorEmphasis, normalizedSavedInstructorEmphases]
   );
+  const pendingDocumentId = String(pendingDocumentOpen?.id || "").trim();
+  const isPendingDocumentOpen = Boolean(pendingDocumentId);
+  const pendingDocumentName =
+    String(pendingDocumentOpen?.name || file?.name || "문서").trim() || "문서";
   const handleRequestSummary = useCallback(
     () => requestSummary({ force: true, replaceExisting: true }),
     [requestSummary]
@@ -486,6 +491,64 @@ export default function DetailPage({
     if (!isSavedPartialSummaryOpen) return;
     partialSummaryListRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [isSavedPartialSummaryOpen]);
+
+  if (isPendingDocumentOpen) {
+    return (
+      <section
+        ref={detailContainerRef}
+        className="flex flex-col gap-4 lg:h-[clamp(70vh,calc(100vh-120px),90vh)] lg:flex-row lg:items-stretch lg:gap-0 lg:overflow-hidden"
+      >
+        <div
+          className="flex flex-col gap-3 lg:h-full lg:flex-[0_0_var(--split-basis)] lg:overflow-y-auto"
+          style={splitStyle}
+        >
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] px-4 py-3 shadow-lg shadow-black/20 lg:hidden">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-300/75">
+                  Document
+                </p>
+                <p className="truncate text-sm font-semibold text-white">{pendingDocumentName}</p>
+              </div>
+              <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">
+                준비 중
+              </span>
+            </div>
+          </div>
+
+          <div className="flex h-[58svh] min-h-[24rem] flex-1 items-center justify-center rounded-3xl border border-white/10 bg-slate-950/70 px-6 text-center shadow-2xl shadow-black/40 sm:min-h-[72vh] lg:h-full lg:min-h-0">
+            <div className="max-w-sm">
+              <div className="mx-auto mb-4 h-12 w-12 animate-pulse rounded-2xl border border-emerald-300/20 bg-emerald-400/10" />
+              <p className="text-base font-semibold text-white">{pendingDocumentName}</p>
+              <p className="mt-2 text-sm text-slate-300">문서를 여는 중입니다.</p>
+              <p className="mt-2 text-xs text-slate-400">
+                원격 저장소에서 파일을 불러오고 미리보기를 준비하고 있습니다.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="hidden w-2 items-stretch justify-center lg:flex">
+          <div className="h-full w-1 rounded-full bg-white/10" />
+        </div>
+
+        <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
+          <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-5 shadow-lg shadow-black/30">
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300/75">
+              Opening
+            </p>
+            <p className="mt-3 text-lg font-semibold text-white">{pendingDocumentName}</p>
+            <p className="mt-2 text-sm text-slate-300">
+              파일 준비가 끝나면 요약, 퀴즈, 오답노트 화면이 바로 표시됩니다.
+            </p>
+            <div className="mt-4 rounded-2xl border border-emerald-300/15 bg-emerald-400/5 px-4 py-3 text-sm text-emerald-100">
+              잠시만 기다려 주세요. 첫 진입에서는 원격 저장소 다운로드 때문에 시간이 조금 걸릴 수 있습니다.
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
 
 
   return (

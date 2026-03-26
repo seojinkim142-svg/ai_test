@@ -197,6 +197,13 @@ Recent app changes that are already reflected in the current codebase:
 - 퀴즈, OX, 모의고사 생성 시 AI 제공 증거 페이지를 선택된 챕터 범위로 제한
 - 챕터 선택 생성이 태그된 챕터 페이지와 폴백 전체 문서 컨텍스트를 혼합하지 않음
 
+### Latest PDF Opening Behavior
+
+- Clicking a PDF now enters the detail screen immediately.
+- An opening placeholder is shown first while the app prepares the document preview and extracted text.
+- The placeholder stays visible during the initial open flow instead of appearing only briefly after loading has already started.
+- Preview-time OCR remains disabled. OCR is reserved for flows that explicitly need it, such as page-range summaries or tutor features.
+
 ## Modularization And Deployment Notes
 
 This project is modularized with Vercel deployment constraints in mind.
