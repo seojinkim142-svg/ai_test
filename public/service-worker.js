@@ -98,6 +98,11 @@ self.addEventListener('fetch', (event) => {
   const isNavigationRequest = event.request.mode === 'navigate';
   const acceptsHtml = event.request.headers.get('Accept')?.includes('text/html');
 
+  if (event.request.method !== 'GET') {
+    event.respondWith(fetch(event.request));
+    return;
+  }
+
   if (isNavigationRequest || acceptsHtml) {
     event.respondWith(networkFirstStrategy(event.request));
     return;
@@ -137,7 +142,7 @@ async function networkFirstStrategy(request) {
     }
     
     return networkResponse;
-  } catch (error) {
+  } catch {
     console.log('[Service Worker] 네트워크 실패, 캐시에서 응답:', request.url);
     
     // 네트워크 실패 시 캐시에서 응답
@@ -173,7 +178,7 @@ async function cacheFirstStrategy(request) {
     }
     
     return networkResponse;
-  } catch (error) {
+  } catch {
     console.log('[Service Worker] 네트워크 실패:', request.url);
     return offlineResponse(request);
   }
@@ -201,7 +206,7 @@ async function cacheThenNetworkStrategy(request) {
     }
     
     return networkResponse;
-  } catch (error) {
+  } catch {
     console.log('[Service Worker] 네트워크 실패:', request.url);
     return offlineResponse(request);
   }
