@@ -3,14 +3,13 @@
  * 오프라인 지원 및 캐싱 강화
  */
 
-const CACHE_NAME = 'exam-study-ai-v1';
-const STATIC_CACHE_NAME = 'exam-study-ai-static-v1';
-const DYNAMIC_CACHE_NAME = 'exam-study-ai-dynamic-v1';
+const CACHE_NAME = 'exam-study-ai-v2';
+const STATIC_CACHE_NAME = 'exam-study-ai-static-v2';
+const DYNAMIC_CACHE_NAME = 'exam-study-ai-dynamic-v2';
 
 // 캐시할 정적 자원
 const STATIC_ASSETS = [
   '/',
-  '/index.html',
   '/manifest.webmanifest',
   '/pwa-192.png',
   '/pwa-512.png',
@@ -96,6 +95,13 @@ self.addEventListener('activate', (event) => {
 // 네트워크 요청 가로채기
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
+  const isNavigationRequest = event.request.mode === 'navigate';
+  const acceptsHtml = event.request.headers.get('Accept')?.includes('text/html');
+
+  if (isNavigationRequest || acceptsHtml) {
+    event.respondWith(networkFirstStrategy(event.request));
+    return;
+  }
   
   // 캐시 제외 경로 확인
   if (EXCLUDE_FROM_CACHE.some(path => url.pathname.startsWith(path))) {
