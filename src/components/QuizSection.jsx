@@ -9,6 +9,7 @@ function MultipleChoiceItem({
   selectedChoice,
   revealed,
   onSelect,
+  onDelete,
   onResolveEvidence,
   onJumpToEvidencePage,
 }) {
@@ -25,6 +26,17 @@ function MultipleChoiceItem({
         <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-100">
           객관식
         </span>
+        {typeof onDelete === "function" && (
+          <button
+            type="button"
+            onClick={() => onDelete(idx)}
+            className="ghost-button text-[11px] text-slate-200"
+            data-ghost-size="sm"
+            style={{ "--ghost-color": "148, 163, 184" }}
+          >
+            삭제
+          </button>
+        )}
       </div>
 
       <ul className="mt-3 space-y-2">
@@ -98,6 +110,7 @@ function ShortAnswer({
   result,
   onChange,
   onCheck,
+  onDelete,
   onResolveEvidence,
   onJumpToEvidencePage,
 }) {
@@ -116,6 +129,17 @@ function ShortAnswer({
         <span className="rounded-full bg-cyan-500/20 px-2 py-1 text-xs font-semibold text-cyan-100">
           주관식
         </span>
+        {typeof onDelete === "function" && (
+          <button
+            type="button"
+            onClick={() => onDelete(index)}
+            className="ghost-button text-[11px] text-slate-200"
+            data-ghost-size="sm"
+            style={{ "--ghost-color": "148, 163, 184" }}
+          >
+            삭제
+          </button>
+        )}
       </div>
 
       <div className="mt-3 flex flex-col gap-2">
@@ -275,6 +299,8 @@ function QuizSection({
   onSelectChoice,
   onShortAnswerChange,
   onShortAnswerCheck,
+  onDeleteMultipleChoice,
+  onDeleteShortAnswer,
   onOxSelect,
   onToggleOxExplanation,
   onResolveEvidence,
@@ -324,6 +350,7 @@ function QuizSection({
             selectedChoice={selectedChoices?.[idx]}
             revealed={revealedChoices?.[idx]}
             onSelect={onSelectChoice}
+            onDelete={onDeleteMultipleChoice}
             onResolveEvidence={onResolveEvidence}
             onJumpToEvidencePage={onJumpToEvidencePage}
           />
@@ -339,6 +366,7 @@ function QuizSection({
             result={shortAnswerResult?.[idx] || null}
             onChange={onShortAnswerChange}
             onCheck={onShortAnswerCheck}
+            onDelete={onDeleteShortAnswer}
             onResolveEvidence={onResolveEvidence}
             onJumpToEvidencePage={onJumpToEvidencePage}
           />

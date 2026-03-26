@@ -3503,7 +3503,20 @@ function App() {
       } = {}
     ) => {
       const fallbackText = String(baseText || "").trim();
-      const normalizedPages = toSortedUniquePages(candidatePages).slice(0, maxPages);
+      const allPages = toSortedUniquePages(candidatePages);
+      const normalizedPages =
+        allPages.length <= maxPages
+          ? allPages
+          : Array.from(
+              new Set(
+                Array.from({ length: maxPages }, (_, index) => {
+                  if (maxPages <= 1) return allPages[0];
+                  const ratio = index / (maxPages - 1);
+                  const mappedIndex = Math.round(ratio * (allPages.length - 1));
+                  return allPages[mappedIndex];
+                })
+              )
+            );
       if (!normalizedPages.length || !file || !isCurrentPdfDocument) {
         return fallbackText;
       }
@@ -4270,6 +4283,58 @@ function App() {
     setError("");
     await persistArtifacts({ quiz: null });
   };
+
+  const handleDeleteQuizItem = useCallback(
+    async (setId, section, questionIndex) => {
+      const normalizedSection = String(section || "").trim();
+      const normalizedIndex = Number.parseInt(questionIndex, 10);
+      if (!setId || !["multipleChoice", "shortAnswer"].includes(normalizedSection)) return;
+      if (!Number.isFinite(normalizedIndex) || normalizedIndex < 0) return;
+
+      let nextPersistedQuiz = null;
+      let deleted = false;
+
+      setQuizSets((prev) => {
+        const nextSets = (Array.isArray(prev) ? prev : [])
+          .map((set) => {
+            if (set.id !== setId) return set;
+
+            const questions = normalizeQuizPayload(set?.questions || {});
+            const sourceItems = Array.isArray(questions?.[normalizedSection])
+              ? questions[normalizedSection]
+              : [];
+            if (normalizedIndex >= sourceItems.length) {
+              return set;
+            }
+
+            deleted = true;
+            const nextQuestions = {
+              ...questions,
+              [normalizedSection]: sourceItems.filter((_, idx) => idx !== normalizedIndex),
+            };
+
+            return {
+              ...set,
+              questions: nextQuestions,
+            };
+          })
+          .filter((set) => {
+            const questions = normalizeQuizPayload(set?.questions || {});
+            return questions.multipleChoice.length > 0 || questions.shortAnswer.length > 0;
+          });
+
+        nextPersistedQuiz = nextSets.length > 0 ? normalizeQuizPayload(nextSets[0]?.questions || {}) : null;
+        return nextSets;
+      });
+
+      if (!deleted) return;
+
+      setStatus("퀴즈 문항을 삭제했습니다.");
+      setError("");
+      await persistArtifacts({ quiz: nextPersistedQuiz });
+    },
+    [persistArtifacts]
+  );
 
   const reindexOxStateMap = (value, removedIndex) =>
     Object.entries(value || {}).reduce((next, [key, entryValue]) => {
@@ -7397,6 +7462,7 @@ function App() {
     handleGenerateExamCram,
     handleCreateReviewNotesMockExam,
     deleteQuiz: handleDeleteQuiz,
+    deleteQuizItem: handleDeleteQuizItem,
     deleteOxQuestion: handleDeleteOxQuestion,
     isLoadingOx,
     requestOxQuiz,
