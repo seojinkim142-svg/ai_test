@@ -1,8 +1,42 @@
 apply plugin: 'com.android.application'
 
+def resolveBuildValue = { String key ->
+    def gradleValue = project.findProperty(key)
+    if (gradleValue != null && gradleValue.toString().trim()) {
+        return gradleValue.toString().trim()
+    }
+
+    def envValue = System.getenv(key)
+    if (envValue != null && envValue.trim()) {
+        return envValue.trim()
+    }
+
+    return null
+}
+
+def admobAppId = resolveBuildValue('ADMOB_APP_ID') ?: 'ca-app-pub-3940256099942544~3347511713'
+def sourceMainAssetsDir = file('src/main/assets')
+def stagedAssetRoot = new File(System.getProperty('java.io.tmpdir'), "examstudyai-android-assets/${project.name}")
+def stagedMainAssetsDir = new File(stagedAssetRoot, 'main')
+
+tasks.register('stageMainAssets', Copy) {
+    from(sourceMainAssetsDir)
+    into(stagedMainAssetsDir)
+
+    doFirst {
+        delete(stagedMainAssetsDir)
+        stagedMainAssetsDir.mkdirs()
+    }
+}
+
 android {
     namespace "com.tjwls.examstudyai"
     compileSdk rootProject.ext.compileSdkVersion
+    sourceSets {
+        main {
+            assets.srcDirs = [stagedMainAssetsDir.absolutePath]
+        }
+    }
     defaultConfig {
         applicationId "com.tjwls.examstudyai"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -15,6 +49,7 @@ android {
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
+        resValue "string", "admob_app_id", admobAppId
     }
     buildTypes {
         release {
@@ -43,6 +78,10 @@ dependencies {
 }
 
 apply from: 'capacitor.build.gradle'
+
+tasks.named('preBuild').configure {
+    dependsOn('stageMainAssets')
+}
 
 try {
     def servicesJSON = file('google-services.json')

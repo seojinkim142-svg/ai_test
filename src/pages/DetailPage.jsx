@@ -507,6 +507,27 @@ export default function DetailPage({
     [handleSelectInstructorEmphasis]
   );
 
+  const resizeHandle = (
+    <div className="hidden w-8 shrink-0 items-stretch justify-center px-1 lg:flex">
+      <button
+        type="button"
+        onPointerDown={handleDragStart}
+        className="group relative flex h-full w-full cursor-col-resize touch-none items-center justify-center border-0 bg-transparent p-0 outline-none"
+        role="separator"
+        aria-label="PDF와 패널 크기 조절"
+        aria-orientation="vertical"
+        title="PDF와 패널 크기 조절"
+      >
+        <span className="pointer-events-none h-full w-px rounded-full bg-white/12 transition group-hover:bg-emerald-300/35" />
+        <span className="pointer-events-none absolute left-1/2 top-1/2 flex h-20 w-5 -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-1 rounded-full border border-white/12 bg-slate-950/92 shadow-[0_14px_32px_rgba(2,6,23,0.45)] transition group-hover:border-emerald-300/35 group-hover:bg-slate-900/95">
+          <span className="h-1 w-1 rounded-full bg-slate-200/85" />
+          <span className="h-1 w-1 rounded-full bg-slate-200/85" />
+          <span className="h-1 w-1 rounded-full bg-slate-200/85" />
+        </span>
+      </button>
+    </div>
+  );
+
   useEffect(() => {
     const container = savedInstructorScrollRef.current;
     if (!container || normalizedSavedInstructorEmphases.length === 0) return;
@@ -561,9 +582,7 @@ export default function DetailPage({
           </div>
         </div>
 
-        <div className="hidden w-2 items-stretch justify-center lg:flex">
-          <div className="h-full w-1 rounded-full bg-white/10" />
-        </div>
+        {resizeHandle}
 
         <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
           <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-5 shadow-lg shadow-black/30">
@@ -602,16 +621,9 @@ export default function DetailPage({
         />
       </div>
 
-      <div className="hidden w-2 cursor-col-resize items-stretch justify-center lg:flex">
-        <div
-          className="h-full w-1 rounded-full bg-white/10 transition hover:bg-white/30"
-          onPointerDown={handleDragStart}
-          role="separator"
-          aria-label="Resize panel"
-        />
-      </div>
+      {resizeHandle}
 
-        <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
+      <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
         <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 sm:grid-cols-6 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
           {[
             { id: "summary", label: "\uC694\uC57D", type: "tab" },
