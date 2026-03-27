@@ -11,6 +11,7 @@ import FlashcardsPanel from "../components/FlashcardsPanel";
 import OxSection from "../components/OxSection";
 import PdfPreview from "../components/PdfPreview";
 import QuizSection from "../components/QuizSection";
+import ReviewNotesPanel from "../components/ReviewNotesPanel";
 import SummaryCard from "../components/SummaryCard";
 import { useQuizMixCarousel } from "../hooks/useQuizMixCarousel";
 import { LETTERS } from "../constants";
@@ -223,15 +224,40 @@ export default function DetailPage({
   requestQuestions,
   quizChapterSelectionInput,
   setQuizChapterSelectionInput,
+  quizMixInput,
+  setQuizMixInput,
   quizMix,
   setQuizMix,
+  quizMixError,
   quizSets,
   handleChoiceSelect,
   handleShortAnswerChange,
   handleShortAnswerCheck,
+  handleQuizOxSelect,
+  handleToggleQuizOxExplanation,
   regenerateQuiz,
   deleteQuiz,
   deleteQuizItem,
+  reviewNotes,
+  reviewNoteSections,
+  reviewNotesSectionSelectionInput,
+  setReviewNotesSectionSelectionInput,
+  reviewNotesSectionError,
+  examCramItems,
+  examCramPendingCount,
+  examCramSectionError,
+  examCramReferenceCounts,
+  examCramHasAnySource,
+  examCramContent,
+  examCramUpdatedAt,
+  examCramScopeLabel,
+  examCramStatus,
+  examCramError,
+  isGeneratingExamCram,
+  handleReviewNoteAttempt,
+  handleDeleteReviewNote,
+  handleGenerateExamCram,
+  handleCreateReviewNotesMockExam,
   isLoadingOx,
   requestOxQuiz,
   oxChapterSelectionInput,
@@ -239,6 +265,7 @@ export default function DetailPage({
   regenerateOxQuiz,
   oxItems,
   oxSelections,
+  handleOxSelect,
   setOxSelections,
   oxExplanationOpen,
   setOxExplanationOpen,
@@ -420,6 +447,12 @@ export default function DetailPage({
   );
 
   useEffect(() => {
+    if (panelTab === "ox") {
+      setPanelTab("quiz");
+    }
+  }, [panelTab, setPanelTab]);
+
+  useEffect(() => {
     const target = emphasisTextareaRef.current;
     if (!target) return;
     target.style.height = "auto";
@@ -583,7 +616,7 @@ export default function DetailPage({
           {[
             { id: "summary", label: "\uC694\uC57D", type: "tab" },
             { id: "quiz", label: "\uD034\uC988", type: "tab" },
-            { id: "ox", label: "O/X", type: "tab" },
+            { id: "reviewNotes", label: "\uC624\uB2F5\uB178\uD2B8", type: "tab" },
             { id: "mockExam", label: "\uBAA8\uC758\uACE0\uC0AC", type: "tab" },
             { id: "flashcards", label: "\uCE74\uB4DC", type: "tab" },
             { id: "tutor", label: "AI 튜터", type: "tab" },
@@ -1308,6 +1341,27 @@ export default function DetailPage({
 
               <div className="rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-300">문항 비율</p>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    type="text"
+                    value={quizMixInput}
+                    onChange={(event) => setQuizMixInput(event.target.value)}
+                    disabled={isLoadingQuiz || isLoadingText}
+                    placeholder="객관식-주관식-OX 예: 4-3-1"
+                    className={`w-full rounded-xl border bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition ${
+                      quizMixError
+                        ? "border-red-400/45 focus:border-red-300/60"
+                        : "border-white/15 focus:border-emerald-300/60"
+                    }`}
+                  />
+                </div>
+                <p className={`mt-2 text-xs ${quizMixError ? "text-red-200" : "text-slate-400"}`}>
+                  {quizMixError || "형식: 객관식-주관식-OX (예: 4-3-1)"}
+                </p>
+              </div>
+
+              <div className="hidden rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-300">문항 비율</p>
                 <div
                   ref={quizMixScrollRef}
                   onScroll={handleQuizMixScroll}
@@ -1350,9 +1404,15 @@ export default function DetailPage({
                       revealedChoices={set.revealedChoices}
                       shortAnswerInput={set.shortAnswerInput}
                       shortAnswerResult={set.shortAnswerResult}
+                      oxSelections={set.oxSelections}
+                      oxExplanationOpen={set.oxExplanationOpen}
                       onSelectChoice={(qIdx, choiceIdx) => handleChoiceSelect(set.id, qIdx, choiceIdx)}
                       onShortAnswerChange={(idx, val) => handleShortAnswerChange(set.id, idx, val)}
                       onShortAnswerCheck={(idx) => handleShortAnswerCheck(set.id, idx)}
+                      onOxSelect={(qIdx, choice) => handleQuizOxSelect(set.id, qIdx, choice)}
+                      onToggleOxExplanation={(qIdx) =>
+                        handleToggleQuizOxExplanation(set.id, qIdx)
+                      }
                         onDeleteMultipleChoice={(qIdx) => deleteQuizItem?.(set.id, "multipleChoice", qIdx)}
                         onDeleteShortAnswer={(qIdx) => deleteQuizItem?.(set.id, "shortAnswer", qIdx)}
                     />
@@ -1360,7 +1420,126 @@ export default function DetailPage({
                 </div>
               )}
 
-              <div className="mt-4 flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
+              <p className="mt-4 text-xs text-slate-300">
+                현재 구성: 객관식 {quizMix?.multipleChoice ?? 0} / 주관식 {quizMix?.shortAnswer ?? 0} / OX{" "}
+                {quizMix?.ox ?? 0}
+                {` (총 ${(Number(quizMix?.multipleChoice) || 0) + (Number(quizMix?.shortAnswer) || 0) + (Number(quizMix?.ox) || 0)}문항)`}
+              </p>
+
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={requestQuestions}
+                  disabled={
+                    isLoadingQuiz ||
+                    isLoadingText ||
+                    Boolean(quizMixError) ||
+                    ((Number(quizMix?.multipleChoice) || 0) +
+                      (Number(quizMix?.shortAnswer) || 0) +
+                      (Number(quizMix?.ox) || 0) <=
+                      0) ||
+                    (isFreeTier && quizSets.length > 0)
+                  }
+                  title={
+                    isFreeTier && quizSets.length > 0
+                      ? "무료 티어에서는 퀴즈 세트를 1개만 생성할 수 없습니다."
+                      : quizMixError || undefined
+                  }
+                  className="ghost-button w-full text-sm text-emerald-100"
+                  data-ghost-size="xl"
+                  style={{ "--ghost-color": "16, 185, 129" }}
+                >
+                  {isLoadingQuiz
+                    ? "퀴즈 생성 중..."
+                    : `퀴즈 바로 생성하기 (총 ${(Number(quizMix?.multipleChoice) || 0) +
+                        (Number(quizMix?.shortAnswer) || 0) +
+                        (Number(quizMix?.ox) || 0)}문항)`}
+                </button>
+                <button
+                  type="button"
+                  onClick={deleteQuiz}
+                  disabled={isLoadingQuiz || quizSets.length === 0}
+                  className="ghost-button w-full text-sm text-slate-200"
+                  data-ghost-size="xl"
+                  style={{ "--ghost-color": "148, 163, 184" }}
+                >
+                  퀴즈 삭제
+                </button>
+              </div>
+
+              <div className="hidden mt-4 space-y-4 rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-300">O/X</p>
+                  <p className="mt-1 text-sm text-slate-300">퀴즈 안에서 바로 O/X도 같이 풀 수 있습니다.</p>
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-slate-950/40 p-3 text-sm text-slate-200">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <input
+                      type="text"
+                      value={oxChapterSelectionInput}
+                      onChange={(event) =>
+                        setOxChapterSelectionInput(
+                          normalizeChapterSelectionInput(event.target.value)
+                        )
+                      }
+                      placeholder="梨뺥꽣 踰붿쐞 (?? 1-3,5)"
+                      className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => requestOxQuiz({ auto: false })}
+                      disabled={isLoadingOx || isLoadingText}
+                      className="ghost-button text-xs text-emerald-100"
+                      data-ghost-size="sm"
+                      style={{ "--ghost-color": "52, 211, 153" }}
+                    >
+                      ?뺤씤
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => requestOxQuiz({ auto: false })}
+                    disabled={isLoadingOx || isLoadingText}
+                    className="ghost-button w-full text-sm text-emerald-100"
+                    data-ghost-size="xl"
+                    style={{ "--ghost-color": "16, 185, 129" }}
+                  >
+                    {isLoadingOx ? "O/X ?앹꽦 以?.." : "O/X ?댁쫰 ?앹꽦"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={regenerateOxQuiz}
+                    disabled={isLoadingOx || isLoadingText}
+                    className="ghost-button w-full text-sm text-emerald-100"
+                    data-ghost-size="xl"
+                    style={{ "--ghost-color": "16, 185, 129" }}
+                  >
+                    {isLoadingOx ? "O/X ?ъ깮??以?.." : "O/X ?댁쫰 ?ъ깮????뼱?곌린)"}
+                  </button>
+                </div>
+
+                {oxItems && oxItems.length > 0 && (
+                  <OxSection
+                    title="O/X ?댁쫰"
+                    items={oxItems}
+                    selections={oxSelections}
+                    explanationsOpen={oxExplanationOpen}
+                    onSelect={handleOxSelect}
+                    onToggleExplanation={(qIdx) =>
+                      setOxExplanationOpen((prev) => ({
+                        ...prev,
+                        [qIdx]: !prev?.[qIdx],
+                      }))
+                    }
+                  />
+                )}
+              </div>
+
+              <div className="hidden mt-4 flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
                 <button
                   type="button"
                   onClick={requestQuestions}
@@ -1408,7 +1587,7 @@ export default function DetailPage({
             </>
           )}
 
-{panelTab === "ox" && (
+{false && panelTab === "ox" && (
             <div className="space-y-4">
               <ActionsPanel
                 title="O/X 퀴즈 생성"
@@ -1495,6 +1674,32 @@ export default function DetailPage({
                 />
               )}
             </div>
+          )}
+
+          {panelTab === "reviewNotes" && (
+            <ReviewNotesPanel
+              items={reviewNotes}
+              availableSections={reviewNoteSections}
+              sectionSelectionInput={reviewNotesSectionSelectionInput}
+              onSectionSelectionChange={setReviewNotesSectionSelectionInput}
+              sectionSelectionError={reviewNotesSectionError}
+              examCramItems={examCramItems}
+              examCramPendingCount={examCramPendingCount}
+              examCramSectionError={examCramSectionError}
+              examCramReferenceCounts={examCramReferenceCounts}
+              examCramHasAnySource={examCramHasAnySource}
+              examCramContent={examCramContent}
+              examCramUpdatedAt={examCramUpdatedAt}
+              examCramScopeLabel={examCramScopeLabel}
+              examCramStatus={examCramStatus}
+              examCramError={examCramError}
+              onSubmitAttempt={handleReviewNoteAttempt}
+              onDelete={handleDeleteReviewNote}
+              onGenerateExamCram={handleGenerateExamCram}
+              onCreateMockExam={handleCreateReviewNotesMockExam}
+              isCreatingMockExam={isGeneratingMockExam}
+              isGeneratingExamCram={isGeneratingExamCram}
+            />
           )}
 
           {panelTab === "flashcards" && (
