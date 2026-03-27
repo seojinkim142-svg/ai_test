@@ -1,3 +1,4 @@
+import { Capacitor } from "@capacitor/core";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import "./theme/light.css";
@@ -5,6 +6,7 @@ import App from "./App.jsx";
 import PromoPage from "./pages/PromoPage.jsx";
 import LegalPage from "./pages/LegalPage.jsx";
 
+const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
 const path = typeof window !== "undefined" ? window.location.pathname.toLowerCase() : "/";
 const normalizedPath = path.replace(/\/+$/, "") || "/";
 const promoOnlyPaths = new Set(["/start", "/intro", "/landing"]);
@@ -16,8 +18,6 @@ const legalPages = {
 };
 
 const rootElement = legalPages[normalizedPath] ?? (promoOnlyPaths.has(normalizedPath) ? <PromoPage /> : <App />);
-
-createRoot(document.getElementById("root")).render(rootElement);
 
 if (typeof window !== "undefined") {
   window.addEventListener("vite:preloadError", (event) => {
@@ -36,7 +36,9 @@ if (typeof window !== "undefined") {
   });
 }
 
-if (import.meta.env.PROD && typeof window !== "undefined" && "serviceWorker" in navigator) {
+createRoot(document.getElementById("root")).render(rootElement);
+
+if (!IS_NATIVE_PLATFORM && import.meta.env.PROD && typeof window !== "undefined" && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker
       .register("/service-worker.js")
