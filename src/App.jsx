@@ -91,11 +91,25 @@ import {
   pushUniqueByQuestionKey,
   pickRandomUniqueByQuestionKey,
 } from "./utils/questionDedupe";
+import {
+  EXAM_CRAM_PREVIEW_LIMIT,
+  REVIEW_NOTE_MOCK_EXAM_LIMIT,
+  collectExamCramQuizItems,
+  createQuizSetState,
+  mergeQuizWithLegacyOx,
+  sortReviewNotesByRecentWrong,
+} from "./utils/appFeatureHelpers";
+import {
+  normalizeReviewNoteEntries,
+  readExamCramFromHighlights,
+  readReviewNotesFromHighlights,
+} from "./utils/studyArtifacts";
 
 const AuthPanel = lazy(() => import("./components/AuthPanel"));
 const Header = lazy(() => import("./components/Header"));
 const LoginBackground = lazy(() => import("./components/LoginBackground"));
 const PaymentPage = lazy(() => import("./components/PaymentPage"));
+const SettingsDialog = lazy(() => import("./components/SettingsDialog"));
 const DetailPage = lazy(() => import("./pages/DetailPage"));
 const PremiumProfilePicker = lazy(() => import("./components/PremiumProfilePicker"));
 
@@ -720,6 +734,105 @@ function writePartialSummaryBundleToHighlights(
   return Object.keys(base).length > 0 ? base : null;
 }
 
+function writeReviewNotesBundleToHighlights(highlightsValue, reviewNotes) {
+  const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
+  if (!isPlainObject(highlightsValue) && highlightsValue != null) {
+    base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
+  }
+
+  const normalizedNotes = normalizeReviewNoteEntries(reviewNotes);
+  if (normalizedNotes.length > 0) {
+    base.__review_notes_v1 = normalizedNotes;
+  } else {
+    delete base.__review_notes_v1;
+  }
+
+  return Object.keys(base).length > 0 ? base : null;
+}
+
+function writeExamCramBundleToHighlights(
+  highlightsValue,
+  { content = "", scopeLabel = "", updatedAt = new Date().toISOString() } = {}
+) {
+  const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
+  if (!isPlainObject(highlightsValue) && highlightsValue != null) {
+    base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
+  }
+
+  const normalizedContent = String(content || "").trim();
+  if (normalizedContent) {
+    base.__exam_cram_v1 = {
+      content: normalizedContent,
+      scopeLabel: String(scopeLabel || "").trim(),
+      updatedAt,
+    };
+  } else {
+    delete base.__exam_cram_v1;
+  }
+
+  return Object.keys(base).length > 0 ? base : null;
+}
+
+function normalizeQuestionKey(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 220);
+}
+
+const DEFAULT_QUIZ_MIX = Object.freeze({
+  multipleChoice: 4,
+  shortAnswer: 2,
+  ox: 1,
+});
+
+const DEFAULT_QUIZ_MIX_INPUT = `${DEFAULT_QUIZ_MIX.multipleChoice}-${DEFAULT_QUIZ_MIX.shortAnswer}-${DEFAULT_QUIZ_MIX.ox}`;
+
+function parseQuizMixInput(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return {
+      mix: null,
+      total: 0,
+      error: "문항 비율을 입력해주세요. 형식: 객관식-주관식-OX (예: 4-3-1)",
+    };
+  }
+
+  const parts = raw
+    .split(/[^0-9]+/)
+    .filter(Boolean)
+    .map((part) => Number.parseInt(part, 10));
+
+  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
+    return {
+      mix: null,
+      total: 0,
+      error: "문항 비율은 객관식-주관식-OX 형식으로 입력해주세요. 예: 4-3-1",
+    };
+  }
+
+  const [multipleChoice, shortAnswer, ox] = parts;
+  const total = multipleChoice + shortAnswer + ox;
+  if (total <= 0) {
+    return {
+      mix: null,
+      total: 0,
+      error: "최소 1문항 이상 입력해주세요.",
+    };
+  }
+
+  return {
+    mix: {
+      multipleChoice,
+      shortAnswer,
+      ox,
+    },
+    total,
+    error: "",
+  };
+}
+
 function App() {
   const [file, setFile] = useState(null);
   const [extractedText, setExtractedText] = useState("");
@@ -735,7 +848,7 @@ function App() {
   const [theme, setTheme] = useState("dark");
   const [summary, setSummary] = useState("");
   const [quizSets, setQuizSets] = useState([]);
-  const [quizMix, setQuizMix] = useState({ multipleChoice: 4, shortAnswer: 1 });
+  const [quizMixInput, setQuizMixInput] = useState(DEFAULT_QUIZ_MIX_INPUT);
   const [oxItems, setOxItems] = useState(null);
   const [oxSelections, setOxSelections] = useState({});
   const [oxExplanationOpen, setOxExplanationOpen] = useState({});
@@ -749,6 +862,7 @@ function App() {
   const [isResizingSplit, setIsResizingSplit] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showGuestIntro, setShowGuestIntro] = useState(() => !AUTH_ENABLED);
   const [currentPage, setCurrentPage] = useState(1);
@@ -782,10 +896,18 @@ function App() {
   const [partialSummary, setPartialSummary] = useState("");
   const [partialSummaryRange, setPartialSummaryRange] = useState("");
   const [savedPartialSummaries, setSavedPartialSummaries] = useState([]);
+  const [reviewNotes, setReviewNotes] = useState([]);
   const [instructorEmphasisInput, setInstructorEmphasisInput] = useState("");
   const [savedInstructorEmphases, setSavedInstructorEmphases] = useState([]);
   const [activeInstructorEmphasisId, setActiveInstructorEmphasisId] = useState("");
   const [isSavedPartialSummaryOpen, setIsSavedPartialSummaryOpen] = useState(false);
+  const [reviewNotesChapterSelectionInput, setReviewNotesChapterSelectionInput] = useState("");
+  const [examCramContent, setExamCramContent] = useState("");
+  const [examCramUpdatedAt, setExamCramUpdatedAt] = useState("");
+  const [examCramScopeLabel, setExamCramScopeLabel] = useState("");
+  const [isGeneratingExamCram, setIsGeneratingExamCram] = useState(false);
+  const [examCramStatus, setExamCramStatus] = useState("");
+  const [examCramError, setExamCramError] = useState("");
   const [quizChapterSelectionInput, setQuizChapterSelectionInput] = useState("");
   const [oxChapterSelectionInput, setOxChapterSelectionInput] = useState("");
   const [flashcardChapterSelectionInput, setFlashcardChapterSelectionInput] = useState("");
@@ -816,6 +938,7 @@ function App() {
   const fileOpenRequestSeqRef = useRef(0);
   const detailContainerRef = useRef(null);
   const summaryRef = useRef(null);
+  const reviewNotesRef = useRef([]);
   const mockExamPrintRef = useRef(null);
   const mockExamMenuRef = useRef(null);
   const mockExamMenuButtonRef = useRef(null);
@@ -867,6 +990,14 @@ function App() {
   const safeFlashcardError = useMemo(
     () => sanitizeUiText(flashcardError, "플래시카드 처리 중 오류가 발생했습니다."),
     [flashcardError]
+  );
+  const safeExamCramStatus = useMemo(
+    () => sanitizeUiText(examCramStatus, "시험 직전 정리가 준비되었습니다."),
+    [examCramStatus]
+  );
+  const safeExamCramError = useMemo(
+    () => sanitizeUiText(examCramError, "시험 직전 정리 처리 중 오류가 발생했습니다."),
+    [examCramError]
   );
   const safeTutorError = useMemo(
     () => sanitizeUiText(tutorError, "튜터 응답 처리 중 오류가 발생했습니다."),
@@ -970,6 +1101,14 @@ function App() {
     setShowPayment(true);
   }, []);
 
+  const openSettings = useCallback(() => {
+    setShowSettings(true);
+  }, []);
+
+  const closeSettings = useCallback(() => {
+    setShowSettings(false);
+  }, []);
+
   const handleOpenFeedbackDialog = useCallback(() => {
     if (!user) {
       setStatus("\uD53C\uB4DC\uBC31\uC744 \uBCF4\uB0B4\uB824\uBA74 \uB85C\uADF8\uC778\uD574 \uC8FC\uC138\uC694.");
@@ -1061,10 +1200,18 @@ function App() {
     setPartialSummary("");
     setPartialSummaryRange("");
     setSavedPartialSummaries([]);
+    setReviewNotes([]);
+    reviewNotesRef.current = [];
     setInstructorEmphasisInput("");
     setSavedInstructorEmphases([]);
     setActiveInstructorEmphasisId("");
     setIsSavedPartialSummaryOpen(false);
+    setReviewNotesChapterSelectionInput("");
+    setExamCramContent("");
+    setExamCramUpdatedAt("");
+    setExamCramScopeLabel("");
+    setExamCramStatus("");
+    setExamCramError("");
     setQuizChapterSelectionInput("");
     setOxChapterSelectionInput("");
     setFlashcardChapterSelectionInput("");
@@ -1719,6 +1866,9 @@ function App() {
     () => (previewText.length > 700 ? `${previewText.slice(0, 700)}...` : previewText),
     [previewText]
   );
+  const parsedQuizMix = useMemo(() => parseQuizMixInput(quizMixInput), [quizMixInput]);
+  const quizMix = parsedQuizMix.mix;
+  const quizMixError = parsedQuizMix.error;
 
   const tutorNotice = useMemo(() => {
     if (!file || !selectedFileId) {
@@ -1948,6 +2098,14 @@ function App() {
     async (docId) => {
       if (!supabase || !user || !docId) {
         setArtifacts(null);
+        setReviewNotes([]);
+        reviewNotesRef.current = [];
+        setReviewNotesChapterSelectionInput("");
+        setExamCramContent("");
+        setExamCramUpdatedAt("");
+        setExamCramScopeLabel("");
+        setExamCramStatus("");
+        setExamCramError("");
         return null;
       }
       try {
@@ -1959,6 +2117,8 @@ function App() {
           highlights: data?.highlights_json || null,
         };
         const partialBundle = readPartialSummaryBundleFromHighlights(mapped.highlights);
+        const reviewNoteEntries = readReviewNotesFromHighlights(mapped.highlights);
+        const examCramBundle = readExamCramFromHighlights(mapped.highlights);
         const activeInstructorText = normalizeInstructorEmphasisInput(
           partialBundle.instructorEmphasisLibrary.find(
             (item) => item.id === partialBundle.activeInstructorEmphasisId
@@ -1968,24 +2128,25 @@ function App() {
         setPartialSummary(partialBundle.summary);
         setPartialSummaryRange(partialBundle.range);
         setSavedPartialSummaries(partialBundle.library);
+        setReviewNotes(reviewNoteEntries);
         setInstructorEmphasisInput(activeInstructorText);
         setSavedInstructorEmphases(partialBundle.instructorEmphasisLibrary);
         setActiveInstructorEmphasisId(partialBundle.activeInstructorEmphasisId);
         setIsSavedPartialSummaryOpen(false);
+        setReviewNotesChapterSelectionInput("");
+        setExamCramContent(examCramBundle.content);
+        setExamCramUpdatedAt(examCramBundle.updatedAt || "");
+        setExamCramScopeLabel(examCramBundle.scopeLabel);
+        setExamCramStatus("");
+        setExamCramError("");
+        reviewNotesRef.current = reviewNoteEntries;
         if (mapped.summary) {
           setSummary(mapped.summary);
           summaryRequestedRef.current = true;
         }
         if (mapped.quiz) {
-          const normalizedQuiz = normalizeQuizPayload(mapped.quiz);
-          const cachedSet = {
-            id: `quiz-cached-${docId}`,
-            questions: normalizedQuiz,
-            selectedChoices: {},
-            revealedChoices: {},
-            shortAnswerInput: {},
-            shortAnswerResult: {},
-          };
+          const normalizedQuiz = mergeQuizWithLegacyOx(mapped.quiz, mapped.ox);
+          const cachedSet = createQuizSetState(normalizedQuiz, `quiz-cached-${docId}`);
           setQuizSets([cachedSet]);
           quizAutoRequestedRef.current = true;
         }
@@ -2296,10 +2457,18 @@ function App() {
       setPartialSummary("");
       setPartialSummaryRange("");
       setSavedPartialSummaries([]);
+      setReviewNotes([]);
+      reviewNotesRef.current = [];
       setInstructorEmphasisInput("");
       setSavedInstructorEmphases([]);
       setActiveInstructorEmphasisId("");
       setIsSavedPartialSummaryOpen(false);
+      setReviewNotesChapterSelectionInput("");
+      setExamCramContent("");
+      setExamCramUpdatedAt("");
+      setExamCramScopeLabel("");
+      setExamCramStatus("");
+      setExamCramError("");
       setQuizChapterSelectionInput("");
       setOxChapterSelectionInput("");
       setFlashcardChapterSelectionInput("");
@@ -2626,10 +2795,18 @@ function App() {
     setPartialSummary("");
     setPartialSummaryRange("");
     setSavedPartialSummaries([]);
+    setReviewNotes([]);
+    reviewNotesRef.current = [];
     setInstructorEmphasisInput("");
     setSavedInstructorEmphases([]);
     setActiveInstructorEmphasisId("");
     setIsSavedPartialSummaryOpen(false);
+    setReviewNotesChapterSelectionInput("");
+    setExamCramContent("");
+    setExamCramUpdatedAt("");
+    setExamCramScopeLabel("");
+    setExamCramStatus("");
+    setExamCramError("");
     setQuizChapterSelectionInput("");
     setOxChapterSelectionInput("");
     setFlashcardChapterSelectionInput("");
@@ -2798,6 +2975,32 @@ function App() {
       persistArtifacts({ highlights: nextHighlights });
     },
     [activeInstructorEmphasisId, artifacts?.highlights, persistArtifacts, savedInstructorEmphases]
+  );
+
+  const persistReviewNotes = useCallback(
+    (updater) => {
+      const base = Array.isArray(reviewNotesRef.current) ? reviewNotesRef.current : [];
+      const nextRaw = typeof updater === "function" ? updater(base) : updater;
+      const next = normalizeReviewNoteEntries(nextRaw);
+      reviewNotesRef.current = next;
+      setReviewNotes(next);
+      const nextHighlights = writeReviewNotesBundleToHighlights(artifacts?.highlights, next);
+      persistArtifacts({ highlights: nextHighlights });
+      return next;
+    },
+    [artifacts?.highlights, persistArtifacts]
+  );
+
+  const persistExamCramBundle = useCallback(
+    ({ content = "", scopeLabel = "", updatedAt = new Date().toISOString() } = {}) => {
+      const nextHighlights = writeExamCramBundleToHighlights(artifacts?.highlights, {
+        content,
+        scopeLabel,
+        updatedAt,
+      });
+      persistArtifacts({ highlights: nextHighlights });
+    },
+    [artifacts?.highlights, persistArtifacts]
   );
 
   const handleSaveInstructorEmphasis = useCallback(
@@ -3236,6 +3439,10 @@ function App() {
       setError("먼저 PDF를 열어주세요.");
       return;
     }
+    if (!quizMix) {
+      setError(quizMixError || "문항 비율을 다시 확인해주세요.");
+      return;
+    }
     if (isFreeTier && quizSets.length > 0) {
       setError("무료 플랜에서는 퀴즈 세트를 1개만 생성할 수 있습니다.");
       return;
@@ -3276,28 +3483,69 @@ function App() {
       const historicalMockTexts = collectQuestionTextsFromMockExams(mockExams);
       const avoidQuestionTexts = dedupeQuestionTexts([...historicalQuizTexts, ...historicalMockTexts]).slice(0, 80);
       const seenQuestionKeys = createQuestionKeySet(avoidQuestionTexts);
+      const historicalOxTexts = collectQuestionTextsFromOxItems(oxItems);
+      const avoidStatementTexts = dedupeQuestionTexts([...historicalOxTexts, ...historicalMockTexts]).slice(0, 80);
+      const seenOxKeys = createQuestionKeySet(avoidStatementTexts);
 
       const targetMcCount = Math.max(0, Number(quizMix.multipleChoice) || 0);
       const targetSaCount = Math.max(0, Number(quizMix.shortAnswer) || 0);
+      const targetOxCount = Math.max(0, Number(quizMix.ox) || 0);
+      const targetTotalCount = targetMcCount + targetSaCount + targetOxCount;
+      if (targetTotalCount <= 0) {
+        throw new Error("최소 1문항 이상 입력해주세요.");
+      }
       const nextMultipleChoice = [];
       const nextShortAnswer = [];
+      const nextOx = [];
 
-      const { generateQuiz } = await getOpenAiService();
-      const maxAttempts = 3;
+      const { generateQuiz, generateOxQuiz } = await getOpenAiService();
+      const maxAttempts = Math.max(
+        3,
+        Math.ceil(targetMcCount / 5) + 1,
+        Math.ceil(targetSaCount / 5) + 1,
+        Math.ceil(targetOxCount / 10) + 1
+      );
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        if (nextMultipleChoice.length >= targetMcCount && nextShortAnswer.length >= targetSaCount) break;
+        if (
+          nextMultipleChoice.length >= targetMcCount &&
+          nextShortAnswer.length >= targetSaCount &&
+          nextOx.length >= targetOxCount
+        ) {
+          break;
+        }
 
-        const requestMcCount = Math.min(5, Math.max(targetMcCount - nextMultipleChoice.length, 1) + 1);
-        const requestSaCount = Math.min(5, Math.max(targetSaCount - nextShortAnswer.length, 0) + 1);
+        const requestMcCount =
+          targetMcCount > nextMultipleChoice.length
+            ? Math.min(5, targetMcCount - nextMultipleChoice.length + 1)
+            : 0;
+        const requestSaCount =
+          targetSaCount > nextShortAnswer.length
+            ? Math.min(5, targetSaCount - nextShortAnswer.length + 1)
+            : 0;
+        const requestOxCount =
+          targetOxCount > nextOx.length ? Math.min(10, targetOxCount - nextOx.length + 1) : 0;
+        const shouldRequestQuiz = requestMcCount > 0 || requestSaCount > 0;
+        const shouldRequestOx = requestOxCount > 0;
 
-        const quiz = normalizeQuizPayload(
-          await generateQuiz(quizSourceText, {
-            multipleChoiceCount: requestMcCount,
-            shortAnswerCount: requestSaCount,
-            instructorEmphasis: instructorEmphasisText,
-            avoidQuestions: avoidQuestionTexts,
-          })
-        );
+        const [quizResult, oxResult] = await Promise.all([
+          shouldRequestQuiz
+            ? generateQuiz(quizSourceText, {
+                multipleChoiceCount: requestMcCount,
+                shortAnswerCount: requestSaCount,
+                instructorEmphasis: instructorEmphasisText,
+                avoidQuestions: avoidQuestionTexts,
+                scopeLabel,
+              })
+            : Promise.resolve({ multipleChoice: [], shortAnswer: [] }),
+          shouldRequestOx
+            ? generateOxQuiz(quizSourceText, {
+                avoidStatements: avoidStatementTexts,
+                count: requestOxCount,
+                scopeLabel,
+              })
+            : Promise.resolve({ items: [] }),
+        ]);
+        const quiz = normalizeQuizPayload(quizResult);
 
         pushUniqueByQuestionKey(
           nextMultipleChoice,
@@ -3313,6 +3561,13 @@ function App() {
           seenQuestionKeys,
           targetSaCount
         );
+        pushUniqueByQuestionKey(
+          nextOx,
+          Array.isArray(oxResult?.items) ? oxResult.items : [],
+          getOxPromptText,
+          seenOxKeys,
+          targetOxCount
+        );
 
         const mergedAvoidQuestions = mergeQuestionHistory(
           avoidQuestionTexts,
@@ -3320,28 +3575,41 @@ function App() {
           120
         );
         avoidQuestionTexts.splice(0, avoidQuestionTexts.length, ...mergedAvoidQuestions);
+        const mergedAvoidStatements = mergeQuestionHistory(
+          avoidStatementTexts,
+          nextOx.map(getOxPromptText),
+          120
+        );
+        avoidStatementTexts.splice(0, avoidStatementTexts.length, ...mergedAvoidStatements);
       }
 
-      if (nextMultipleChoice.length < targetMcCount || nextShortAnswer.length < targetSaCount) {
+      if (
+        nextMultipleChoice.length < targetMcCount ||
+        nextShortAnswer.length < targetSaCount ||
+        nextOx.length < targetOxCount
+      ) {
         throw new Error("중복 문항을 제외하느라 충분한 새 문항을 만들지 못했습니다. 범위를 바꿔 다시 시도해 주세요.");
       }
 
       const trimmedQuiz = {
         multipleChoice: nextMultipleChoice.slice(0, targetMcCount),
         shortAnswer: nextShortAnswer.slice(0, targetSaCount),
+        ox: nextOx.slice(0, targetOxCount),
       };
-      const newSet = {
-        id: `quiz-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-        questions: trimmedQuiz,
-        selectedChoices: {},
-        revealedChoices: {},
-        shortAnswerInput: {},
-        shortAnswerResult: {},
-      };
+      const newSet = createQuizSetState(trimmedQuiz);
       setQuizSets((prev) => [...prev, newSet]);
+      setOxItems((prev) => [
+        ...(Array.isArray(prev) ? prev : []),
+        ...(Array.isArray(trimmedQuiz.ox) ? trimmedQuiz.ox : []),
+      ]);
       setStatus(scopeLabel ? `퀴즈 세트가 생성되었습니다. (${scopeLabel})` : "퀴즈 세트가 생성되었습니다.");
       setUsageCounts((prev) => ({ ...prev, quiz: prev.quiz + 1 }));
-      persistArtifacts({ quiz: trimmedQuiz });
+      persistArtifacts({
+        quiz: trimmedQuiz,
+        ox: {
+          items: Array.isArray(trimmedQuiz.ox) ? trimmedQuiz.ox : [],
+        },
+      });
     } catch (err) {
       setError(`퀴즈 세트 생성에 실패했습니다: ${err.message}`);
     } finally {
@@ -3394,7 +3662,11 @@ function App() {
           })
           .filter((set) => {
             const questions = normalizeQuizPayload(set?.questions || {});
-            return questions.multipleChoice.length > 0 || questions.shortAnswer.length > 0;
+            return (
+              questions.multipleChoice.length > 0 ||
+              questions.shortAnswer.length > 0 ||
+              questions.ox.length > 0
+            );
           });
 
         nextPersistedQuiz = nextSets.length > 0 ? normalizeQuizPayload(nextSets[0]?.questions || {}) : null;
@@ -3437,21 +3709,284 @@ function App() {
     await requestQuestions({ force: true });
   };
 
-  const handleChoiceSelect = (setId, qIdx, choiceIdx) => {
+  const createBaseReviewNote = useCallback(
+    ({
+      sourceType,
+      sourceLabel,
+      prompt,
+      explanation = "",
+      evidencePages = [],
+      evidenceSnippet = "",
+      evidenceLabel = "",
+    }) => {
+      const promptText = String(prompt || "").trim();
+      const questionKey = normalizeQuestionKey(promptText);
+      const now = new Date().toISOString();
+      return {
+        id: `${sourceType}:${questionKey}`,
+        sourceType,
+        sourceLabel,
+        questionKey,
+        prompt: promptText,
+        explanation: String(explanation || "").trim(),
+        evidencePages: Array.isArray(evidencePages) ? evidencePages : [],
+        evidenceSnippet: String(evidenceSnippet || "").trim(),
+        evidenceLabel: String(evidenceLabel || "").trim(),
+        wrongCount: 1,
+        reviewCount: 0,
+        resolved: false,
+        createdAt: now,
+        updatedAt: now,
+        lastWrongAt: now,
+        lastCorrectAt: null,
+        hiddenAt: null,
+      };
+    },
+    []
+  );
+
+  const upsertWrongReviewNote = useCallback(
+    (note) => {
+      if (!note?.questionKey || !note?.sourceType) return;
+      const now = new Date().toISOString();
+      persistReviewNotes((prev) => {
+        const list = Array.isArray(prev) ? prev : [];
+        const existingIndex = list.findIndex(
+          (item) => item?.sourceType === note.sourceType && item?.questionKey === note.questionKey
+        );
+        if (existingIndex < 0) {
+          return [
+            {
+              ...note,
+              createdAt: note.createdAt || now,
+              updatedAt: now,
+              lastWrongAt: now,
+              lastCorrectAt: note.lastCorrectAt || null,
+            },
+            ...list,
+          ];
+        }
+
+        const existing = list[existingIndex];
+        const next = [...list];
+        next[existingIndex] = {
+          ...existing,
+          ...note,
+          id: existing.id || note.id,
+          createdAt: existing.createdAt || note.createdAt || now,
+          updatedAt: now,
+          lastWrongAt: now,
+          wrongCount: Math.max(1, Number(existing?.wrongCount || 0) + 1),
+          reviewCount: Number(existing?.reviewCount || 0),
+          resolved: false,
+          hiddenAt: null,
+        };
+        return next;
+      });
+    },
+    [persistReviewNotes]
+  );
+
+  const markReviewNoteCorrectByPrompt = useCallback(
+    (sourceType, prompt, userAnswerText = "", userAnswerValue = "") => {
+      const questionKey = normalizeQuestionKey(prompt);
+      if (!questionKey) return;
+      const now = new Date().toISOString();
+      persistReviewNotes((prev) =>
+        (Array.isArray(prev) ? prev : []).map((item) =>
+          item?.sourceType === sourceType && item?.questionKey === questionKey
+            ? {
+                ...item,
+                userAnswerText: String(userAnswerText || "").trim() || item.userAnswerText,
+                userAnswerValue:
+                  userAnswerValue !== undefined && userAnswerValue !== null && userAnswerValue !== ""
+                    ? userAnswerValue
+                    : item.userAnswerValue,
+                resolved: true,
+                updatedAt: now,
+                lastCorrectAt: now,
+              }
+            : item
+        )
+      );
+    },
+    [persistReviewNotes]
+  );
+
+  const handleReviewNoteAttempt = useCallback(
+    (item, attempt) => {
+      if (!item?.id || !attempt) return;
+      const now = new Date().toISOString();
+      persistReviewNotes((prev) =>
+        (Array.isArray(prev) ? prev : []).map((note) => {
+          if (note?.id !== item.id) return note;
+          if (attempt.isCorrect) {
+            return {
+              ...note,
+              userAnswerText: String(attempt.userAnswerText || "").trim() || note.userAnswerText,
+              userAnswerValue:
+                attempt.userAnswerValue !== undefined ? attempt.userAnswerValue : note.userAnswerValue,
+              resolved: true,
+              reviewCount: Number(note?.reviewCount || 0) + 1,
+              updatedAt: now,
+              lastCorrectAt: now,
+            };
+          }
+          return {
+            ...note,
+            userAnswerText: String(attempt.userAnswerText || "").trim() || note.userAnswerText,
+            userAnswerValue:
+              attempt.userAnswerValue !== undefined ? attempt.userAnswerValue : note.userAnswerValue,
+            resolved: false,
+            wrongCount: Math.max(1, Number(note?.wrongCount || 0) + 1),
+            reviewCount: Number(note?.reviewCount || 0) + 1,
+            updatedAt: now,
+            lastWrongAt: now,
+          };
+        })
+      );
+    },
+    [persistReviewNotes]
+  );
+
+  const handleDeleteReviewNote = useCallback(
+    (noteId) => {
+      if (!noteId) return;
+      const now = new Date().toISOString();
+      persistReviewNotes((prev) =>
+        (Array.isArray(prev) ? prev : []).map((item) =>
+          item?.id === noteId
+            ? {
+                ...item,
+                hiddenAt: now,
+                updatedAt: now,
+              }
+            : item
+        )
+      );
+    },
+    [persistReviewNotes]
+  );
+
+  const handleQuizOxSelect = useCallback(
+    (setId, qIdx, choice) => {
+      const targetSet = quizSets.find((set) => set.id === setId);
+      const currentSelection = targetSet?.oxSelections?.[qIdx];
+      if (currentSelection === "o" || currentSelection === "x") return;
+
+      setQuizSets((prev) =>
+        prev.map((set) =>
+          set.id === setId
+            ? {
+                ...set,
+                oxSelections: { ...set.oxSelections, [qIdx]: choice },
+              }
+            : set
+        )
+      );
+
+      const items = Array.isArray(targetSet?.questions?.ox) ? targetSet.questions.ox : [];
+      const item = items[qIdx];
+      if (!item || (choice !== "o" && choice !== "x")) return;
+
+      const expected = item.answer === true ? "o" : "x";
+      const userAnswerText = choice === "o" ? "O" : "X";
+      const prompt = String(item?.statement || item?.prompt || item?.question || "").trim();
+      if (choice === expected) {
+        markReviewNoteCorrectByPrompt("ox", prompt, userAnswerText, choice === "o");
+        return;
+      }
+
+      upsertWrongReviewNote({
+        ...createBaseReviewNote({
+          sourceType: "ox",
+          sourceLabel: "O/X",
+          prompt,
+          explanation: item?.explanation,
+          evidencePages: item?.evidencePages,
+          evidenceSnippet: item?.evidenceSnippet || item?.evidence,
+          evidenceLabel: item?.evidenceLabel || "",
+        }),
+        correctAnswerText: item.answer ? "O" : "X",
+        correctAnswerValue: Boolean(item.answer),
+        userAnswerText,
+        userAnswerValue: choice === "o",
+      });
+    },
+    [createBaseReviewNote, markReviewNoteCorrectByPrompt, quizSets, upsertWrongReviewNote]
+  );
+
+  const handleToggleQuizOxExplanation = useCallback((setId, qIdx) => {
     setQuizSets((prev) =>
       prev.map((set) =>
         set.id === setId
           ? {
               ...set,
-              selectedChoices: { ...set.selectedChoices, [qIdx]: choiceIdx },
-              revealedChoices: { ...set.revealedChoices, [qIdx]: true },
+              oxExplanationOpen: {
+                ...set.oxExplanationOpen,
+                [qIdx]: !set?.oxExplanationOpen?.[qIdx],
+              },
             }
           : set
       )
     );
-  };
+  }, []);
 
-  const handleShortAnswerChange = (setId, idx, value) => {
+  const handleChoiceSelect = useCallback(
+    (setId, qIdx, choiceIdx) => {
+      const targetSet = quizSets.find((set) => set.id === setId);
+      const multipleChoice = Array.isArray(targetSet?.questions?.multipleChoice)
+        ? targetSet.questions.multipleChoice
+        : [];
+      const question = multipleChoice[qIdx];
+      if (targetSet?.revealedChoices?.[qIdx]) return;
+
+      setQuizSets((prev) =>
+        prev.map((set) =>
+          set.id === setId
+            ? {
+                ...set,
+                selectedChoices: { ...set.selectedChoices, [qIdx]: choiceIdx },
+                revealedChoices: { ...set.revealedChoices, [qIdx]: true },
+              }
+            : set
+        )
+      );
+
+      if (!question) return;
+
+      const choices = Array.isArray(question?.choices) ? question.choices : [];
+      const prompt = String(question?.question || question?.prompt || "").trim();
+      const selectedChoiceText = String(choices?.[choiceIdx] || "").trim();
+      const answerIndex = Number.isFinite(question?.answerIndex) ? question.answerIndex : -1;
+      const correctChoiceText = String(choices?.[answerIndex] || "").trim();
+      if (choiceIdx === answerIndex) {
+        markReviewNoteCorrectByPrompt("quiz_multiple_choice", prompt, selectedChoiceText, choiceIdx);
+        return;
+      }
+
+      upsertWrongReviewNote({
+        ...createBaseReviewNote({
+          sourceType: "quiz_multiple_choice",
+          sourceLabel: "객관식",
+          prompt,
+          explanation: question?.explanation,
+          evidencePages: question?.evidencePages,
+          evidenceSnippet: question?.evidenceSnippet,
+          evidenceLabel: question?.evidenceLabel,
+        }),
+        choices,
+        answerIndex,
+        correctAnswerText: correctChoiceText,
+        correctAnswerValue: answerIndex,
+        userAnswerText: selectedChoiceText,
+        userAnswerValue: choiceIdx,
+      });
+    },
+    [createBaseReviewNote, markReviewNoteCorrectByPrompt, quizSets, upsertWrongReviewNote]
+  );
+
+  const handleShortAnswerChange = useCallback((setId, idx, value) => {
     setQuizSets((prev) =>
       prev.map((set) =>
         set.id === setId
@@ -3459,29 +3994,223 @@ function App() {
           : set
       )
     );
-  };
+  }, []);
 
-  const handleShortAnswerCheck = (setId, idx) => {
-    setQuizSets((prev) =>
-      prev.map((set) => {
-        const shortAnswers = Array.isArray(set.questions?.shortAnswer) ? set.questions.shortAnswer : [];
-        const target = shortAnswers[idx];
-        if (set.id !== setId || !target?.answer) return set;
-        const user = String(set.shortAnswerInput?.[idx] || "").trim().toLowerCase();
-        const answer = String(target.answer).trim().toLowerCase();
-        const normalizedUser = user.replace(/\s+/g, "");
-        const normalizedAnswer = answer.replace(/\s+/g, "");
-        const isCorrect = normalizedUser === normalizedAnswer;
+  const handleShortAnswerCheck = useCallback(
+    (setId, idx) => {
+      const targetSet = quizSets.find((set) => set.id === setId);
+      const shortAnswers = Array.isArray(targetSet?.questions?.shortAnswer)
+        ? targetSet.questions.shortAnswer
+        : [];
+      const target = shortAnswers[idx];
+      if (!target?.answer) return;
+
+      const user = String(targetSet?.shortAnswerInput?.[idx] || "").trim().toLowerCase();
+      const answer = String(target.answer).trim().toLowerCase();
+      const normalizedUser = user.replace(/\s+/g, "");
+      const normalizedAnswer = answer.replace(/\s+/g, "");
+      const existingResult = targetSet?.shortAnswerResult?.[idx];
+      if (existingResult?.submittedValue === normalizedUser) return;
+      const isCorrect = normalizedUser === normalizedAnswer;
+
+      setQuizSets((prev) =>
+        prev.map((set) => {
+          const shortAnswerList = Array.isArray(set.questions?.shortAnswer) ? set.questions.shortAnswer : [];
+          const shortTarget = shortAnswerList[idx];
+          if (set.id !== setId || !shortTarget?.answer) return set;
+          return {
+            ...set,
+            shortAnswerResult: {
+              ...set.shortAnswerResult,
+              [idx]: { isCorrect, answer: shortTarget.answer, submittedValue: normalizedUser },
+            },
+          };
+        })
+      );
+
+      const prompt = String(target?.question || target?.prompt || "").trim();
+      const userAnswerText = String(targetSet?.shortAnswerInput?.[idx] || "").trim();
+      if (isCorrect) {
+        markReviewNoteCorrectByPrompt("quiz_short_answer", prompt, userAnswerText, userAnswerText);
+        return;
+      }
+
+      upsertWrongReviewNote({
+        ...createBaseReviewNote({
+          sourceType: "quiz_short_answer",
+          sourceLabel: "주관식",
+          prompt,
+          explanation: target?.explanation,
+          evidencePages: target?.evidencePages,
+          evidenceSnippet: target?.evidenceSnippet,
+          evidenceLabel: target?.evidenceLabel,
+        }),
+        correctAnswerText: String(target?.answer || "").trim(),
+        correctAnswerValue: String(target?.answer || "").trim(),
+        userAnswerText,
+        userAnswerValue: userAnswerText,
+      });
+    },
+    [createBaseReviewNote, markReviewNoteCorrectByPrompt, quizSets, upsertWrongReviewNote]
+  );
+
+  const resolveChapterRangeLimit = useCallback(
+    (rawInput) => {
+      const pageLimit = Number(pageInfo.total || pageInfo.used || 0);
+      if (isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+        return pageLimit;
+      }
+      let inferredLimit = 0;
+
+      String(rawInput || "")
+        .split(/[\n,;]+/)
+        .map((token) => token.trim())
+        .filter(Boolean)
+        .forEach((token) => {
+          const compact = token.replace(/\s+/g, "");
+          let matched =
+            compact.match(/^(\d+)[:=](\d+)-(\d+)$/i) ||
+            compact.match(/^ch(?:apter)?(\d+)[:=](\d+)-(\d+)$/i);
+          if (matched) {
+            inferredLimit = Math.max(inferredLimit, Number.parseInt(matched[3], 10) || 0);
+            return;
+          }
+
+          matched = compact.match(/^(\d+)-(\d+)$/);
+          if (matched) {
+            inferredLimit = Math.max(inferredLimit, Number.parseInt(matched[2], 10) || 0);
+          }
+        });
+
+      return Math.max(pageLimit, inferredLimit);
+    },
+    [file, pageInfo.total, pageInfo.used]
+  );
+
+  const configuredReviewSections = useMemo(() => {
+    const raw = String(chapterRangeInput || "").trim();
+    if (!raw) return [];
+    const limit = resolveChapterRangeLimit(raw);
+    if (!limit) return [];
+    const parsed = parseChapterRangeSelectionInput(raw, limit);
+    if (parsed.error) return [];
+    return (Array.isArray(parsed.chapters) ? parsed.chapters : [])
+      .map((chapter, index) => {
+        const chapterNumber = Number.parseInt(chapter?.chapterNumber, 10);
+        const pageStart = Number.parseInt(chapter?.pageStart, 10);
+        const pageEnd = Number.parseInt(chapter?.pageEnd, 10);
+        if (!Number.isFinite(pageStart) || !Number.isFinite(pageEnd) || pageStart <= 0 || pageEnd < pageStart) {
+          return null;
+        }
+        const normalizedChapterNumber =
+          Number.isFinite(chapterNumber) && chapterNumber > 0 ? chapterNumber : index + 1;
         return {
-          ...set,
-          shortAnswerResult: {
-            ...set.shortAnswerResult,
-            [idx]: { isCorrect, answer: target.answer },
-          },
+          id: String(chapter?.id || `review-section-${normalizedChapterNumber}`),
+          chapterNumber: normalizedChapterNumber,
+          pageStart,
+          pageEnd,
+          label: `섹션 ${normalizedChapterNumber}`,
+          detailLabel: `섹션 ${normalizedChapterNumber} · ${pageStart}-${pageEnd}p`,
         };
       })
-    );
-  };
+      .filter(Boolean);
+  }, [chapterRangeInput, resolveChapterRangeLimit]);
+
+  const reviewNotesWithSections = useMemo(() => {
+    const notes = Array.isArray(reviewNotes) ? reviewNotes : [];
+    return notes.map((item) => {
+      const evidencePages = Array.isArray(item?.evidencePages) ? item.evidencePages : [];
+      const matchedSections = configuredReviewSections.filter((section) =>
+        evidencePages.some((pageNumber) => pageNumber >= section.pageStart && pageNumber <= section.pageEnd)
+      );
+      return {
+        ...item,
+        sectionNumbers: matchedSections.map((section) => section.chapterNumber),
+        sectionLabels: matchedSections.map((section) => section.detailLabel),
+      };
+    });
+  }, [configuredReviewSections, reviewNotes]);
+
+  const selectReviewNotesBySection = useCallback(
+    (items, chapterSelectionInput = "") => {
+      const list = (Array.isArray(items) ? items : []).filter((item) => !item?.hiddenAt);
+      const cleaned = String(chapterSelectionInput || "").trim();
+      if (!cleaned) {
+        return {
+          items: list,
+          error: "",
+          selectedSectionNumbers: [],
+        };
+      }
+      if (!configuredReviewSections.length) {
+        return {
+          items: list,
+          error: "먼저 요약 탭에서 챕터 범위를 설정해주세요.",
+          selectedSectionNumbers: [],
+        };
+      }
+
+      const selected = parseChapterNumberSelectionInput(cleaned, configuredReviewSections);
+      if (selected.error) {
+        return {
+          items: list,
+          error: "섹션 범위를 다시 확인해주세요. (예: 1-3,5)",
+          selectedSectionNumbers: [],
+        };
+      }
+
+      const selectedNumberSet = new Set(selected.chapterNumbers);
+      return {
+        items: list.filter(
+          (item) =>
+            Array.isArray(item?.sectionNumbers) &&
+            item.sectionNumbers.some((chapterNumber) => selectedNumberSet.has(chapterNumber))
+        ),
+        error: "",
+        selectedSectionNumbers: selected.chapterNumbers,
+      };
+    },
+    [configuredReviewSections]
+  );
+
+  const reviewNotesPanelState = useMemo(() => {
+    const filtered = selectReviewNotesBySection(reviewNotesWithSections, reviewNotesChapterSelectionInput);
+    return {
+      ...filtered,
+      items: sortReviewNotesByRecentWrong(filtered.items),
+    };
+  }, [reviewNotesChapterSelectionInput, reviewNotesWithSections, selectReviewNotesBySection]);
+
+  const examCramQuizItems = useMemo(() => collectExamCramQuizItems(quizSets), [quizSets]);
+
+  const examCramState = useMemo(() => {
+    const filtered = selectReviewNotesBySection(reviewNotesWithSections, reviewNotesChapterSelectionInput);
+    const pendingNotes = sortReviewNotesByRecentWrong(filtered.items.filter((item) => !item?.resolved));
+    return {
+      ...filtered,
+      items: pendingNotes.slice(0, EXAM_CRAM_PREVIEW_LIMIT),
+      pendingCount: pendingNotes.length,
+      referenceCounts: {
+        summary: String(summary || partialSummary || "").trim() ? 1 : 0,
+        quiz: examCramQuizItems.length,
+        ox: Array.isArray(oxItems) ? oxItems.length : 0,
+        reviewNotes: pendingNotes.length,
+      },
+      hasAnySource:
+        Boolean(String(summary || partialSummary || "").trim()) ||
+        examCramQuizItems.length > 0 ||
+        (Array.isArray(oxItems) ? oxItems.length : 0) > 0 ||
+        pendingNotes.length > 0,
+    };
+  }, [
+    examCramQuizItems,
+    oxItems,
+    partialSummary,
+    reviewNotesChapterSelectionInput,
+    reviewNotesWithSections,
+    selectReviewNotesBySection,
+    summary,
+  ]);
 
   const buildAdaptiveChapterSummaryRanges = (chapters) => {
     const list = Array.isArray(chapters) ? chapters : [];
@@ -4138,6 +4867,52 @@ function App() {
       setIsExportingSummary(false);
     }
   }, [summary, file, isExportingSummary]);
+
+  const handleOxSelect = useCallback(
+    (qIdx, choice) => {
+      const currentSelection = oxSelections?.[qIdx];
+      if (currentSelection === "o" || currentSelection === "x") return;
+
+      setOxSelections((prev) => ({
+        ...prev,
+        [qIdx]: choice,
+      }));
+
+      const item = Array.isArray(oxItems) ? oxItems[qIdx] : null;
+      if (!item || (choice !== "o" && choice !== "x")) return;
+
+      const expected = item.answer === true ? "o" : "x";
+      const userAnswerText = choice === "o" ? "O" : "X";
+      const prompt = String(item?.statement || item?.prompt || item?.question || "").trim();
+      if (choice === expected) {
+        markReviewNoteCorrectByPrompt("ox", prompt, userAnswerText, choice === "o");
+        return;
+      }
+
+      upsertWrongReviewNote({
+        ...createBaseReviewNote({
+          sourceType: "ox",
+          sourceLabel: "O/X",
+          prompt,
+          explanation: item?.explanation,
+          evidencePages: item?.evidencePages,
+          evidenceSnippet: item?.evidenceSnippet || item?.evidence,
+          evidenceLabel: item?.evidenceLabel || "",
+        }),
+        correctAnswerText: item.answer ? "O" : "X",
+        correctAnswerValue: Boolean(item.answer),
+        userAnswerText,
+        userAnswerValue: choice === "o",
+      });
+    },
+    [
+      createBaseReviewNote,
+      markReviewNoteCorrectByPrompt,
+      oxItems,
+      oxSelections,
+      upsertWrongReviewNote,
+    ]
+  );
 
   const requestOxQuiz = async ({ auto = false, force = false } = {}) => {
     if (isLoadingOx && !force) return;
@@ -4946,6 +5721,235 @@ function App() {
     user,
   ]);
 
+  const handleGenerateExamCram = useCallback(
+    async ({ chapterSelectionInput = "" } = {}) => {
+      if (isGeneratingExamCram) return;
+      if (!selectedFileId) {
+        setExamCramError("먼저 문서를 선택해 주세요.");
+        setExamCramStatus("");
+        return;
+      }
+
+      const scoped = selectReviewNotesBySection(reviewNotesWithSections, chapterSelectionInput);
+      if (scoped.error) {
+        setExamCramError(scoped.error);
+        setExamCramStatus("");
+        return;
+      }
+
+      const summaryText = String(summary || partialSummary || "").trim();
+      const quizReferenceItems = examCramQuizItems.slice(0, 12);
+      const oxReferenceItems = (Array.isArray(oxItems) ? oxItems : []).slice(0, 10);
+      const reviewNoteReferences = sortReviewNotesByRecentWrong(
+        scoped.items.filter((item) => item && !item.resolved)
+      ).slice(0, 10);
+      const hasSources =
+        Boolean(summaryText) ||
+        quizReferenceItems.length > 0 ||
+        oxReferenceItems.length > 0 ||
+        reviewNoteReferences.length > 0;
+
+      if (!hasSources) {
+        setExamCramError("먼저 요약, 퀴즈, O/X, 오답노트 중 하나를 준비해주세요.");
+        setExamCramStatus("");
+        return;
+      }
+
+      const scopeLabel = scoped.selectedSectionNumbers.length
+        ? `섹션 ${scoped.selectedSectionNumbers.join(", ")} 기준`
+        : "";
+
+      setIsGeneratingExamCram(true);
+      setExamCramError("");
+      setExamCramStatus(scopeLabel ? `시험 직전 AI 정리 생성 중... (${scopeLabel})` : "시험 직전 AI 정리 생성 중...");
+
+      try {
+        const ai = await getOpenAiService();
+        const generated = await ai.generateExamCramSheet({
+          summaryText,
+          oxItems: oxReferenceItems,
+          quizItems: quizReferenceItems,
+          reviewNotes: reviewNoteReferences,
+          scopeLabel,
+        });
+        const trimmed = String(generated || "").trim();
+        if (!trimmed) {
+          throw new Error("AI가 비어 있는 정리를 반환했습니다.");
+        }
+
+        const nextUpdatedAt = new Date().toISOString();
+        setExamCramContent(trimmed);
+        setExamCramUpdatedAt(nextUpdatedAt);
+        setExamCramScopeLabel(scopeLabel);
+        setExamCramStatus(scopeLabel ? `시험 직전 AI 정리가 준비되었습니다. (${scopeLabel})` : "시험 직전 AI 정리가 준비되었습니다.");
+        persistExamCramBundle({
+          content: trimmed,
+          scopeLabel,
+          updatedAt: nextUpdatedAt,
+        });
+      } catch (err) {
+        setExamCramError(`시험 직전 AI 정리 생성에 실패했습니다: ${err.message}`);
+        setExamCramStatus("");
+      } finally {
+        setIsGeneratingExamCram(false);
+      }
+    },
+    [
+      examCramQuizItems,
+      getOpenAiService,
+      isGeneratingExamCram,
+      oxItems,
+      partialSummary,
+      persistExamCramBundle,
+      reviewNotesWithSections,
+      selectReviewNotesBySection,
+      selectedFileId,
+      summary,
+    ]
+  );
+
+  const handleCreateReviewNotesMockExam = useCallback(
+    async ({
+      chapterSelectionInput = "",
+      titlePrefix = "오답노트",
+      sourceKind = "review_notes",
+      statusLabel = "오답노트",
+    } = {}) => {
+      if (isGeneratingMockExam) return;
+
+      const notes = Array.isArray(reviewNotesWithSections) ? reviewNotesWithSections : [];
+      const scoped = selectReviewNotesBySection(notes, chapterSelectionInput);
+      if (scoped.error) {
+        setMockExamError(scoped.error);
+        setMockExamStatus("");
+        return;
+      }
+
+      const pendingNotes = sortReviewNotesByRecentWrong(
+        scoped.items.filter((item) => item && !item.resolved)
+      );
+
+      if (!pendingNotes.length) {
+        setMockExamError(
+          scoped.selectedSectionNumbers.length > 0
+            ? "선택한 섹션에 복습할 최근 오답이 없습니다."
+            : "오답노트에 복습할 최근 오답이 없습니다."
+        );
+        setMockExamStatus("");
+        return;
+      }
+
+      if (AUTH_ENABLED && !user) {
+        setMockExamError("먼저 로그인해 주세요.");
+        setMockExamStatus("");
+        return;
+      }
+      if (!selectedFileId) {
+        setMockExamError("먼저 문서를 선택해 주세요.");
+        setMockExamStatus("");
+        return;
+      }
+
+      setIsGeneratingMockExam(true);
+      setMockExamError("");
+      setMockExamStatus(`${statusLabel} 모의고사 생성 중...`);
+
+      try {
+        const examItems = pendingNotes.slice(0, REVIEW_NOTE_MOCK_EXAM_LIMIT).map((note, index) => {
+          const base = {
+            order: index + 1,
+            prompt: String(note?.prompt || "").trim(),
+            explanation: String(note?.explanation || "").trim(),
+            evidencePages: Array.isArray(note?.evidencePages) ? note.evidencePages : [],
+            evidenceSnippet: String(note?.evidenceSnippet || "").trim(),
+            evidenceLabel: String(note?.evidenceLabel || "").trim(),
+            evidence: String(note?.evidenceLabel || note?.evidenceSnippet || "").trim(),
+          };
+
+          if (note?.sourceType === "ox") {
+            return {
+              ...base,
+              type: "ox",
+              answer: note?.correctAnswerValue === true ? "O" : "X",
+            };
+          }
+
+          if (note?.sourceType === "quiz_short_answer") {
+            return {
+              ...base,
+              type: "quiz-short",
+              answer: String(note?.correctAnswerText || "").trim(),
+            };
+          }
+
+          return {
+            ...base,
+            type: "quiz",
+            choices: Array.isArray(note?.choices) ? note.choices : [],
+            answerIndex: Number.isFinite(note?.answerIndex) ? note.answerIndex : null,
+          };
+        });
+
+        const answerSheet = buildMockExamAnswerSheet(examItems);
+        const now = new Date();
+        const dateStamp = `${now.getFullYear()}.${now.getMonth() + 1}.${now.getDate()}`;
+        const nextIndex = mockExams.length + 1;
+        const title = `${dateStamp} ${titlePrefix} 모의고사 ${nextIndex}`;
+        const payload = {
+          title,
+          items: examItems,
+          answerSheet,
+          source: {
+            kind: sourceKind,
+            totalReviewNotes: pendingNotes.length,
+            sectionNumbers: scoped.selectedSectionNumbers,
+            recentOnly: true,
+          },
+          generatedAt: now.toISOString(),
+        };
+
+        const saved = user
+          ? await saveMockExam({
+              userId: user.id,
+              docId: selectedFileId,
+              docName: file?.name || "",
+              title,
+              totalQuestions: examItems.length,
+              payload,
+            })
+          : {
+              id: createLocalEntityId("mock-exam"),
+              doc_id: selectedFileId,
+              doc_name: file?.name || "",
+              title,
+              total_questions: examItems.length,
+              payload,
+              created_at: now.toISOString(),
+            };
+
+        setMockExams((prev) => [saved, ...prev]);
+        setActiveMockExamId(saved.id);
+        setShowMockExamAnswers(false);
+        setPanelTab("mockExam");
+        setMockExamStatus(`${examItems.length}문항 ${statusLabel} 모의고사를 만들었습니다.`);
+      } catch (err) {
+        setMockExamError(`${statusLabel} 모의고사 생성에 실패했습니다: ${err.message}`);
+        setMockExamStatus("");
+      } finally {
+        setIsGeneratingMockExam(false);
+      }
+    },
+    [
+      file?.name,
+      isGeneratingMockExam,
+      mockExams.length,
+      reviewNotesWithSections,
+      selectReviewNotesBySection,
+      selectedFileId,
+      user,
+    ]
+  );
+
   const handleDeleteMockExam = useCallback(
     async (examId) => {
       if (!user) {
@@ -5212,15 +6216,45 @@ function App() {
     requestQuestions,
     quizChapterSelectionInput,
     setQuizChapterSelectionInput,
+    quizMixInput,
+    setQuizMixInput,
     quizMix,
-    setQuizMix,
+    setQuizMix: (nextMix) => {
+      const nextMultipleChoice = Math.max(0, Number(nextMix?.multipleChoice) || 0);
+      const nextShortAnswer = Math.max(0, Number(nextMix?.shortAnswer) || 0);
+      const nextOx = Math.max(0, Number(nextMix?.ox) || 0);
+      setQuizMixInput(`${nextMultipleChoice}-${nextShortAnswer}-${nextOx}`);
+    },
+    quizMixError,
     quizSets,
     deleteQuiz: handleDeleteQuiz,
     deleteQuizItem: handleDeleteQuizItem,
     handleChoiceSelect,
     handleShortAnswerChange,
     handleShortAnswerCheck,
+    handleQuizOxSelect,
+    handleToggleQuizOxExplanation,
     regenerateQuiz,
+    reviewNotes: reviewNotesPanelState.items,
+    reviewNoteSections: configuredReviewSections,
+    reviewNotesSectionSelectionInput: reviewNotesChapterSelectionInput,
+    setReviewNotesSectionSelectionInput: setReviewNotesChapterSelectionInput,
+    reviewNotesSectionError: reviewNotesPanelState.error,
+    examCramItems: examCramState.items,
+    examCramPendingCount: examCramState.pendingCount,
+    examCramSectionError: examCramState.error,
+    examCramReferenceCounts: examCramState.referenceCounts,
+    examCramHasAnySource: examCramState.hasAnySource,
+    examCramContent,
+    examCramUpdatedAt,
+    examCramScopeLabel,
+    examCramStatus: safeExamCramStatus,
+    examCramError: safeExamCramError,
+    isGeneratingExamCram,
+    handleReviewNoteAttempt,
+    handleDeleteReviewNote,
+    handleGenerateExamCram,
+    handleCreateReviewNotesMockExam,
     isLoadingOx,
     requestOxQuiz,
     oxChapterSelectionInput,
@@ -5228,6 +6262,7 @@ function App() {
     regenerateOxQuiz,
     oxItems,
     oxSelections,
+    handleOxSelect,
     setOxSelections,
     oxExplanationOpen,
     setOxExplanationOpen,
@@ -5299,6 +6334,39 @@ function App() {
             theme={theme}
             user={user}
             onTierUpdated={refreshTier}
+          />
+        </Suspense>
+      )}
+      {showSettings && (
+        <Suspense fallback={null}>
+          <SettingsDialog
+            onClose={closeSettings}
+            theme={theme}
+            onThemeChange={setTheme}
+            user={user}
+            authEnabled={AUTH_ENABLED}
+            currentTier={tier}
+            currentTierExpiresAt={tierExpiresAt}
+            currentTierRemainingDays={tierRemainingDays}
+            loadingTier={loadingTier}
+            activeProfile={activePremiumProfile}
+            premiumSpaceMode={premiumSpaceMode}
+            onOpenBilling={() => {
+              closeSettings();
+              openBilling();
+            }}
+            onOpenFeedbackDialog={() => {
+              closeSettings();
+              handleOpenFeedbackDialog();
+            }}
+            onOpenLogin={() => {
+              closeSettings();
+              openAuth();
+            }}
+            onSignOut={handleSignOut}
+            signingOut={isSigningOut}
+            onRefresh={handleManualSync}
+            isRefreshing={isManualSyncing}
           />
         </Suspense>
       )}
@@ -5504,6 +6572,7 @@ function App() {
               onGoHome={showDetail ? goBackToList : null}
               onOpenFeedbackDialog={AUTH_ENABLED ? handleOpenFeedbackDialog : null}
               onOpenBilling={openBilling}
+              onOpenSettings={openSettings}
               showBilling={AUTH_ENABLED}
               onToggleTheme={toggleTheme}
               onOpenLogin={openAuth}
