@@ -96,7 +96,6 @@ import {
   REVIEW_NOTE_MOCK_EXAM_LIMIT,
   collectExamCramQuizItems,
   createQuizSetState,
-  mergeQuizWithLegacyOx,
   sortReviewNotesByRecentWrong,
 } from "./utils/appFeatureHelpers";
 import {
@@ -783,11 +782,11 @@ function normalizeQuestionKey(value) {
 
 const DEFAULT_QUIZ_MIX = Object.freeze({
   multipleChoice: 4,
-  shortAnswer: 2,
-  ox: 1,
+  shortAnswer: 1,
+  ox: 0,
 });
 
-const DEFAULT_QUIZ_MIX_INPUT = `${DEFAULT_QUIZ_MIX.multipleChoice}-${DEFAULT_QUIZ_MIX.shortAnswer}-${DEFAULT_QUIZ_MIX.ox}`;
+const DEFAULT_QUIZ_MIX_INPUT = `${DEFAULT_QUIZ_MIX.multipleChoice}-${DEFAULT_QUIZ_MIX.shortAnswer}`;
 
 function parseQuizMixInput(value) {
   const raw = String(value || "").trim();
@@ -795,7 +794,7 @@ function parseQuizMixInput(value) {
     return {
       mix: null,
       total: 0,
-      error: "문항 비율을 입력해주세요. 형식: 객관식-주관식-OX (예: 4-3-1)",
+      error: "문항 비율을 입력해주세요. 형식: 객관식-주관식 (예: 4-1)",
     };
   }
 
@@ -804,16 +803,16 @@ function parseQuizMixInput(value) {
     .filter(Boolean)
     .map((part) => Number.parseInt(part, 10));
 
-  if (parts.length !== 3 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
+  if (parts.length !== 2 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
     return {
       mix: null,
       total: 0,
-      error: "문항 비율은 객관식-주관식-OX 형식으로 입력해주세요. 예: 4-3-1",
+      error: "문항 비율은 객관식-주관식 형식으로 입력해주세요. 예: 4-1",
     };
   }
 
-  const [multipleChoice, shortAnswer, ox] = parts;
-  const total = multipleChoice + shortAnswer + ox;
+  const [multipleChoice, shortAnswer] = parts;
+  const total = multipleChoice + shortAnswer;
   if (total <= 0) {
     return {
       mix: null,
@@ -826,7 +825,7 @@ function parseQuizMixInput(value) {
     mix: {
       multipleChoice,
       shortAnswer,
-      ox,
+      ox: 0,
     },
     total,
     error: "",
@@ -2145,8 +2144,15 @@ function App() {
           summaryRequestedRef.current = true;
         }
         if (mapped.quiz) {
-          const normalizedQuiz = mergeQuizWithLegacyOx(mapped.quiz, mapped.ox);
-          const cachedSet = createQuizSetState(normalizedQuiz, `quiz-cached-${docId}`);
+          const normalizedQuiz = normalizeQuizPayload(mapped.quiz);
+          const cachedSet = createQuizSetState(
+            {
+              multipleChoice: normalizedQuiz.multipleChoice,
+              shortAnswer: normalizedQuiz.shortAnswer,
+              ox: [],
+            },
+            `quiz-cached-${docId}`
+          );
           setQuizSets([cachedSet]);
           quizAutoRequestedRef.current = true;
         }
@@ -3094,13 +3100,8 @@ function App() {
   );
 
   const getEffectiveInstructorEmphasisText = useCallback(() => {
-    const draft = normalizeInstructorEmphasisInput(instructorEmphasisInput);
-    if (draft) return draft;
-    const active = (Array.isArray(savedInstructorEmphases) ? savedInstructorEmphases : []).find(
-      (item) => item.id === activeInstructorEmphasisId
-    );
-    return normalizeInstructorEmphasisInput(active?.text);
-  }, [activeInstructorEmphasisId, instructorEmphasisInput, savedInstructorEmphases]);
+    return "";
+  }, []);
 
   useEffect(() => {
     uploadedFilesRef.current = uploadedFiles;
@@ -3453,7 +3454,6 @@ function App() {
     }
     const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
     const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
-    const instructorEmphasisText = getEffectiveInstructorEmphasisText();
 
     if (!extractedText && !chapterSelectionRaw && !isPdfSource) {
       setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
@@ -3483,34 +3483,24 @@ function App() {
       const historicalMockTexts = collectQuestionTextsFromMockExams(mockExams);
       const avoidQuestionTexts = dedupeQuestionTexts([...historicalQuizTexts, ...historicalMockTexts]).slice(0, 80);
       const seenQuestionKeys = createQuestionKeySet(avoidQuestionTexts);
-      const historicalOxTexts = collectQuestionTextsFromOxItems(oxItems);
-      const avoidStatementTexts = dedupeQuestionTexts([...historicalOxTexts, ...historicalMockTexts]).slice(0, 80);
-      const seenOxKeys = createQuestionKeySet(avoidStatementTexts);
 
       const targetMcCount = Math.max(0, Number(quizMix.multipleChoice) || 0);
       const targetSaCount = Math.max(0, Number(quizMix.shortAnswer) || 0);
-      const targetOxCount = Math.max(0, Number(quizMix.ox) || 0);
-      const targetTotalCount = targetMcCount + targetSaCount + targetOxCount;
+      const targetTotalCount = targetMcCount + targetSaCount;
       if (targetTotalCount <= 0) {
         throw new Error("최소 1문항 이상 입력해주세요.");
       }
       const nextMultipleChoice = [];
       const nextShortAnswer = [];
-      const nextOx = [];
 
-      const { generateQuiz, generateOxQuiz } = await getOpenAiService();
+      const { generateQuiz } = await getOpenAiService();
       const maxAttempts = Math.max(
         3,
         Math.ceil(targetMcCount / 5) + 1,
-        Math.ceil(targetSaCount / 5) + 1,
-        Math.ceil(targetOxCount / 10) + 1
+        Math.ceil(targetSaCount / 5) + 1
       );
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        if (
-          nextMultipleChoice.length >= targetMcCount &&
-          nextShortAnswer.length >= targetSaCount &&
-          nextOx.length >= targetOxCount
-        ) {
+        if (nextMultipleChoice.length >= targetMcCount && nextShortAnswer.length >= targetSaCount) {
           break;
         }
 
@@ -3522,30 +3512,14 @@ function App() {
           targetSaCount > nextShortAnswer.length
             ? Math.min(5, targetSaCount - nextShortAnswer.length + 1)
             : 0;
-        const requestOxCount =
-          targetOxCount > nextOx.length ? Math.min(10, targetOxCount - nextOx.length + 1) : 0;
-        const shouldRequestQuiz = requestMcCount > 0 || requestSaCount > 0;
-        const shouldRequestOx = requestOxCount > 0;
-
-        const [quizResult, oxResult] = await Promise.all([
-          shouldRequestQuiz
-            ? generateQuiz(quizSourceText, {
-                multipleChoiceCount: requestMcCount,
-                shortAnswerCount: requestSaCount,
-                instructorEmphasis: instructorEmphasisText,
-                avoidQuestions: avoidQuestionTexts,
-                scopeLabel,
-              })
-            : Promise.resolve({ multipleChoice: [], shortAnswer: [] }),
-          shouldRequestOx
-            ? generateOxQuiz(quizSourceText, {
-                avoidStatements: avoidStatementTexts,
-                count: requestOxCount,
-                scopeLabel,
-              })
-            : Promise.resolve({ items: [] }),
-        ]);
-        const quiz = normalizeQuizPayload(quizResult);
+        const quiz = normalizeQuizPayload(
+          await generateQuiz(quizSourceText, {
+            multipleChoiceCount: requestMcCount,
+            shortAnswerCount: requestSaCount,
+            avoidQuestions: avoidQuestionTexts,
+            scopeLabel,
+          })
+        );
 
         pushUniqueByQuestionKey(
           nextMultipleChoice,
@@ -3561,13 +3535,6 @@ function App() {
           seenQuestionKeys,
           targetSaCount
         );
-        pushUniqueByQuestionKey(
-          nextOx,
-          Array.isArray(oxResult?.items) ? oxResult.items : [],
-          getOxPromptText,
-          seenOxKeys,
-          targetOxCount
-        );
 
         const mergedAvoidQuestions = mergeQuestionHistory(
           avoidQuestionTexts,
@@ -3575,41 +3542,21 @@ function App() {
           120
         );
         avoidQuestionTexts.splice(0, avoidQuestionTexts.length, ...mergedAvoidQuestions);
-        const mergedAvoidStatements = mergeQuestionHistory(
-          avoidStatementTexts,
-          nextOx.map(getOxPromptText),
-          120
-        );
-        avoidStatementTexts.splice(0, avoidStatementTexts.length, ...mergedAvoidStatements);
       }
 
-      if (
-        nextMultipleChoice.length < targetMcCount ||
-        nextShortAnswer.length < targetSaCount ||
-        nextOx.length < targetOxCount
-      ) {
+      if (nextMultipleChoice.length < targetMcCount || nextShortAnswer.length < targetSaCount) {
         throw new Error("중복 문항을 제외하느라 충분한 새 문항을 만들지 못했습니다. 범위를 바꿔 다시 시도해 주세요.");
       }
 
       const trimmedQuiz = {
         multipleChoice: nextMultipleChoice.slice(0, targetMcCount),
         shortAnswer: nextShortAnswer.slice(0, targetSaCount),
-        ox: nextOx.slice(0, targetOxCount),
       };
       const newSet = createQuizSetState(trimmedQuiz);
       setQuizSets((prev) => [...prev, newSet]);
-      setOxItems((prev) => [
-        ...(Array.isArray(prev) ? prev : []),
-        ...(Array.isArray(trimmedQuiz.ox) ? trimmedQuiz.ox : []),
-      ]);
       setStatus(scopeLabel ? `퀴즈 세트가 생성되었습니다. (${scopeLabel})` : "퀴즈 세트가 생성되었습니다.");
       setUsageCounts((prev) => ({ ...prev, quiz: prev.quiz + 1 }));
-      persistArtifacts({
-        quiz: trimmedQuiz,
-        ox: {
-          items: Array.isArray(trimmedQuiz.ox) ? trimmedQuiz.ox : [],
-        },
-      });
+      persistArtifacts({ quiz: trimmedQuiz });
     } catch (err) {
       setError(`퀴즈 세트 생성에 실패했습니다: ${err.message}`);
     } finally {
@@ -4924,9 +4871,8 @@ function App() {
       setError("현재 요금제의 O/X 생성 한도에 도달했습니다.");
       return;
     }
-    const chapterSelectionRaw = String(oxChapterSelectionInput || "").trim();
+    const chapterSelectionRaw = String(oxChapterSelectionInput || quizChapterSelectionInput || "").trim();
     const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
-    const instructorEmphasisText = getEffectiveInstructorEmphasisText();
     if (!extractedText && !chapterSelectionRaw && !isPdfSource) {
       setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
       return;
@@ -4957,8 +4903,8 @@ function App() {
 
       const { generateOxQuiz } = await getOpenAiService();
       const ox = await generateOxQuiz(oxSourceText, {
-        instructorEmphasis: instructorEmphasisText,
         avoidStatements: avoidStatementTexts,
+        scopeLabel,
       });
       const rawItems = Array.isArray(ox?.items) ? ox.items : [];
       const qualityRawItems = rawItems.filter(
@@ -5002,7 +4948,7 @@ function App() {
       setError("현재 요금제의 O/X 생성 한도에 도달했습니다.");
       return;
     }
-    const chapterSelectionRaw = String(oxChapterSelectionInput || "").trim();
+    const chapterSelectionRaw = String(oxChapterSelectionInput || quizChapterSelectionInput || "").trim();
     if (!extractedText && !chapterSelectionRaw && !isPdfDocumentKind(detectSupportedDocumentKind(file))) {
       setError("추출된 텍스트가 없습니다. 먼저 PDF 텍스트 추출을 실행해주세요.");
       return;
@@ -6222,8 +6168,7 @@ function App() {
     setQuizMix: (nextMix) => {
       const nextMultipleChoice = Math.max(0, Number(nextMix?.multipleChoice) || 0);
       const nextShortAnswer = Math.max(0, Number(nextMix?.shortAnswer) || 0);
-      const nextOx = Math.max(0, Number(nextMix?.ox) || 0);
-      setQuizMixInput(`${nextMultipleChoice}-${nextShortAnswer}-${nextOx}`);
+      setQuizMixInput(`${nextMultipleChoice}-${nextShortAnswer}`);
     },
     quizMixError,
     quizSets,
