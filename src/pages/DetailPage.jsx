@@ -805,7 +805,7 @@ export default function DetailPage({
                   )}
                 </div>
               )}
-              <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
+              <div className="hidden mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <p className="text-sm font-semibold text-slate-100">
@@ -1347,7 +1347,7 @@ export default function DetailPage({
                     value={quizMixInput}
                     onChange={(event) => setQuizMixInput(event.target.value)}
                     disabled={isLoadingQuiz || isLoadingText}
-                    placeholder="객관식-주관식-OX 예: 4-3-1"
+                    placeholder="객관식-주관식 예: 4-1"
                     className={`w-full rounded-xl border bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition ${
                       quizMixError
                         ? "border-red-400/45 focus:border-red-300/60"
@@ -1356,7 +1356,7 @@ export default function DetailPage({
                   />
                 </div>
                 <p className={`mt-2 text-xs ${quizMixError ? "text-red-200" : "text-slate-400"}`}>
-                  {quizMixError || "형식: 객관식-주관식-OX (예: 4-3-1)"}
+                  {quizMixError || "형식: 객관식-주관식 (예: 4-1)"}
                 </p>
               </div>
 
@@ -1421,9 +1421,8 @@ export default function DetailPage({
               )}
 
               <p className="mt-4 text-xs text-slate-300">
-                현재 구성: 객관식 {quizMix?.multipleChoice ?? 0} / 주관식 {quizMix?.shortAnswer ?? 0} / OX{" "}
-                {quizMix?.ox ?? 0}
-                {` (총 ${(Number(quizMix?.multipleChoice) || 0) + (Number(quizMix?.shortAnswer) || 0) + (Number(quizMix?.ox) || 0)}문항)`}
+                현재 구성: 객관식 {quizMix?.multipleChoice ?? 0} / 주관식 {quizMix?.shortAnswer ?? 0}
+                {` (총 ${(Number(quizMix?.multipleChoice) || 0) + (Number(quizMix?.shortAnswer) || 0)}문항)`}
               </p>
 
               <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -1435,8 +1434,7 @@ export default function DetailPage({
                     isLoadingText ||
                     Boolean(quizMixError) ||
                     ((Number(quizMix?.multipleChoice) || 0) +
-                      (Number(quizMix?.shortAnswer) || 0) +
-                      (Number(quizMix?.ox) || 0) <=
+                      (Number(quizMix?.shortAnswer) || 0) <=
                       0) ||
                     (isFreeTier && quizSets.length > 0)
                   }
@@ -1451,21 +1449,38 @@ export default function DetailPage({
                 >
                   {isLoadingQuiz
                     ? "퀴즈 생성 중..."
-                    : `퀴즈 바로 생성하기 (총 ${(Number(quizMix?.multipleChoice) || 0) +
-                        (Number(quizMix?.shortAnswer) || 0) +
-                        (Number(quizMix?.ox) || 0)}문항)`}
+                    : `퀴즈 생성하기 (총 ${(Number(quizMix?.multipleChoice) || 0) +
+                        (Number(quizMix?.shortAnswer) || 0)}문항)`}
                 </button>
                 <button
                   type="button"
-                  onClick={deleteQuiz}
-                  disabled={isLoadingQuiz || quizSets.length === 0}
-                  className="ghost-button w-full text-sm text-slate-200"
+                  onClick={() => requestOxQuiz({ auto: false })}
+                  disabled={isLoadingOx || isLoadingText}
+                  className="ghost-button w-full text-sm text-emerald-100"
                   data-ghost-size="xl"
-                  style={{ "--ghost-color": "148, 163, 184" }}
+                  style={{ "--ghost-color": "16, 185, 129" }}
                 >
-                  퀴즈 삭제
+                  {isLoadingOx ? "O/X 생성 중..." : "O/X 퀴즈 생성하기"}
                 </button>
               </div>
+
+              {oxItems && oxItems.length > 0 && (
+                <div className="mt-4">
+                  <OxSection
+                    title="O/X 퀴즈"
+                    items={oxItems}
+                    selections={oxSelections}
+                    explanationsOpen={oxExplanationOpen}
+                    onSelect={handleOxSelect}
+                    onToggleExplanation={(qIdx) =>
+                      setOxExplanationOpen((prev) => ({
+                        ...prev,
+                        [qIdx]: !prev?.[qIdx],
+                      }))
+                    }
+                  />
+                </div>
+              )}
 
               <div className="hidden mt-4 space-y-4 rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
                 <div>
