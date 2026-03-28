@@ -14,13 +14,20 @@ function PdfTile({
   draggable = false,
   onDragStart,
   onDragEnd,
+  compactGrid = false,
   fullWidth = false,
   onDelete,
   onContextMenu,
 }) {
   return (
     <div
-      className={`group flex h-full min-h-[208px] w-full min-w-0 flex-col overflow-hidden rounded-[1.4rem] border bg-slate-900/70 text-left shadow-lg shadow-black/30 ring-1 transition hover:-translate-y-1 hover:border-emerald-300/50 hover:ring-emerald-300/40 aspect-[4/5] sm:min-h-[190px] sm:w-full sm:max-w-none sm:rounded-2xl sm:aspect-auto ${
+      className={`group flex h-full min-h-[208px] w-full min-w-0 flex-col overflow-hidden rounded-[1.4rem] border bg-slate-900/70 text-left shadow-lg shadow-black/30 ring-1 transition hover:-translate-y-1 hover:border-emerald-300/50 hover:ring-emerald-300/40 aspect-[4/5] sm:min-h-[190px] sm:max-w-none sm:rounded-2xl sm:aspect-auto ${
+        compactGrid
+          ? "sm:w-full"
+          : fullWidth
+            ? "sm:w-full"
+            : "sm:w-[260px] sm:flex-shrink-0"
+      } ${
         active ? "border-emerald-300/60 ring-emerald-300/50" : "border-white/10 ring-white/5"
       } ${selectable ? "cursor-pointer" : ""}`}
       onClick={onProceed}
@@ -109,6 +116,7 @@ PdfTile.propTypes = {
   draggable: PropTypes.bool,
   onDragStart: PropTypes.func,
   onDragEnd: PropTypes.func,
+  compactGrid: PropTypes.bool,
   fullWidth: PropTypes.bool,
   onDelete: PropTypes.func,
   onContextMenu: PropTypes.func,
