@@ -1,19 +1,33 @@
+import { Capacitor } from "@capacitor/core";
 import { resolvePublicAppOrigin } from "../utils/appOrigin";
 
 const DEFAULT_FEEDBACK_API_BASE_PATH = "/api/feedback";
+const trimTrailingSlash = (value) => String(value || "").trim().replace(/\/+$/, "");
 
 const normalizeApiBase = (value) => {
   const raw = String(value || "").trim();
-  if (!raw) return DEFAULT_FEEDBACK_API_BASE_PATH;
-  if (/^https?:\/\//i.test(raw)) return raw.replace(/\/$/, "");
+  if (/^https?:\/\//i.test(raw)) return trimTrailingSlash(raw);
+
+  if (import.meta.env.DEV && !Capacitor.isNativePlatform()) {
+    return trimTrailingSlash(raw) || DEFAULT_FEEDBACK_API_BASE_PATH;
+  }
 
   const publicOrigin = resolvePublicAppOrigin();
-  if (!publicOrigin) return raw.replace(/\/$/, "") || DEFAULT_FEEDBACK_API_BASE_PATH;
+  if (Capacitor.isNativePlatform() && publicOrigin) {
+    const nativeBasePath = raw || DEFAULT_FEEDBACK_API_BASE_PATH;
+    try {
+      return new URL(nativeBasePath, `${trimTrailingSlash(publicOrigin)}/`).toString().replace(/\/$/, "");
+    } catch {
+      return `${trimTrailingSlash(publicOrigin)}${nativeBasePath.startsWith("/") ? nativeBasePath : `/${nativeBasePath}`}`;
+    }
+  }
+
+  if (!publicOrigin) return trimTrailingSlash(raw) || DEFAULT_FEEDBACK_API_BASE_PATH;
 
   try {
     return new URL(raw, `${publicOrigin}/`).toString().replace(/\/$/, "");
   } catch {
-    return raw.replace(/\/$/, "") || DEFAULT_FEEDBACK_API_BASE_PATH;
+    return trimTrailingSlash(raw) || DEFAULT_FEEDBACK_API_BASE_PATH;
   }
 };
 
