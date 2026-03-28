@@ -2,6 +2,7 @@
 import { Capacitor } from "@capacitor/core";
 import StartPage from "./pages/StartPage";
 import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
+import { useAdMobBanner } from "./hooks/useAdMobBanner";
 import { useUserTier } from "./hooks/useUserTier";
 import { usePageProgressCache } from "./hooks/usePageProgressCache";
 import { AUTH_ENABLED } from "./config/auth";
@@ -1010,6 +1011,14 @@ function App() {
   const shouldForceNativeAuthEntry = AUTH_ENABLED && isNativePlatform && authReady && !user;
   const shouldRenderAuthScreen = AUTH_ENABLED && !user && (showAuth || shouldForceNativeAuthEntry);
   const canReturnHomeFromAuth = showAuth && !shouldForceNativeAuthEntry;
+  const shouldShowAdBanner = !loadingTier && tier === "free" && !shouldRenderAuthScreen;
+  const { bannerHeight } = useAdMobBanner({ enabled: shouldShowAdBanner });
+  const appShellStyle = useMemo(
+    () => ({
+      "--app-banner-offset": `${Math.max(0, Number(bannerHeight) || 0)}px`,
+    }),
+    [bannerHeight]
+  );
   const buildHistoryState = useCallback(
     (override = null) => {
       if (override && typeof override === "object") {
@@ -6265,9 +6274,10 @@ function App() {
 
   return (
     <div
+      style={appShellStyle}
       className={`relative min-h-screen overflow-hidden ${
         theme === "light" ? "text-slate-900" : "text-slate-100"
-      } ${showAmbient ? "" : "bg-black"}`}
+      } ${showAmbient ? "" : "bg-black"} app-banner-offset`}
     >
       {showPayment && (
         <Suspense fallback={null}>
