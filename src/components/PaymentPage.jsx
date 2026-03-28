@@ -131,6 +131,10 @@ function resolveKakaoRedirectUrl(data) {
   const mobileUrl = String(data?.next_redirect_mobile_url || "").trim();
   const appUrl = String(data?.next_redirect_app_url || "").trim();
 
+  if (IS_NATIVE_PLATFORM) {
+    return appUrl || mobileUrl || pcUrl;
+  }
+
   if (shouldUseMobileKakaoRedirect()) {
     return mobileUrl || appUrl || pcUrl;
   }
