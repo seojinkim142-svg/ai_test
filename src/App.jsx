@@ -78,6 +78,7 @@ import {
   resolveShortAnswerText,
   buildMockExamAnswerSheet,
 } from "./utils/mockExamUtils";
+import { notifyFeedbackEmail } from "./services/feedback";
 import {
   dedupeQuestionTexts,
   mergeQuestionHistory,
@@ -97,6 +98,7 @@ import {
   REVIEW_NOTE_MOCK_EXAM_LIMIT,
   collectExamCramQuizItems,
   createQuizSetState,
+  isMissingFeedbackTableError,
   sortReviewNotesByRecentWrong,
 } from "./utils/appFeatureHelpers";
 import {
@@ -5988,7 +5990,7 @@ function App() {
       setIsSubmittingFeedback(true);
       setFeedbackError("");
       try {
-        await saveUserFeedback({
+        const feedbackPayload = {
           userId: user.id,
           category: feedbackCategory,
           content: trimmedFeedback,
@@ -5999,12 +6001,53 @@ function App() {
             currentPage,
             totalPages: pageInfo?.total || pageInfo?.used || null,
             tier,
+            platform: Capacitor.getPlatform(),
           },
-        });
+        };
+        const [saveResult, notifyResult] = await Promise.allSettled([
+          saveUserFeedback({
+            ...feedbackPayload,
+          }),
+          notifyFeedbackEmail({
+            ...feedbackPayload,
+            userEmail: user?.email || "",
+          }),
+        ]);
+        const saveSucceeded = saveResult.status === "fulfilled";
+        const notifySucceeded = notifyResult.status === "fulfilled";
+
+        if (!saveSucceeded) {
+          console.warn("Feedback DB save failed.", saveResult.reason);
+        }
+        if (!notifySucceeded) {
+          console.warn("Feedback email notification failed.", notifyResult.reason);
+        }
+
+        if (!saveSucceeded && !notifySucceeded) {
+          const saveError = saveResult.reason;
+          const notifyError = notifyResult.reason;
+          if (isMissingFeedbackTableError(saveError)) {
+            throw new Error(
+              `피드백 저장 테이블이 준비되지 않았고 메일 발송도 실패했습니다. ${notifyError?.message || ""}`.trim()
+            );
+          }
+          throw new Error(saveError?.message || notifyError?.message || "알 수 없는 오류가 발생했습니다.");
+        }
+
         setIsFeedbackDialogOpen(false);
         setFeedbackCategory("general");
         setFeedbackInput("");
-        setStatus("\uD53C\uB4DC\uBC31\uC774 \uC804\uC1A1\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uAC10\uC0AC\uD569\uB2C8\uB2E4.");
+        if (saveSucceeded && notifySucceeded) {
+          setStatus("\uD53C\uB4DC\uBC31\uC774 \uC804\uC1A1\uB418\uC5C8\uC2B5\uB2C8\uB2E4. \uAC10\uC0AC\uD569\uB2C8\uB2E4.");
+        } else if (notifySucceeded) {
+          setStatus(
+            "\uD53C\uB4DC\uBC31 \uBA54\uC77C\uC740 \uC804\uC1A1\uB418\uC5C8\uC9C0\uB9CC \uC571 \uC800\uC7A5\uC740 \uC644\uB8CC\uB418\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4."
+          );
+        } else {
+          setStatus(
+            "\uD53C\uB4DC\uBC31\uC740 \uC800\uC7A5\uB418\uC5C8\uC9C0\uB9CC \uBA54\uC77C \uC54C\uB9BC \uC804\uC1A1\uC740 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4."
+          );
+        }
       } catch (err) {
         setFeedbackError(`\uD53C\uB4DC\uBC31 \uC804\uC1A1\uC5D0 \uC2E4\uD328\uD588\uC2B5\uB2C8\uB2E4: ${err.message}`);
       } finally {
@@ -6023,6 +6066,7 @@ function App() {
       selectedFileId,
       saveUserFeedback,
       tier,
+      user?.email,
       user?.id,
     ]
   );
