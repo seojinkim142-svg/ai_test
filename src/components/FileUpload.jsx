@@ -1,4 +1,5 @@
 ﻿import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { Capacitor } from "@capacitor/core";
 import FolderDialog from "./FolderDialog";
 import { SUPPORTED_UPLOAD_ACCEPT } from "../utils/document";
 import { buildFolderAggregateDocId, buildFolderAggregateThumbnail } from "../utils/appShared";
@@ -58,6 +59,7 @@ const FileUpload = memo(function FileUpload({
   const contextMenuRef = useRef(null);
   const selectedFolderIdStr = selectedFolderId?.toString() || null;
   const normalizeFolderId = (fid) => (fid ? fid.toString() : null);
+  const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
 
   const folderItems = useMemo(
     () => folders.map((f) => ({ id: f.id, label: f.name || f.id })),
@@ -151,6 +153,15 @@ const FileUpload = memo(function FileUpload({
     () => formatUploadLimitText(currentTier, maxPdfSizeBytes),
     [currentTier, maxPdfSizeBytes]
   );
+  const uploadGridClassName = isNativePlatform
+    ? "relative mt-1 grid grid-cols-2 gap-3 sm:mt-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+    : "relative mt-1 grid grid-cols-2 gap-3 sm:mt-2 sm:flex sm:flex-wrap";
+  const emptyStateClassName = isNativePlatform
+    ? "col-span-full flex min-h-[170px] w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 text-center text-sm text-slate-300 ring-1 ring-white/5"
+    : "col-span-2 flex min-h-[170px] w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 text-center text-sm text-slate-300 ring-1 ring-white/5 sm:w-[260px] sm:flex-shrink-0";
+  const folderModalGridClassName = isNativePlatform
+    ? "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5"
+    : "grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
 
   const handleOpenAddMenu = () => {
     if (isGuest) {
@@ -244,12 +255,13 @@ const FileUpload = memo(function FileUpload({
         </div>
       </div>
 
-      <div className="relative mt-1 grid grid-cols-2 gap-3 sm:mt-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+      <div className={uploadGridClassName}>
         <div className="relative h-full" ref={addMenuRef}>
           <UploadTile
             onFileChange={handleFileSelect}
             onOpenMenu={handleOpenAddMenu}
             inputRef={fileInputRef}
+            compactGrid={isNativePlatform}
           />
           {showAddMenu && (
             <div className="absolute left-0 top-full z-10 mt-2 flex w-48 flex-col overflow-hidden rounded-xl border border-white/10 bg-slate-900/90 text-sm text-slate-100 shadow-lg ring-1 ring-white/10">
@@ -288,6 +300,7 @@ const FileUpload = memo(function FileUpload({
                 name={folder.label}
                 count={folderCounts.get(folder.id) || 0}
                 active={active}
+                compactGrid={isNativePlatform}
                 canDrop={false}
                 onClick={() => handleOpenFolderModal(folder.id)}
                 onDelete={() => onDeleteFolder?.(folder.id)}
@@ -298,7 +311,7 @@ const FileUpload = memo(function FileUpload({
           })}
 
         {showEmptyState && (
-          <div className="col-span-full flex min-h-[170px] w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 text-center text-sm text-slate-300 ring-1 ring-white/5">
+          <div className={emptyStateClassName}>
             {selectedFolderId === "all"
               ? "파일이 없습니다."
               : "이 폴더에 파일이 없습니다."}
@@ -322,6 +335,7 @@ const FileUpload = memo(function FileUpload({
               draggable={isFolderFeatureEnabled}
               onDragStart={undefined}
               onDragEnd={undefined}
+              compactGrid={isNativePlatform}
               onProceed={() => onSelectFile?.(item)}
               onContextMenu={(e) => handleContextMenuUpload(e, item)}
               onDelete={() => onDeleteUpload?.(item)}
@@ -418,7 +432,7 @@ const FileUpload = memo(function FileUpload({
             </div>
 
             <div className="flex-1 overflow-auto pr-1">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">
+              <div className={folderModalGridClassName}>
                 {!hasFolderItems && (
                   <button
                     type="button"
@@ -453,6 +467,7 @@ const FileUpload = memo(function FileUpload({
                     draggable={false}
                     onDragStart={undefined}
                     onDragEnd={undefined}
+                    compactGrid={isNativePlatform}
                     onProceed={() => {
                       handleCloseFolderModal();
                       onSelectFolderSummary?.(folderModalId);
@@ -479,6 +494,7 @@ const FileUpload = memo(function FileUpload({
                         draggable={isFolderFeatureEnabled}
                         onDragStart={undefined}
                         onDragEnd={undefined}
+                        compactGrid={isNativePlatform}
                       onProceed={() => {
                         handleCloseFolderModal();
                         onSelectFile?.(item);

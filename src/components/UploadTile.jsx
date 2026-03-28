@@ -1,9 +1,13 @@
 ﻿import PropTypes from "prop-types";
 import { SUPPORTED_UPLOAD_ACCEPT } from "../utils/document";
 
-function UploadTile({ onFileChange, onOpenMenu, inputRef }) {
+function UploadTile({ onFileChange, onOpenMenu, inputRef, compactGrid = false }) {
   return (
-    <div className="relative flex h-full min-h-[208px] w-full min-w-0 aspect-[4/5] sm:min-h-[170px] sm:w-full sm:max-w-none sm:aspect-auto">
+    <div
+      className={`relative flex h-full min-h-[208px] w-full min-w-0 aspect-[4/5] sm:min-h-[170px] sm:max-w-none sm:aspect-auto ${
+        compactGrid ? "sm:w-full" : "sm:w-[260px] sm:flex-shrink-0"
+      }`}
+    >
       <button
         type="button"
         onClick={onOpenMenu}
@@ -34,6 +38,7 @@ UploadTile.propTypes = {
   onFileChange: PropTypes.func,
   onOpenMenu: PropTypes.func,
   inputRef: PropTypes.shape({ current: PropTypes.instanceOf(Element) }),
+  compactGrid: PropTypes.bool,
 };
 
 export default UploadTile;
