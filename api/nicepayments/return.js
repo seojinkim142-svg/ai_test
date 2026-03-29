@@ -10,15 +10,62 @@ import {
 } from "../../lib/payments/nicepayments.js";
 import { redirectToPaymentClient } from "../../lib/payments/client-redirect.js";
 
-const failAndRedirect = (req, res, clientOrigin, message) => {
+const text = (value) => String(value ?? "").trim();
+
+const getRequestUrl = (req) => {
+  try {
+    return new URL(req?.url || "/", `http://${req?.headers?.host || "localhost"}`);
+  } catch {
+    return new URL("http://localhost/");
+  }
+};
+
+const getFirstValue = (source, keys = []) => {
+  for (const key of keys) {
+    const value = text(source?.[key]);
+    if (value) return value;
+  }
+  return "";
+};
+
+const normalizeReturnPayload = (source = {}) => ({
+  authResultCode: getFirstValue(source, ["authResultCode", "AuthResultCode", "resultCode", "ResultCode"]),
+  authResultMsg: getFirstValue(source, ["authResultMsg", "AuthResultMsg", "resultMsg", "ResultMsg", "message", "Message"]),
+  tid: getFirstValue(source, ["tid", "TID", "txTid", "TxTid"]),
+  orderId: getFirstValue(source, ["orderId", "Moid", "moid"]),
+  amount: getFirstValue(source, ["amount", "Amt", "amt"]),
+  authToken: getFirstValue(source, ["authToken", "AuthToken"]),
+  signature: getFirstValue(source, ["signature", "Signature"]),
+  clientId: getFirstValue(source, ["clientId", "ClientId", "mid", "MID"]),
+});
+
+const hasReturnPayload = (payload = {}) =>
+  Boolean(
+    payload.authResultCode ||
+      payload.authResultMsg ||
+      payload.tid ||
+      payload.orderId ||
+      payload.amount ||
+      payload.authToken ||
+      payload.signature ||
+      payload.clientId
+  );
+
+const isCancelAuthResult = (value) => text(value).toUpperCase() === "I002";
+
+const redirectWithState = (req, res, clientOrigin, params = {}) => {
   redirectToPaymentClient({
     req,
     res,
     clientOrigin,
-    params: {
-      nicePay: "fail",
-      message,
-    },
+    params,
+  });
+};
+
+const failAndRedirect = (req, res, clientOrigin, message) => {
+  redirectWithState(req, res, clientOrigin, {
+    nicePay: "fail",
+    message,
   });
 };
 
@@ -31,24 +78,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  if (req.method === "GET") {
-    res.writeHead(200, {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-store",
-      ...buildCorsHeaders(allowOrigin),
-    });
-    res.end(
-      [
-        "NICEPAYMENTS return endpoint is running.",
-        "This URL is a callback endpoint and expects a POST request from NICEPAYMENTS.",
-        `clientOrigin=${clientOrigin}`,
-        `apiBase=${apiBase}`,
-      ].join("\n")
-    );
-    return;
-  }
-
-  if (req.method !== "POST") {
+  if (req.method !== "GET" && req.method !== "POST") {
     sendJson(res, 405, { message: "Method not allowed." }, allowOrigin);
     return;
   }
@@ -58,27 +88,42 @@ export default async function handler(req, res) {
     return;
   }
 
-  let body;
+  let payload;
   try {
-    body = await parseRequestBody(req);
+    if (req.method === "GET") {
+      const requestUrl = getRequestUrl(req);
+      payload = normalizeReturnPayload(Object.fromEntries(requestUrl.searchParams.entries()));
+      if (!hasReturnPayload(payload)) {
+        redirectWithState(req, res, clientOrigin, {
+          nicePay: "cancel",
+          message: "결제가 취소되었습니다.",
+        });
+        return;
+      }
+    } else {
+      payload = normalizeReturnPayload(await parseRequestBody(req));
+    }
   } catch {
     failAndRedirect(req, res, clientOrigin, "Invalid return payload.");
     return;
   }
 
-  const authResultCode = String(body.authResultCode || body.resultCode || "").trim();
-  const authResultMsg = String(body.authResultMsg || body.resultMsg || "").trim();
+  const authResultCode = payload.authResultCode;
+  const authResultMsg = payload.authResultMsg;
   if (authResultCode !== "0000") {
-    failAndRedirect(req, res, clientOrigin, authResultMsg || "Payment authorization failed.");
+    redirectWithState(req, res, clientOrigin, {
+      nicePay: isCancelAuthResult(authResultCode) ? "cancel" : "fail",
+      message: authResultMsg || (isCancelAuthResult(authResultCode) ? "결제가 취소되었습니다." : "Payment authorization failed."),
+    });
     return;
   }
 
-  const tid = String(body.tid || "").trim();
-  const orderId = String(body.orderId || "").trim();
-  const amount = String(body.amount || "").trim();
-  const authToken = String(body.authToken || "").trim();
-  const signature = String(body.signature || "").trim();
-  const responseClientId = String(body.clientId || clientId).trim();
+  const tid = payload.tid;
+  const orderId = payload.orderId;
+  const amount = payload.amount;
+  const authToken = payload.authToken;
+  const signature = payload.signature;
+  const responseClientId = payload.clientId || clientId;
 
   if (!tid || !orderId || !amount || !authToken || !signature) {
     failAndRedirect(req, res, clientOrigin, "Required payment fields are missing.");
@@ -120,12 +165,12 @@ export default async function handler(req, res) {
       body: JSON.stringify({ amount: amountNumber }),
     });
 
-    const text = await confirmResponse.text();
+    const responseText = await confirmResponse.text();
     let data;
     try {
-      data = text ? JSON.parse(text) : {};
+      data = responseText ? JSON.parse(responseText) : {};
     } catch {
-      data = { raw: text };
+      data = { raw: responseText };
     }
 
     if (!confirmResponse.ok) {
@@ -150,16 +195,11 @@ export default async function handler(req, res) {
       secretKey
     );
 
-    redirectToPaymentClient({
-      req,
-      res,
-      clientOrigin,
-      params: {
-        nicePay: "success",
-        np_token: token,
-        orderId: confirmedOrderId,
-        amount: confirmedAmount,
-      },
+    redirectWithState(req, res, clientOrigin, {
+      nicePay: "success",
+      np_token: token,
+      orderId: confirmedOrderId,
+      amount: confirmedAmount,
     });
   } catch (error) {
     failAndRedirect(req, res, clientOrigin, `Payment confirmation request failed: ${error.message}`);

@@ -166,10 +166,18 @@ export function useCardPayment({
       window.history.replaceState({}, document.title, cleanUrl);
     };
 
-    if (cardState === "fail") {
+    if (cardState === "fail" || cardState === "cancel") {
       handledCardReturnRef.current = handledKey;
       setPaymentNotice("");
-      setPaymentError(failMessage ? `나이스페이 결제 실패: ${failMessage}` : "나이스페이 결제가 실패했습니다.");
+      setShowCardWidget(false);
+      setCardPaying(false);
+      setPaymentError(
+        failMessage
+          ? `나이스페이 결제 ${cardState === "cancel" ? "취소" : "실패"}: ${failMessage}`
+          : cardState === "cancel"
+            ? "나이스페이 결제가 취소되었습니다."
+            : "나이스페이 결제가 실패했습니다."
+      );
       localStorage.removeItem(CARD_PAYMENT_STORAGE_KEY);
       clearPaymentReturnPending();
       clearUrl();
