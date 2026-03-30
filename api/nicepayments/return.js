@@ -11,6 +11,19 @@ import {
 import { redirectToPaymentClient } from "../../lib/payments/client-redirect.js";
 
 const text = (value) => String(value ?? "").trim();
+const isSuccessfulApproval = (data = {}) =>
+  text(data?.resultCode) === "0000" && text(data?.status).toLowerCase() === "paid";
+const normalizeNiceFailureMessage = (message) => {
+  const normalized = text(message);
+  if (!normalized) return "";
+  if (normalized.includes("계좌잔액 부족")) {
+    return "체크카드 계좌 잔액이 부족합니다. 잔액을 확인하거나 다른 카드로 다시 시도해주세요.";
+  }
+  if (normalized.includes("한도 초과")) {
+    return "카드 한도를 초과했습니다. 결제 가능 금액을 확인한 뒤 다시 시도해주세요.";
+  }
+  return normalized;
+};
 
 const getRequestUrl = (req) => {
   try {
@@ -173,8 +186,10 @@ export default async function handler(req, res) {
       data = { raw: responseText };
     }
 
-    if (!confirmResponse.ok) {
-      const message = String(data?.resultMsg || data?.message || data?.msg || "Payment confirmation failed.");
+    if (!confirmResponse.ok || !isSuccessfulApproval(data)) {
+      const message = normalizeNiceFailureMessage(
+        String(data?.resultMsg || data?.message || data?.msg || "Payment confirmation failed.")
+      );
       failAndRedirect(req, res, clientOrigin, message);
       return;
     }
