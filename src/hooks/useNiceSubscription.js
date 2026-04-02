@@ -16,12 +16,12 @@ const NICE_BILLING_RETURN_QUERY_KEYS = ["niceBilling", "trial", "orderId", "amou
 
 const cardSubscriptionPlans = {
   Pro: {
-    baseAmount: 4900,
+    baseAmount: 6900,
     tier: "pro",
     itemName: "Zeusian Pro Card Subscription",
   },
   Premium: {
-    baseAmount: 16000,
+    baseAmount: 18900,
     tier: "premium",
     itemName: "Zeusian Premium Card Subscription",
   },

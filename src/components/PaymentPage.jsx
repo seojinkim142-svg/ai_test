@@ -53,7 +53,7 @@ const PLAN_OPTIONS = [
   {
     name: "Pro",
     label: "Pro",
-    price: "4,900원 / 월",
+    price: "6,900원 / 월",
     desc: "개인 학습",
     features: ["업로드 무제한", "요약 / 퀴즈 / OX / 플래시카드", "우선 처리"],
     cta: "Pro 업그레이드",
@@ -62,7 +62,7 @@ const PLAN_OPTIONS = [
   {
     name: "Premium",
     label: "Premium",
-    price: "16,000원 / 월",
+    price: "18,900원 / 월",
     desc: "공유 학습",
     features: ["최대 4명", "공유 워크스페이스", "팀 학습 플로우"],
     cta: "Premium 업그레이드",
@@ -71,12 +71,12 @@ const PLAN_OPTIONS = [
 ];
 const kakaoPayPlans = {
   Pro: {
-    baseAmount: 4900,
+    baseAmount: 6900,
     tier: "pro",
     itemName: "제우시안 프로 월간권",
   },
   Premium: {
-    baseAmount: 16000,
+    baseAmount: 18900,
     tier: "premium",
     itemName: "제우시안 프리미엄 월간권",
   },
@@ -940,7 +940,7 @@ function PaymentPage({
                       오늘 결제 0 KRW
                     </span>
                     <span className={isLight ? "text-slate-500" : "text-slate-300"}>
-                      결제수단 등록 후 1개월 뒤부터 매월 4,900 KRW가 자동 결제됩니다.
+                      결제수단 등록 후 1개월 뒤부터 매월 6,900 KRW가 자동 결제됩니다.
                     </span>
                   </>
                 ) : (
