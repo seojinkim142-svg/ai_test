@@ -83,12 +83,6 @@ export default async function handler(req, res) {
     return;
   }
 
-  const configError = validateKakaoRuntimeConfig({ secretKey, cid, apiBase });
-  if (configError) {
-    sendJson(res, 500, { message: configError }, allowOrigin);
-    return;
-  }
-
   let body;
   try {
     body = await parseRequestBody(req);
@@ -110,21 +104,35 @@ export default async function handler(req, res) {
     body?.proTrial === true &&
     requestedTier === PRO_TRIAL_TIER;
 
+  if (!registerSubscription) {
+    sendJson(res, 400, { message: "One-time KakaoPay payments are disabled. Use subscription billing only." }, allowOrigin);
+    return;
+  }
+
+  const configError = validateKakaoRuntimeConfig({
+    secretKey,
+    cid,
+    apiBase,
+    requireCid: !registerSubscription,
+  });
+  if (configError) {
+    sendJson(res, 500, { message: configError }, allowOrigin);
+    return;
+  }
+
   if (!tid || !orderId || !pgToken) {
     sendJson(res, 400, { message: "tid, orderId, and pgToken are required." }, allowOrigin);
     return;
   }
 
-  if (registerSubscription) {
-    const subscriptionConfigError = validateKakaoSubscriptionConfig({
-      secretKey,
-      subscriptionCid,
-      apiBase,
-    });
-    if (subscriptionConfigError) {
-      sendJson(res, 500, { message: subscriptionConfigError }, allowOrigin);
-      return;
-    }
+  const subscriptionConfigError = validateKakaoSubscriptionConfig({
+    secretKey,
+    subscriptionCid,
+    apiBase,
+  });
+  if (subscriptionConfigError) {
+    sendJson(res, 500, { message: subscriptionConfigError }, allowOrigin);
+    return;
   }
 
   const authResult = await authenticateSupabaseUserFromRequest(req);
@@ -324,7 +332,7 @@ export default async function handler(req, res) {
       200,
       {
         ...data,
-        paymentMode: registerSubscription ? "subscription" : "one-time",
+        paymentMode: "subscription",
         proTrial: isProTrialRegistration,
         subscriptionSaved,
         subscriptionWarning,
