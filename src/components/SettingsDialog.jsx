@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchKakaoPaySubscriptionStatus } from "../services/kakaopay";
-import { fetchNicePaymentsSubscriptionStatus } from "../services/nicepayments";
+import { fetchKakaoPaySubscriptionStatus, inactiveKakaoPaySubscription } from "../services/kakaopay";
+import { fetchNicePaymentsSubscriptionStatus, inactiveNicePaymentsSubscription } from "../services/nicepayments";
 import { getAccessToken } from "../services/supabase";
 import { getTierLabel } from "../utils/appStateHelpers";
 
@@ -141,6 +141,8 @@ function SettingsDialog({
   const [niceSubscription, setNiceSubscription] = useState(null);
   const [loadingSubscriptions, setLoadingSubscriptions] = useState(false);
   const [subscriptionError, setSubscriptionError] = useState("");
+  const [subscriptionNotice, setSubscriptionNotice] = useState("");
+  const [isCancellingPlan, setIsCancellingPlan] = useState(false);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -158,6 +160,7 @@ function SettingsDialog({
         setKakaoSubscription(null);
         setNiceSubscription(null);
         setSubscriptionError("");
+        setSubscriptionNotice("");
         return;
       }
 
@@ -202,8 +205,77 @@ function SettingsDialog({
     kakaoSubscription?.status === "active" ? kakaoSubscription : null;
   const activeNiceSubscription =
     niceSubscription?.status === "active" ? niceSubscription : null;
+  const hasActiveSubscription = Boolean(activeKakaoSubscription || activeNiceSubscription);
   const hasMultipleActiveSubscriptions =
     Boolean(activeKakaoSubscription && activeNiceSubscription);
+
+  const handleCancelPlan = useCallback(async () => {
+    if (!user?.id || isCancellingPlan || !hasActiveSubscription) return;
+
+    setSubscriptionError("");
+    setSubscriptionNotice("");
+    setIsCancellingPlan(true);
+
+    try {
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        throw new Error("구독 해지에는 로그인 세션이 필요합니다.");
+      }
+
+      const activeProviders = [
+        activeKakaoSubscription && {
+          label: "카카오페이",
+          cancel: () => inactiveKakaoPaySubscription({}, { accessToken }),
+        },
+        activeNiceSubscription && {
+          label: "나이스페이먼츠 카드",
+          cancel: () => inactiveNicePaymentsSubscription({}, { accessToken }),
+        },
+      ].filter(Boolean);
+
+      const results = await Promise.allSettled(activeProviders.map((provider) => provider.cancel()));
+      const cancelledProviders = [];
+      const failedMessages = [];
+
+      results.forEach((result, index) => {
+        const providerLabel = activeProviders[index]?.label || "구독";
+        if (result.status === "fulfilled") {
+          cancelledProviders.push(providerLabel);
+          return;
+        }
+        failedMessages.push(`${providerLabel}: ${result.reason?.message || "해지에 실패했습니다."}`);
+      });
+
+      await loadSubscriptions({ showLoading: false });
+      await onRefresh?.();
+
+      if (cancelledProviders.length) {
+        setSubscriptionNotice(
+          `${cancelledProviders.join(", ")} 정기결제를 해지했습니다. 현재 이용 기간은 만료일까지 유지됩니다.`
+        );
+      }
+
+      if (failedMessages.length) {
+        setSubscriptionError(
+          cancelledProviders.length
+            ? `일부 구독만 해지되었습니다. ${failedMessages.join(" / ")}`
+            : failedMessages.join(" / ")
+        );
+      }
+    } catch (error) {
+      setSubscriptionError(error?.message || "플랜 해지에 실패했습니다.");
+    } finally {
+      setIsCancellingPlan(false);
+    }
+  }, [
+    activeKakaoSubscription,
+    activeNiceSubscription,
+    hasActiveSubscription,
+    isCancellingPlan,
+    loadSubscriptions,
+    onRefresh,
+    user?.id,
+  ]);
 
   const currentPlanLabel = loadingTier ? "확인 중..." : getTierLabel(currentTier);
   const currentTierNote = loadingTier
@@ -267,13 +339,13 @@ function SettingsDialog({
 
     if (currentTierExpiresAt || Number.isFinite(Number(currentTierRemainingDays))) {
       return {
-        value: "단건 결제",
+        value: "구독 없음",
         description:
           Number.isFinite(Number(currentTierRemainingDays)) && Number(currentTierRemainingDays) > 0
             ? `${Number(currentTierRemainingDays)}일 남음`
             : currentTierExpiresAt
               ? `만료 ${formatDateTime(currentTierExpiresAt)}`
-              : "정기결제 없이 이용 중입니다.",
+              : "활성 정기결제 없이 이용 중입니다.",
       };
     }
 
@@ -560,7 +632,28 @@ function SettingsDialog({
                     >
                       {loadingSubscriptions ? "불러오는 중..." : "구독 새로고침"}
                     </button>
+                    <button
+                      type="button"
+                      onClick={handleCancelPlan}
+                      disabled={loadingSubscriptions || !user || !hasActiveSubscription || isCancellingPlan}
+                      className="ghost-button text-xs text-rose-100"
+                      data-ghost-size="sm"
+                      style={{ "--ghost-color": "244, 63, 94" }}
+                    >
+                      {isCancellingPlan ? "플랜 취소 중..." : "플랜 취소"}
+                    </button>
                   </div>
+
+                  {subscriptionNotice && (
+                    <p className={`mt-3 text-xs ${isLight ? "text-emerald-600" : "text-emerald-300"}`}>
+                      {subscriptionNotice}
+                    </p>
+                  )}
+                  {subscriptionError && (
+                    <p className={`mt-3 text-xs ${isLight ? "text-amber-600" : "text-amber-300"}`}>
+                      {subscriptionError}
+                    </p>
+                  )}
                 </div>
 
                 {subscriptionCards.length > 0 && (
@@ -574,10 +667,6 @@ function SettingsDialog({
                       </div>
                     ))}
                   </div>
-                )}
-
-                {!subscriptionCards.length && subscriptionError && (
-                  <p className="mt-3 text-xs text-amber-300">{subscriptionError}</p>
                 )}
               </>
             )}

@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { approveKakaoPay, chargeKakaoPaySubscription, fetchKakaoPaySubscriptionStatus, inactiveKakaoPaySubscription, requestKakaoPayReady } from "../services/kakaopay";
 import { fetchProTrialStatus } from "../services/nicepayments";
 import { getAccessToken } from "../services/supabase";
-import { useCardPayment } from "../hooks/useCardPayment";
 import { useNiceSubscription } from "../hooks/useNiceSubscription";
 import { COMPANY_INFO, LEGAL_LINKS } from "../legal/companyInfo";
 import { resolvePublicAppOrigin } from "../utils/appOrigin";
@@ -82,7 +81,6 @@ const kakaoPayPlans = {
     itemName: "제우시안 프리미엄 월간권",
   },
 };
-const BILLING_MONTH_OPTIONS = [1, 2];
 const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
 const KAKAO_RETURN_QUERY_KEYS = ["pg_token", "kakaoPay", "message"];
 
@@ -233,7 +231,7 @@ function PaymentPage({
   paymentReturnSignal = 0,
 }) {
   const [selectedPlan, setSelectedPlan] = useState(tierMeta[currentTier] || "Free");
-  const [billingMonths, setBillingMonths] = useState(1);
+  const billingMonths = 2;
   const [paying, setPaying] = useState(false);
   const [paymentError, setPaymentError] = useState("");
   const [paymentNotice, setPaymentNotice] = useState("");
@@ -250,7 +248,6 @@ function PaymentPage({
   const [isChargingSubscription, setIsChargingSubscription] = useState(false);
   const [countdownNowMs, setCountdownNowMs] = useState(() => Date.now());
   const handledKakaoReturnRef = useRef("");
-  const cardWidgetSectionRef = useRef(null);
   const isLight = theme === "light";
   const surfaceClass = isLight
     ? "border-slate-200 bg-white/95 text-slate-900 ring-slate-200/80 shadow-black/10"
@@ -279,13 +276,9 @@ function PaymentPage({
       : serverRemainingDays;
   const tierTimeRemainingLabel = formatTierTimeRemainingLabel(tierTimeRemaining);
   const selectedKakaoPlan = kakaoPayPlans[selectedPlan];
-  const selectedPlanLabel = planLabelKo[selectedPlan] || selectedPlan;
-  const normalizedBillingMonths =
-    Number.isFinite(Number(billingMonths)) && Number(billingMonths) > 0
-      ? Math.floor(Number(billingMonths))
-      : 1;
+  const normalizedBillingMonths = billingMonths;
   const isRecurringSelection = normalizedBillingMonths >= 2;
-  const selectedChargeMonths = isRecurringSelection ? 1 : normalizedBillingMonths;
+  const selectedChargeMonths = 1;
   const selectedKakaoAmount = selectedKakaoPlan ? selectedKakaoPlan.baseAmount * selectedChargeMonths : 0;
   const selectedKakaoItemName = selectedKakaoPlan ? selectedKakaoPlan.itemName : "";
   const paymentDisclosureSections = selectedPlan === "Free"
@@ -294,28 +287,19 @@ function PaymentPage({
         {
           title: "서비스 제공 및 결제 시기",
           items: [
-            isRecurringSelection
-              ? "첫 결제 승인 후 즉시 이용이 시작되며, 이후 이용기간은 정기결제 상태에 따라 갱신됩니다."
-              : `결제 승인 후 즉시 이용이 시작되며, 결제 완료 시점부터 ${selectedChargeMonths}개월 동안 이용할 수 있습니다.`,
-            isRecurringSelection
-              ? `첫 결제금액은 ${selectedKakaoAmount.toLocaleString()}KRW이며, 이후 이용요금은 회사가 정한 결제주기에 따라 자동 청구됩니다.`
-              : `결제 승인 즉시 ${selectedKakaoAmount.toLocaleString()}KRW가 1회 청구됩니다.`,
+            "결제 확인 즉시 서비스 이용이 시작되고, 해지 전까지 매월 정기결제로 갱신됩니다.",
+            `첫 결제 금액은 ${selectedKakaoAmount.toLocaleString()}KRW이고, 이후에도 매월 같은 금액이 자동 청구됩니다.`,
             "결제 완료 후 현재 페이지에서 요금제 상태와 만료일이 자동으로 갱신됩니다.",
           ],
         },
         {
           title: "정기결제 안내",
-          items: isRecurringSelection
-            ? [
-                "정기결제는 해지하지 않으면 다음 결제일부터 자동으로 갱신됩니다.",
-                "다음 결제일 이전까지 해지하면 다음 회차부터 자동 청구가 중단되며, 이미 결제된 이용기간은 만료일까지 이용할 수 있습니다.",
-                "결제수단 오류, 한도 초과, 잔액 부족 등으로 결제가 실패하면 재시도되거나 유료서비스 이용이 제한될 수 있습니다.",
-                "이용요금, 결제주기 또는 제공내용이 변경되는 경우 사전에 고지됩니다.",
-              ]
-            : [
-                "정기결제는 결제 개월에서 '정기결제'를 선택한 경우에만 적용됩니다.",
-                "1개월 선택은 자동갱신 없는 일반 결제입니다.",
-              ],
+          items: [
+            "정기결제는 해지하지 않으면 다음 결제일부터 자동으로 갱신됩니다.",
+            "다음 결제일 이전까지 해지하면 다음 회차부터 자동 청구가 중단되며, 이미 결제된 이용기간은 만료일까지 이용할 수 있습니다.",
+            "결제수단 오류, 한도 초과, 잔액 부족 등으로 결제가 실패하면 재시도되거나 유료서비스 이용이 제한될 수 있습니다.",
+            "이용요금, 결제주기 또는 제공내용이 변경되는 경우 사전에 고지됩니다.",
+          ],
         },
         {
           title: "취소 및 환불",
@@ -335,32 +319,12 @@ function PaymentPage({
   const canPayWithKakao =
     Boolean(selectedKakaoPlan) && !paying && !isLoadingSubscription && !isSameActiveKakaoSubscription;
   const canStartSubscriptionWithKakao = canPayWithKakao && normalizedBillingMonths >= 2;
-  const canStartOneTimeKakao = Boolean(selectedKakaoPlan) && !paying && !isLoadingSubscription;
   const subscriptionStatusLabel = formatSubscriptionStatusLabel(subscriptionState?.status);
   const subscriptionTierLabel = planLabelKo[tierMeta[subscriptionState?.tier] || ""] || subscriptionState?.tier || "-";
   const subscriptionApprovedLabel = formatTierExpiryLabel(subscriptionState?.approvedAt);
   const subscriptionLastChargeLabel = formatTierExpiryLabel(subscriptionState?.lastChargeAt);
   const subscriptionNextChargeLabel = formatTierExpiryLabel(subscriptionState?.nextChargeAt);
   const subscriptionCancelledLabel = formatTierExpiryLabel(subscriptionState?.cancelledAt);
-  const {
-    selectedCardPlan,
-    selectedCardAmount,
-    canPayWithCard,
-    cardPaying,
-    showCardWidget,
-    setShowCardWidget,
-    cardWidgetReady,
-    openCardWidget,
-    requestCardPayment,
-  } = useCardPayment({
-    user,
-    selectedPlan,
-    billingMonths: normalizedBillingMonths,
-    paymentReturnSignal,
-    onTierUpdated,
-    setPaymentError,
-    setPaymentNotice,
-  });
   const {
     subscriptionState: niceSubscriptionData,
     activeSubscription: activeNiceSubscription,
@@ -395,8 +359,8 @@ function PaymentPage({
   const niceSubscriptionLastChargeLabel = formatTierExpiryLabel(niceSubscriptionData?.lastChargeAt);
   const niceSubscriptionNextChargeLabel = formatTierExpiryLabel(niceSubscriptionData?.nextChargeAt);
   const niceSubscriptionCancelledLabel = formatTierExpiryLabel(niceSubscriptionData?.cancelledAt);
-  const canProceedWithKakao = isRecurringSelection ? canStartSubscriptionWithKakao : canStartOneTimeKakao;
-  const canProceedWithCard = isRecurringSelection ? canStartNiceSubscription : canPayWithCard;
+  const canProceedWithKakao = canStartSubscriptionWithKakao;
+  const canProceedWithCard = canStartNiceSubscription;
   const shouldShowSubscriptionSettings =
     Boolean(subscriptionState) ||
     Boolean(niceSubscriptionData) ||
@@ -448,17 +412,6 @@ function PaymentPage({
     const intervalId = window.setInterval(tick, 60 * 1000);
     return () => window.clearInterval(intervalId);
   }, [isPaidTier, currentTierExpiresAt]);
-
-  useEffect(() => {
-    if (!showCardWidget) return;
-
-    window.requestAnimationFrame(() => {
-      cardWidgetSectionRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "nearest",
-      });
-    });
-  }, [showCardWidget]);
 
   useEffect(() => {
     loadKakaoSubscriptionStatus({ showLoading: true });
@@ -596,14 +549,9 @@ function PaymentPage({
                 : selectedChargeMonths,
             amount: storedHasAmount ? Number(stored.amount) : selectedKakaoAmount,
             itemName: String(stored.itemName || selectedKakaoItemName || "").trim(),
-            registerSubscription:
-              stored?.registerSubscription === true ||
-              String(stored?.paymentMode || "").trim().toLowerCase() === "subscription",
+            registerSubscription: true,
             proTrial: storedProTrial,
-            paymentMode:
-              String(stored?.paymentMode || "").trim().toLowerCase() === "subscription"
-                ? "subscription"
-                : "one-time",
+            paymentMode: "subscription",
           },
           { accessToken }
         );
@@ -842,91 +790,6 @@ function PaymentPage({
     }
   };
 
-  const handleKakaoOneTimePay = async () => {
-    if (!user?.id) {
-      setPaymentNotice("");
-      setPaymentError("카카오페이 결제에는 로그인 세션이 필요합니다.");
-      return;
-    }
-
-    if (!selectedKakaoPlan) {
-      setPaymentNotice("");
-      setPaymentError("카카오페이는 Pro/Premium 플랜에서만 사용할 수 있습니다.");
-      return;
-    }
-
-    if (!Number.isFinite(selectedKakaoAmount) || selectedKakaoAmount <= 0) {
-      setPaymentNotice("");
-      setPaymentError("결제 금액이 올바르지 않습니다.");
-      return;
-    }
-
-    setPaymentError("");
-    setPaymentNotice("");
-    setPaying(true);
-
-    const orderId = `kpay_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const approvalUrl = buildKakaoReturnUrl("approve");
-    const cancelUrl = buildKakaoReturnUrl("cancel");
-    const failUrl = buildKakaoReturnUrl("fail");
-
-    try {
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        throw new Error("결제 준비에는 로그인 세션이 필요합니다.");
-      }
-
-      const data = await requestKakaoPayReady(
-        {
-          orderId,
-          userId: user.id,
-          amount: selectedKakaoAmount,
-          itemName: selectedKakaoItemName,
-          plan: selectedPlan,
-          tier: selectedKakaoPlan.tier,
-          billingMonths: normalizedBillingMonths,
-          registerSubscription: false,
-          paymentMode: "one-time",
-          approvalUrl,
-          cancelUrl,
-          failUrl,
-        },
-        { accessToken }
-      );
-
-      const redirectUrl =
-        data?.next_redirect_pc_url || data?.next_redirect_mobile_url || data?.next_redirect_app_url;
-
-      if (!data?.tid || !(resolveKakaoRedirectUrl(data) || redirectUrl)) {
-        throw new Error("카카오페이 결제 준비에 실패했습니다. 잠시 후 다시 시도해주세요.");
-      }
-
-      localStorage.setItem(
-        KAKAOPAY_STORAGE_KEY,
-        JSON.stringify({
-          tid: data.tid,
-          orderId,
-          planName: selectedPlan,
-          tier: selectedKakaoPlan.tier,
-          billingMonths: normalizedBillingMonths,
-          amount: selectedKakaoAmount,
-          itemName: selectedKakaoItemName,
-          registerSubscription: false,
-          paymentMode: "one-time",
-        })
-      );
-      markPaymentReturnPending({
-        provider: "kakaopay",
-        paymentMode: "one-time",
-      });
-
-      window.location.href = resolveKakaoRedirectUrl(data) || redirectUrl;
-    } catch (err) {
-      setPaymentError(err?.message || "카카오페이 결제 준비에 실패했습니다.");
-      setPaying(false);
-    }
-  };
-
   const handleInactiveKakaoSubscription = async () => {
     if (!user?.id || !activeKakaoSubscription || isCancellingSubscription) return;
 
@@ -1069,25 +932,6 @@ function PaymentPage({
             </p>
           </div>
           <div className="flex flex-col items-start gap-2 text-xs md:items-end">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className={isLight ? "text-slate-600" : "text-slate-300"}>결제 개월</span>
-              <select
-                value={isUsingProTrialFlow ? 1 : normalizedBillingMonths}
-                onChange={(event) => setBillingMonths(Number(event.target.value))}
-                disabled={selectedPlan === "Free" || isUsingProTrialFlow}
-                className={`rounded-md border px-2 py-1 text-xs ${
-                  isLight
-                    ? "border-slate-300 bg-white text-slate-700"
-                    : "border-white/20 bg-slate-900 text-slate-100"
-                }`}
-              >
-                {BILLING_MONTH_OPTIONS.map((months) => (
-                  <option key={months} value={months}>
-                    {months === 1 ? "1개월" : "정기결제"}
-                  </option>
-                ))}
-              </select>
-            </div>
             {selectedPlan !== "Free" && (
               <>
                 {isUsingProTrialFlow ? (
@@ -1102,13 +946,11 @@ function PaymentPage({
                 ) : (
                   <>
                     <span className={isLight ? "text-slate-700" : "text-slate-100"}>
-                      {isRecurringSelection ? "첫 결제금액" : "총 결제금액"} {selectedKakaoAmount.toLocaleString()} KRW
+                      첫 결제금액 {selectedKakaoAmount.toLocaleString()} KRW
                     </span>
-                    {isRecurringSelection && (
-                      <span className={isLight ? "text-slate-500" : "text-slate-300"}>
-                        이후 매월 {selectedKakaoAmount.toLocaleString()} KRW가 자동 결제됩니다.
-                      </span>
-                    )}
+                    <span className={isLight ? "text-slate-500" : "text-slate-300"}>
+                      이후 매월 {selectedKakaoAmount.toLocaleString()} KRW가 자동 결제됩니다.
+                    </span>
                   </>
                 )}
               </>
@@ -1130,7 +972,7 @@ function PaymentPage({
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 [&>*:nth-child(2)]:hidden [&>*:nth-child(4)]:hidden [&>*:nth-child(5)]:hidden">
             <button
               type="button"
-              onClick={isUsingProTrialFlow ? handleKakaoProTrial : isRecurringSelection ? handleKakaoPay : handleKakaoOneTimePay}
+              onClick={isUsingProTrialFlow ? handleKakaoProTrial : handleKakaoPay}
               disabled={isUsingProTrialFlow ? !canStartKakaoProTrial : !canProceedWithKakao}
               className={`ghost-button text-sm ${isLight ? "text-amber-700" : "text-amber-100"}`}
               style={{ "--ghost-color": "234, 179, 8" }}
@@ -1154,12 +996,12 @@ function PaymentPage({
             </button>
             <button
               type="button"
-              onClick={isUsingProTrialFlow ? () => startNiceSubscription({ proTrial: true }) : isRecurringSelection ? () => startNiceSubscription() : openCardWidget}
+              onClick={isUsingProTrialFlow ? () => startNiceSubscription({ proTrial: true }) : () => startNiceSubscription()}
               disabled={isUsingProTrialFlow ? !canStartNiceSubscription : !canProceedWithCard}
               className={`ghost-button text-sm ${isLight ? "text-emerald-700" : "text-emerald-100"}`}
               style={{ "--ghost-color": "16, 185, 129" }}
             >
-              {isStartingNiceSubscription || cardPaying
+              {isStartingNiceSubscription
                 ? isUsingProTrialFlow
                   ? "무료체험 처리 중..."
                   : "신용카드 처리 중..."
@@ -1508,62 +1350,11 @@ function PaymentPage({
           )}
           {isSameActiveNiceSubscription && (
             <p className={isLight ? "mt-3 text-xs text-cyan-600" : "mt-3 text-xs text-cyan-300"}>
-              ?좏깮??議곌굔怨??숈씪???섏씠?ㅽ럹??移대뱶 ?뺢린寃곗젣媛 ?대? ?쒖꽦?붾릺???덉뒿?덈떎.
+              선택한 조건과 동일한 나이스페이 신용카드 정기결제가 이미 활성화되어 있습니다.
             </p>
           )}
         </section>
         )}
-
-        <div
-          ref={cardWidgetSectionRef}
-          className={`${showCardWidget ? "block" : "hidden"} border-t px-6 py-4 text-sm ${
-            isLight ? "border-slate-200/80 bg-slate-50 text-slate-700" : "border-white/5 bg-white/5 text-slate-200"
-          }`}
-        >
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="font-semibold">신용카드 결제</p>
-              <p className={isLight ? "text-slate-600" : "text-slate-300"}>
-                선택 플랜: {selectedPlanLabel}
-                {selectedCardPlan ? ` / ${selectedCardAmount.toLocaleString()} KRW` : ""}
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowCardWidget(false)}
-              className={`ghost-button text-xs ${isLight ? "text-slate-600" : "text-slate-200"}`}
-              style={{ "--ghost-color": isLight ? "100, 116, 139" : "148, 163, 184" }}
-            >
-              닫기
-            </button>
-          </div>
-          <div
-            className={`mt-4 rounded-2xl border p-4 ${
-              isLight ? "border-slate-200 bg-white" : "border-white/10 bg-white/5"
-            }`}
-          >
-            <p className="text-sm font-semibold">신용카드 결제 진행</p>
-            <p className={isLight ? "mt-2 text-xs text-slate-500" : "mt-2 text-xs text-slate-300"}>
-              결제 창이 준비되면 아래 버튼으로 결제를 확정하세요.
-            </p>
-            {!cardWidgetReady && (
-              <p className={isLight ? "mt-3 text-xs text-slate-400" : "mt-3 text-xs text-slate-400"}>
-                결제 모듈을 로딩 중입니다.
-              </p>
-            )}
-          </div>
-          <div className="mt-4 flex items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={requestCardPayment}
-              disabled={!cardWidgetReady || cardPaying}
-              className={`ghost-button text-sm ${isLight ? "text-emerald-700" : "text-emerald-100"}`}
-              style={{ "--ghost-color": "16, 185, 129" }}
-            >
-              {cardPaying ? "처리 중..." : "신용카드 결제 확정"}
-            </button>
-          </div>
-        </div>
 
         {selectedPlan !== "Free" && (
           <section

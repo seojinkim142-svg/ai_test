@@ -129,8 +129,7 @@ export function useNiceSubscription({
     Boolean(selectedPlanConfig) &&
     (canStartProTrial || normalizedBillingMonths >= 2) &&
     !isStartingSubscription &&
-    !isLoadingSubscription &&
-    !isSameActiveSubscription;
+    !isLoadingSubscription;
 
   const loadSubscriptionStatus = useCallback(
     async ({ showLoading = false } = {}) => {
