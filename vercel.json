@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/nicepayments/subscription/charge",
+      "schedule": "5 * * * *"
+    },
+    {
+      "path": "/api/feedback/sync-replies",
+      "schedule": "*/10 * * * *"
+    }
+  ]
+}
