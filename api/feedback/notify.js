@@ -1,5 +1,3 @@
-/* global process, Buffer */
-
 const DEFAULT_FROM_EMAIL = "onboarding@resend.dev";
 const CATEGORY_LABELS = {
   general: "General",
@@ -125,7 +123,7 @@ const escapeHtml = (value) =>
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
+    .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
 const formatMetadata = (metadata) => {
@@ -137,15 +135,16 @@ const formatMetadata = (metadata) => {
   }
 };
 
-const buildSubject = ({ category, docName }) => {
+const buildSubject = ({ category, docName, feedbackId }) => {
   const categoryLabel = CATEGORY_LABELS[category] || CATEGORY_LABELS.general;
   const normalizedDocName = text(docName);
+  const token = Number.isFinite(Number(feedbackId)) && Number(feedbackId) > 0 ? `[FB-${Number(feedbackId)}]` : "";
   return normalizedDocName
-    ? `[Zeusian Feedback][${categoryLabel}] ${normalizedDocName}`
-    : `[Zeusian Feedback][${categoryLabel}]`;
+    ? `[Zeusian Feedback]${token}[${categoryLabel}] ${normalizedDocName}`
+    : `[Zeusian Feedback]${token}[${categoryLabel}]`;
 };
 
-const buildEmailText = ({ category, content, docId, docName, panel, metadata, userId, userEmail, submittedAt }) => {
+const buildEmailText = ({ category, content, docId, docName, panel, metadata, userId, userEmail, userName, submittedAt }) => {
   const categoryLabel = CATEGORY_LABELS[category] || CATEGORY_LABELS.general;
   const metadataText = formatMetadata(metadata);
   return [
@@ -154,6 +153,7 @@ const buildEmailText = ({ category, content, docId, docName, panel, metadata, us
     `Category: ${categoryLabel} (${text(category) || "general"})`,
     `Submitted at: ${submittedAt}`,
     `User ID: ${text(userId) || "-"}`,
+    `User name: ${text(userName) || "-"}`,
     `User email: ${text(userEmail) || "-"}`,
     `Document ID: ${text(docId) || "-"}`,
     `Document name: ${text(docName) || "-"}`,
@@ -171,13 +171,14 @@ ${metadataText}`
     .join("\n");
 };
 
-const buildEmailHtml = ({ category, content, docId, docName, panel, metadata, userId, userEmail, submittedAt }) => {
+const buildEmailHtml = ({ category, content, docId, docName, panel, metadata, userId, userEmail, userName, submittedAt }) => {
   const categoryLabel = CATEGORY_LABELS[category] || CATEGORY_LABELS.general;
   const metadataText = formatMetadata(metadata);
   const rows = [
     ["Category", `${escapeHtml(categoryLabel)} (${escapeHtml(category || "general")})`],
     ["Submitted at", escapeHtml(submittedAt)],
     ["User ID", escapeHtml(userId)],
+    ["User name", escapeHtml(userName)],
     ["User email", escapeHtml(userEmail)],
     ["Document ID", escapeHtml(docId)],
     ["Document name", escapeHtml(docName)],
@@ -297,6 +298,7 @@ export default async function handler(req, res) {
     metadata: body?.metadata && typeof body.metadata === "object" ? body.metadata : null,
     userId: text(body?.userId),
     userEmail,
+    userName: text(body?.userName),
     submittedAt: new Date().toISOString(),
   };
 
