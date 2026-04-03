@@ -120,7 +120,7 @@ export async function sendFeedbackReply({ accessToken, feedbackId, content } = {
 }
 
 export async function deleteFeedbackReply({ accessToken, replyId } = {}) {
-  return requestFeedbackApi("/delete-reply", {
+  return requestFeedbackApi("/replies", {
     method: "POST",
     accessToken,
     payload: {
