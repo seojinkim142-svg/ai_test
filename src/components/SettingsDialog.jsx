@@ -8,8 +8,8 @@ import { getTierLabel } from "../utils/appStateHelpers";
 const SECTIONS = [
   { id: "account", label: "계정" },
   { id: "subscription", label: "구독" },
-  { id: "theme", label: "?�마" },
-  { id: "feedback", label: "개선 ?�청" },
+  { id: "theme", label: "테마" },
+  { id: "feedback", label: "개선 요청" },
 ];
 
 function formatDateTime(value) {
@@ -27,22 +27,22 @@ function formatDateTime(value) {
 }
 
 function getThemeLabel(theme) {
-  return theme === "light" ? "����Ʈ" : "��ũ";
+  return theme === "light" ? "라이트" : "다크";
 }
 
 function getSubscriptionStatusLabel(status) {
   const normalized = String(status || "").trim().toLowerCase();
-  if (normalized === "active") return "?�성";
-  if (normalized === "inactive") return "��Ȱ��";
-  return "�̵��";
+  if (normalized === "active") return "활성";
+  if (normalized === "inactive") return "비활성";
+  return "없음";
 }
 
 function getFeedbackCategoryLabel(category) {
   const normalized = String(category || "").trim().toLowerCase();
   if (normalized === "bug") return "버그";
-  if (normalized === "feature") return "기능 ?�안";
-  if (normalized === "ux") return "��뼺";
-  return "?�반";
+  if (normalized === "feature") return "기능 제안";
+  if (normalized === "ux") return "사용성";
+  return "일반";
 }
 
 function SectionIcon({ id }) {
@@ -207,7 +207,7 @@ function SettingsDialog({
         );
 
         if (kakaoResult.status === "rejected" && niceResult.status === "rejected") {
-          setSubscriptionError("구독 ?�태�?불러?��? 못했?�니??");
+          setSubscriptionError("구독 상태를 불러오지 못했습니다.");
         }
       } finally {
         if (showLoading) setLoadingSubscriptions(false);
@@ -250,16 +250,16 @@ function SettingsDialog({
     try {
       const accessToken = await getAccessToken();
       if (!accessToken) {
-        throw new Error("구독 ?��??�는 로그???�션???�요?�니??");
+        throw new Error("구독을 취소하려면 로그인 세션이 필요합니다.");
       }
 
       const activeProviders = [
         activeKakaoSubscription && {
-          label: "īī������",
+          label: "카카오페이",
           cancel: () => inactiveKakaoPaySubscription({}, { accessToken }),
         },
         activeNiceSubscription && {
-          label: "?�이?�페?�먼�?카드",
+          label: "나이스페이먼츠 카드",
           cancel: () => inactiveNicePaymentsSubscription({}, { accessToken }),
         },
       ].filter(Boolean);
@@ -274,7 +274,7 @@ function SettingsDialog({
           cancelledProviders.push(providerLabel);
           return;
         }
-        failedMessages.push(`${providerLabel}: ${result.reason?.message || "?��????�패?�습?�다."}`);
+        failedMessages.push(`${providerLabel}: ${result.reason?.message || "취소에 실패했습니다."}`);
       });
 
       await loadSubscriptions({ showLoading: false });
@@ -282,19 +282,19 @@ function SettingsDialog({
 
       if (cancelledProviders.length) {
         setSubscriptionNotice(
-          `${cancelledProviders.join(", ")} ?�기결제�??��??�습?�다. ?�재 ?�용 기간?� 만료?�까지 ?��??�니??`
+          `${cancelledProviders.join(", ")} 정기결제를 해지했습니다. 현재 이용 기간은 만료일까지 유지됩니다.`
         );
       }
 
       if (failedMessages.length) {
         setSubscriptionError(
           cancelledProviders.length
-            ? `?��? 구독�??��??�었?�니?? ${failedMessages.join(" / ")}`
+            ? `일부 구독만 해지되었습니다. ${failedMessages.join(" / ")}`
             : failedMessages.join(" / ")
         );
       }
     } catch (error) {
-      setSubscriptionError(error?.message || "?�랜 ?��????�패?�습?�다.");
+      setSubscriptionError(error?.message || "플랜 취소에 실패했습니다.");
     } finally {
       setIsCancellingPlan(false);
     }
@@ -339,7 +339,7 @@ function SettingsDialog({
           setFeedbackInboxError("");
         } else {
           setCanManageFeedback((prev) => (prev === null ? true : prev));
-          setFeedbackInboxError(error?.message || "?�드�?목록??불러?��? 못했?�니??");
+          setFeedbackInboxError(error?.message || "피드백 목록을 불러오지 못했습니다.");
         }
       } finally {
         if (showLoading) setLoadingFeedbackInbox(false);
@@ -374,7 +374,7 @@ function SettingsDialog({
         const result = await fetchFeedbackReplies({ accessToken, limit: 20 });
         setFeedbackReplies(Array.isArray(result?.replies) ? result.replies : []);
       } catch (error) {
-        setFeedbackRepliesError(error?.message || "?�장??불러?��? 못했?�니??");
+        setFeedbackRepliesError(error?.message || "답장을 불러오지 못했습니다.");
       } finally {
         if (showLoading) setLoadingFeedbackReplies(false);
       }
@@ -401,7 +401,7 @@ function SettingsDialog({
 
       const draft = String(feedbackReplyDrafts?.[normalizedId] || "").trim();
       if (!draft) {
-        setFeedbackInboxError("?�장 ?�용???�력?�주?�요.");
+        setFeedbackInboxError("답장 내용을 입력해 주세요.");
         return;
       }
 
@@ -412,7 +412,7 @@ function SettingsDialog({
       try {
         const accessToken = await getAccessToken();
         if (!accessToken) {
-          throw new Error("?�장??보내?�면 로그???�션???�요?�니??");
+          throw new Error("답장을 보내려면 로그인 세션이 필요합니다.");
         }
 
         await sendFeedbackReply({
@@ -425,10 +425,10 @@ function SettingsDialog({
           ...prev,
           [normalizedId]: "",
         }));
-        setFeedbackInboxNotice("?�장???�송?�습?�다.");
+        setFeedbackInboxNotice("답장을 전송했습니다.");
         await loadFeedbackInbox({ showLoading: false });
       } catch (error) {
-        setFeedbackInboxError(error?.message || "?�장 ?�송???�패?�습?�다.");
+        setFeedbackInboxError(error?.message || "답장 전송에 실패했습니다.");
       } finally {
         setSendingFeedbackReplyId(null);
       }
@@ -436,81 +436,81 @@ function SettingsDialog({
     [feedbackReplyDrafts, loadFeedbackInbox, sendingFeedbackReplyId]
   );
 
-  const currentPlanLabel = loadingTier ? "?�인 �?.." : getTierLabel(currentTier);
+  const currentPlanLabel = loadingTier ? "확인 중.." : getTierLabel(currentTier);
   const currentTierNote = loadingTier
-    ? "?�금???�태�?불러?�는 중입?�다."
+    ? "요금제 상태를 불러오는 중입니다."
     : currentTier === "free"
-      ? "무료 ?�랜"
+      ? "무료 플랜"
       : Number.isFinite(Number(currentTierRemainingDays)) && Number(currentTierRemainingDays) > 0
-        ? `${Number(currentTierRemainingDays)}???�음`
+        ? `${Number(currentTierRemainingDays)}일 남음`
         : currentTierExpiresAt
           ? `만료 ${formatDateTime(currentTierExpiresAt)}`
-          : "만료???�인 ?�요";
+          : "만료일 확인 필요";
 
   const accountSummary = useMemo(() => {
     if (user?.email) {
       return {
-        status: "로그?�됨",
+        status: "로그인됨",
         description: user.email,
       };
     }
 
     return {
-      status: authEnabled ? "�Խ�Ʈ" : "��ȸ�� ���",
+      status: authEnabled ? "게스트" : "비회원 모드",
       description: authEnabled
-        ? "로그????결제?� ?�드백을 ?�결?????�습?�다."
-        : "?�재??로그???�이 ?�용?�는 모드?�니??",
+        ? "로그인하면 결제와 피드백을 연결할 수 있습니다."
+        : "현재는 로그인을 사용하지 않는 모드입니다.",
     };
   }, [authEnabled, user?.email]);
 
   const paymentSummary = useMemo(() => {
     if (hasMultipleActiveSubscriptions) {
       return {
-        value: "복수 ?�기결제",
-        description: "카카?�페?��? 카드 ?�기결제가 모두 ?�성?�니??",
+        value: "복수 정기결제",
+        description: "카카오페이와 카드 정기결제가 모두 활성입니다.",
       };
     }
 
     if (activeNiceSubscription) {
       return {
-        value: "카드 ?�기결제",
+        value: "카드 정기결제",
         description: activeNiceSubscription.nextChargeAt
-          ? `?�음 결제 ${formatDateTime(activeNiceSubscription.nextChargeAt)}`
-          : "카드 ?�동결제 ?�성",
+          ? `다음 결제 ${formatDateTime(activeNiceSubscription.nextChargeAt)}`
+          : "카드 자동결제 활성",
       };
     }
 
     if (activeKakaoSubscription) {
       return {
-        value: "카카?�페???�기결제",
+        value: "카카오페이 정기결제",
         description: activeKakaoSubscription.nextChargeAt
-          ? `?�음 결제 ${formatDateTime(activeKakaoSubscription.nextChargeAt)}`
-          : "카카?�페???�동결제 ?�성",
+          ? `다음 결제 ${formatDateTime(activeKakaoSubscription.nextChargeAt)}`
+          : "카카오페이 자동결제 활성",
       };
     }
 
     if (currentTier === "free") {
       return {
-        value: "�̱���",
-        description: "?�재 Free ?�랜 ?�용 중입?�다.",
+        value: "미구독",
+        description: "현재 Free 플랜 이용 중입니다.",
       };
     }
 
     if (currentTierExpiresAt || Number.isFinite(Number(currentTierRemainingDays))) {
       return {
-        value: "구독 ?�음",
+        value: "구독 없음",
         description:
           Number.isFinite(Number(currentTierRemainingDays)) && Number(currentTierRemainingDays) > 0
-            ? `${Number(currentTierRemainingDays)}???�음`
+            ? `${Number(currentTierRemainingDays)}일 남음`
             : currentTierExpiresAt
               ? `만료 ${formatDateTime(currentTierExpiresAt)}`
-              : "?�성 ?�기결제 ?�이 ?�용 중입?�다.",
+              : "활성 정기결제 없이 이용 중입니다.",
       };
     }
 
     return {
-      value: "?�인 ?�요",
-      description: subscriptionError || "결제 ?�단???�직 ?�인?��? 못했?�니??",
+      value: "확인 필요",
+      description: subscriptionError || "결제 수단을 아직 확인하지 못했습니다.",
     };
   }, [
     activeKakaoSubscription,
@@ -525,29 +525,29 @@ function SettingsDialog({
   const subscriptionCards = [
     kakaoSubscription && {
       key: "kakao",
-      title: "īī������",
+      title: "카카오페이",
       rows: [
-        { label: "?�태", value: getSubscriptionStatusLabel(kakaoSubscription?.status) },
-        { label: "�����", value: getTierLabel(kakaoSubscription?.tier || "free") },
+        { label: "상태", value: getSubscriptionStatusLabel(kakaoSubscription?.status) },
+        { label: "요금제", value: getTierLabel(kakaoSubscription?.tier || "free") },
         { label: "결제 주기", value: `${kakaoSubscription?.billingMonths || 1}개월` },
-        { label: "?�음 결제", value: formatDateTime(kakaoSubscription?.nextChargeAt) },
+        { label: "다음 결제", value: formatDateTime(kakaoSubscription?.nextChargeAt) },
       ],
     },
     niceSubscription && {
       key: "nice",
       title: "카드 결제",
       rows: [
-        { label: "?�태", value: getSubscriptionStatusLabel(niceSubscription?.status) },
-        { label: "�����", value: getTierLabel(niceSubscription?.tier || "free") },
+        { label: "상태", value: getSubscriptionStatusLabel(niceSubscription?.status) },
+        { label: "요금제", value: getTierLabel(niceSubscription?.tier || "free") },
         {
-          label: "결제 ?�단",
+          label: "결제 수단",
           value:
             niceSubscription?.cardName ||
             niceSubscription?.cardNoMasked ||
             niceSubscription?.bidMasked ||
             "-",
         },
-        { label: "?�음 결제", value: formatDateTime(niceSubscription?.nextChargeAt) },
+        { label: "다음 결제", value: formatDateTime(niceSubscription?.nextChargeAt) },
       ],
     },
   ].filter(Boolean);
@@ -564,19 +564,19 @@ function SettingsDialog({
   const sectionMeta = {
     account: {
       title: "계정",
-      description: "?�재 로그???�태?� ?�결??계정???�인?�니??",
+      description: "현재 로그인 상태와 연결된 계정을 확인합니다.",
     },
     subscription: {
       title: "구독",
-      description: "?�재 ?�랜�?결제 방식??짧게 ?�인?�니??",
+      description: "현재 플랜과 결제 방식을 짧게 확인합니다.",
     },
     theme: {
-      title: "?�마",
-      description: "???�마�?바로 ?�환?�니??",
+      title: "테마",
+      description: "앱 테마를 바로 전환합니다.",
     },
     feedback: {
-      title: "개선 ?�청",
-      description: "불편???�이???�안??바로 ?�깁?�다.",
+      title: "개선 요청",
+      description: "불편한 점이나 제안을 바로 남깁니다.",
     },
   };
 
@@ -593,7 +593,7 @@ function SettingsDialog({
     <div className="fixed inset-0 z-[170] flex items-center justify-center px-4 py-5">
       <button
         type="button"
-        aria-label="?�정 �??�기"
+        aria-label="설정 창 닫기"
         onClick={onClose}
         className={`absolute inset-0 ${isLight ? "bg-slate-900/16" : "bg-black/76"} backdrop-blur-[2px]`}
       />
@@ -602,12 +602,12 @@ function SettingsDialog({
         className={`relative z-[171] flex max-h-[min(78vh,30rem)] w-full max-w-[36rem] flex-col overflow-hidden rounded-[1.2rem] border ${panelClass}`}
       >
         <div className={`flex items-center justify-between border-b px-4 py-3 ${headerClass}`}>
-          <p className="text-sm font-semibold">?�정</p>
+          <p className="text-sm font-semibold">설정</p>
           <button
             type="button"
             onClick={onClose}
             className={`${mutedTextClass} transition hover:text-white`}
-            aria-label="?�기"
+            aria-label="닫기"
           >
             <svg
               viewBox="0 0 20 20"
@@ -662,29 +662,29 @@ function SettingsDialog({
             {activeSection === "account" && (
               <div className={`mt-4 rounded-2xl border p-4 ${cardClass}`}>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  <MiniInfo label="계정 ?�태" value={accountSummary.status} isLight={isLight} />
-                  <MiniInfo label="?�재 ?�랜" value={currentPlanLabel} isLight={isLight} />
+                  <MiniInfo label="계정 상태" value={accountSummary.status} isLight={isLight} />
+                  <MiniInfo label="현재 플랜" value={currentPlanLabel} isLight={isLight} />
                 </div>
 
                 <div className="mt-4">
                   <DetailRows
                     isLight={isLight}
                     rows={[
-                      { label: "�̸���", value: user?.email || "-" },
-                      { label: "?�랜 ?�태", value: currentTierNote },
+                      { label: "이메일", value: user?.email || "-" },
+                      { label: "플랜 상태", value: currentTierNote },
                       {
-                        label: "Ȱ�� ������",
+                        label: "활성 프로필",
                         value:
                           activeProfile?.name ||
-                          (currentTier === "premium" ? "?�택?��? ?�음" : "-"),
+                          (currentTier === "premium" ? "선택된 프로필 없음" : "-"),
                       },
                       {
                         label: "공간 모드",
                         value:
                           currentTier === "premium"
                             ? premiumSpaceMode === "shared"
-                              ? "공유 ?�페?�스"
-                              : "개인 ?�페?�스"
+                              ? "공유 스페이스"
+                              : "개인 스페이스"
                             : "-",
                       },
                     ]}
@@ -705,7 +705,7 @@ function SettingsDialog({
                       data-ghost-size="sm"
                       style={{ "--ghost-color": isLight ? "100, 116, 139" : "148, 163, 184" }}
                     >
-                      {isRefreshing ? "?�기??�?.." : "?�로고침"}
+                      {isRefreshing ? "새로고침 중.." : "새로고침"}
                     </button>
                   )}
                   {user ? (
@@ -717,7 +717,7 @@ function SettingsDialog({
                       data-ghost-size="sm"
                       style={{ "--ghost-color": "244, 63, 94" }}
                     >
-                      {signingOut ? "로그?�웃 �?.." : "로그?�웃"}
+                      {signingOut ? "로그아웃 중.." : "로그아웃"}
                     </button>
                   ) : authEnabled ? (
                     <button
@@ -727,7 +727,8 @@ function SettingsDialog({
                       data-ghost-size="sm"
                       style={{ "--ghost-color": "52, 211, 153" }}
                     >
-                      로그??                    </button>
+                      로그인
+                    </button>
                   ) : null}
                 </div>
               </div>
@@ -739,13 +740,13 @@ function SettingsDialog({
                   <div className="grid gap-2 sm:grid-cols-2">
                     <MiniInfo label="구독 방식" value={paymentSummary.value} isLight={isLight} />
                     <MiniInfo
-                      label="?�기결제 ?�태"
+                      label="정기결제 상태"
                       value={
                         hasMultipleActiveSubscriptions
-                          ? "중복 ?�인 ?�요"
+                          ? "중복 확인 필요"
                           : activeKakaoSubscription || activeNiceSubscription
-                            ? "?�성"
-                            : "?�음"
+                            ? "활성"
+                            : "없음"
                       }
                       isLight={isLight}
                     />
@@ -755,13 +756,13 @@ function SettingsDialog({
                     <DetailRows
                       isLight={isLight}
                       rows={[
-                        { label: "?�재 ?�랜", value: currentPlanLabel },
-                        { label: "?�랜 ?�태", value: currentTierNote },
-                        { label: "만료/?�음 결제", value: nextBillingLabel },
+                        { label: "현재 플랜", value: currentPlanLabel },
+                        { label: "플랜 상태", value: currentTierNote },
+                        { label: "만료/다음 결제", value: nextBillingLabel },
                         {
-                          label: "?�세 메모",
+                          label: "상세 메모",
                           value: loadingSubscriptions
-                            ? "불러?�는 �?.."
+                            ? "불러오는 중.."
                             : paymentSummary.description,
                         },
                       ]}
@@ -777,7 +778,7 @@ function SettingsDialog({
                         data-ghost-size="sm"
                         style={{ "--ghost-color": "52, 211, 153" }}
                       >
-                        ?�금???�기
+                        요금제 열기
                       </button>
                     )}
                     <button
@@ -788,7 +789,7 @@ function SettingsDialog({
                       data-ghost-size="sm"
                       style={{ "--ghost-color": isLight ? "100, 116, 139" : "148, 163, 184" }}
                     >
-                      {loadingSubscriptions ? "불러?�는 �?.." : "구독 ?�로고침"}
+                      {loadingSubscriptions ? "불러오는 중.." : "구독 새로고침"}
                     </button>
                     <button
                       type="button"
@@ -798,7 +799,7 @@ function SettingsDialog({
                       data-ghost-size="sm"
                       style={{ "--ghost-color": "244, 63, 94" }}
                     >
-                      {isCancellingPlan ? "?�랜 취소 �?.." : "?�랜 취소"}
+                      {isCancellingPlan ? "플랜 취소 중.." : "플랜 취소"}
                     </button>
                   </div>
 
@@ -851,12 +852,12 @@ function SettingsDialog({
                         }`}
                       >
                         <p className="text-sm font-semibold">
-                          {option === "dark" ? "��ũ" : "����Ʈ"}
+                          {option === "dark" ? "다크" : "라이트"}
                         </p>
                         <p className="mt-1 text-xs leading-5 opacity-80">
                           {option === "dark"
-                            ? "?�두??배경?�로 집중?�기 좋습?�다."
-                            : "밝�? 배경?�로 문서�?보기 좋습?�다."}
+                            ? "어두운 배경으로 집중하기 좋습니다."
+                            : "밝은 배경으로 문서를 보기 좋습니다."}
                         </p>
                       </button>
                     );
@@ -864,7 +865,7 @@ function SettingsDialog({
                 </div>
 
                 <p className={`mt-4 text-sm ${bodyTextClass}`}>
-                  ?�재 {getThemeLabel(theme)} ?�마가 ?�용?�어 ?�습?�다.
+                  현재 {getThemeLabel(theme)} 테마가 적용되어 있습니다.
                 </p>
               </div>
             )}
@@ -872,11 +873,11 @@ function SettingsDialog({
             {activeSection === "feedback" && (
               <>
                 <div className={`mt-4 rounded-2xl border p-4 ${cardClass}`}>
-                  <p className="text-sm font-semibold">���� ���� �ǰ��� �ּ���.</p>
+                  <p className="text-sm font-semibold">서비스 개선에 도움을 주세요.</p>
                   <p className={`mt-3 text-sm leading-7 ${bodyTextClass}`}>
                     {onOpenFeedbackDialog
-                      ? "버그, ?�안, 불편???�을 짧게 ?�겨주시�??�니?? ?�떤 ?�면?�서 막혔?��? ?�어주시�?바로 ?�인?�기 좋습?�다."
-                      : "?�재 모드?�서???�드�?기능???�결?�어 ?��? ?�습?�다."}
+                      ? "버그, 제안, 불편한 점을 짧게 남겨주시면 됩니다. 어떤 화면에서 막혔는지 적어주시면 바로 확인하기 좋습니다."
+                      : "현재 모드에서는 피드백 기능이 연결되어 있지 않습니다."}
                   </p>
 
                   {onOpenFeedbackDialog && (
@@ -886,7 +887,7 @@ function SettingsDialog({
                       className={`mt-4 ghost-button text-sm ${isLight ? "text-slate-700" : "text-slate-100"}`}
                       style={{ "--ghost-color": isLight ? "71, 85, 105" : "226, 232, 240" }}
                     >
-                      �ǵ�� �����
+                      피드백 남기기
                     </button>
                   )}
                 </div>
@@ -895,9 +896,9 @@ function SettingsDialog({
                   <div className={`mt-3 rounded-2xl border p-4 ${cardClass}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="text-sm font-semibold">?�장</p>
+                        <p className="text-sm font-semibold">답장</p>
                         <p className={`mt-1 text-xs leading-5 ${bodyTextClass}`}>
-                          ?�영?��? 보낸 ?�장???�면 ?�기???�인?????�습?�다.
+                          운영자가 보낸 답장이 오면 여기에서 확인할 수 있습니다.
                         </p>
                       </div>
                       <button
@@ -908,7 +909,7 @@ function SettingsDialog({
                         data-ghost-size="sm"
                         style={{ "--ghost-color": isLight ? "100, 116, 139" : "148, 163, 184" }}
                       >
-                        {loadingFeedbackReplies ? "불러?�는 �?." : "?�로고침"}
+                        {loadingFeedbackReplies ? "불러오는 중.." : "새로고침"}
                       </button>
                     </div>
 
@@ -919,7 +920,7 @@ function SettingsDialog({
                     )}
 
                     {loadingFeedbackReplies ? (
-                      <p className={`mt-4 text-sm ${bodyTextClass}`}>?�장??불러?�는 중입?�다.</p>
+                      <p className={`mt-4 text-sm ${bodyTextClass}`}>답장을 불러오는 중입니다.</p>
                     ) : feedbackReplies.length > 0 ? (
                       <div className="mt-4 space-y-3">
                         {feedbackReplies.map((entry) => (
@@ -931,7 +932,7 @@ function SettingsDialog({
                           >
                             <div className="flex items-start justify-between gap-3">
                               <div className="min-w-0">
-                                <p className="text-sm font-semibold">?�영?� ?�장</p>
+                                <p className="text-sm font-semibold">운영자 답장</p>
                                 <p className={`mt-1 text-[11px] ${mutedTextClass}`}>
                                   {formatDateTime(entry?.createdAt)}
                                   {entry?.responderEmail ? ` · ${entry.responderEmail}` : ""}
@@ -956,7 +957,7 @@ function SettingsDialog({
                                     : "border-white/10 bg-black/20 text-slate-300"
                                 }`}
                               >
-                                <span className="font-semibold">���� ���� �ǵ��</span>
+                                <span className="font-semibold">내가 보낸 피드백</span>
                                 <p className="mt-1 whitespace-pre-wrap">{entry.feedback.excerpt}</p>
                               </div>
                             )}
@@ -964,7 +965,7 @@ function SettingsDialog({
                         ))}
                       </div>
                     ) : (
-                      <p className={`mt-4 text-sm ${bodyTextClass}`}>?�직 받�? ?�장???�습?�다.</p>
+                      <p className={`mt-4 text-sm ${bodyTextClass}`}>아직 받은 답장이 없습니다.</p>
                     )}
                   </div>
                 )}
@@ -973,9 +974,9 @@ function SettingsDialog({
                   <div className={`mt-3 rounded-2xl border p-4 ${cardClass}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="text-sm font-semibold">�ǵ�� ����</p>
+                        <p className="text-sm font-semibold">피드백 관리</p>
                         <p className={`mt-1 text-xs leading-5 ${bodyTextClass}`}>
-                          ?�출???�보?� 문맥??보고 바로 ?�장 메일??보낼 ???�습?�다.
+                          제출자의 정보와 문맥을 보고 바로 답장 메일을 보낼 수 있습니다.
                         </p>
                       </div>
                       <button
@@ -986,7 +987,7 @@ function SettingsDialog({
                         data-ghost-size="sm"
                         style={{ "--ghost-color": isLight ? "100, 116, 139" : "148, 163, 184" }}
                       >
-                        {loadingFeedbackInbox ? "불러?�는 �?." : "?�로고침"}
+                        {loadingFeedbackInbox ? "불러오는 중.." : "새로고침"}
                       </button>
                     </div>
 
@@ -1002,7 +1003,7 @@ function SettingsDialog({
                     )}
 
                     {loadingFeedbackInbox ? (
-                      <p className={`mt-4 text-sm ${bodyTextClass}`}>?�드�?목록??불러?�는 중입?�다.</p>
+                      <p className={`mt-4 text-sm ${bodyTextClass}`}>피드백 목록을 불러오는 중입니다.</p>
                     ) : feedbackInbox.length > 0 ? (
                       <div className="mt-4 space-y-3">
                         {feedbackInbox.map((entry) => {
@@ -1023,7 +1024,7 @@ function SettingsDialog({
                                 <div className="min-w-0">
                                   <p className="text-sm font-semibold">{senderLabel}</p>
                                   <p className={`mt-1 text-[11px] ${mutedTextClass}`}>
-                                    {entry?.userEmail || "?�메???�음"} · {getFeedbackCategoryLabel(entry?.category)} ·{" "}
+                                    {entry?.userEmail || "이메일 없음"} · {getFeedbackCategoryLabel(entry?.category)} ·{" "}
                                     {formatDateTime(entry?.createdAt)}
                                   </p>
                                   {(entry?.docName || entry?.panel) && (
@@ -1043,7 +1044,7 @@ function SettingsDialog({
                                         : "bg-amber-400/10 text-amber-200"
                                   }`}
                                 >
-                                  {entry?.status === "replied" ? "���� �Ϸ�" : "�̴���"}
+                                  {entry?.status === "replied" ? "답장 완료" : "미답장"}
                                 </span>
                               </div>
 
@@ -1051,7 +1052,7 @@ function SettingsDialog({
 
                               {entry?.lastRepliedAt && (
                                 <p className={`mt-3 text-[11px] leading-5 ${mutedTextClass}`}>
-                                  최근 ?�장 {formatDateTime(entry.lastRepliedAt)}
+                                  최근 답장 {formatDateTime(entry.lastRepliedAt)}
                                   {entry?.lastReplyExcerpt ? ` · ${entry.lastReplyExcerpt}` : ""}
                                 </p>
                               )}
@@ -1061,7 +1062,7 @@ function SettingsDialog({
                                 onChange={(event) => handleFeedbackReplyDraftChange(entryId, event.target.value)}
                                 rows={3}
                                 maxLength={2000}
-                                placeholder="???�드백에 ?�장???�용???�력?�세??"
+                                placeholder="이 피드백에 답장할 내용을 입력하세요."
                                 className={`mt-3 w-full resize-y rounded-xl border px-3 py-2 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
                                   isLight
                                     ? "border-slate-300 bg-white text-slate-900"
@@ -1078,7 +1079,7 @@ function SettingsDialog({
                                   data-ghost-size="sm"
                                   style={{ "--ghost-color": "52, 211, 153" }}
                                 >
-                                  {isReplying ? "���� ���� ��.." : "���� ������"}
+                                  {isReplying ? "답장 전송 중.." : "답장 보내기"}
                                 </button>
                               </div>
                             </div>
@@ -1086,7 +1087,7 @@ function SettingsDialog({
                         })}
                       </div>
                     ) : canManageFeedback ? (
-                      <p className={`mt-4 text-sm ${bodyTextClass}`}>최근 ?�드백이 ?�습?�다.</p>
+                      <p className={`mt-4 text-sm ${bodyTextClass}`}>최근 피드백이 없습니다.</p>
                     ) : null}
                   </div>
                 )}
