@@ -36,6 +36,14 @@ const resolveLimitParam = (req) => {
 
 const REPLY_SYNC_TIMEOUT_MS = 12000;
 
+const resolveSyncErrorMessage = (error) => {
+  const rawMessage = text(error?.responseText || error?.response || error?.message);
+  if (error?.authenticationFailed || text(error?.serverResponseCode).toUpperCase() === "AUTH") {
+    return "네이버 IMAP 로그인에 실패했습니다. 네이버 메일의 IMAP/SMTP 사용함, 2단계 인증, 애플리케이션 비밀번호를 다시 확인해 주세요.";
+  }
+  return rawMessage || "Feedback reply sync failed.";
+};
+
 const syncRepliesOnDemand = async () => {
   try {
     await Promise.race([
@@ -46,7 +54,7 @@ const syncRepliesOnDemand = async () => {
     ]);
     return "";
   } catch (error) {
-    return error?.message || "Feedback reply sync failed.";
+    return resolveSyncErrorMessage(error);
   }
 };
 
