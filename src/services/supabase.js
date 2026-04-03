@@ -756,8 +756,6 @@ export async function setUserTier({ userId, tier, expiresAt = null, extendMonths
 }
 export async function saveUserFeedback({
   userId,
-  userEmail = "",
-  userName = "",
   category = "general",
   content,
   docId = null,
@@ -774,8 +772,6 @@ export async function saveUserFeedback({
 
   const payload = {
     user_id: userId,
-    user_email: userEmail || "",
-    user_name: userName || "",
     category: String(category || "general").trim() || "general",
     content: trimmedContent,
     doc_id: docId || null,
@@ -784,26 +780,7 @@ export async function saveUserFeedback({
     metadata_json: metadata || null,
   };
 
-  let result = await client.from(FEEDBACK_TABLE).insert(payload).select().single();
-  if (
-    result.error &&
-    `${result.error?.message || ""} ${result.error?.details || ""} ${result.error?.hint || ""}`.match(
-      /user_email|user_name/i
-    )
-  ) {
-    const fallbackPayload = {
-      user_id: userId,
-      category: String(category || "general").trim() || "general",
-      content: trimmedContent,
-      doc_id: docId || null,
-      doc_name: docName || "",
-      panel: panel || "",
-      metadata_json: metadata || null,
-    };
-    result = await client.from(FEEDBACK_TABLE).insert(fallbackPayload).select().single();
-  }
-
-  const { data, error } = result;
+  const { data, error } = await client.from(FEEDBACK_TABLE).insert(payload).select().single();
   if (error) throw error;
   return data;
 }

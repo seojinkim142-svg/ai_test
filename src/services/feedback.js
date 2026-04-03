@@ -51,26 +51,18 @@ const parseJsonResponse = async (response) => {
   }
 };
 
-const throwFeedbackError = (body, fallbackMessage, status) => {
-  const error = new Error(body?.message || fallbackMessage);
-  error.status = Number(status) || 500;
-  error.body = body;
-  throw error;
-};
-
-const requestFeedbackApi = async (path, { method = "GET", payload = null, accessToken = "" } = {}) => {
+export async function notifyFeedbackEmail(payload = {}) {
   let response;
   try {
-    response = await fetch(buildFeedbackApiUrl(path), {
-      method,
+    response = await fetch(buildFeedbackApiUrl("/notify"), {
+      method: "POST",
       headers: {
-        ...(payload != null ? { "Content-Type": "application/json" } : {}),
-        ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+        "Content-Type": "application/json",
       },
-      ...(payload != null ? { body: JSON.stringify(payload) } : {}),
+      body: JSON.stringify(payload || {}),
     });
   } catch (error) {
-    throw new Error(`Feedback request failed: ${error.message}`);
+    throw new Error(`Feedback email request failed: ${error.message}`);
   }
 
   if (response.status === 204) {
@@ -79,42 +71,8 @@ const requestFeedbackApi = async (path, { method = "GET", payload = null, access
 
   const body = await parseJsonResponse(response);
   if (!response.ok) {
-    throwFeedbackError(body, "Feedback request failed.", response.status);
+    throw new Error(body?.message || "Feedback email request failed.");
   }
 
   return body;
-};
-
-export async function notifyFeedbackEmail(payload = {}) {
-  return requestFeedbackApi("/notify", {
-    method: "POST",
-    payload: payload || {},
-  });
-}
-
-export async function fetchFeedbackInbox({ accessToken, limit = 20 } = {}) {
-  const normalizedLimit = Number.isFinite(Number(limit)) ? Math.max(1, Math.min(100, Math.floor(Number(limit)))) : 20;
-  return requestFeedbackApi(`/inbox?limit=${normalizedLimit}`, {
-    method: "GET",
-    accessToken,
-  });
-}
-
-export async function fetchFeedbackReplies({ accessToken, limit = 20 } = {}) {
-  const normalizedLimit = Number.isFinite(Number(limit)) ? Math.max(1, Math.min(100, Math.floor(Number(limit)))) : 20;
-  return requestFeedbackApi(`/replies?limit=${normalizedLimit}`, {
-    method: "GET",
-    accessToken,
-  });
-}
-
-export async function sendFeedbackReply({ accessToken, feedbackId, content } = {}) {
-  return requestFeedbackApi("/reply", {
-    method: "POST",
-    accessToken,
-    payload: {
-      feedbackId,
-      content,
-    },
-  });
 }
