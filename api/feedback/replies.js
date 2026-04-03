@@ -9,6 +9,7 @@ import {
   text,
   truncateText,
 } from "../../lib/feedback/server.js";
+import { syncNaverFeedbackReplies } from "../../lib/feedback/naver-replies.js";
 
 const FEEDBACK_SELECT = "id, category, content, doc_name, panel, created_at";
 const REPLY_SELECT = "id, feedback_id, responder_email, content, created_at";
@@ -30,6 +31,21 @@ const resolveLimitParam = (req) => {
     return requestUrl.searchParams.get("limit");
   } catch {
     return null;
+  }
+};
+
+const REPLY_SYNC_TIMEOUT_MS = 12000;
+
+const syncRepliesOnDemand = async () => {
+  try {
+    await Promise.race([
+      syncNaverFeedbackReplies(),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("Feedback reply sync timed out.")), REPLY_SYNC_TIMEOUT_MS);
+      }),
+    ]);
+  } catch {
+    // Reply sync is best-effort. We still return any replies already saved in the database.
   }
 };
 
@@ -79,6 +95,8 @@ export default async function handler(req, res) {
       sendJson(res, 200, { ok: true, replies: [] }, allowOrigin);
       return;
     }
+
+    await syncRepliesOnDemand();
 
     const replyResult = await authResult.client
       .from(replyTable)
