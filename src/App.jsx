@@ -106,7 +106,6 @@ import {
   readExamCramFromHighlights,
   readReviewNotesFromHighlights,
 } from "./utils/studyArtifacts";
-import { clearPaymentReturnPending, readPaymentReturnPending } from "./utils/paymentReturn";
 
 const AuthPanel = lazy(() => import("./components/AuthPanel"));
 const Header = lazy(() => import("./components/Header"));
@@ -115,67 +114,6 @@ const PaymentPage = lazy(() => import("./components/PaymentPage"));
 const SettingsDialog = lazy(() => import("./components/SettingsDialog"));
 const DetailPage = lazy(() => import("./pages/DetailPage"));
 const PremiumProfilePicker = lazy(() => import("./components/PremiumProfilePicker"));
-
-const NativeAppPlugin =
-  Capacitor.isNativePlatform() && Capacitor.isPluginAvailable("App")
-    ? Capacitor.registerPlugin("App")
-    : null;
-
-const PAYMENT_RETURN_QUERY_KEYS = [
-  "pg_token",
-  "kakaoPay",
-  "nicePay",
-  "np_token",
-  "orderId",
-  "amount",
-  "message",
-  "niceBilling",
-  "trial",
-];
-const NATIVE_PAYMENT_RETURN_FALLBACK_MS = 1200;
-const trimSchemeSeparators = (value) => String(value || "").trim().replace(/:\/*$/, "");
-const NATIVE_PAYMENT_RETURN_SCHEME = trimSchemeSeparators(
-  import.meta.env.VITE_NATIVE_APP_SCHEME || "com.tjwls.examstudyai"
-);
-const NATIVE_PAYMENT_RETURN_HOST = "auth";
-const NATIVE_PAYMENT_RETURN_PATH = "/callback";
-
-function extractPaymentReturnParams(rawUrl) {
-  const source = String(rawUrl || "").trim();
-  if (!source) return null;
-
-  try {
-    const parsed = new URL(source);
-    const nextParams = new URLSearchParams();
-
-    PAYMENT_RETURN_QUERY_KEYS.forEach((key) => {
-      const value = parsed.searchParams.get(key);
-      if (value != null && value !== "") {
-        nextParams.set(key, value);
-      }
-    });
-
-    return nextParams.toString() ? nextParams : null;
-  } catch {
-    return null;
-  }
-}
-
-function isNativePaymentCallbackUrl(rawUrl) {
-  const source = String(rawUrl || "").trim();
-  if (!source || !NATIVE_PAYMENT_RETURN_SCHEME) return false;
-
-  try {
-    const parsed = new URL(source);
-    return (
-      parsed.protocol === `${NATIVE_PAYMENT_RETURN_SCHEME}:` &&
-      parsed.hostname === NATIVE_PAYMENT_RETURN_HOST &&
-      String(parsed.pathname || "").startsWith(NATIVE_PAYMENT_RETURN_PATH)
-    );
-  } catch {
-    return false;
-  }
-}
 
 function buildStoragePathCandidates(rawPath) {
   const source = String(rawPath || "").trim();
@@ -926,7 +864,6 @@ function App() {
   const [isResizingSplit, setIsResizingSplit] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
-  const [paymentReturnSignal, setPaymentReturnSignal] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showGuestIntro, setShowGuestIntro] = useState(() => !AUTH_ENABLED);
@@ -937,7 +874,6 @@ function App() {
   const [isGeneratingMockExam, setIsGeneratingMockExam] = useState(false);
   const [mockExamStatus, setMockExamStatus] = useState("");
   const [mockExamError, setMockExamError] = useState("");
-  const paymentAbortFallbackTimerRef = useRef(null);
   const [activeMockExamId, setActiveMockExamId] = useState(null);
   const [showMockExamAnswers, setShowMockExamAnswers] = useState(false);
   const [isMockExamMenuOpen, setIsMockExamMenuOpen] = useState(false);
@@ -1170,19 +1106,6 @@ function App() {
   const closeAuth = useCallback(() => {
     setShowAuth(false);
   }, []);
-
-  const clearPaymentAbortFallback = useCallback(() => {
-    if (paymentAbortFallbackTimerRef.current != null && typeof window !== "undefined") {
-      window.clearTimeout(paymentAbortFallbackTimerRef.current);
-      paymentAbortFallbackTimerRef.current = null;
-    }
-  }, []);
-
-  const closePayment = useCallback(() => {
-    clearPaymentAbortFallback();
-    clearPaymentReturnPending();
-    setShowPayment(false);
-  }, [clearPaymentAbortFallback]);
 
   const openBilling = useCallback(() => {
     setShowPayment(true);
@@ -1987,75 +1910,6 @@ function App() {
       setShowPayment(true);
     }
   }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !isNativePlatform || !NativeAppPlugin) return undefined;
-
-    const applyPaymentReturnUrl = (rawUrl) => {
-      clearPaymentAbortFallback();
-      const nextPaymentParams = extractPaymentReturnParams(rawUrl);
-      if (!nextPaymentParams) {
-        if (isNativePaymentCallbackUrl(rawUrl) && readPaymentReturnPending()) {
-          paymentAbortFallbackTimerRef.current = window.setTimeout(() => {
-            paymentAbortFallbackTimerRef.current = null;
-            if (!readPaymentReturnPending()) return;
-            const currentParams = new URLSearchParams(window.location.search);
-            const hasPaymentReturnParams = PAYMENT_RETURN_QUERY_KEYS.some((key) => {
-              const value = currentParams.get(key);
-              return value != null && value !== "";
-            });
-            if (hasPaymentReturnParams) return;
-            clearPaymentReturnPending();
-            setShowPayment(false);
-          }, NATIVE_PAYMENT_RETURN_FALLBACK_MS);
-          return true;
-        }
-        return false;
-      }
-
-      const currentUrl = new URL(window.location.href);
-      PAYMENT_RETURN_QUERY_KEYS.forEach((key) => currentUrl.searchParams.delete(key));
-      nextPaymentParams.forEach((value, key) => currentUrl.searchParams.set(key, value));
-
-      const nextUrl = `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`;
-      const nextState =
-        window.history.state && typeof window.history.state === "object"
-          ? window.history.state
-          : buildHistoryState();
-
-      window.history.replaceState(nextState, "", nextUrl);
-      setShowPayment(true);
-      setPaymentReturnSignal((prev) => prev + 1);
-      return true;
-    };
-
-    let cancelled = false;
-    let listenerHandle = null;
-
-    (async () => {
-      try {
-        if (typeof NativeAppPlugin.getLaunchUrl === "function") {
-          const launchData = await NativeAppPlugin.getLaunchUrl();
-          if (!cancelled) {
-            applyPaymentReturnUrl(launchData?.url);
-          }
-        }
-
-        listenerHandle = await NativeAppPlugin.addListener("appUrlOpen", ({ url }) => {
-          if (cancelled) return;
-          applyPaymentReturnUrl(url);
-        });
-      } catch (err) {
-        console.warn("Native payment appUrlOpen listener setup failed:", err);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      clearPaymentAbortFallback();
-      listenerHandle?.remove?.();
-    };
-  }, [buildHistoryState, clearPaymentAbortFallback, isNativePlatform]);
 
   useEffect(() => {
     if (!AUTH_ENABLED || !authReady || user || typeof window === "undefined") return;
@@ -3018,7 +2872,7 @@ function App() {
 
   const consumeOverlayBack = useCallback(() => {
     if (showPayment) {
-      closePayment();
+      setShowPayment(false);
       return true;
     }
     if (showProfilePinDialog) {
@@ -3073,7 +2927,6 @@ function App() {
     showMockExamAnswers,
     showPayment,
     showProfilePinDialog,
-    closePayment,
   ]);
 
   const uploadedFilesRef = useRef(uploadedFiles);
@@ -6137,18 +5990,8 @@ function App() {
       setIsSubmittingFeedback(true);
       setFeedbackError("");
       try {
-        const feedbackUserName =
-          String(
-            user?.user_metadata?.name ||
-              user?.user_metadata?.full_name ||
-              user?.user_metadata?.nickname ||
-              user?.email ||
-              ""
-          ).trim() || "";
         const feedbackPayload = {
           userId: user.id,
-          userEmail: user?.email || "",
-          userName: feedbackUserName,
           category: feedbackCategory,
           content: trimmedFeedback,
           docId: selectedFileId || null,
@@ -6161,33 +6004,28 @@ function App() {
             platform: Capacitor.getPlatform(),
           },
         };
-        let savedFeedback = null;
-        let saveError = null;
-        let notifyError = null;
-
-        try {
-          savedFeedback = await saveUserFeedback({
+        const [saveResult, notifyResult] = await Promise.allSettled([
+          saveUserFeedback({
             ...feedbackPayload,
-          });
-        } catch (error) {
-          saveError = error;
-          console.warn("Feedback DB save failed.", error);
-        }
-
-        try {
-          await notifyFeedbackEmail({
+          }),
+          notifyFeedbackEmail({
             ...feedbackPayload,
-            feedbackId: savedFeedback?.id || null,
-          });
-        } catch (error) {
-          notifyError = error;
-          console.warn("Feedback email notification failed.", error);
-        }
+            userEmail: user?.email || "",
+          }),
+        ]);
+        const saveSucceeded = saveResult.status === "fulfilled";
+        const notifySucceeded = notifyResult.status === "fulfilled";
 
-        const saveSucceeded = Boolean(savedFeedback);
-        const notifySucceeded = !notifyError;
+        if (!saveSucceeded) {
+          console.warn("Feedback DB save failed.", saveResult.reason);
+        }
+        if (!notifySucceeded) {
+          console.warn("Feedback email notification failed.", notifyResult.reason);
+        }
 
         if (!saveSucceeded && !notifySucceeded) {
+          const saveError = saveResult.reason;
+          const notifyError = notifyResult.reason;
           if (isMissingFeedbackTableError(saveError)) {
             throw new Error(
               `피드백 저장 테이블이 준비되지 않았고 메일 발송도 실패했습니다. ${notifyError?.message || ""}`.trim()
@@ -6230,7 +6068,6 @@ function App() {
       tier,
       user?.email,
       user?.id,
-      user?.user_metadata,
     ]
   );
 
@@ -6489,14 +6326,13 @@ function App() {
       {showPayment && (
         <Suspense fallback={null}>
           <PaymentPage
-            onClose={closePayment}
+            onClose={() => setShowPayment(false)}
             currentTier={tier}
             currentTierExpiresAt={tierExpiresAt}
             currentTierRemainingDays={tierRemainingDays}
             theme={theme}
             user={user}
             onTierUpdated={refreshTier}
-            paymentReturnSignal={paymentReturnSignal}
           />
         </Suspense>
       )}
