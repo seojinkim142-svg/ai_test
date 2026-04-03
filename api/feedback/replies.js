@@ -111,6 +111,7 @@ export default async function handler(req, res) {
       .from(replyTable)
       .select(REPLY_SELECT)
       .in("feedback_id", [...feedbackById.keys()])
+      .neq("content", "")
       .order("created_at", { ascending: false })
       .limit(limit);
 
