@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fetchFeedbackInbox, fetchFeedbackReplies, sendFeedbackReply } from "../services/feedback";
+import { deleteFeedbackReply, fetchFeedbackInbox, fetchFeedbackReplies, sendFeedbackReply } from "../services/feedback";
 import { fetchKakaoPaySubscriptionStatus, inactiveKakaoPaySubscription } from "../services/kakaopay";
 import { fetchNicePaymentsSubscriptionStatus, inactiveNicePaymentsSubscription } from "../services/nicepayments";
 import { getAccessToken } from "../services/supabase";
@@ -162,6 +162,7 @@ function SettingsDialog({
   const [feedbackReplies, setFeedbackReplies] = useState([]);
   const [loadingFeedbackReplies, setLoadingFeedbackReplies] = useState(false);
   const [feedbackRepliesError, setFeedbackRepliesError] = useState("");
+  const [deletingFeedbackReplyId, setDeletingFeedbackReplyId] = useState(null);
 
   useEffect(() => {
     const handleKeyDown = (event) => {
@@ -230,6 +231,7 @@ function SettingsDialog({
     setSendingFeedbackReplyId(null);
     setFeedbackReplies([]);
     setFeedbackRepliesError("");
+    setDeletingFeedbackReplyId(null);
   }, [user?.id]);
 
   const activeKakaoSubscription =
@@ -396,6 +398,36 @@ function SettingsDialog({
       [feedbackId]: value,
     }));
   }, []);
+
+  const handleDeleteFeedbackReply = useCallback(
+    async (replyId) => {
+      const normalizedId = Number(replyId);
+      if (!Number.isFinite(normalizedId) || normalizedId <= 0 || deletingFeedbackReplyId != null) return;
+      if (!window.confirm("\uC774 \uB2F5\uC7A5\uC744 \uC0AD\uC81C\uD560\uAE4C\uC694?")) return;
+
+      setFeedbackRepliesError("");
+      setDeletingFeedbackReplyId(normalizedId);
+
+      try {
+        const accessToken = await getAccessToken();
+        if (!accessToken) {
+          throw new Error("\uB2F5\uC7A5\uC744 \uC0AD\uC81C\uD558\uB824\uBA74 \uB85C\uADF8\uC778 \uC138\uC158\uC774 \uD544\uC694\uD569\uB2C8\uB2E4.");
+        }
+
+        await deleteFeedbackReply({
+          accessToken,
+          replyId: normalizedId,
+        });
+
+        setFeedbackReplies((prev) => prev.filter((entry) => Number(entry?.id) !== normalizedId));
+      } catch (error) {
+        setFeedbackRepliesError(error?.message || "\uB2F5\uC7A5\uC744 \uC0AD\uC81C\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.");
+      } finally {
+        setDeletingFeedbackReplyId(null);
+      }
+    },
+    [deletingFeedbackReplyId]
+  );
 
   const handleSendFeedbackReply = useCallback(
     async (feedbackId) => {
@@ -948,6 +980,16 @@ function SettingsDialog({
                                   </p>
                                 )}
                               </div>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteFeedbackReply(entry?.id)}
+                                disabled={deletingFeedbackReplyId != null}
+                                className="ghost-button text-xs text-rose-100"
+                                data-ghost-size="sm"
+                                style={{ "--ghost-color": "244, 63, 94" }}
+                              >
+                                {deletingFeedbackReplyId === Number(entry?.id) ? "\uC0AD\uC81C \uC911.." : "\uC0AD\uC81C"}
+                              </button>
                             </div>
 
                             <p className="mt-3 whitespace-pre-wrap text-sm leading-6">{entry?.content || "-"}</p>

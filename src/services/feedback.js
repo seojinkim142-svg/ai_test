@@ -118,3 +118,13 @@ export async function sendFeedbackReply({ accessToken, feedbackId, content } = {
     },
   });
 }
+
+export async function deleteFeedbackReply({ accessToken, replyId } = {}) {
+  return requestFeedbackApi("/delete-reply", {
+    method: "POST",
+    accessToken,
+    payload: {
+      replyId,
+    },
+  });
+}
