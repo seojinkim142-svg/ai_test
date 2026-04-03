@@ -44,8 +44,9 @@ const syncRepliesOnDemand = async () => {
         setTimeout(() => reject(new Error("Feedback reply sync timed out.")), REPLY_SYNC_TIMEOUT_MS);
       }),
     ]);
-  } catch {
-    // Reply sync is best-effort. We still return any replies already saved in the database.
+    return "";
+  } catch (error) {
+    return error?.message || "Feedback reply sync failed.";
   }
 };
 
@@ -96,7 +97,7 @@ export default async function handler(req, res) {
       return;
     }
 
-    await syncRepliesOnDemand();
+    const syncError = await syncRepliesOnDemand();
 
     const replyResult = await authResult.client
       .from(replyTable)
@@ -107,7 +108,7 @@ export default async function handler(req, res) {
 
     if (replyResult.error) {
       if (isMissingTableError(replyResult.error, replyTable)) {
-        sendJson(res, 200, { ok: true, replies: [] }, allowOrigin);
+        sendJson(res, 200, { ok: true, replies: [], syncError }, allowOrigin);
         return;
       }
       throw replyResult.error;
@@ -135,7 +136,7 @@ export default async function handler(req, res) {
       };
     });
 
-    sendJson(res, 200, { ok: true, replies }, allowOrigin);
+    sendJson(res, 200, { ok: true, replies, syncError }, allowOrigin);
   } catch (error) {
     sendJson(res, 500, { message: error?.message || "Feedback replies request failed." }, allowOrigin);
   }

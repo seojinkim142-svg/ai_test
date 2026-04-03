@@ -373,6 +373,9 @@ function SettingsDialog({
 
         const result = await fetchFeedbackReplies({ accessToken, limit: 20 });
         setFeedbackReplies(Array.isArray(result?.replies) ? result.replies : []);
+        if (result?.syncError) {
+          setFeedbackRepliesError(result.syncError);
+        }
       } catch (error) {
         setFeedbackRepliesError(error?.message || "답장을 불러오지 못했습니다.");
       } finally {

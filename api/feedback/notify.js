@@ -290,6 +290,7 @@ export default async function handler(req, res) {
 
   const userEmail = text(body?.userEmail);
   const payload = {
+    feedbackId: Number.isFinite(Number(body?.feedbackId)) ? Number(body.feedbackId) : null,
     category: text(body?.category) || "general",
     content,
     docId: text(body?.docId),
