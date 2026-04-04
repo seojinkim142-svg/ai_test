@@ -774,17 +774,6 @@ function SettingsDialog({
                 <div className={`mt-4 rounded-2xl border p-4 ${cardClass}`}>
                   <div className="grid gap-2 sm:grid-cols-2">
                     <MiniInfo label="구독 방식" value={paymentSummary.value} isLight={isLight} />
-                    <MiniInfo
-                      label="정기결제 상태"
-                      value={
-                        hasMultipleActiveSubscriptions
-                          ? "중복 확인 필요"
-                          : activeKakaoSubscription || activeNiceSubscription
-                            ? "활성"
-                            : "없음"
-                      }
-                      isLight={isLight}
-                    />
                   </div>
 
                   <div className="mt-4">
