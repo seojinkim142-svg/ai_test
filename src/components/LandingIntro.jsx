@@ -540,10 +540,6 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
           <p className="uppercase tracking-[0.24em] text-emerald-300/75">회사 정보</p>
           <div className="mt-3 space-y-1 leading-6">
             <p>상호명: Hestra</p>
-            <p>사업자등록번호: 393-03-03517</p>
-            <p>대표자명: 김서진</p>
-            <p>사업장 주소: 부산광역시 금정구 금강로 335번길 125</p>
-            <p>전화번호: 010-5906-5692</p>
           </div>
         </div>
       </footer>
