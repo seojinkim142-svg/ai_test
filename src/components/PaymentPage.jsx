@@ -361,11 +361,7 @@ function PaymentPage({
   const niceSubscriptionCancelledLabel = formatTierExpiryLabel(niceSubscriptionData?.cancelledAt);
   const canProceedWithKakao = canStartSubscriptionWithKakao;
   const canProceedWithCard = canStartNiceSubscription;
-  const shouldShowSubscriptionSettings =
-    Boolean(subscriptionState) ||
-    Boolean(niceSubscriptionData) ||
-    isLoadingSubscription ||
-    isLoadingNiceSubscription;
+  const shouldShowSubscriptionSettings = false;
   const canShowProTrial = currentTier === "free" && selectedPlan === "Pro";
   const isProTrialEligible = canShowProTrial && Boolean(proTrialStatus?.eligible);
   const canStartKakaoProTrial =
