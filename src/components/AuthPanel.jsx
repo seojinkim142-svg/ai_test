@@ -1,22 +1,94 @@
 import { useState } from "react";
-import { signInWithEmail, signUpWithEmail, signInWithProvider, signOut, supabase } from "../services/supabase";
+import { signInWithEmail, signInWithProvider, signOut, signUpWithEmail, supabase } from "../services/supabase";
 
-function AuthPanel({ user, onAuth }) {
+function AuthIcon({ children }) {
+  return (
+    <span className="flex h-9 w-9 items-center justify-center rounded-full border border-current/10 bg-black/5">
+      {children}
+    </span>
+  );
+}
+
+function GoogleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <path d="M20 12.18c0 4.7-3.16 8.02-7.84 8.02A8.2 8.2 0 1 1 12 3.8c2.2 0 4.04.8 5.45 2.12" />
+      <path d="M21 12h-9" />
+    </svg>
+  );
+}
+
+function KakaoIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <path d="M12 4.5c4.7 0 8.5 3.01 8.5 6.72 0 3.72-3.8 6.73-8.5 6.73-.82 0-1.62-.09-2.38-.28L5.5 20l1.12-3.18c-1.92-1.2-3.12-3.19-3.12-5.6C3.5 7.51 7.3 4.5 12 4.5Z" />
+    </svg>
+  );
+}
+
+function EmailIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <rect x="3.5" y="5.5" width="17" height="13" rx="2" />
+      <path d="m5 8 7 5 7-5" />
+    </svg>
+  );
+}
+
+function AuthPanel({ user, onAuth, theme = "dark" }) {
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [showEmailForm, setShowEmailForm] = useState(false);
-  const [isSignup, setIsSignup] = useState(false);
+  const [isSignup, setIsSignup] = useState(true);
 
-  const handleProvider = async (provider) => {
+  const isLight = theme === "light";
+  const shellClass = isLight ? "text-slate-900" : "text-slate-100";
+  const bodyClass = isLight ? "text-slate-600" : "text-slate-400";
+  const buttonClass = isLight
+    ? "border-slate-300 bg-white/70 text-slate-900 hover:border-slate-400 hover:bg-white"
+    : "border-white/12 bg-white/[0.03] text-slate-100 hover:border-white/24 hover:bg-white/[0.06]";
+  const inputClass = isLight
+    ? "border-slate-300 bg-white/80 text-slate-900 placeholder:text-slate-400 focus:border-slate-500 focus:ring-slate-300/60"
+    : "border-white/12 bg-white/[0.03] text-slate-100 placeholder:text-slate-500 focus:border-white/30 focus:ring-white/15";
+  const subtleButtonClass = isLight ? "text-slate-700 hover:text-slate-900" : "text-slate-300 hover:text-slate-100";
+  const legalLinkClass = isLight ? "text-slate-900" : "text-slate-100";
+  const noticeClass = isLight ? "text-slate-700" : "text-slate-300";
+
+  const title = showEmailForm ? (isSignup ? "이메일로 계정 생성" : "이메일로 로그인") : isSignup ? "계정 생성" : "로그인";
+  const description = showEmailForm
+    ? isSignup
+      ? "이메일과 비밀번호를 입력해 Zeusian 계정을 만드세요."
+      : "이메일과 비밀번호를 입력해 다시 로그인하세요."
+    : isSignup
+      ? "Google, 카카오 또는 이메일로 바로 계정을 만들 수 있습니다."
+      : "이미 계정이 있다면 원하는 방식으로 바로 로그인하세요.";
+
+  const resetMessages = () => {
     setError("");
     setMessage("");
+  };
+
+  const openEmailForm = () => {
+    setShowEmailForm(true);
+    resetMessages();
+  };
+
+  const closeEmailForm = () => {
+    setShowEmailForm(false);
+    setEmail("");
+    setPassword("");
+    resetMessages();
+  };
+
+  const handleProvider = async (provider) => {
+    resetMessages();
     setLoading(true);
     try {
       await signInWithProvider(provider);
-      setMessage("소셜 로그인 리다이렉트 중입니다...");
+      setMessage("인증 화면으로 이동하고 있습니다.");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -24,22 +96,22 @@ function AuthPanel({ user, onAuth }) {
     }
   };
 
-  const handleEmailSubmit = async (e) => {
-    e.preventDefault();
+  const handleEmailSubmit = async (event) => {
+    event.preventDefault();
     if (!email || !password) {
-      setError("이메일과 비밀번호를 입력하세요.");
+      setError("이메일과 비밀번호를 입력해주세요.");
       return;
     }
-    setError("");
-    setMessage("");
+
+    resetMessages();
     setLoading(true);
     try {
       if (isSignup) {
         await signUpWithEmail(email, password);
-        setMessage("회원가입 완료. 메일 인증이 필요할 수 있습니다.");
+        setMessage("계정 생성이 완료되었습니다. 이메일 인증이 필요할 수 있습니다.");
       } else {
         await signInWithEmail(email, password);
-        setMessage("로그인 성공");
+        setMessage("로그인되었습니다.");
       }
       onAuth?.();
     } catch (err) {
@@ -49,153 +121,157 @@ function AuthPanel({ user, onAuth }) {
     }
   };
 
-  const handleSignOut = async () => {
-    setError("");
-    setMessage("");
-    setLoading(true);
-    try {
-      await signOut();
-      onAuth?.();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+  const handleModeChange = () => {
+    setIsSignup((prev) => !prev);
+    closeEmailForm();
   };
+
+  const providerItems = [
+    {
+      key: "google",
+      label: "Google로 계속",
+      icon: <GoogleIcon />,
+      onClick: () => handleProvider("google"),
+    },
+    {
+      key: "kakao",
+      label: "카카오로 계속",
+      icon: <KakaoIcon />,
+      onClick: () => handleProvider("kakao"),
+    },
+    {
+      key: "email",
+      label: "이메일로 계속",
+      icon: <EmailIcon />,
+      onClick: openEmailForm,
+    },
+  ];
 
   if (!supabase) {
     return (
-      <div className="rounded-3xl border border-red-400/20 bg-red-900/30 p-4 text-sm text-red-100">
-        Supabase 환경변수가 설정되지 않았습니다. <code>VITE_SUPABASE_URL</code>과 <code>VITE_SUPABASE_ANON_KEY</code>를
-        .env에 추가해주세요.
+      <div className="w-full max-w-xl rounded-2xl border border-red-400/20 bg-red-900/20 p-4 text-sm text-red-100">
+        Supabase 환경 변수가 설정되지 않았습니다. `VITE_SUPABASE_URL`과 `VITE_SUPABASE_ANON_KEY`를 확인해주세요.
       </div>
     );
   }
 
   if (user) {
     return (
-      <div className="auth-card auth-card-logged flex items-center justify-between rounded-2xl border border-emerald-200/30 bg-slate-900/80 px-4 py-3 shadow-lg">
-        <div>
-          <p className="text-xs text-emerald-200/80">로그인됨</p>
-          <p className="text-sm font-semibold text-slate-50">{user.email}</p>
-        </div>
+      <div className={`w-full max-w-xl ${shellClass}`}>
+        <p className={`text-xs uppercase tracking-[0.24em] ${bodyClass}`}>Signed In</p>
+        <h1 className="mt-3 text-4xl font-black tracking-tight">계정 연결 완료</h1>
+        <p className={`mt-3 text-sm leading-7 ${bodyClass}`}>{user.email}</p>
         <button
           type="button"
-          onClick={handleSignOut}
+          onClick={async () => {
+            resetMessages();
+            setLoading(true);
+            try {
+              await signOut();
+              onAuth?.();
+            } catch (err) {
+              setError(err.message);
+            } finally {
+              setLoading(false);
+            }
+          }}
           disabled={loading}
-          className="ghost-button text-sm text-emerald-100"
-          style={{ "--ghost-color": "52, 211, 153" }}
+          className={`mt-8 inline-flex h-12 items-center rounded-2xl border px-5 text-sm font-medium transition ${buttonClass}`}
         >
           로그아웃
         </button>
+        {error && (
+          <p className="mt-4 rounded-2xl border border-red-400/20 bg-red-900/20 px-4 py-3 text-sm text-red-200">{error}</p>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="auth-card flex w-full max-w-md flex-col items-center gap-5 rounded-3xl border border-emerald-300/40 bg-slate-950/90 px-8 pt-6 pb-8 text-slate-100 shadow-2xl shadow-black/50 backdrop-blur">
-      <div className="text-center leading-tight">
-        <h1 className="text-xl font-extrabold tracking-tight text-emerald-300">ZEUSIAN.AI</h1>
+    <div className={`w-full max-w-xl ${shellClass}`}>
+      <div className="max-w-lg">
+        <h1 className="text-4xl font-black tracking-tight sm:text-5xl">{title}</h1>
+        <p className={`mt-4 text-sm leading-7 sm:text-base ${bodyClass}`}>{description}</p>
       </div>
 
-      {!showEmailForm && (
-        <div className="flex w-full flex-col items-center gap-2">
-          <button
-            type="button"
-            onClick={() => handleProvider("google")}
-            disabled={loading}
-            className="ghost-button h-12 w-full max-w-xs text-sm text-slate-100"
-            data-ghost-size="xl"
-            style={{ "--ghost-color": "226, 232, 240" }}
-          >
-            Google로 로그인
-          </button>
-          <button
-            type="button"
-            onClick={() => handleProvider("kakao")}
-            disabled={loading}
-            className="ghost-button h-12 w-full max-w-xs text-sm text-amber-100"
-            data-ghost-size="xl"
-            style={{ "--ghost-color": "251, 191, 36" }}
-          >
-            카카오로 로그인
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowEmailForm(true)}
-            disabled={loading}
-            className="ghost-button h-12 w-full max-w-xs text-sm text-emerald-100"
-            data-ghost-size="xl"
-            style={{ "--ghost-color": "52, 211, 153" }}
-          >
-            아이디 로그인
-          </button>
+      {!showEmailForm ? (
+        <div className="mt-10 flex w-full max-w-lg flex-col gap-3">
+          {providerItems.map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={item.onClick}
+              disabled={loading}
+              className={`flex h-14 w-full items-center justify-between rounded-2xl border px-4 text-sm font-medium transition ${buttonClass}`}
+            >
+              <span className="flex items-center gap-3">
+                <AuthIcon>{item.icon}</AuthIcon>
+                <span>{item.label}</span>
+              </span>
+              <span className={`text-xs ${bodyClass}`}>계속</span>
+            </button>
+          ))}
         </div>
-      )}
-
-      {showEmailForm && (
-        <form className="flex w-full flex-col items-center gap-2" onSubmit={handleEmailSubmit}>
+      ) : (
+        <form className="mt-10 flex w-full max-w-lg flex-col gap-3" onSubmit={handleEmailSubmit}>
           <input
             name="auth-email"
             type="email"
             placeholder="이메일"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="h-11 w-full max-w-xs rounded-2xl border border-emerald-200/50 bg-slate-800 px-4 text-sm text-slate-100 outline-none transition focus:border-emerald-400 focus:ring-1 focus:ring-emerald-300"
+            onChange={(event) => setEmail(event.target.value)}
+            className={`h-14 rounded-2xl border px-4 text-sm outline-none ring-1 ring-transparent transition ${inputClass}`}
           />
           <input
             name="auth-password"
             type="password"
             placeholder="비밀번호"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="h-11 w-full max-w-xs rounded-2xl border border-emerald-200/50 bg-slate-800 px-4 text-sm text-slate-100 outline-none transition focus:border-emerald-400 focus:ring-1 focus:ring-emerald-300"
+            onChange={(event) => setPassword(event.target.value)}
+            className={`h-14 rounded-2xl border px-4 text-sm outline-none ring-1 ring-transparent transition ${inputClass}`}
           />
-          <div className="flex w-full max-w-xs gap-2">
+          <div className="flex gap-3 pt-2">
             <button
               type="button"
-              onClick={() => {
-                setShowEmailForm(false);
-                setIsSignup(false);
-                setError("");
-                setMessage("");
-              }}
-              className="ghost-button h-11 flex-1 text-sm text-slate-200"
-              style={{ "--ghost-color": "148, 163, 184" }}
+              onClick={closeEmailForm}
+              className={`flex h-12 flex-1 items-center justify-center rounded-2xl border text-sm font-medium transition ${buttonClass}`}
             >
-              취소
+              돌아가기
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="ghost-button h-11 flex-1 text-sm text-emerald-100"
-              style={{ "--ghost-color": "52, 211, 153" }}
+              className={`flex h-12 flex-1 items-center justify-center rounded-2xl border text-sm font-medium transition ${buttonClass}`}
             >
-              {isSignup ? "회원가입" : "로그인"}
+              {isSignup ? "계정 생성" : "로그인"}
             </button>
           </div>
-          <button
-            type="button"
-            onClick={() => setIsSignup((prev) => !prev)}
-            className="ghost-button text-xs text-emerald-200"
-            data-ghost-size="sm"
-            style={{ "--ghost-color": "52, 211, 153" }}
-          >
-            {isSignup ? "이미 계정이 있으신가요? 로그인" : "계정이 없으신가요? 회원가입"}
-          </button>
         </form>
       )}
 
-      <p className="mt-1 text-center text-xs text-slate-400">
-        로그인 시{" "}
-        <a className="font-semibold text-emerald-300 underline underline-offset-2">이용약관</a> 및{" "}
-        <a className="font-semibold text-emerald-300 underline underline-offset-2">개인정보 처리방침</a>에 동의합니다
-      </p>
+      <div className="mt-8 max-w-lg">
+        <button type="button" onClick={handleModeChange} className={`text-sm font-medium transition ${subtleButtonClass}`}>
+          {isSignup ? "이미 계정이 있으신가요? 로그인" : "계정이 없으신가요? 계정 생성"}
+        </button>
+        <p className={`mt-5 text-xs leading-6 ${noticeClass}`}>
+          계속하면{" "}
+          <a href="/terms" className={`font-medium underline underline-offset-4 ${legalLinkClass}`}>
+            이용약관
+          </a>{" "}
+          및{" "}
+          <a href="/privacy" className={`font-medium underline underline-offset-4 ${legalLinkClass}`}>
+            개인정보처리방침
+          </a>
+          에 동의하게 됩니다.
+        </p>
+      </div>
 
       {error && (
-        <p className="w-full rounded-lg bg-red-900/30 px-3 py-2 text-sm text-red-200 ring-1 ring-red-500/40">{error}</p>
+        <p className="mt-6 max-w-lg rounded-2xl border border-red-400/20 bg-red-900/20 px-4 py-3 text-sm text-red-200">
+          {error}
+        </p>
       )}
-      {message && <p className="text-sm text-emerald-200">{message}</p>}
+      {message && <p className={`mt-4 max-w-lg text-sm ${noticeClass}`}>{message}</p>}
     </div>
   );
 }
