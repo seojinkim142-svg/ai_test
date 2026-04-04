@@ -1,4 +1,4 @@
-import { COMPANY_INFO } from "./companyInfo";
+import { COMPANY_INFO } from "./companyInfo.js";
 
 export const TERMS_CONTENT = {
   slug: "terms",

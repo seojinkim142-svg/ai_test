@@ -8,12 +8,12 @@ import { clearPaymentReturnPending, markPaymentReturnPending } from "../utils/pa
 const CARD_PAYMENT_STORAGE_KEY = "nicepayments_session";
 const cardPayPlans = {
   Pro: {
-    baseAmount: 4900,
+    baseAmount: 6900,
     tier: "pro",
     orderName: "Zeusian Pro (Monthly)",
   },
   Premium: {
-    baseAmount: 16000,
+    baseAmount: 18900,
     tier: "premium",
     orderName: "Zeusian Premium (Monthly)",
   },
@@ -23,7 +23,27 @@ const NICEPAYMENTS_SCRIPT_ID = "nicepayments-js-sdk";
 const DEFAULT_NICEPAYMENTS_SCRIPT = "https://pay.nicepay.co.kr/v1/js/";
 const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
 const CARD_RETURN_QUERY_KEYS = ["nicePay", "np_token", "orderId", "amount", "message"];
+const trimSchemeSeparators = (value) => String(value || "").trim().replace(/:\/*$/, "");
+const NATIVE_PAYMENT_SCHEME = trimSchemeSeparators(
+  import.meta.env.VITE_NATIVE_APP_SCHEME || "com.tjwls.examstudyai"
+);
+const NATIVE_PAYMENT_CALLBACK_URL = NATIVE_PAYMENT_SCHEME ? `${NATIVE_PAYMENT_SCHEME}://auth/callback` : "";
 let niceScriptPromise = null;
+
+function normalizeNiceFailureMessage(message) {
+  const normalized = String(message || "").trim();
+  if (!normalized) return "";
+
+  if (normalized.includes("계좌잔액 부족")) {
+    return "체크카드 계좌 잔액이 부족합니다. 잔액을 확인하거나 다른 카드로 다시 시도해주세요.";
+  }
+
+  if (normalized.includes("한도 초과")) {
+    return "카드 한도를 초과했습니다. 결제 가능 금액을 확인한 뒤 다시 시도해주세요.";
+  }
+
+  return normalized;
+}
 
 function appendNativeReturnMode(rawUrl, appOrigin) {
   try {
@@ -41,6 +61,19 @@ function getCardReturnKey(params) {
   const parts = CARD_RETURN_QUERY_KEYS.map((key) => `${key}:${String(params.get(key) || "").trim()}`);
   const hasValue = parts.some((entry) => !entry.endsWith(":"));
   return hasValue ? parts.join("|") : "";
+}
+
+function buildNativeCardAbortUrl(message = "cancelled") {
+  if (!NATIVE_PAYMENT_CALLBACK_URL) return "";
+
+  try {
+    const target = new URL(NATIVE_PAYMENT_CALLBACK_URL);
+    target.searchParams.set("nicePay", "cancel");
+    target.searchParams.set("message", String(message || "").trim() || "cancelled");
+    return target.toString();
+  } catch {
+    return NATIVE_PAYMENT_CALLBACK_URL;
+  }
 }
 
 function loadNicePaymentsScript(src) {
@@ -93,6 +126,7 @@ export function useCardPayment({
   billingMonths = 1,
   paymentReturnSignal = 0,
   onTierUpdated,
+  onPaymentAborted,
   setPaymentError,
   setPaymentNotice,
 }) {
@@ -171,9 +205,10 @@ export function useCardPayment({
       setPaymentNotice("");
       setShowCardWidget(false);
       setCardPaying(false);
+      const normalizedFailMessage = normalizeNiceFailureMessage(failMessage);
       setPaymentError(
-        failMessage
-          ? `나이스페이 결제 ${cardState === "cancel" ? "취소" : "실패"}: ${failMessage}`
+        normalizedFailMessage
+          ? `나이스페이 결제 ${cardState === "cancel" ? "취소" : "실패"}: ${normalizedFailMessage}`
           : cardState === "cancel"
             ? "나이스페이 결제가 취소되었습니다."
             : "나이스페이 결제가 실패했습니다."
@@ -181,6 +216,9 @@ export function useCardPayment({
       localStorage.removeItem(CARD_PAYMENT_STORAGE_KEY);
       clearPaymentReturnPending();
       clearUrl();
+      if (IS_NATIVE_PLATFORM && cardState === "cancel") {
+        onPaymentAborted?.();
+      }
       return;
     }
 
@@ -279,7 +317,7 @@ export function useCardPayment({
         onTierUpdated?.();
         setPaymentNotice("결제가 완료되었습니다.");
       } catch (err) {
-        setPaymentError(`결제 확인 실패: ${err.message}`);
+        setPaymentError(`결제 확인 실패: ${normalizeNiceFailureMessage(err.message) || err.message}`);
       } finally {
         localStorage.removeItem(CARD_PAYMENT_STORAGE_KEY);
         clearPaymentReturnPending();
@@ -289,6 +327,7 @@ export function useCardPayment({
     })();
   }, [
     normalizedBillingMonths,
+    onPaymentAborted,
     onTierUpdated,
     paymentReturnSignal,
     selectedCardPlan?.tier,
@@ -382,6 +421,7 @@ export function useCardPayment({
     const fallbackReturnUrl = appendNativeReturnMode(`${appOrigin}/api/nicepayments/return`, appOrigin);
     const configuredReturnUrl = envReturnUrl || runtimeCardConfig.returnUrl;
     let returnUrl = fallbackReturnUrl;
+    const nativeAbortUrl = IS_NATIVE_PLATFORM ? buildNativeCardAbortUrl() : "";
 
     if (configuredReturnUrl) {
       try {
@@ -418,18 +458,26 @@ export function useCardPayment({
         amount,
         goodsName,
         returnUrl,
+        ...(nativeAbortUrl
+          ? {
+              WapUrl: NATIVE_PAYMENT_CALLBACK_URL,
+              IspCancelUrl: nativeAbortUrl,
+            }
+          : {}),
         buyerName: user?.user_metadata?.name || user?.email?.split("@")[0] || "user",
         buyerEmail: user?.email || "",
         fnError: (err) => {
-          const message = err?.errorMsg || err?.message || "결제 요청이 취소되었습니다.";
+          const message = normalizeNiceFailureMessage(err?.errorMsg || err?.message) || "결제 요청이 취소되었습니다.";
           setPaymentError(`나이스페이 결제 요청 실패: ${message}`);
           clearPaymentReturnPending();
+          setShowCardWidget(false);
           setCardPaying(false);
         },
       });
     } catch (err) {
       setPaymentError(err?.message || "나이스페이 결제 요청을 진행할 수 없습니다.");
       clearPaymentReturnPending();
+      setShowCardWidget(false);
       setCardPaying(false);
     }
   };

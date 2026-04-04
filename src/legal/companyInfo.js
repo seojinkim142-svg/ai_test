@@ -12,11 +12,6 @@ export const COMPANY_INFO = {
 
 export const COMPANY_INFO_ITEMS = [
   { label: "상호", value: `${COMPANY_INFO.operatorNameKo} (${COMPANY_INFO.operatorName})` },
-  { label: "서비스명", value: COMPANY_INFO.serviceName },
-  { label: "대표자명", value: COMPANY_INFO.representativeName },
-  { label: "사업자등록번호", value: COMPANY_INFO.businessRegistrationNumber },
-  { label: "사업장 주소", value: COMPANY_INFO.address },
-  { label: "대표 연락처", value: COMPANY_INFO.phone },
 ];
 
 export const LEGAL_LINKS = [
