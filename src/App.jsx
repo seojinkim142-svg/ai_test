@@ -879,7 +879,6 @@ function App() {
   const isNativePlatform = Capacitor.isNativePlatform();
   const shouldForceNativeAuthEntry = AUTH_ENABLED && isNativePlatform && authReady && !user;
   const shouldRenderAuthScreen = AUTH_ENABLED && !user && (showAuth || shouldForceNativeAuthEntry);
-  const canReturnHomeFromAuth = showAuth && !shouldForceNativeAuthEntry;
   const buildHistoryState = useCallback(
     (override = null) => {
       if (override && typeof override === "object") {
@@ -5233,22 +5232,14 @@ function App() {
     return (
       <Suspense fallback={<div className="min-h-screen bg-black" />}>
         <LoginBackground theme={theme}>
-        <div className="relative z-10 flex min-h-screen flex-col items-center justify-center gap-4 px-4 py-8">
-          {canReturnHomeFromAuth && (
-            <div className="flex w-full max-w-md justify-end">
-              <button
-                type="button"
-                onClick={closeAuth}
-                className="ghost-button text-xs text-slate-200"
-                data-ghost-size="sm"
-                style={{ "--ghost-color": "148, 163, 184" }}
-              >
-                Back to Home
-              </button>
+          <div className="relative z-10 min-h-screen px-6 py-6 sm:px-8 sm:py-8">
+            <div className="flex items-center justify-start">
+              <div className="text-sm font-semibold tracking-[0.18em] text-slate-100/92">Zeusian.ai</div>
             </div>
-          )}
-          <AuthPanel user={user} onAuth={refreshSession} />
-        </div>
+            <div className="flex min-h-[calc(100vh-96px)] items-center justify-center">
+              <AuthPanel user={user} onAuth={refreshSession} theme={theme} />
+            </div>
+          </div>
         </LoginBackground>
       </Suspense>
     );
