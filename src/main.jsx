@@ -38,17 +38,58 @@ if (typeof window !== "undefined") {
 
 createRoot(document.getElementById("root")).render(rootElement);
 
+async function syncServiceWorkerRegistration() {
+  const workerUrl = "/service-worker.js";
+
+  try {
+    const probe = await fetch(workerUrl, {
+      method: "HEAD",
+      cache: "no-store",
+    });
+
+    if (probe.ok) {
+      const registration = await navigator.serviceWorker.register(workerUrl);
+      registration.update().catch(() => {
+        // Ignore explicit update check failures.
+      });
+      return;
+    }
+  } catch (error) {
+    console.warn("Service worker availability check failed:", error);
+  }
+
+  try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(
+      registrations.map(async (registration) => {
+        const scriptUrl = String(
+          registration?.active?.scriptURL || registration?.waiting?.scriptURL || registration?.installing?.scriptURL || ""
+        );
+
+        if (!scriptUrl.endsWith(workerUrl)) return false;
+
+        const unregistered = await registration.unregister();
+        if (typeof window !== "undefined" && window.caches) {
+          const cacheKeys = await window.caches.keys();
+          await Promise.all(
+            cacheKeys
+              .filter((key) => key.startsWith("exam-study-ai"))
+              .map((key) => window.caches.delete(key))
+          );
+        }
+
+        return unregistered;
+      })
+    );
+  } catch (error) {
+    console.warn("Service worker cleanup failed:", error);
+  }
+}
+
 if (!IS_NATIVE_PLATFORM && import.meta.env.PROD && typeof window !== "undefined" && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker
-      .register("/service-worker.js")
-      .then((registration) => {
-        registration.update().catch(() => {
-          // Ignore explicit update check failures.
-        });
-      })
-      .catch((error) => {
-        console.warn("Service worker registration failed:", error);
-      });
+    syncServiceWorkerRegistration().catch((error) => {
+      console.warn("Service worker sync failed:", error);
+    });
   });
 }
