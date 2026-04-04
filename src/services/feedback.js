@@ -109,7 +109,7 @@ export async function fetchFeedbackReplies({ accessToken, limit = 20 } = {}) {
 }
 
 export async function sendFeedbackReply({ accessToken, feedbackId, content } = {}) {
-  return requestFeedbackApi("/reply", {
+  return requestFeedbackApi("/replies", {
     method: "POST",
     accessToken,
     payload: {
