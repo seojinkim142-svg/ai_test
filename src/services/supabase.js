@@ -1,5 +1,6 @@
 ﻿import { createClient } from "@supabase/supabase-js";
 import { resolveAppRedirectUrl } from "../utils/appOrigin";
+import { Capacitor } from "@capacitor/core";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -28,8 +29,56 @@ const normalizeAbsoluteUrl = (value) => {
     return "";
   }
 };
-const SUPABASE_REDIRECT =
-  normalizeAbsoluteUrl(import.meta.env.VITE_SUPABASE_REDIRECT_URL) || resolveAppRedirectUrl("/") || undefined;
+const trimSchemeSeparators = (value) => String(value || "").trim().replace(/:\/*$/, "");
+const NATIVE_APP_SCHEME = trimSchemeSeparators(
+  import.meta.env.VITE_NATIVE_APP_SCHEME || "com.tjwls.examstudyai"
+);
+const NATIVE_AUTH_HOST = "auth";
+const NATIVE_AUTH_PATH = "/callback";
+const DEFAULT_NATIVE_AUTH_REDIRECT = NATIVE_APP_SCHEME
+  ? `${NATIVE_APP_SCHEME}://${NATIVE_AUTH_HOST}${NATIVE_AUTH_PATH}`
+  : "";
+const EXPLICIT_SUPABASE_REDIRECT = normalizeAbsoluteUrl(import.meta.env.VITE_SUPABASE_REDIRECT_URL);
+const EXPLICIT_WEB_SUPABASE_REDIRECT =
+  EXPLICIT_SUPABASE_REDIRECT && /^https?:/i.test(EXPLICIT_SUPABASE_REDIRECT)
+    ? EXPLICIT_SUPABASE_REDIRECT
+    : "";
+const EXPLICIT_NATIVE_SUPABASE_REDIRECT = normalizeAbsoluteUrl(
+  import.meta.env.VITE_NATIVE_AUTH_REDIRECT_URL || DEFAULT_NATIVE_AUTH_REDIRECT
+);
+const PREFERRED_NATIVE_SUPABASE_REDIRECT =
+  EXPLICIT_NATIVE_SUPABASE_REDIRECT ||
+  (EXPLICIT_SUPABASE_REDIRECT && !/^https?:/i.test(EXPLICIT_SUPABASE_REDIRECT)
+    ? EXPLICIT_SUPABASE_REDIRECT
+    : "") ||
+  DEFAULT_NATIVE_AUTH_REDIRECT;
+
+export const SUPABASE_REDIRECT =
+  (Capacitor.isNativePlatform()
+    ? PREFERRED_NATIVE_SUPABASE_REDIRECT || undefined
+    : EXPLICIT_WEB_SUPABASE_REDIRECT || resolveAppRedirectUrl("/") || undefined);
+
+function normalizeComparablePath(pathname) {
+  const normalized = String(pathname || "").trim().replace(/\/+$/, "");
+  return normalized || "/";
+}
+
+export function isNativeSupabaseRedirectUrl(value) {
+  if (!Capacitor.isNativePlatform()) return false;
+  if (!SUPABASE_REDIRECT || /^https?:/i.test(SUPABASE_REDIRECT)) return false;
+
+  try {
+    const incoming = new URL(String(value || "").trim());
+    const expected = new URL(SUPABASE_REDIRECT);
+    return (
+      incoming.protocol === expected.protocol &&
+      incoming.host === expected.host &&
+      normalizeComparablePath(incoming.pathname) === normalizeComparablePath(expected.pathname)
+    );
+  } catch {
+    return false;
+  }
+}
 
 if (!supabaseUrl || !supabaseAnonKey) {
   console.warn("Supabase environment variables are missing: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY");
@@ -310,6 +359,24 @@ export async function deleteFolder({ userId, folderId }) {
   if (!folderId) return;
   const { error } = await client.from("folders").delete().eq("id", folderId).eq("user_id", userId);
   if (error) throw error;
+}
+
+export async function renameFolder({ userId, folderId, name }) {
+  const client = requireSupabase();
+  requireUser(userId);
+  const trimmedFolderId = String(folderId || "").trim();
+  const trimmedName = String(name || "").trim();
+  if (!trimmedFolderId) throw new Error("Folder ID is required.");
+  if (!trimmedName) throw new Error("Folder name is required.");
+  const { data, error } = await client
+    .from("folders")
+    .update({ name: trimmedName })
+    .eq("id", trimmedFolderId)
+    .eq("user_id", userId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
 }
 
 export async function saveUploadMetadata({ userId, fileName, fileSize, storagePath, bucket, thumbnail, fileHash, folderId }) {
