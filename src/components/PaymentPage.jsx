@@ -1386,9 +1386,7 @@ function PaymentPage({
               <div className={`px-4 py-4 ${isLight ? "border-t border-slate-200 bg-slate-50/80" : "border-t border-white/10 bg-slate-950/30"}`}>
                 <p className={`font-semibold ${isLight ? "text-slate-900" : "text-white"}`}>문의 및 약관</p>
                 <ul className="mt-2 space-y-1.5">
-                  <li>문의 및 이의신청: {COMPANY_INFO.phone}</li>
-                  <li>사업자등록번호: {COMPANY_INFO.businessRegistrationNumber}</li>
-                  <li>사업장 주소: {COMPANY_INFO.address}</li>
+                  <li>상호: {COMPANY_INFO.operatorNameKo} ({COMPANY_INFO.operatorName})</li>
                 </ul>
                 <div className="mt-3 flex flex-wrap gap-3">
                   {LEGAL_LINKS.map((link) => (
