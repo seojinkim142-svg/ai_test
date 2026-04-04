@@ -1,4 +1,4 @@
-import { COMPANY_INFO_ITEMS, LEGAL_LINKS } from "./companyInfo";
+import { COMPANY_INFO_ITEMS, LEGAL_LINKS } from "./companyInfo.js";
 
 const HTML_ESCAPE_MAP = {
   "&": "&amp;",

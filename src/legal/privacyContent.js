@@ -1,4 +1,4 @@
-import { COMPANY_INFO } from "./companyInfo";
+import { COMPANY_INFO } from "./companyInfo.js";
 
 export const PRIVACY_CONTENT = {
   slug: "privacy",
@@ -216,10 +216,7 @@ export const PRIVACY_CONTENT = {
         {
           type: "ul",
           items: [
-            `담당자: ${COMPANY_INFO.privacyContactName}`,
             `상호: ${COMPANY_INFO.operatorNameKo} (${COMPANY_INFO.operatorName})`,
-            `연락처: ${COMPANY_INFO.phone}`,
-            `주소: ${COMPANY_INFO.address}`,
           ],
         },
         {

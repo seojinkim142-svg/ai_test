@@ -1,6 +1,8 @@
 import { Fragment, memo, useCallback, useEffect, useRef, useState } from "react";
 import { COMPANY_INFO_ITEMS, LEGAL_LINKS } from "../legal/companyInfo";
 
+const FOOTER_COMPANY_INFO = COMPANY_INFO_ITEMS.find((item) => item.label === "상호") ?? COMPANY_INFO_ITEMS[0];
+
 function SummaryIcon({ className = "h-10 w-10" }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
@@ -699,13 +701,13 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
         <div className="mx-auto flex max-w-7xl flex-col gap-6 text-sm text-emerald-100/65 md:flex-row md:items-start md:justify-between">
           <div className="text-center md:text-left">
             <p className="uppercase tracking-[0.24em] text-emerald-300/75">회사 정보</p>
-            <div className="mt-3 space-y-1 leading-6">
-              {COMPANY_INFO_ITEMS.map((item) => (
-                <p key={item.label}>
-                  {item.label}: {item.value}
+            {FOOTER_COMPANY_INFO ? (
+              <div className="mt-3 space-y-1 leading-6">
+                <p>
+                  {FOOTER_COMPANY_INFO.label}: {FOOTER_COMPANY_INFO.value}
                 </p>
-              ))}
-            </div>
+              </div>
+            ) : null}
           </div>
           <div className="flex flex-wrap justify-center gap-3 md:justify-end">
             {LEGAL_LINKS.map((link) => (
