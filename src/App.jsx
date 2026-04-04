@@ -96,6 +96,7 @@ const AuthPanel = lazy(() => import("./components/AuthPanel"));
 const Header = lazy(() => import("./components/Header"));
 const LoginBackground = lazy(() => import("./components/LoginBackground"));
 const PaymentPage = lazy(() => import("./components/PaymentPage"));
+const SettingsDialog = lazy(() => import("./components/SettingsDialog"));
 const DetailPage = lazy(() => import("./pages/DetailPage"));
 const PremiumProfilePicker = lazy(() => import("./components/PremiumProfilePicker"));
 
@@ -748,6 +749,7 @@ function App() {
   const [isResizingSplit, setIsResizingSplit] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showGuestIntro, setShowGuestIntro] = useState(() => !AUTH_ENABLED);
   const [currentPage, setCurrentPage] = useState(1);
@@ -966,6 +968,14 @@ function App() {
 
   const openBilling = useCallback(() => {
     setShowPayment(true);
+  }, []);
+
+  const openSettings = useCallback(() => {
+    setShowSettings(true);
+  }, []);
+
+  const closeSettings = useCallback(() => {
+    setShowSettings(false);
   }, []);
 
   const handleOpenFeedbackDialog = useCallback(() => {
@@ -3315,6 +3325,67 @@ function App() {
     }
   };
 
+  const handleDeleteQuiz = async () => {
+    if (isLoadingQuiz) return;
+    if (!quizSets.length) {
+      setError("삭제할 퀴즈가 없습니다.");
+      return;
+    }
+    quizAutoRequestedRef.current = false;
+    resetQuizState();
+    setStatus("퀴즈를 삭제했습니다.");
+    setError("");
+    await persistArtifacts({ quiz: null });
+  };
+
+  const handleDeleteQuizItem = useCallback(
+    async (setId, section, questionIndex) => {
+      const normalizedSection = String(section || "").trim();
+      const normalizedIndex = Number.parseInt(questionIndex, 10);
+      if (!setId || !["multipleChoice", "shortAnswer"].includes(normalizedSection)) return;
+      if (!Number.isFinite(normalizedIndex) || normalizedIndex < 0) return;
+
+      let nextPersistedQuiz = null;
+      let deleted = false;
+
+      setQuizSets((prev) => {
+        const nextSets = (Array.isArray(prev) ? prev : [])
+          .map((set) => {
+            if (set.id !== setId) return set;
+
+            const questions = normalizeQuizPayload(set?.questions || {});
+            const sourceItems = Array.isArray(questions?.[normalizedSection])
+              ? questions[normalizedSection]
+              : [];
+            if (normalizedIndex >= sourceItems.length) return set;
+
+            deleted = true;
+            return {
+              ...set,
+              questions: {
+                ...questions,
+                [normalizedSection]: sourceItems.filter((_, idx) => idx !== normalizedIndex),
+              },
+            };
+          })
+          .filter((set) => {
+            const questions = normalizeQuizPayload(set?.questions || {});
+            return questions.multipleChoice.length > 0 || questions.shortAnswer.length > 0;
+          });
+
+        nextPersistedQuiz = nextSets.length > 0 ? normalizeQuizPayload(nextSets[0]?.questions || {}) : null;
+        return nextSets;
+      });
+
+      if (!deleted) return;
+
+      setStatus("퀴즈 문항을 삭제했습니다.");
+      setError("");
+      await persistArtifacts({ quiz: nextPersistedQuiz });
+    },
+    [persistArtifacts]
+  );
+
   const regenerateQuiz = async () => {
     if (isLoadingQuiz) return;
     if (!file) {
@@ -3609,6 +3680,10 @@ function App() {
           maxLengthPerRange: 14000,
           useOcr: true,
           ocrLang: "kor+eng",
+          ocrScale: 1.35,
+          ocrMaxPixels: 1000000,
+          ocrPageOrder: "spread",
+          maxOcrPagesPerRange: 4,
           onOcrProgress: (message) => setStatus(message),
         });
         customChapterSections = (chapterExtraction?.chapters || [])
@@ -5115,6 +5190,8 @@ function App() {
     quizMix,
     setQuizMix,
     quizSets,
+    deleteQuiz: handleDeleteQuiz,
+    deleteQuizItem: handleDeleteQuizItem,
     handleChoiceSelect,
     handleShortAnswerChange,
     handleShortAnswerCheck,
@@ -5197,6 +5274,39 @@ function App() {
             theme={theme}
             user={user}
             onTierUpdated={refreshTier}
+          />
+        </Suspense>
+      )}
+      {showSettings && (
+        <Suspense fallback={null}>
+          <SettingsDialog
+            onClose={closeSettings}
+            theme={theme}
+            onThemeChange={setTheme}
+            user={user}
+            authEnabled={AUTH_ENABLED}
+            currentTier={tier}
+            currentTierExpiresAt={tierExpiresAt}
+            currentTierRemainingDays={tierRemainingDays}
+            loadingTier={loadingTier}
+            activeProfile={activePremiumProfile}
+            premiumSpaceMode={premiumSpaceMode}
+            onOpenBilling={() => {
+              closeSettings();
+              openBilling();
+            }}
+            onOpenFeedbackDialog={() => {
+              closeSettings();
+              handleOpenFeedbackDialog();
+            }}
+            onOpenLogin={() => {
+              closeSettings();
+              openAuth();
+            }}
+            onSignOut={handleSignOut}
+            signingOut={isSigningOut}
+            onRefresh={handleManualSync}
+            isRefreshing={isManualSyncing}
           />
         </Suspense>
       )}
@@ -5402,6 +5512,7 @@ function App() {
               onGoHome={showDetail ? goBackToList : null}
               onOpenFeedbackDialog={AUTH_ENABLED ? handleOpenFeedbackDialog : null}
               onOpenBilling={openBilling}
+              onOpenSettings={openSettings}
               showBilling={AUTH_ENABLED}
               onToggleTheme={toggleTheme}
               onOpenLogin={openAuth}
@@ -5438,6 +5549,7 @@ function App() {
 }
 
 export default App;
+
 
 
 

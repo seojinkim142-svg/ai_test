@@ -1,5 +1,14 @@
 let pdfRuntimePromise = null;
 
+const pdfDocumentCache = new WeakMap();
+const pdfPageTextCache = new WeakMap();
+const pdfOcrTextCache = new WeakMap();
+const ocrWorkerCache = new Map();
+
+const OCR_WORKER_IDLE_MS = 30000;
+const OCR_PROGRESS_INTERVAL_MS = 250;
+const DEFAULT_OCR_MAX_PIXELS = 2200000;
+
 async function loadPdfRuntime() {
   if (!pdfRuntimePromise) {
     pdfRuntimePromise = (async () => {
@@ -13,6 +22,197 @@ async function loadPdfRuntime() {
     })();
   }
   return pdfRuntimePromise;
+}
+
+async function loadPdfDocument(file) {
+  if (!file || typeof file.arrayBuffer !== "function") {
+    throw new Error("PDF file is unavailable.");
+  }
+
+  let cached = pdfDocumentCache.get(file);
+  if (!cached) {
+    cached = (async () => {
+      const pdfjsLib = await loadPdfRuntime();
+      const { getDocument } = pdfjsLib;
+      const data = await file.arrayBuffer();
+      const pdf = await getDocument({ data }).promise;
+      return { pdfjsLib, pdf };
+    })();
+    pdfDocumentCache.set(file, cached);
+    cached.catch(() => {
+      pdfDocumentCache.delete(file);
+    });
+  }
+  return cached;
+}
+
+function getPerFileCache(store, file) {
+  let cache = store.get(file);
+  if (!cache) {
+    cache = new Map();
+    store.set(file, cache);
+  }
+  return cache;
+}
+
+function normalizeExtractedText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function createOcrProgressReporter(onOcrProgress) {
+  const callback = typeof onOcrProgress === "function" ? onOcrProgress : null;
+  if (!callback) {
+    return {
+      notify: () => {},
+      handleLogger: () => {},
+      flush: () => {},
+    };
+  }
+
+  let lastMessage = "";
+  let lastEmitAt = 0;
+  let pendingMessage = "";
+  let timerId = null;
+
+  const emit = (message, { force = false } = {}) => {
+    const nextMessage = String(message || "").trim();
+    if (!nextMessage) return;
+    if (!force && nextMessage === lastMessage) return;
+
+    if (force) {
+      if (timerId) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
+      pendingMessage = "";
+      lastEmitAt = Date.now();
+      lastMessage = nextMessage;
+      callback(nextMessage);
+      return;
+    }
+
+    const now = Date.now();
+    const elapsed = now - lastEmitAt;
+    if (!lastEmitAt || elapsed >= OCR_PROGRESS_INTERVAL_MS) {
+      lastEmitAt = now;
+      lastMessage = nextMessage;
+      pendingMessage = "";
+      callback(nextMessage);
+      return;
+    }
+
+    pendingMessage = nextMessage;
+    if (timerId) return;
+    timerId = setTimeout(() => {
+      timerId = null;
+      if (!pendingMessage || pendingMessage === lastMessage) {
+        pendingMessage = "";
+        return;
+      }
+      lastEmitAt = Date.now();
+      lastMessage = pendingMessage;
+      callback(pendingMessage);
+      pendingMessage = "";
+    }, OCR_PROGRESS_INTERVAL_MS - elapsed);
+  };
+
+  return {
+    notify: (message) => emit(message, { force: true }),
+    handleLogger: (info) => {
+      if (!info || typeof info.progress !== "number") return;
+      const pct = Math.round(info.progress * 100);
+      emit(`OCR ${info.status || "processing"}... ${pct}%`);
+    },
+    flush: () => {
+      if (timerId) {
+        clearTimeout(timerId);
+        timerId = null;
+      }
+      if (pendingMessage && pendingMessage !== lastMessage) {
+        lastEmitAt = Date.now();
+        lastMessage = pendingMessage;
+        callback(pendingMessage);
+      }
+      pendingMessage = "";
+    },
+  };
+}
+
+function scheduleOcrWorkerCleanup(langKey, entry) {
+  const cleanupToken = entry.activityToken;
+  if (entry.idleTimer) {
+    clearTimeout(entry.idleTimer);
+    entry.idleTimer = null;
+  }
+
+  entry.idleTimer = setTimeout(async () => {
+    if (entry.progressLogger) return;
+    if (entry.activityToken !== cleanupToken) return;
+    if (ocrWorkerCache.get(langKey) !== entry) return;
+
+    ocrWorkerCache.delete(langKey);
+    try {
+      const worker = await entry.workerPromise;
+      await worker.terminate();
+    } catch {
+      // Worker cleanup is best-effort only.
+    }
+  }, OCR_WORKER_IDLE_MS);
+}
+
+function getOcrWorkerEntry(lang) {
+  const langKey = String(lang || "eng");
+  let entry = ocrWorkerCache.get(langKey);
+  if (!entry) {
+    entry = {
+      workerPromise: null,
+      queue: Promise.resolve(),
+      progressLogger: null,
+      idleTimer: null,
+      activityToken: 0,
+    };
+    entry.workerPromise = (async () => {
+      const { createWorker } = await import("tesseract.js");
+      return createWorker(langKey, 1, {
+        logger: (info) => {
+          if (typeof entry.progressLogger === "function") {
+            entry.progressLogger(info);
+          }
+        },
+      });
+    })();
+    entry.workerPromise.catch(() => {
+      if (ocrWorkerCache.get(langKey) === entry) {
+        ocrWorkerCache.delete(langKey);
+      }
+    });
+    ocrWorkerCache.set(langKey, entry);
+  }
+  return entry;
+}
+
+async function runWithOcrWorker(lang, progressLogger, task) {
+  const langKey = String(lang || "eng");
+  const entry = getOcrWorkerEntry(langKey);
+  entry.activityToken += 1;
+  if (entry.idleTimer) {
+    clearTimeout(entry.idleTimer);
+    entry.idleTimer = null;
+  }
+
+  const run = entry.queue.catch(() => {}).then(async () => {
+    const worker = await entry.workerPromise;
+    entry.progressLogger = progressLogger;
+    try {
+      return await task(worker);
+    } finally {
+      entry.progressLogger = null;
+      scheduleOcrWorkerCleanup(langKey, entry);
+    }
+  });
+
+  entry.queue = run.catch(() => {});
+  return run;
 }
 
 const TOC_HEADER_RE = /(?:table\s+of\s+contents|contents|\uBAA9\uCC28|\uCC28\uB840)/i;
@@ -305,20 +505,18 @@ function analyzeTocPage(lines, pageText) {
 }
 
 export async function extractPdfText(file, pageLimit = 30, maxLength = 12000, options = {}) {
-  const pdfjsLib = await loadPdfRuntime();
-  const { getDocument } = pdfjsLib;
+  const { pdfjsLib, pdf } = await loadPdfDocument(file);
   const {
     includeLayout = false,
     useOcr = false,
     ocrLang = "kor+eng",
     ocrScale = 2,
+    ocrMaxPixels = DEFAULT_OCR_MAX_PIXELS,
+    ocrPageOrder = "sequential",
+    maxOcrPages = 0,
     onOcrProgress,
   } = options || {};
-  const notifyOcr = (message) => {
-    if (typeof onOcrProgress === "function") onOcrProgress(message);
-  };
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await getDocument({ data: arrayBuffer }).promise;
+  const progressReporter = createOcrProgressReporter(onOcrProgress);
   const totalPages = pdf.numPages;
   const pagesToRead = Math.min(totalPages, pageLimit);
 
@@ -329,70 +527,74 @@ export async function extractPdfText(file, pageLimit = 30, maxLength = 12000, op
 
   for (let i = 1; i <= pagesToRead; i += 1) {
     const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    let viewport;
-    let pageLayout;
-    if (includeLayout) {
-      viewport = page.getViewport({ scale: 1 });
-      pageLayout = {
-        pageNumber: i,
-        width: viewport.width,
-        height: viewport.height,
-        text: "",
-        items: [],
-      };
-    }
+    try {
+      const content = await page.getTextContent();
+      let viewport;
+      let pageLayout;
+      if (includeLayout) {
+        viewport = page.getViewport({ scale: 1 });
+        pageLayout = {
+          pageNumber: i,
+          width: viewport.width,
+          height: viewport.height,
+          text: "",
+          items: [],
+        };
+      }
 
-    let pageText = "";
-    for (const item of content.items) {
-      const str = item.str.trim();
-      if (!str) continue;
+      let pageText = "";
+      for (const item of content.items) {
+        const str = item.str.trim();
+        if (!str) continue;
 
-      const withSpace = pageText ? " " : "";
-      const start = pageText.length + withSpace.length;
-      pageText += withSpace + str;
-      const end = pageText.length;
+        const withSpace = pageText ? " " : "";
+        const start = pageText.length + withSpace.length;
+        pageText += withSpace + str;
+        const end = pageText.length;
+
+        if (includeLayout) {
+          const transformed = pdfjsLib.Util.transform(viewport.transform, item.transform);
+          const x = transformed[4];
+          const y = transformed[5]; // baseline after viewport transform (top-left origin)
+          const scaleX = Math.hypot(transformed[0], transformed[1]);
+          const scaleY = Math.hypot(transformed[2], transformed[3]);
+          const widthPx = scaleX * item.width; // advance width with transform applied
+          const heightPx = scaleY * (item.height || Math.abs(transformed[3])); // ascent-ish height
+          const highlightHeight = heightPx * 0.6; // underline-style highlight
+          const topY = y - highlightHeight * 0.9; // sit just below baseline, light overlap
+          const norm = {
+            x: Math.min(1, Math.max(0, x / viewport.width)),
+            y: Math.min(1, Math.max(0, topY / viewport.height)),
+            width: Math.min(1, widthPx / viewport.width),
+            height: Math.min(1, Math.max(0.01, highlightHeight / viewport.height)),
+          };
+
+          pageLayout.items.push({
+            text: str,
+            start,
+            end,
+            rect: norm,
+          });
+        }
+      }
 
       if (includeLayout) {
-        const transformed = pdfjsLib.Util.transform(viewport.transform, item.transform);
-        const x = transformed[4];
-        const y = transformed[5]; // baseline after viewport transform (top-left origin)
-        const scaleX = Math.hypot(transformed[0], transformed[1]);
-        const scaleY = Math.hypot(transformed[2], transformed[3]);
-        const widthPx = scaleX * item.width; // advance width with transform applied
-        const heightPx = scaleY * (item.height || Math.abs(transformed[3])); // ascent-ish height
-        const highlightHeight = heightPx * 0.6; // underline-style highlight
-        const topY = y - highlightHeight * 0.9; // sit just below baseline, light overlap
-        const norm = {
-          x: Math.min(1, Math.max(0, x / viewport.width)),
-          y: Math.min(1, Math.max(0, topY / viewport.height)),
-          width: Math.min(1, widthPx / viewport.width),
-          height: Math.min(1, Math.max(0.01, highlightHeight / viewport.height)),
-        };
-
-        pageLayout.items.push({
-          text: str,
-          start,
-          end,
-          rect: norm,
-        });
+        pageLayout.text = pageText;
+        layoutPages.push(pageLayout);
       }
-    }
 
-    if (includeLayout) {
-      pageLayout.text = pageText;
-      layoutPages.push(pageLayout);
+      if (pageText) {
+        chunks.push(pageText);
+        currentLength += pageText.length + 1;
+      }
+      pagesUsed = i;
+      if (currentLength >= maxLength) break;
+    } finally {
+      if (typeof page.cleanup === "function") page.cleanup();
     }
-
-    if (pageText) {
-      chunks.push(pageText);
-      currentLength += pageText.length + 1;
-    }
-    pagesUsed = i;
-    if (currentLength >= maxLength) break;
   }
 
-  const normalized = chunks.join("\n").replace(/\s+/g, " ").trim().slice(0, maxLength);
+  const normalized = normalizeExtractedText(chunks.join("\n")).slice(0, maxLength);
   if (normalized || !useOcr) {
     return {
       text: normalized,
@@ -403,38 +605,41 @@ export async function extractPdfText(file, pageLimit = 30, maxLength = 12000, op
     };
   }
 
-  // OCR fallback for scanned PDFs.
-  notifyOcr("\uD14D\uC2A4\uD2B8\uAC00 \uC5C6\uC5B4 OCR\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4...");
-  const { createWorker } = await import("tesseract.js");
-  const worker = await createWorker(ocrLang, 1, {
-    logger: (info) => {
-      if (!info || typeof info.progress !== "number") return;
-      const pct = Math.round(info.progress * 100);
-      notifyOcr(`OCR ${info.status || "processing"}... ${pct}%`);
-    },
-  });
-  const ocrChunks = [];
+  progressReporter.notify("\uD14D\uC2A4\uD2B8\uAC00 \uC5C6\uC5B4 OCR\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4...");
+  const ocrEntries = [];
   let ocrLength = 0;
+  const ocrPageQueue = resolveOcrPageQueue(
+    Array.from({ length: pagesToRead }, (_, index) => index + 1),
+    { ocrPageOrder, maxOcrPages }
+  );
   try {
-    for (let idx = 1; idx <= pagesToRead; idx += 1) {
+    for (let idx = 0; idx < ocrPageQueue.length; idx += 1) {
       if (ocrLength >= maxLength) break;
-      notifyOcr(`OCR \uC9C4\uD589 \uC911... (${idx}/${pagesToRead}\uD398\uC774\uC9C0)`);
-      const page = await pdf.getPage(idx);
-      const canvas = await renderPageToCanvas(page, ocrScale);
-      const result = await worker.recognize(canvas);
-      const text = String(result?.data?.text || "").replace(/\s+/g, " ").trim();
+      const pageNumber = ocrPageQueue[idx];
+      progressReporter.notify(
+        `OCR \uC9C4\uD589 \uC911... (${idx + 1}/${ocrPageQueue.length}\uD398\uC774\uC9C0)`
+      );
+      const text = await recognizePdfPage(file, pdf, pageNumber, {
+        ocrLang,
+        ocrScale,
+        ocrMaxPixels,
+        progressReporter,
+      });
       if (text) {
-        ocrChunks.push(text);
+        ocrEntries.push({ pageNumber, text });
         ocrLength += text.length + 1;
       }
-      canvas.width = 0;
-      canvas.height = 0;
     }
   } finally {
-    await worker.terminate();
+    progressReporter.flush();
   }
 
-  const ocrNormalized = ocrChunks.join("\n").replace(/\s+/g, " ").trim().slice(0, maxLength);
+  const ocrNormalized = normalizeExtractedText(
+    ocrEntries
+      .sort((left, right) => left.pageNumber - right.pageNumber)
+      .map((entry) => entry.text)
+      .join("\n")
+  ).slice(0, maxLength);
   return {
     text: ocrNormalized,
     pagesUsed,
@@ -444,15 +649,138 @@ export async function extractPdfText(file, pageLimit = 30, maxLength = 12000, op
   };
 }
 
-async function renderPageToCanvas(page, scale = 2) {
-  const viewport = page.getViewport({ scale });
+function resolveOcrRenderScale(page, requestedScale = 2, maxPixels = DEFAULT_OCR_MAX_PIXELS) {
+  const parsedScale = Number(requestedScale);
+  let scale = Number.isFinite(parsedScale) && parsedScale > 0 ? parsedScale : 2;
+  const viewport = page.getViewport({ scale: 1 });
+  const pageArea = Number(viewport?.width || 0) * Number(viewport?.height || 0);
+
+  if (Number.isFinite(maxPixels) && maxPixels > 0 && pageArea > 0) {
+    scale = Math.min(scale, Math.sqrt(maxPixels / pageArea));
+  }
+
+  if (!Number.isFinite(scale) || scale <= 0) return 1;
+  return Math.max(1, Number(scale.toFixed(2)));
+}
+
+async function renderPageToCanvas(page, scale = 2, { maxPixels = DEFAULT_OCR_MAX_PIXELS } = {}) {
+  const resolvedScale = resolveOcrRenderScale(page, scale, maxPixels);
+  const viewport = page.getViewport({ scale: resolvedScale });
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Canvas context unavailable");
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
+  canvas.width = Math.max(1, Math.round(viewport.width));
+  canvas.height = Math.max(1, Math.round(viewport.height));
   await page.render({ canvasContext: context, viewport }).promise;
   return canvas;
+}
+
+async function getCachedPageText(file, pdf, pageNumber) {
+  const cache = getPerFileCache(pdfPageTextCache, file);
+  if (cache.has(pageNumber)) return cache.get(pageNumber);
+
+  const page = await pdf.getPage(pageNumber);
+  try {
+    const text = await extractPageTextWithAttempts(page);
+    cache.set(pageNumber, text);
+    return text;
+  } finally {
+    if (typeof page.cleanup === "function") page.cleanup();
+  }
+}
+
+function buildOcrPageCacheKey(
+  pageNumber,
+  { ocrLang = "kor+eng", ocrScale = 2, ocrMaxPixels = DEFAULT_OCR_MAX_PIXELS } = {}
+) {
+  const parsedScale = Number(ocrScale);
+  const scaleKey =
+    Number.isFinite(parsedScale) && parsedScale > 0 ? parsedScale.toFixed(2) : "2.00";
+  const pixelKey =
+    Number.isFinite(ocrMaxPixels) && ocrMaxPixels > 0 ? Math.round(ocrMaxPixels) : "none";
+  return `${pageNumber}:${ocrLang}:${scaleKey}:${pixelKey}`;
+}
+
+function buildSpreadOcrPageOrder(pageNumbers) {
+  const normalized = Array.isArray(pageNumbers) ? pageNumbers : [];
+  if (normalized.length <= 2) return [...normalized];
+
+  const ordered = [];
+  const seen = new Set();
+  const pushIndex = (index) => {
+    if (index < 0 || index >= normalized.length) return;
+    const pageNumber = normalized[index];
+    if (seen.has(pageNumber)) return;
+    seen.add(pageNumber);
+    ordered.push(pageNumber);
+  };
+
+  const lastIndex = normalized.length - 1;
+  const middleIndex = Math.floor(lastIndex / 2);
+  pushIndex(0);
+  pushIndex(middleIndex);
+  pushIndex(lastIndex);
+
+  for (let offset = 1; ordered.length < normalized.length; offset += 1) {
+    pushIndex(offset);
+    pushIndex(middleIndex - offset);
+    pushIndex(middleIndex + offset);
+    pushIndex(lastIndex - offset);
+  }
+
+  return ordered;
+}
+
+function resolveOcrPageQueue(pageNumbers, { ocrPageOrder = "sequential", maxOcrPages = 0 } = {}) {
+  const normalized = Array.isArray(pageNumbers) ? pageNumbers : [];
+  const ordered =
+    String(ocrPageOrder || "sequential").toLowerCase() === "spread"
+      ? buildSpreadOcrPageOrder(normalized)
+      : [...normalized];
+  const parsedMax = Number.parseInt(maxOcrPages, 10);
+  if (Number.isFinite(parsedMax) && parsedMax > 0) {
+    return ordered.slice(0, parsedMax);
+  }
+  return ordered;
+}
+
+async function recognizePdfPage(
+  file,
+  pdf,
+  pageNumber,
+  {
+    ocrLang = "kor+eng",
+    ocrScale = 2,
+    ocrMaxPixels = DEFAULT_OCR_MAX_PIXELS,
+    progressReporter,
+  } = {}
+) {
+  const cache = getPerFileCache(pdfOcrTextCache, file);
+  const cacheKey = buildOcrPageCacheKey(pageNumber, {
+    ocrLang,
+    ocrScale,
+    ocrMaxPixels,
+  });
+  if (cache.has(cacheKey)) return cache.get(cacheKey);
+
+  const text = await runWithOcrWorker(ocrLang, progressReporter?.handleLogger, async (worker) => {
+    const page = await pdf.getPage(pageNumber);
+    let canvas = null;
+    try {
+      canvas = await renderPageToCanvas(page, ocrScale, { maxPixels: ocrMaxPixels });
+      const result = await worker.recognize(canvas);
+      return normalizeExtractedText(result?.data?.text || "");
+    } finally {
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+      if (typeof page.cleanup === "function") page.cleanup();
+    }
+  });
+
+  cache.set(cacheKey, text);
+  return text;
 }
 
 function buildTextFromItems(items) {
@@ -484,8 +812,7 @@ async function extractPageTextWithAttempts(page) {
 }
 
 export async function extractPdfTextFromPages(file, pageNumbers, maxLength = 12000, options = {}) {
-  const pdfjsLib = await loadPdfRuntime();
-  const { getDocument } = pdfjsLib;
+  const { pdf } = await loadPdfDocument(file);
   let resolvedMaxLength = maxLength;
   let resolvedOptions = options || {};
   if (typeof maxLength === "object" && maxLength !== null) {
@@ -496,14 +823,10 @@ export async function extractPdfTextFromPages(file, pageNumbers, maxLength = 120
     useOcr = false,
     ocrLang = "kor+eng",
     ocrScale = 2,
+    ocrMaxPixels = DEFAULT_OCR_MAX_PIXELS,
     onOcrProgress,
   } = resolvedOptions;
-  const notifyOcr = (message) => {
-    if (typeof onOcrProgress === "function") onOcrProgress(message);
-  };
-
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await getDocument({ data: arrayBuffer }).promise;
+  const progressReporter = createOcrProgressReporter(onOcrProgress);
   const totalPages = pdf.numPages;
   const normalizedPages = Array.from(
     new Set(
@@ -518,8 +841,7 @@ export async function extractPdfTextFromPages(file, pageNumbers, maxLength = 120
   let currentLength = 0;
 
   for (const pageNumber of normalizedPages) {
-    const page = await pdf.getPage(pageNumber);
-    const pageText = await extractPageTextWithAttempts(page);
+    const pageText = await getCachedPageText(file, pdf, pageNumber);
     if (pageText) {
       chunks.push(pageText);
       pagesUsed.push(pageNumber);
@@ -528,7 +850,7 @@ export async function extractPdfTextFromPages(file, pageNumbers, maxLength = 120
     if (currentLength >= resolvedMaxLength) break;
   }
 
-  const normalized = chunks.join("\n").replace(/\s+/g, " ").trim().slice(0, resolvedMaxLength);
+  const normalized = normalizeExtractedText(chunks.join("\n")).slice(0, resolvedMaxLength);
   if (normalized || !useOcr || normalizedPages.length === 0) {
     return {
       text: normalized,
@@ -538,18 +860,9 @@ export async function extractPdfTextFromPages(file, pageNumbers, maxLength = 120
     };
   }
 
-  // OCR fallback for scanned pages.
-  notifyOcr(
+  progressReporter.notify(
     "\uC120\uD0DD\uD55C \uD398\uC774\uC9C0\uC5D0\uC11C \uD14D\uC2A4\uD2B8\uAC00 \uC5C6\uC5B4 OCR\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4..."
   );
-  const { createWorker } = await import("tesseract.js");
-  const worker = await createWorker(ocrLang, 1, {
-    logger: (info) => {
-      if (!info || typeof info.progress !== "number") return;
-      const pct = Math.round(info.progress * 100);
-      notifyOcr(`OCR ${info.status || "processing"}... ${pct}%`);
-    },
-  });
   const ocrChunks = [];
   const ocrPagesUsed = [];
   let ocrLength = 0;
@@ -557,24 +870,26 @@ export async function extractPdfTextFromPages(file, pageNumbers, maxLength = 120
     for (let idx = 0; idx < normalizedPages.length; idx += 1) {
       if (ocrLength >= resolvedMaxLength) break;
       const pageNumber = normalizedPages[idx];
-      notifyOcr(`OCR \uC9C4\uD589 \uC911... (${idx + 1}/${normalizedPages.length}\uD398\uC774\uC9C0)`);
-      const page = await pdf.getPage(pageNumber);
-      const canvas = await renderPageToCanvas(page, ocrScale);
-      const result = await worker.recognize(canvas);
-      const text = String(result?.data?.text || "").replace(/\s+/g, " ").trim();
+      progressReporter.notify(
+        `OCR \uC9C4\uD589 \uC911... (${idx + 1}/${normalizedPages.length}\uD398\uC774\uC9C0)`
+      );
+      const text = await recognizePdfPage(file, pdf, pageNumber, {
+        ocrLang,
+        ocrScale,
+        ocrMaxPixels,
+        progressReporter,
+      });
       if (text) {
         ocrChunks.push(text);
         ocrPagesUsed.push(pageNumber);
         ocrLength += text.length + 1;
       }
-      canvas.width = 0;
-      canvas.height = 0;
     }
   } finally {
-    await worker.terminate();
+    progressReporter.flush();
   }
 
-  const ocrNormalized = ocrChunks.join("\n").replace(/\s+/g, " ").trim().slice(0, resolvedMaxLength);
+  const ocrNormalized = normalizeExtractedText(ocrChunks.join("\n")).slice(0, resolvedMaxLength);
   return {
     text: ocrNormalized,
     pagesUsed: ocrPagesUsed,
@@ -584,21 +899,16 @@ export async function extractPdfTextFromPages(file, pageNumbers, maxLength = 120
 }
 
 export async function extractPdfPageTexts(file, pageNumbers, options = {}) {
-  const pdfjsLib = await loadPdfRuntime();
-  const { getDocument } = pdfjsLib;
+  const { pdf } = await loadPdfDocument(file);
   const {
     useOcr = false,
     ocrLang = "kor+eng",
     ocrScale = 2,
+    ocrMaxPixels = DEFAULT_OCR_MAX_PIXELS,
     onOcrProgress,
     maxCharsPerPage = 6000,
   } = options || {};
-  const notifyOcr = (message) => {
-    if (typeof onOcrProgress === "function") onOcrProgress(message);
-  };
-
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await getDocument({ data: arrayBuffer }).promise;
+  const progressReporter = createOcrProgressReporter(onOcrProgress);
   const totalPages = pdf.numPages;
   const normalizedPages = Array.from(
     new Set(
@@ -609,60 +919,47 @@ export async function extractPdfPageTexts(file, pageNumbers, options = {}) {
   ).sort((a, b) => a - b);
 
   const pages = [];
+  const pageEntries = new Map();
   const missingPages = [];
   for (const pageNumber of normalizedPages) {
-    const page = await pdf.getPage(pageNumber);
-    const text = await extractPageTextWithAttempts(page);
-    const normalized = String(text || "").replace(/\s+/g, " ").trim().slice(0, maxCharsPerPage);
-    if (normalized) {
-      pages.push({
-        pageNumber,
-        text: normalized,
-        ocrUsed: false,
-      });
-    } else {
-      pages.push({
-        pageNumber,
-        text: "",
-        ocrUsed: false,
-      });
-      missingPages.push(pageNumber);
-    }
+    const text = await getCachedPageText(file, pdf, pageNumber);
+    const normalized = normalizeExtractedText(text).slice(0, maxCharsPerPage);
+    const entry = {
+      pageNumber,
+      text: normalized,
+      ocrUsed: false,
+    };
+    pages.push(entry);
+    pageEntries.set(pageNumber, entry);
+    if (!normalized) missingPages.push(pageNumber);
   }
 
   if (useOcr && missingPages.length > 0) {
-    notifyOcr("\uD398\uC774\uC9C0\uBCC4 OCR\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4...");
-    const { createWorker } = await import("tesseract.js");
-    const worker = await createWorker(ocrLang, 1, {
-      logger: (info) => {
-        if (!info || typeof info.progress !== "number") return;
-        const pct = Math.round(info.progress * 100);
-        notifyOcr(`OCR ${info.status || "processing"}... ${pct}%`);
-      },
-    });
+    progressReporter.notify("\uD398\uC774\uC9C0\uBCC4 OCR\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4...");
 
     try {
       for (let idx = 0; idx < missingPages.length; idx += 1) {
         const pageNumber = missingPages[idx];
-        notifyOcr(`OCR \uC9C4\uD589 \uC911... (${idx + 1}/${missingPages.length}\uD398\uC774\uC9C0)`);
-        const page = await pdf.getPage(pageNumber);
-        const canvas = await renderPageToCanvas(page, ocrScale);
-        const result = await worker.recognize(canvas);
-        const text = String(result?.data?.text || "")
-          .replace(/\s+/g, " ")
-          .trim()
-          .slice(0, maxCharsPerPage);
-        canvas.width = 0;
-        canvas.height = 0;
+        progressReporter.notify(
+          `OCR \uC9C4\uD589 \uC911... (${idx + 1}/${missingPages.length}\uD398\uC774\uC9C0)`
+        );
+        const text = (
+          await recognizePdfPage(file, pdf, pageNumber, {
+            ocrLang,
+            ocrScale,
+            ocrMaxPixels,
+            progressReporter,
+          })
+        ).slice(0, maxCharsPerPage);
 
-        const target = pages.find((item) => item.pageNumber === pageNumber);
+        const target = pageEntries.get(pageNumber);
         if (target && text) {
           target.text = text;
           target.ocrUsed = true;
         }
       }
     } finally {
-      await worker.terminate();
+      progressReporter.flush();
     }
   }
 
@@ -680,17 +977,14 @@ export async function extractPdfTextByRanges(
     useOcr = false,
     ocrLang = "kor+eng",
     ocrScale = 2,
+    ocrMaxPixels = DEFAULT_OCR_MAX_PIXELS,
+    ocrPageOrder = "sequential",
+    maxOcrPagesPerRange = 0,
     onOcrProgress,
   } = {}
 ) {
-  const pdfjsLib = await loadPdfRuntime();
-  const { getDocument } = pdfjsLib;
-  const notifyOcr = (message) => {
-    if (typeof onOcrProgress === "function") onOcrProgress(message);
-  };
-
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await getDocument({ data: arrayBuffer }).promise;
+  const { pdf } = await loadPdfDocument(file);
+  const progressReporter = createOcrProgressReporter(onOcrProgress);
   const totalPages = pdf.numPages;
   const inputRanges = Array.isArray(ranges) ? ranges : [];
   const normalizedRanges = inputRanges
@@ -714,15 +1008,6 @@ export async function extractPdfTextByRanges(
     })
     .filter(Boolean);
 
-  const pageTextCache = new Map();
-  const getPageText = async (pageNumber) => {
-    if (pageTextCache.has(pageNumber)) return pageTextCache.get(pageNumber);
-    const page = await pdf.getPage(pageNumber);
-    const text = await extractPageTextWithAttempts(page);
-    pageTextCache.set(pageNumber, text);
-    return text;
-  };
-
   const chapters = [];
   for (const range of normalizedRanges) {
     const chunks = [];
@@ -730,7 +1015,7 @@ export async function extractPdfTextByRanges(
     let currentLength = 0;
     for (const pageNumber of range.pages) {
       if (currentLength >= maxLengthPerRange) break;
-      const pageText = await getPageText(pageNumber);
+      const pageText = await getCachedPageText(file, pdf, pageNumber);
       if (!pageText) continue;
       chunks.push(pageText);
       pagesUsed.push(pageNumber);
@@ -738,7 +1023,7 @@ export async function extractPdfTextByRanges(
     }
     chapters.push({
       ...range,
-      text: chunks.join("\n").replace(/\s+/g, " ").trim().slice(0, maxLengthPerRange),
+      text: normalizeExtractedText(chunks.join("\n")).slice(0, maxLengthPerRange),
       pagesUsed,
       ocrUsed: false,
     });
@@ -753,57 +1038,49 @@ export async function extractPdfTextByRanges(
     return { totalPages, chapters };
   }
 
-  notifyOcr("\uC120\uD0DD \uCC55\uD130 \uD14D\uC2A4\uD2B8\uAC00 \uC5C6\uC5B4 OCR\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4...");
-  const { createWorker } = await import("tesseract.js");
-  const worker = await createWorker(ocrLang, 1, {
-    logger: (info) => {
-      if (!info || typeof info.progress !== "number") return;
-      const pct = Math.round(info.progress * 100);
-      notifyOcr(`OCR ${info.status || "processing"}... ${pct}%`);
-    },
-  });
-
-  const ocrPageCache = new Map();
-  const getOcrText = async (pageNumber) => {
-    if (ocrPageCache.has(pageNumber)) return ocrPageCache.get(pageNumber);
-    const page = await pdf.getPage(pageNumber);
-    const canvas = await renderPageToCanvas(page, ocrScale);
-    const result = await worker.recognize(canvas);
-    const text = String(result?.data?.text || "").replace(/\s+/g, " ").trim();
-    canvas.width = 0;
-    canvas.height = 0;
-    ocrPageCache.set(pageNumber, text);
-    return text;
-  };
+  progressReporter.notify(
+    "\uC120\uD0DD \uCC55\uD130 \uD14D\uC2A4\uD2B8\uAC00 \uC5C6\uC5B4 OCR\uC744 \uC2DC\uC791\uD569\uB2C8\uB2E4..."
+  );
 
   try {
     for (let chapterIdx = 0; chapterIdx < chapters.length; chapterIdx += 1) {
       const chapter = chapters[chapterIdx];
       if (chapter.text || chapter.pages.length === 0) continue;
-      const chunks = [];
-      const pagesUsed = [];
+      const ocrPageQueue = resolveOcrPageQueue(chapter.pages, {
+        ocrPageOrder,
+        maxOcrPages: maxOcrPagesPerRange,
+      });
+      const ocrEntries = [];
       let currentLength = 0;
-      for (let idx = 0; idx < chapter.pages.length; idx += 1) {
+      for (let idx = 0; idx < ocrPageQueue.length; idx += 1) {
         if (currentLength >= maxLengthPerRange) break;
-        const pageNumber = chapter.pages[idx];
-        notifyOcr(
-          `OCR \uC9C4\uD589 \uC911... (${chapter.chapterNumber}\uCC55\uD130 ${idx + 1}/${chapter.pages.length}\uD398\uC774\uC9C0)`
+        const pageNumber = ocrPageQueue[idx];
+        progressReporter.notify(
+          `OCR \uC9C4\uD589 \uC911... (${chapter.chapterNumber}\uCC55\uD130 ${idx + 1}/${ocrPageQueue.length}\uD398\uC774\uC9C0)`
         );
-        const text = await getOcrText(pageNumber);
+        const text = await recognizePdfPage(file, pdf, pageNumber, {
+          ocrLang,
+          ocrScale,
+          ocrMaxPixels,
+          progressReporter,
+        });
         if (!text) continue;
-        chunks.push(text);
-        pagesUsed.push(pageNumber);
+        ocrEntries.push({ pageNumber, text });
         currentLength += text.length + 1;
       }
+      const orderedEntries = ocrEntries.sort((left, right) => left.pageNumber - right.pageNumber);
       chapters[chapterIdx] = {
         ...chapter,
-        text: chunks.join("\n").replace(/\s+/g, " ").trim().slice(0, maxLengthPerRange),
-        pagesUsed,
+        text: normalizeExtractedText(orderedEntries.map((entry) => entry.text).join("\n")).slice(
+          0,
+          maxLengthPerRange
+        ),
+        pagesUsed: orderedEntries.map((entry) => entry.pageNumber),
         ocrUsed: true,
       };
     }
   } finally {
-    await worker.terminate();
+    progressReporter.flush();
   }
 
   return { totalPages, chapters };
@@ -898,10 +1175,7 @@ export async function extractChapterRangesFromToc(
   file,
   { maxScanPages = 24 } = {}
 ) {
-  const pdfjsLib = await loadPdfRuntime();
-  const { getDocument } = pdfjsLib;
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await getDocument({ data: arrayBuffer }).promise;
+  const { pdf } = await loadPdfDocument(file);
   const totalPages = Number(pdf?.numPages) || 0;
 
   if (!totalPages) {
@@ -944,10 +1218,7 @@ export async function extractChapterRangesFromToc(
 
 // Lower default scale for faster thumbnail generation and save as WebP.
 export async function generatePdfThumbnail(file, { scale = 0.2, quality = 1.0 } = {}) {
-  const pdfjsLib = await loadPdfRuntime();
-  const { getDocument } = pdfjsLib;
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await getDocument({ data: arrayBuffer }).promise;
+  const { pdf } = await loadPdfDocument(file);
   const page = await pdf.getPage(1);
 
   const viewport = page.getViewport({ scale });

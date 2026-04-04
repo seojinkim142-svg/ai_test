@@ -1,7 +1,7 @@
 import { LETTERS } from "../constants";
 import MathMarkdown from "./MathMarkdown";
 
-function MultipleChoiceItem({ question, idx, selectedChoice, revealed, onSelect }) {
+function MultipleChoiceItem({ question, idx, selectedChoice, revealed, onSelect, onDelete }) {
   return (
     <article className="rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
       <div className="flex items-start justify-between gap-3">
@@ -12,7 +12,20 @@ function MultipleChoiceItem({ question, idx, selectedChoice, revealed, onSelect 
             className="summary-prose mt-1 max-w-none break-words text-sm text-slate-100 [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto"
           />
         </div>
-        <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-100">객관식</span>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-100">객관식</span>
+          {onDelete && (
+            <button
+              type="button"
+              onClick={() => onDelete(idx)}
+              className="ghost-button text-[11px] text-slate-200"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "148, 163, 184" }}
+            >
+              삭제
+            </button>
+          )}
+        </div>
       </div>
       <ul className="mt-3 space-y-2">
         {(question.choices || []).map((choice, cIdx) => {
@@ -68,7 +81,7 @@ function MultipleChoiceItem({ question, idx, selectedChoice, revealed, onSelect 
   );
 }
 
-function ShortAnswer({ question, questionNumber, index, userInput, result, onChange, onCheck }) {
+function ShortAnswer({ question, questionNumber, index, userInput, result, onChange, onCheck, onDelete }) {
   if (!question) return null;
 
   return (
@@ -81,7 +94,20 @@ function ShortAnswer({ question, questionNumber, index, userInput, result, onCha
             className="summary-prose mt-1 max-w-none break-words text-sm text-slate-100 [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto"
           />
         </div>
-        <span className="rounded-full bg-cyan-500/20 px-2 py-1 text-xs font-semibold text-cyan-100">주관식</span>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full bg-cyan-500/20 px-2 py-1 text-xs font-semibold text-cyan-100">주관식</span>
+          {onDelete && (
+            <button
+              type="button"
+              onClick={() => onDelete(index)}
+              className="ghost-button text-[11px] text-slate-200"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "148, 163, 184" }}
+            >
+              삭제
+            </button>
+          )}
+        </div>
       </div>
       <div className="mt-3 flex flex-col gap-2">
         <input
@@ -127,6 +153,8 @@ function QuizSection({
   onSelectChoice,
   onShortAnswerChange,
   onShortAnswerCheck,
+  onDeleteMultipleChoice,
+  onDeleteShortAnswer,
 }) {
   const multipleChoice = questions?.multipleChoice || [];
   const shortAnswers = Array.isArray(questions?.shortAnswer) ? questions.shortAnswer : [];
@@ -155,6 +183,7 @@ function QuizSection({
             selectedChoice={selectedChoices[idx]}
             revealed={revealedChoices[idx]}
             onSelect={onSelectChoice}
+            onDelete={onDeleteMultipleChoice}
           />
         ))}
 
@@ -168,6 +197,7 @@ function QuizSection({
             result={shortAnswerResult?.[idx] || null}
             onChange={onShortAnswerChange}
             onCheck={onShortAnswerCheck}
+            onDelete={onDeleteShortAnswer}
           />
         ))}
       </div>

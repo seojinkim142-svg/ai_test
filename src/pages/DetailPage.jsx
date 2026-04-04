@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
+import { Capacitor } from "@capacitor/core";
 import ActionsPanel from "../components/ActionsPanel";
 import AiTutorPanel from "../components/AiTutorPanel";
 import FlashcardsPanel from "../components/FlashcardsPanel";
@@ -228,6 +229,8 @@ export default function DetailPage({
   handleShortAnswerChange,
   handleShortAnswerCheck,
   regenerateQuiz,
+  deleteQuiz,
+  deleteQuizItem,
   isLoadingOx,
   requestOxQuiz,
   oxChapterSelectionInput,
@@ -256,6 +259,7 @@ export default function DetailPage({
   handleSendTutorMessage,
   handleResetTutor,
 }) {
+  const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
   const quizMixOptions = useMemo(
     () => [
       { multipleChoice: 5, shortAnswer: 0, label: "개관식 5 / 주관식 0" },
@@ -512,7 +516,7 @@ export default function DetailPage({
       </div>
 
         <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
-        <div className="grid grid-cols-6 items-center gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
+        <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 sm:grid-cols-6 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
           {[
             { id: "summary", label: "\uC694\uC57D", type: "tab" },
             { id: "quiz", label: "\uD034\uC988", type: "tab" },
@@ -1118,7 +1122,11 @@ export default function DetailPage({
                               <section
                                 key={`mock-exam-page-${pageIndex}`}
                                 className="mock-exam-page relative mx-auto bg-white text-black shadow-sm"
-                                style={{ width: "794px", minHeight: "1123px", padding: "44px 52px 48px" }}
+                                style={{
+                                  width: isNativePlatform ? "min(100%, 794px)" : "794px",
+                                  minHeight: "1123px",
+                                  padding: isNativePlatform ? "32px 24px 36px" : "44px 52px 48px",
+                                }}
                               >
                                 <div className="relative flex items-start justify-center">
                                   <h4 className="text-[18px] font-semibold">{activeMockExamTitle}</h4>
@@ -1282,12 +1290,14 @@ export default function DetailPage({
                       onSelectChoice={(qIdx, choiceIdx) => handleChoiceSelect(set.id, qIdx, choiceIdx)}
                       onShortAnswerChange={(idx, val) => handleShortAnswerChange(set.id, idx, val)}
                       onShortAnswerCheck={(idx) => handleShortAnswerCheck(set.id, idx)}
+                        onDeleteMultipleChoice={(qIdx) => deleteQuizItem?.(set.id, "multipleChoice", qIdx)}
+                        onDeleteShortAnswer={(qIdx) => deleteQuizItem?.(set.id, "shortAnswer", qIdx)}
                     />
                   ))}
                 </div>
               )}
 
-              <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="mt-4 flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
                 <button
                   type="button"
                   onClick={requestQuestions}
@@ -1297,7 +1307,7 @@ export default function DetailPage({
                       ? "무료 티어에서는 퀴즈를 재생성할 수 없습니다."
                       : undefined
                   }
-                  className="ghost-button w-full text-sm text-emerald-100"
+                  className="ghost-button w-full max-w-[320px] text-sm text-emerald-100"
                   data-ghost-size="xl"
                   style={{ "--ghost-color": "16, 185, 129" }}
                 >
@@ -1317,6 +1327,18 @@ export default function DetailPage({
                     {isLoadingQuiz
                       ? "퀴즈 재생성 중..."
                       : "퀴즈 재생성(덮어쓰기)"}
+                  </button>
+                )}
+                {quizSets.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={deleteQuiz}
+                    disabled={isLoadingQuiz || isLoadingText}
+                    className="ghost-button w-full max-w-[320px] text-sm text-slate-100"
+                    data-ghost-size="xl"
+                    style={{ "--ghost-color": "148, 163, 184" }}
+                  >
+                    퀴즈 전체 삭제
                   </button>
                 )}
               </div>
@@ -1469,4 +1491,5 @@ export default function DetailPage({
     </section>
   );
 }
+
 
