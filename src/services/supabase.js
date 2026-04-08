@@ -38,6 +38,14 @@ const NATIVE_AUTH_PATH = "/callback";
 const DEFAULT_NATIVE_AUTH_REDIRECT = NATIVE_APP_SCHEME
   ? `${NATIVE_APP_SCHEME}://${NATIVE_AUTH_HOST}${NATIVE_AUTH_PATH}`
   : "";
+const resolveBrowserRedirectUrl = () => {
+  if (typeof window === "undefined") return "";
+  try {
+    return new URL("/", window.location.origin).toString();
+  } catch {
+    return "";
+  }
+};
 const EXPLICIT_SUPABASE_REDIRECT = normalizeAbsoluteUrl(import.meta.env.VITE_SUPABASE_REDIRECT_URL);
 const EXPLICIT_WEB_SUPABASE_REDIRECT =
   EXPLICIT_SUPABASE_REDIRECT && /^https?:/i.test(EXPLICIT_SUPABASE_REDIRECT)
@@ -52,11 +60,16 @@ const PREFERRED_NATIVE_SUPABASE_REDIRECT =
     ? EXPLICIT_SUPABASE_REDIRECT
     : "") ||
   DEFAULT_NATIVE_AUTH_REDIRECT;
+const PREFERRED_WEB_SUPABASE_REDIRECT =
+  EXPLICIT_WEB_SUPABASE_REDIRECT ||
+  (import.meta.env.DEV ? resolveBrowserRedirectUrl() : "") ||
+  resolveAppRedirectUrl("/") ||
+  resolveBrowserRedirectUrl();
 
 export const SUPABASE_REDIRECT =
   (Capacitor.isNativePlatform()
     ? PREFERRED_NATIVE_SUPABASE_REDIRECT || undefined
-    : EXPLICIT_WEB_SUPABASE_REDIRECT || resolveAppRedirectUrl("/") || undefined);
+    : PREFERRED_WEB_SUPABASE_REDIRECT || undefined);
 
 function normalizeComparablePath(pathname) {
   const normalized = String(pathname || "").trim().replace(/\/+$/, "");
@@ -295,15 +308,23 @@ export async function deleteFlashcard({ userId, cardId }) {
   if (error) throw error;
 }
 
-export async function deleteUpload({ userId, uploadId, bucket, path }) {
+export async function deleteUpload({ userId, uploadId, bucket, path, previewPdfBucket, previewPdfPath }) {
   const client = requireSupabase();
   requireUser(userId);
   if (!uploadId && !path) return;
 
   // Best-effort storage cleanup before deleting DB metadata.
+  const removals = [];
   if (bucket && path) {
+    removals.push({ bucket, path });
+  }
+  if (previewPdfBucket && previewPdfPath) {
+    removals.push({ bucket: previewPdfBucket, path: previewPdfPath });
+  }
+
+  for (const target of removals) {
     try {
-      await client.storage.from(bucket).remove([path]);
+      await client.storage.from(target.bucket).remove([target.path]);
     } catch (err) {
       console.warn("storage remove failed", err);
     }

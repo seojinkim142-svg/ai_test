@@ -43,10 +43,7 @@ const Header = memo(function Header({
               aria-label={"\uD648\uC73C\uB85C \uC774\uB3D9"}
               className="group rounded-xl px-1 py-0.5 text-left transition hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/55"
             >
-              <p className="text-[11px] uppercase tracking-[0.24em] text-emerald-200/75 transition group-hover:text-emerald-100 sm:text-sm sm:tracking-[0.2em]">
-                {"\uD034\uC988\uC640 \uC694\uC57D"}
-              </p>
-              <div className="mt-1 flex items-end gap-2 sm:gap-3">
+              <div className="flex items-end gap-2 sm:gap-3">
                 <h1 className="text-2xl font-bold leading-none text-white transition group-hover:text-emerald-50 sm:text-3xl">
                   Zeusian.ai
                 </h1>
@@ -59,10 +56,7 @@ const Header = memo(function Header({
             </button>
           ) : (
             <div>
-              <p className="text-[11px] uppercase tracking-[0.24em] text-emerald-200/75 sm:text-sm sm:tracking-[0.2em]">
-                {"\uD034\uC988\uC640 \uC694\uC57D"}
-              </p>
-              <div className="mt-1 flex items-end gap-2 sm:gap-3">
+              <div className="flex items-end gap-2 sm:gap-3">
                 <h1 className="text-2xl font-bold leading-none text-white sm:text-3xl">Zeusian.ai</h1>
                 {brandTierLabel && (
                   <span className="pb-0.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-200/80 sm:text-sm">

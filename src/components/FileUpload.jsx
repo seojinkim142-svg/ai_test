@@ -394,7 +394,6 @@ const FileUpload = memo(function FileUpload({
             </button>
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-xs uppercase tracking-wide text-emerald-300/80">폴더</p>
                 <h3 className="text-xl font-semibold">{folderModalName}</h3>
               </div>
               <div className="flex flex-wrap items-center gap-2 pr-12 sm:pr-14">

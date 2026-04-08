@@ -158,8 +158,7 @@ function AuthPanel({ user, onAuth, theme = "dark" }) {
   if (user) {
     return (
       <div className={`w-full max-w-xl ${shellClass}`}>
-        <p className={`text-xs uppercase tracking-[0.24em] ${bodyClass}`}>Signed In</p>
-        <h1 className="mt-3 text-4xl font-black tracking-tight">계정 연결 완료</h1>
+        <h1 className="text-4xl font-black tracking-tight">계정 연결 완료</h1>
         <p className={`mt-3 text-sm leading-7 ${bodyClass}`}>{user.email}</p>
         <button
           type="button"

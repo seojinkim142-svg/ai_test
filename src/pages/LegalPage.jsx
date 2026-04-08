@@ -73,8 +73,7 @@ const LegalPage = memo(function LegalPage({ documentType = "terms" }) {
       <main className="mx-auto max-w-6xl px-6 py-10">
         <section className="overflow-hidden border border-slate-200/12 bg-slate-950/90 shadow-[0_30px_120px_rgba(0,0,0,0.45)]">
           <div className="border-b border-slate-200/10 px-6 py-8 md:px-10">
-            <p className="text-xs font-semibold uppercase tracking-[0.28em] text-emerald-300/75">{content.eyebrow}</p>
-            <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+            <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
               <div>
                 <h1 className="text-3xl font-black tracking-tight text-white md:text-5xl">{content.title}</h1>
                 <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-300 md:text-base">{content.description}</p>
@@ -98,8 +97,7 @@ const LegalPage = memo(function LegalPage({ documentType = "terms" }) {
           </div>
 
           <div className="border-b border-slate-200/10 px-6 py-4 md:px-10">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">문서 내 바로가기</p>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-2">
               {content.sections.map((section) => (
                 <a
                   key={section.id}

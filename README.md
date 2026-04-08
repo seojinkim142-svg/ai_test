@@ -240,6 +240,22 @@ If you want to modularize more:
 2. Create a new file only when the logic represents a real feature boundary.
 3. Avoid micro-modules that add file count but do not create a meaningful lazy-load or ownership boundary.
 
+## Latest Product Updates
+
+Recent app updates now reflected in the codebase:
+
+- Kakao / Supabase OAuth callback handling was hardened for both web and native Android flows.
+  - Web redirect resolution now prefers the current local dev origin when appropriate.
+  - Native Android callback handling now preserves OAuth query parameters so session exchange is not dropped on app return.
+- A Chrome extension was added under `chrome-extension/`.
+  - Supports selected-text capture, page snapshot capture, local clip history, context-menu save actions, and quick launch into Zeusian.ai.
+  - Popup styling was simplified to match the current Zeusian visual direction and decorative helper labels were removed.
+- Decorative helper labels were removed across key web/app surfaces to keep the UI cleaner and more direct.
+- DOCX and PPTX uploads can now be normalized into server-generated PDF previews.
+  - The original Office file remains stored as uploaded.
+  - A generated preview PDF is stored separately and used by the detail preview pipeline.
+  - Upload cards now refresh their thumbnail from the generated preview PDF so Office uploads visually behave more like PDFs after conversion.
+
 ## Build Verification
 
 Use this before deploying:
@@ -249,6 +265,23 @@ npm run build
 ```
 
 The current refactor was verified with a successful production build.
+
+## Office Preview PDF Conversion
+
+DOCX and PPTX uploads can now be normalized into server-generated PDF previews so the app preview path stays consistent with PDF documents.
+
+- The original file is still uploaded to Supabase Storage.
+- A server endpoint at `/api/document/convert` downloads the original file, sends it to a Gotenberg-compatible LibreOffice converter, uploads the generated PDF preview back to Supabase Storage, and stores its path on the `uploads` row.
+- The detail preview prefers the generated PDF when `preview_pdf_path` is available. If an older upload does not have a preview yet, opening it triggers a best-effort backfill conversion.
+
+Required setup:
+
+1. Run [database/uploads_preview_pdf.sql](/c:/Users/tjwls/OneDrive/시험공부ai/database/uploads_preview_pdf.sql) on Supabase.
+2. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` on the server.
+3. Set `GOTENBERG_BASE_URL` to a reachable Gotenberg host.
+4. In local development, run `npm run dev:document` alongside `vite` if you want `/api/document` conversion through the local proxy.
+5. The migration file to run is `database/uploads_preview_pdf.sql`.
+6. For local browser testing, set `DOCUMENT_ALLOW_ORIGIN=http://localhost:5173` and keep `GOTENBERG_BASE_URL=http://localhost:3000` when Gotenberg runs on the same machine.
 
 ## Vite / React Notes
 

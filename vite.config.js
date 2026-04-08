@@ -235,6 +235,10 @@ export default defineConfig(async ({ mode }) => {
           target: "http://localhost:8792",
           changeOrigin: true,
         },
+        "/api/document": {
+          target: "http://localhost:8793",
+          changeOrigin: true,
+        },
       },
     },
     // 개발 서버 최적화
