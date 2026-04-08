@@ -8,13 +8,9 @@ const PromoPage = memo(function PromoPage() {
   }, []);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-black text-slate-100">
-      <main className="relative z-10 mx-auto flex w-full max-w-none flex-col gap-4 py-4">
-        <div className="px-0">
-          <section className="grid grid-cols-1 gap-6">
-            <PromoIntro onStart={handleStart} />
-          </section>
-        </div>
+    <div className="relative min-h-screen overflow-hidden bg-[#f5f7fb] text-slate-900">
+      <main className="relative z-10 min-h-screen">
+        <PromoIntro onStart={handleStart} />
       </main>
     </div>
   );
