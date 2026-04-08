@@ -179,9 +179,271 @@ function isObjectiveShortAnswerItem(item) {
   return isConciseShortAnswerValue(item?.answer);
 }
 
+function normalizeStyleList(items, { maxItems = 6, maxLength = 120 } = {}) {
+  const result = [];
+  const seen = new Set();
+  (Array.isArray(items) ? items : []).forEach((item) => {
+    const normalized = String(item || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, maxLength);
+    if (!normalized) return;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(normalized);
+  });
+  return result.slice(0, maxItems);
+}
+
+function summarizeQuestionStyleSourceBlock(block, maxLength = 150) {
+  const normalized = String(block || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return "";
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, maxLength).trim()}...`;
+}
+
+const QUESTION_STYLE_STEM_RE =
+  /(?:\uBB38\uC81C\s*\d+|question\s*\d+|q\.\s*\d+|\uB2E4\uC74C\s*(?:\uC911|\uBCF4\uAE30|\uC790\uB8CC|\uAE00)|\uC62E\uC740\s*\uAC83|\uC62E\uC9C0\s*\uC54A\uC740\s*\uAC83|\uC54C\uB9DE\uC740\s*\uAC83|\uACE0\uB978\s*\uAC83|\uACE0\uB974\uC2DC\uC624|\uBB3C\uC74C\uC5D0\s*\uB2F5|\uBE48\uCE78|\uC11C\uC220\uD615|which of the following|true or false|fill in the blank|\?)/i;
+const QUESTION_STYLE_CHOICE_RE = /(?:^|\n|\s)(?:①|②|③|④|⑤|[1-5][.)]|[A-E][.)]|[\u3131-\u314e][.)])/;
+
+function looksLikeQuestionStyleBlock(block) {
+  const text = String(block || "").trim();
+  if (text.length < 24) return false;
+  const choiceMatches =
+    text.match(/(?:^|\n|\s)(?:①|②|③|④|⑤|[1-5][.)]|[A-E][.)]|[\u3131-\u314e][.)])/g) || [];
+  return QUESTION_STYLE_STEM_RE.test(text) || choiceMatches.length >= 2 || QUESTION_STYLE_CHOICE_RE.test(text);
+}
+
+function extractQuestionStyleBlocks(text, { maxBlocks = 10, maxChars = 5200 } = {}) {
+  const source = String(text || "").replace(/\r/g, "").trim();
+  if (!source) return [];
+
+  const deduped = [];
+  const seen = new Set();
+  const pushBlock = (value) => {
+    const normalized = String(value || "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+    if (!looksLikeQuestionStyleBlock(normalized)) return false;
+    const compact = normalized.replace(/\s+/g, " ").trim();
+    if (!compact) return false;
+    const key = compact.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    deduped.push(limitText(normalized, 700));
+    return true;
+  };
+
+  const paragraphBlocks = source
+    .split(/\n\s*\n+/)
+    .map((block) => block.trim())
+    .filter(Boolean);
+  paragraphBlocks.forEach((block) => {
+    if (deduped.length < maxBlocks) pushBlock(block);
+  });
+
+  if (deduped.length < maxBlocks) {
+    const lines = source
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    for (let index = 0; index < lines.length && deduped.length < maxBlocks; index += 1) {
+      const window = lines.slice(index, index + 6).join("\n");
+      if (!window) continue;
+      if (!pushBlock(window)) continue;
+      index += 2;
+    }
+  }
+
+  const selected = [];
+  let totalChars = 0;
+  for (const block of deduped) {
+    const nextLength = totalChars + block.length + 2;
+    if (selected.length >= maxBlocks || nextLength > maxChars) break;
+    selected.push(block);
+    totalChars = nextLength;
+  }
+  return selected;
+}
+
+function normalizeQuestionStyleProfile(profile, { sourceBlocks = [] } = {}) {
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) return null;
+
+  const normalized = {
+    detected: Boolean(profile?.detected),
+    summary: normalizeEvidenceText(
+      profile?.summary || profile?.styleSummary || profile?.toneSummary || "",
+      260
+    ),
+    stemPatterns: normalizeStyleList(profile?.stemPatterns || profile?.questionPatterns || profile?.promptPatterns),
+    choicePatterns: normalizeStyleList(
+      profile?.choicePatterns || profile?.optionPatterns || profile?.distractorPatterns
+    ),
+    reasoningPatterns: normalizeStyleList(
+      profile?.reasoningPatterns || profile?.focusPatterns || profile?.thinkingPatterns
+    ),
+    trapPatterns: normalizeStyleList(profile?.trapPatterns || profile?.misdirectionPatterns),
+    answerRules: normalizeStyleList(profile?.answerRules || profile?.gradingRules || profile?.formatRules),
+    avoidPatterns: normalizeStyleList(profile?.avoidPatterns || profile?.dontPatterns || profile?.doNotDo),
+    sampleStems: normalizeStyleList(
+      profile?.sampleStems || profile?.sampleQuestions || profile?.exampleStems,
+      {
+        maxItems: 4,
+        maxLength: 140,
+      }
+    ),
+    sourceExampleCount: Math.max(0, Array.isArray(sourceBlocks) ? sourceBlocks.length : 0),
+    sourceExamplePreviews: normalizeStyleList(
+      (Array.isArray(sourceBlocks) ? sourceBlocks : []).map((block) =>
+        summarizeQuestionStyleSourceBlock(block, 150)
+      ),
+      {
+        maxItems: 4,
+        maxLength: 150,
+      }
+    ),
+  };
+
+  const hasUsefulContent =
+    normalized.detected ||
+    normalized.summary ||
+    normalized.stemPatterns.length > 0 ||
+    normalized.choicePatterns.length > 0 ||
+    normalized.reasoningPatterns.length > 0 ||
+    normalized.trapPatterns.length > 0 ||
+    normalized.answerRules.length > 0 ||
+    normalized.sampleStems.length > 0 ||
+    normalized.sourceExampleCount > 0 ||
+    normalized.sourceExamplePreviews.length > 0;
+
+  if (!hasUsefulContent) return null;
+  if (!normalized.detected) {
+    normalized.detected =
+      normalized.stemPatterns.length > 0 ||
+      normalized.choicePatterns.length > 0 ||
+      normalized.reasoningPatterns.length > 0 ||
+      normalized.trapPatterns.length > 0 ||
+      normalized.sampleStems.length > 0;
+  }
+  return normalized;
+}
+
+function formatQuestionStyleProfile(profile) {
+  if (!profile) return "";
+  if (!profile.detected) {
+    const fallbackLines = ["[분석 결과]"];
+    if (Number(profile.sourceExampleCount || 0) > 0) {
+      fallbackLines.push(
+        `- 예시 문제로 보이는 블록은 ${Number(profile.sourceExampleCount || 0)}개 감지됐지만, 안정적인 스타일 프로필로 확정하기엔 근거가 약했습니다.`
+      );
+    } else {
+      fallbackLines.push("- 문서 안에서 예시 문제를 충분히 감지하지 못했습니다.");
+    }
+    if (profile.sourceExamplePreviews.length) {
+      fallbackLines.push("");
+      fallbackLines.push("[실제 추출 미리보기]");
+      profile.sourceExamplePreviews.forEach((preview, index) => {
+        fallbackLines.push(`${index + 1}. ${preview}`);
+      });
+    }
+    return fallbackLines.join("\n");
+  }
+
+  const sections = [];
+  sections.push("[분석 결과]");
+  sections.push(
+    `- 감지된 예시 문제 블록 수: ${Number(profile.sourceExampleCount || 0)}개`
+  );
+  if (profile.summary) sections.push(`- 한줄 요약: ${profile.summary}`);
+  if (profile.stemPatterns.length) sections.push(`- 발문 패턴: ${profile.stemPatterns.join(" | ")}`);
+  if (profile.choicePatterns.length) {
+    sections.push(`- 선지/보기 패턴: ${profile.choicePatterns.join(" | ")}`);
+  }
+  if (profile.reasoningPatterns.length) {
+    sections.push(`- 주로 묻는 사고: ${profile.reasoningPatterns.join(" | ")}`);
+  }
+  if (profile.trapPatterns.length) {
+    sections.push(`- 자주 나오는 함정: ${profile.trapPatterns.join(" | ")}`);
+  }
+  if (profile.answerRules.length) sections.push(`- 정답 형식 규칙: ${profile.answerRules.join(" | ")}`);
+  if (profile.avoidPatterns.length) {
+    sections.push(`- 피해야 할 엇나간 스타일: ${profile.avoidPatterns.join(" | ")}`);
+  }
+  if (profile.sampleStems.length) {
+    sections.push("");
+    sections.push("[모델이 잡은 대표 발문]");
+    profile.sampleStems.forEach((stem, index) => {
+      sections.push(`${index + 1}. ${stem}`);
+    });
+  }
+  if (profile.sourceExamplePreviews.length) {
+    sections.push("");
+    sections.push("[실제 추출 미리보기]");
+    profile.sourceExamplePreviews.forEach((preview, index) => {
+      sections.push(`${index + 1}. ${preview}`);
+    });
+  }
+  return sections.join("\n");
+}
+
+function buildQuestionStyleProfilePrompt(blocks, { scopeLabel = "" } = {}) {
+  const joinedBlocks = (Array.isArray(blocks) ? blocks : [])
+    .map((block, index) => `[Example ${index + 1}]\n${block}`)
+    .join("\n\n");
+
+  return `
+You analyze document-native question style from example questions only.
+
+[Goal]
+- Infer how this document tends to ask questions so later generated questions can match that style.
+- Focus on the question "feel": stem wording, distractor design, reasoning depth, trap style, and answer-format expectations.
+
+[Rules]
+- Use only the example question blocks below.
+- If the blocks do not clearly look like real document questions, return "detected": false.
+- Do not copy long examples into the summary.
+- Keep every list item short and reusable as generation guidance.
+- All field values must be written in Korean.
+
+[Output JSON]
+{
+  "detected": true,
+  "summary": "...",
+  "stemPatterns": ["..."],
+  "choicePatterns": ["..."],
+  "reasoningPatterns": ["..."],
+  "trapPatterns": ["..."],
+  "answerRules": ["..."],
+  "avoidPatterns": ["..."],
+  "sampleStems": ["..."]
+}
+
+[Style guidance]
+- "stemPatterns": how the prompt is phrased.
+- "choicePatterns": how choices or distractors are written, if any.
+- "reasoningPatterns": what kind of thinking is usually tested.
+- "trapPatterns": recurring misconception or contrast patterns.
+- "answerRules": constraints on answer shape, precision, or notation.
+- "avoidPatterns": styles that would feel unlike the document.
+- "sampleStems": 1-line stem excerpts, tone only, not for verbatim reuse.
+
+${scopeLabel ? `[Selected chapter range]\n${scopeLabel}\n\n` : ""}[Example question blocks]
+${joinedBlocks}
+  `.trim();
+}
+
 function buildQuizPrompt(
   extractedText,
-  { multipleChoiceCount, shortAnswerCount, avoidQuestions = [], scopeLabel = "" }
+  {
+    multipleChoiceCount,
+    shortAnswerCount,
+    avoidQuestions = [],
+    scopeLabel = "",
+    questionStyleProfile = "",
+  }
 ) {
   const avoidBlock = buildAvoidReuseBlock(avoidQuestions, {
     title: "Do not reuse these previously asked questions",
@@ -196,6 +458,9 @@ You are a professor creating quiz questions from lecture material.
 - If a candidate question depends on content not explicitly present in the selected range, do not generate it.
 - Use document facts only as context; do not ask verbatim recall questions.
 - Questions must test understanding, comparison, application, misconception checks, or interpretation.
+- If a document question style profile is provided, match that style closely: stem shape, distractor style, reasoning grain, and trap pattern.
+- Use the style profile only for "how to ask"; use the selected document text for "what to ask".
+- Do not copy any sample stem verbatim, and reject any item that feels unlike the document's native question style.
 - Avoid pure memorization prompts (raw URLs, names, single numbers).
 - If the document contains page tags like [p.12], first choose 1-2 tagged evidence passages and then write the question from that evidence only.
 - evidencePages must use only page numbers that actually appear in the provided page tags.
@@ -242,13 +507,18 @@ You are a professor creating quiz questions from lecture material.
 [Language]
 - Write all question/explanation text in Korean.
 ${avoidBlock ? `\n\n${avoidBlock}` : ""}
+${questionStyleProfile ? `\n\n[Document question style profile]\n${questionStyleProfile}` : ""}
 ${scopeLabel ? `\n\n[Selected chapter range]\n${scopeLabel}` : ""}
 
 [Document]
 ${extractedText}
   `.trim();
 }
-function buildHardQuizPrompt(extractedText, count, { avoidQuestions = [] } = {}) {
+function buildHardQuizPrompt(
+  extractedText,
+  count,
+  { avoidQuestions = [], questionStyleProfile = "", scopeLabel = "" } = {}
+) {
   const avoidBlock = buildAvoidReuseBlock(avoidQuestions, { title: "Do not reuse these previously asked questions" });
   return `
 You are creating high-difficulty mock exam items from the document.
@@ -256,6 +526,9 @@ You are creating high-difficulty mock exam items from the document.
 [Rules]
 - Ban rote-memory/direct-recall items.
 - Require reasoning, application, and concept-level discrimination.
+- If a document question style profile is provided, keep the document's native tone and trap design while raising only the difficulty.
+- Match the way the original document asks, not a generic exam style.
+- Use the style profile only as a writing template; never copy sample stems verbatim.
 - Include plausible distractors but keep one clear correct answer.
 - If the document contains page tags like [p.12], select the supporting tagged evidence first and write the question from that evidence only.
 - evidencePages must reference only visible tagged pages.
@@ -290,6 +563,8 @@ You are creating high-difficulty mock exam items from the document.
 [Language]
 - Write all question/explanation text in Korean.
 ${avoidBlock ? `\n\n${avoidBlock}` : ""}
+${questionStyleProfile ? `\n\n[Document question style profile]\n${questionStyleProfile}` : ""}
+${scopeLabel ? `\n\n[Selected chapter range]\n${scopeLabel}` : ""}
 
 [Document]
 ${extractedText}
@@ -354,8 +629,14 @@ You are a teaching assistant who writes a detailed Korean markdown summary.
 
 [Pre-check]
 - First decide whether the text actually contains learning content.
-- If it is mostly cover/TOC/meta/instructions/questions with little explanatory prose, do not summarize.
-- In that case, return a short notice (1-2 sentences) saying this is not a learning-content page.
+- If it is mostly cover/TOC/publisher meta with almost no study content, return a short notice (1-2 sentences).
+- If it is mostly problems, exercises, answer explanations, or assessment pages, do not refuse.
+- For problem-heavy pages, write a "문제 페이지 학습 요약" instead of refusing:
+  1. 이 페이지가 어떤 유형의 문제를 다루는지
+  2. 문제들이 공통으로 묻는 핵심 개념
+  3. 자주 필요한 공식/용어/판단 기준
+  4. 자주 틀리는 함정이나 오개념
+  5. 문제를 풀기 전에 점검할 것
 - Do not mention this pre-check process inside normal summaries.
 
 [Summary requirements]
@@ -383,6 +664,91 @@ You are a teaching assistant who writes a detailed Korean markdown summary.
 [Document]
 ${extractedText}
   `.trim();
+}
+
+function looksLikeSummaryRefusal(content) {
+  const normalized = String(content || "").replace(/\s+/g, " ").trim();
+  if (!normalized) return false;
+  return (
+    /학습\s*내용이\s*아닌/.test(normalized) ||
+    /요약을\s*생성하지\s*않/.test(normalized) ||
+    /학습\s*콘텐츠가\s*아니/.test(normalized) ||
+    /not a learning-content page/i.test(normalized)
+  );
+}
+
+function looksLikeProblemPageContent(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return false;
+  if (extractQuestionStyleBlocks(normalized, { maxBlocks: 4, maxChars: 1800 }).length >= 2) {
+    return true;
+  }
+  return /(?:객관식|주관식|단답형|OX|정답|해설|보기|선지|문제\s*\d+|다음\s*중|옳은\s*것|옳지\s*않은\s*것)/i.test(
+    normalized
+  );
+}
+
+function buildProblemPageSummaryPrompt(extractedText) {
+  return `
+You are a teaching assistant who writes a Korean markdown study summary for problem-heavy pages.
+
+[Goal]
+- The source may be mostly exercises, mock-test items, answer choices, or short explanations.
+- Do not refuse the summary.
+- Infer what concepts the learner must know to solve these problems well.
+
+[Output]
+- Markdown only.
+- Language: Korean.
+
+[Required sections]
+1. ## 페이지 성격
+   - 이 페이지가 어떤 유형의 문제 페이지인지 2-3문장으로 설명
+2. ## 핵심 개념 정리
+   - 문제들이 공통으로 요구하는 개념을 항목별로 설명
+3. ## 자주 요구하는 판단
+   - 계산, 비교, 해석, 조건 판별 등 자주 필요한 사고를 정리
+4. ## 자주 틀리는 함정
+   - 선지 함정, 개념 혼동, 단위/조건 실수 등을 정리
+5. ## 빠르게 점검할 것
+   - 시험 전에 확인할 공식, 용어, 체크포인트를 간단히 정리
+
+[Rules]
+- Provided text only.
+- If the page includes answer choices or short answer blanks, use them as evidence for what is being tested.
+- Avoid saying there is "no learning content" unless the text is truly only cover/TOC/publisher metadata.
+- Keep the summary useful for studying, not just page classification.
+
+[Document]
+${extractedText}
+  `.trim();
+}
+
+async function generateProblemPageSummary(extractedText, { scope } = {}) {
+  const scopeGuard = scope
+    ? {
+        role: "system",
+        content: `Prioritize evidence from the requested scope (${scope}). If you add outside context, label it as supplemental.`,
+      }
+    : null;
+  const data = await postChatRequest(
+    {
+      model: MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Produce a Korean markdown study summary for problem-heavy academic pages. Focus on the concepts, traps, and solving criteria the page is testing.",
+        },
+        ...(scopeGuard ? [scopeGuard] : []),
+        { role: "user", content: buildProblemPageSummaryPrompt(extractedText) },
+      ],
+      temperature: 1,
+    },
+    { retries: 0 }
+  );
+  const content = data.choices?.[0]?.message?.content?.trim() || "";
+  return sanitizeMarkdown(content);
 }
 
 function formatExamCramAnswer(value, fallback = "-") {
@@ -862,6 +1228,7 @@ const CHAPTER_MIN_CHARS = 500;
 const MAX_CHAPTER_COUNT = 10;
 const MAX_CHAPTER_MODEL_CHARS = 2800;
 const MAX_TOTAL_CHAPTER_MODEL_CHARS = 22000;
+const MAX_LEGACY_SUMMARY_SOURCE_CHARS = 22000;
 const VISUAL_HINT_RE = /(?:figure|fig\.?|table|chart|graph|plot|diagram|illustration)/i;
 const CHAPTER_PATTERNS = [
   /\bchapter\s*(\d{1,2}|[ivxlcdm]+)\b[^.!?\n]{0,90}/gi,
@@ -1085,13 +1452,18 @@ function normalizeManualChapterSections(chapterSections) {
 function buildChapterSummaryInput(extractedText, { scope, chapterSections } = {}) {
   const manualSections = normalizeManualChapterSections(chapterSections);
   if (manualSections.length > 0) {
+    const perChapterBudget = Math.max(
+      500,
+      Math.floor(MAX_TOTAL_CHAPTER_MODEL_CHARS / Math.max(1, manualSections.length))
+    );
+    const chapterTextLimit = Math.min(MAX_CHAPTER_MODEL_CHARS, perChapterBudget);
     return {
       scope: scope || "Custom chapter ranges",
       mode: "manual",
       chapters: manualSections.map((section, index) => ({
         ...section,
         id: section.id || `ch_${index + 1}`,
-        text: shrinkWithTail(section.text, Math.max(800, Number(section.pagePerChunk || 1) * 800)),
+        text: shrinkWithTail(section.text, chapterTextLimit),
       })),
     };
   }
@@ -1571,6 +1943,7 @@ function fallbackOxItems(extractedText) {
 // Simple in-memory cache for quiz generation
 const quizCache = new Map();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const questionStyleProfileCache = new Map();
 
 function getCacheKey(text, options) {
   const hash = btoa(encodeURIComponent(text + JSON.stringify(options)));
@@ -1591,6 +1964,23 @@ function setCachedResult(key, result) {
   quizCache.set(key, {
     result,
     timestamp: Date.now()
+  });
+}
+
+function getCachedQuestionStyleProfile(key) {
+  const entry = questionStyleProfileCache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() - entry.timestamp > CACHE_TTL) {
+    questionStyleProfileCache.delete(key);
+    return undefined;
+  }
+  return entry.result;
+}
+
+function setCachedQuestionStyleProfile(key, result) {
+  questionStyleProfileCache.set(key, {
+    result,
+    timestamp: Date.now(),
   });
 }
 
@@ -1699,34 +2089,99 @@ async function postChatRequest(body, { retries = 1 } = {}) {
 
   return response.json();
 }
+
+async function deriveQuestionStyleProfile(extractedText, { scopeLabel = "" } = {}) {
+  const blocks = extractQuestionStyleBlocks(extractedText, {
+    maxBlocks: 10,
+    maxChars: 5200,
+  });
+  if (!blocks.length) return null;
+
+  const cacheKey = getCacheKey(blocks.join("\n\n"), {
+    type: "question-style-profile",
+    version: "v2",
+    scopeLabel,
+  });
+  const cached = getCachedQuestionStyleProfile(cacheKey);
+  if (cached !== undefined) return cached;
+
+  try {
+    const data = await postChatRequest(
+      {
+        model: MODEL,
+        messages: [
+          {
+            role: "system",
+            content:
+              "Infer a reusable question-style profile from the user's example questions only. Return JSON only.",
+          },
+          {
+            role: "user",
+            content: buildQuestionStyleProfilePrompt(blocks, { scopeLabel }),
+          },
+        ],
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+      },
+      { retries: 0 }
+    );
+
+    const content = data.choices?.[0]?.message?.content?.trim() || "";
+    const sanitized = sanitizeJson(content);
+    const parsed = parseJsonSafe(sanitized, "question style profile JSON");
+    const normalized = normalizeQuestionStyleProfile(parsed, { sourceBlocks: blocks });
+    setCachedQuestionStyleProfile(cacheKey, normalized);
+    return normalized;
+  } catch {
+    setCachedQuestionStyleProfile(cacheKey, null);
+    return null;
+  }
+}
+
+export async function generateQuestionStyleProfile(extractedText, { scopeLabel = "" } = {}) {
+  const profile = await deriveQuestionStyleProfile(extractedText, { scopeLabel });
+  return formatQuestionStyleProfile(profile);
+}
+
 export async function generateQuiz(
   extractedText,
-  { multipleChoiceCount = 4, shortAnswerCount = 1, avoidQuestions = [], scopeLabel = "" } = {}
+  {
+    multipleChoiceCount = 4,
+    shortAnswerCount = 1,
+    avoidQuestions = [],
+    scopeLabel = "",
+    questionStyleProfile = "",
+  } = {}
 ) {
   const mcCount = Math.max(0, Math.min(10, Number(multipleChoiceCount) || 0));
   const saCount = Math.max(0, Math.min(10, Number(shortAnswerCount) || 0));
   
   // 캐싱 키 생성
-  const cacheKey = getCacheKey(extractedText, { 
-    type: 'quiz', 
-    mcCount, 
-    saCount, 
-    avoidQuestions, 
-    scopeLabel 
+  const cacheKey = getCacheKey(extractedText, {
+    version: "quiz-style-v2",
+    type: "quiz",
+    mcCount,
+    saCount,
+    avoidQuestions,
+    scopeLabel,
   });
   
   // 캐시 확인
   const cached = getCachedResult(cacheKey);
   if (cached) {
-    console.log('Quiz cache hit');
+    console.log("Quiz cache hit");
     return cached;
   }
 
+  const resolvedQuestionStyleProfile =
+    String(questionStyleProfile || "").trim() ||
+    formatQuestionStyleProfile(await deriveQuestionStyleProfile(extractedText, { scopeLabel }));
   const prompt = buildQuizPrompt(extractedText, {
     multipleChoiceCount: mcCount,
     shortAnswerCount: saCount,
     avoidQuestions,
     scopeLabel,
+    questionStyleProfile: resolvedQuestionStyleProfile,
   });
 
   const data = await postChatRequest(
@@ -1735,7 +2190,7 @@ export async function generateQuiz(
       messages: [
         {
           role: "system",
-          content: `Generate ${mcCount} Korean multiple-choice items (4 options each) plus ${saCount} Korean short-answer items from the user's text only. Each question must assess understanding/apply/disambiguate/misconception check, not verbatim recall. Avoid asking for raw facts/URLs/names/numbers. Short-answer items must have one exact, short answer only, such as a number, formula, term, concept name, or short phrase. Do not generate essay-style prompts like 설명하라, 서술하라, 논하라, or 기술하라. The shortAnswer answer field must be directly gradable and must not be a sentence. Exclude textbook/preface metadata questions (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure). Respond with JSON only using the provided schema. shortAnswer must be an array with ${saCount} items (empty if 0).`,
+          content: `Generate ${mcCount} Korean multiple-choice items (4 options each) plus ${saCount} Korean short-answer items from the user's text only. Each question must assess understanding/apply/disambiguate/misconception check, not verbatim recall. If a document question style profile is provided, the output must feel like that document's own problem style rather than a generic AI quiz style. Match the original stem tone, distractor logic, and reasoning grain without copying sample stems. Avoid asking for raw facts/URLs/names/numbers. Short-answer items must have one exact, short answer only, such as a number, formula, term, concept name, or short phrase. Do not generate essay-style prompts like 설명하라, 서술하라, 논하라, or 기술하라. The shortAnswer answer field must be directly gradable and must not be a sentence. Exclude textbook/preface metadata questions (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure). Before returning, reject any item whose tone or structure feels mismatched with the detected document question style. Respond with JSON only using the provided schema. shortAnswer must be an array with ${saCount} items (empty if 0).`,
         },
         { role: "user", content: prompt },
       ],
@@ -1759,6 +2214,7 @@ export async function generateQuiz(
     ...parsed,
     multipleChoice,
     shortAnswer,
+    questionStyleProfile: resolvedQuestionStyleProfile,
   };
   
   // 캐시 저장
@@ -1766,8 +2222,18 @@ export async function generateQuiz(
   return result;
 }
 
-export async function generateHardQuiz(extractedText, { count = 3, avoidQuestions = [] } = {}) {
-  const prompt = buildHardQuizPrompt(extractedText, count, { avoidQuestions });
+export async function generateHardQuiz(
+  extractedText,
+  { count = 3, avoidQuestions = [], scopeLabel = "", questionStyleProfile = "" } = {}
+) {
+  const resolvedQuestionStyleProfile =
+    String(questionStyleProfile || "").trim() ||
+    formatQuestionStyleProfile(await deriveQuestionStyleProfile(extractedText, { scopeLabel }));
+  const prompt = buildHardQuizPrompt(extractedText, count, {
+    avoidQuestions,
+    questionStyleProfile: resolvedQuestionStyleProfile,
+    scopeLabel,
+  });
 
   const data = await postChatRequest(
     {
@@ -1776,7 +2242,7 @@ export async function generateHardQuiz(extractedText, { count = 3, avoidQuestion
         {
           role: "system",
           content:
-            "Generate high-difficulty Korean multiple-choice questions from the user's text only. Each item must test reasoning/application, not verbatim recall. Exclude textbook/preface metadata questions (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure). Output JSON only with the provided schema.",
+            "Generate high-difficulty Korean multiple-choice questions from the user's text only. Each item must test reasoning/application, not verbatim recall. If a document question style profile is provided, keep the document's native phrasing, distractor shape, and misconception pattern instead of falling back to a generic AI exam tone. Exclude textbook/preface metadata questions (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure). Before returning, reject any item whose tone or structure feels unlike the document's own question style. Output JSON only with the provided schema.",
         },
         { role: "user", content: prompt },
       ],
@@ -1887,7 +2353,7 @@ export async function generateSummary(
   extractedText,
   { scope, chapterized = true, chapterSections = null } = {}
 ) {
-  const normalized = String(extractedText || "").trim();
+  const normalized = normalizeSummarySource(extractedText);
   const hasManualChapters = Array.isArray(chapterSections) && chapterSections.length > 0;
   if (!normalized && !hasManualChapters) {
     throw new Error("No text available for summary. Load the PDF and extract text first.");
@@ -1906,7 +2372,8 @@ export async function generateSummary(
     throw new Error("Summary source text is empty.");
   }
 
-  const prompt = buildSummaryPrompt(extractedText);
+  const summaryContext = shrinkWithTail(normalized, MAX_LEGACY_SUMMARY_SOURCE_CHARS);
+  const prompt = buildSummaryPrompt(summaryContext);
   const scopeGuard = scope
     ? {
         role: "system",
@@ -1932,7 +2399,11 @@ export async function generateSummary(
   );
 
   const content = data.choices?.[0]?.message?.content?.trim() || "";
-  return sanitizeMarkdown(content);
+  const sanitized = sanitizeMarkdown(content);
+  if (looksLikeSummaryRefusal(sanitized) && looksLikeProblemPageContent(summaryContext)) {
+    return generateProblemPageSummary(summaryContext, { scope });
+  }
+  return sanitized;
 }
 
 export async function generateExamCramSheet({

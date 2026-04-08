@@ -5,6 +5,7 @@ const PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY = "__partial_summary_library_v1";
 const REVIEW_NOTES_ARTIFACT_KEY = "__review_notes_v1";
 const EXAM_CRAM_ARTIFACT_KEY = "__exam_cram_v1";
 const CHAPTER_RANGE_ARTIFACT_KEY = "__chapter_ranges_v1";
+const QUESTION_STYLE_PROFILE_ARTIFACT_KEY = "__question_style_profile_v1";
 const LEGACY_HIGHLIGHTS_WRAP_KEY = "__legacy_highlights_payload_v1";
 const MOJIBAKE_COMPAT_CHAR_RE = /[\uF900-\uFAFF]/;
 const REVIEW_NOTE_SOURCE_TYPES = new Set(["quiz_multiple_choice", "quiz_short_answer", "ox"]);
@@ -250,6 +251,18 @@ export function readChapterRangeInputFromHighlights(highlightsValue) {
   return String(rawState?.input || rawState?.value || "").trim();
 }
 
+export function readQuestionStyleProfileFromHighlights(highlightsValue) {
+  const base = isPlainObject(highlightsValue) ? highlightsValue : null;
+  const rawState = isPlainObject(base?.[QUESTION_STYLE_PROFILE_ARTIFACT_KEY])
+    ? base[QUESTION_STYLE_PROFILE_ARTIFACT_KEY]
+    : null;
+  return {
+    content: String(rawState?.content || "").trim(),
+    scopeLabel: String(rawState?.scopeLabel || "").trim(),
+    updatedAt: toIsoDateString(rawState?.updatedAt, null),
+  };
+}
+
 export function writePartialSummaryBundleToHighlights(
   highlightsValue,
   {
@@ -357,6 +370,33 @@ export function writeChapterRangeInputToHighlights(highlightsValue, input = "") 
     };
   } else {
     delete base[CHAPTER_RANGE_ARTIFACT_KEY];
+  }
+
+  delete base.__instructor_emphasis_library_v1;
+  delete base.__instructor_emphasis_active_id_v1;
+  delete base.__instructor_emphasis_v1;
+
+  return Object.keys(base).length > 0 ? base : null;
+}
+
+export function writeQuestionStyleProfileToHighlights(
+  highlightsValue,
+  { content, scopeLabel, updatedAt } = {}
+) {
+  const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
+  if (!isPlainObject(highlightsValue) && highlightsValue != null) {
+    base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
+  }
+
+  const normalizedContent = String(content || "").trim();
+  if (normalizedContent) {
+    base[QUESTION_STYLE_PROFILE_ARTIFACT_KEY] = {
+      content: normalizedContent,
+      scopeLabel: String(scopeLabel || "").trim(),
+      updatedAt: toIsoDateString(updatedAt, new Date()) || new Date().toISOString(),
+    };
+  } else {
+    delete base[QUESTION_STYLE_PROFILE_ARTIFACT_KEY];
   }
 
   delete base.__instructor_emphasis_library_v1;

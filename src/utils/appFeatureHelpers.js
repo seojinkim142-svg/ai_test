@@ -82,7 +82,8 @@ export const mergeQuizWithLegacyOx = (quizPayload, oxPayload) => {
 
 export const createQuizSetState = (
   questions,
-  id = `quiz-${Date.now()}-${Math.random().toString(16).slice(2)}`
+  id = `quiz-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  options = {}
 ) => ({
   id,
   questions: normalizeQuizPayload(questions),
@@ -92,6 +93,8 @@ export const createQuizSetState = (
   shortAnswerResult: {},
   oxSelections: {},
   oxExplanationOpen: {},
+  questionStyleProfile: String(options?.questionStyleProfile || "").trim(),
+  questionStyleScopeLabel: String(options?.questionStyleScopeLabel || "").trim(),
 });
 
 export const isMissingFeedbackTableError = (error) => {

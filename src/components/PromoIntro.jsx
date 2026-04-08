@@ -74,6 +74,17 @@ const PromoIntro = memo(function PromoIntro({ onStart }) {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("skipSplash") !== "1" && params.get("previewLanding") !== "1") return;
+
+    activatedRef.current = true;
+    setShowLandingIntro(true);
+    setShowSplash(false);
+    setIsSplashExiting(false);
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (startExitTimerRef.current) {
         window.clearTimeout(startExitTimerRef.current);
