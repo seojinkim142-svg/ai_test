@@ -15,55 +15,225 @@ import {
 } from "../../lib/feedback/server.js";
 import { syncNaverFeedbackReplies } from "../../lib/feedback/naver-replies.js";
 
+const DEFAULT_FROM_EMAIL = "onboarding@resend.dev";
+const CATEGORY_LABELS = {
+  general: "General",
+  bug: "Bug report",
+  feature: "Feature request",
+  ux: "UX feedback",
+};
+const LOCAL_ORIGINS = new Set(["http://localhost", "https://localhost", "capacitor://localhost"]);
 const FEEDBACK_SELECT = "id, category, content, doc_name, panel, created_at";
 const REPLY_SELECT = "id, feedback_id, responder_email, content, created_at";
-const DEFAULT_FROM_EMAIL = "onboarding@resend.dev";
 const EXTENDED_FEEDBACK_SELECT =
   "id, user_id, category, content, doc_id, doc_name, panel, metadata_json, created_at, user_email, user_name";
 const BASE_FEEDBACK_SELECT = "id, user_id, category, content, doc_id, doc_name, panel, metadata_json, created_at";
-
-const normalizeLimit = (value, fallback = 20) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return fallback;
-  const normalized = Math.floor(parsed);
-  if (normalized < 1) return fallback;
-  return Math.min(normalized, 100);
-};
-
-const resolveLimitParam = (req) => {
-  const direct = req?.query?.limit;
-  if (direct != null) return direct;
-
-  try {
-    const requestUrl = new URL(req?.url || "/", `http://${req?.headers?.host || "localhost"}`);
-    return requestUrl.searchParams.get("limit");
-  } catch {
-    return null;
-  }
-};
-
 const REPLY_SYNC_TIMEOUT_MS = 12000;
 
-const resolveSyncErrorMessage = (error) => {
-  const rawMessage = text(error?.responseText || error?.response || error?.message);
-  if (error?.authenticationFailed || text(error?.serverResponseCode).toUpperCase() === "AUTH") {
-    return "네이버 IMAP 로그인에 실패했습니다. 네이버 메일의 IMAP/SMTP 사용함, 2단계 인증, 애플리케이션 비밀번호를 다시 확인해 주세요.";
+const normalizeOrigin = (value) => {
+  const raw = text(value);
+  if (!raw) return "";
+  if (raw === "*") return "*";
+  try {
+    const parsed = new URL(raw);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return "";
   }
-  return rawMessage || "Feedback reply sync failed.";
 };
 
-const syncRepliesOnDemand = async () => {
-  try {
-    await Promise.race([
-      syncNaverFeedbackReplies(),
-      new Promise((_, reject) => {
-        setTimeout(() => reject(new Error("Feedback reply sync timed out.")), REPLY_SYNC_TIMEOUT_MS);
-      }),
-    ]);
-    return "";
-  } catch (error) {
-    return resolveSyncErrorMessage(error);
+const parseAllowedOrigins = (...values) => {
+  const origins = new Set();
+  values.forEach((value) => {
+    String(value || "")
+      .split(/[,\s]+/)
+      .map((entry) => normalizeOrigin(entry))
+      .filter(Boolean)
+      .forEach((origin) => origins.add(origin));
+  });
+  return origins;
+};
+
+const readRequestStream = (req) =>
+  new Promise((resolve, reject) => {
+    let raw = "";
+    req.on("data", (chunk) => {
+      raw += chunk;
+    });
+    req.on("end", () => resolve(raw));
+    req.on("error", reject);
+  });
+
+const parseNotifyBody = async (req) => {
+  if (req.body != null) {
+    if (typeof req.body === "object") return req.body;
+    if (Buffer.isBuffer(req.body)) {
+      const parsed = req.body.toString("utf8").trim();
+      return parsed ? JSON.parse(parsed) : {};
+    }
+    if (typeof req.body === "string") {
+      const parsed = req.body.trim();
+      return parsed ? JSON.parse(parsed) : {};
+    }
   }
+
+  const raw = (await readRequestStream(req)).trim();
+  return raw ? JSON.parse(raw) : {};
+};
+
+const resolveRequestOrigin = (req) => {
+  const directOrigin = text(req.headers.origin).split(",")[0];
+  if (directOrigin) return directOrigin;
+
+  const forwardedProto = text(req.headers["x-forwarded-proto"]).split(",")[0];
+  const forwardedHost = text(req.headers["x-forwarded-host"]).split(",")[0];
+  const host = text(req.headers.host).split(",")[0];
+  const resolvedHost = forwardedHost || host;
+  if (!resolvedHost) return "";
+
+  const protocol =
+    forwardedProto || (resolvedHost.startsWith("localhost") || resolvedHost.startsWith("127.0.0.1") ? "http" : "https");
+  return `${protocol}://${resolvedHost}`;
+};
+
+const resolveNotifyAllowOrigin = (req) => {
+  const requestOrigin = normalizeOrigin(resolveRequestOrigin(req));
+  const allowedOrigins = parseAllowedOrigins(
+    process.env.FEEDBACK_ALLOW_ORIGIN,
+    process.env.VITE_PUBLIC_APP_ORIGIN,
+    "http://localhost",
+    "https://localhost",
+    "capacitor://localhost"
+  );
+
+  if (requestOrigin && (allowedOrigins.has(requestOrigin) || LOCAL_ORIGINS.has(requestOrigin))) {
+    return requestOrigin;
+  }
+  if (allowedOrigins.has("*")) return "*";
+
+  const firstAllowed = [...allowedOrigins][0];
+  return firstAllowed || requestOrigin || "*";
+};
+
+const buildNotifyCorsHeaders = (allowOrigin) => ({
+  "Access-Control-Allow-Origin": allowOrigin || "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type",
+  Vary: "Origin",
+});
+
+const sendNotifyJson = (res, statusCode, body, allowOrigin) => {
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json",
+    "Cache-Control": "no-store",
+    ...buildNotifyCorsHeaders(allowOrigin),
+  });
+  res.end(JSON.stringify(body));
+};
+
+const sendNoContent = (res, allowOrigin) => {
+  res.writeHead(204, {
+    "Cache-Control": "no-store",
+    ...buildNotifyCorsHeaders(allowOrigin),
+  });
+  res.end();
+};
+
+const escapeHtml = (value) =>
+  text(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const formatMetadata = (metadata) => {
+  if (!metadata || typeof metadata !== "object") return "";
+  try {
+    return JSON.stringify(metadata, null, 2);
+  } catch {
+    return text(metadata);
+  }
+};
+
+const buildSubject = ({ category, docName, feedbackId }) => {
+  const categoryLabel = CATEGORY_LABELS[category] || CATEGORY_LABELS.general;
+  const normalizedDocName = text(docName);
+  const token = Number.isFinite(Number(feedbackId)) && Number(feedbackId) > 0 ? `[FB-${Number(feedbackId)}]` : "";
+  return normalizedDocName
+    ? `[Zeusian Feedback]${token}[${categoryLabel}] ${normalizedDocName}`
+    : `[Zeusian Feedback]${token}[${categoryLabel}]`;
+};
+
+const buildEmailText = ({ category, content, docId, docName, panel, metadata, userId, userEmail, userName, submittedAt }) => {
+  const categoryLabel = CATEGORY_LABELS[category] || CATEGORY_LABELS.general;
+  const metadataText = formatMetadata(metadata);
+  return [
+    "A new Zeusian feedback submission has arrived.",
+    "",
+    `Category: ${categoryLabel} (${text(category) || "general"})`,
+    `Submitted at: ${submittedAt}`,
+    `User ID: ${text(userId) || "-"}`,
+    `User name: ${text(userName) || "-"}`,
+    `User email: ${text(userEmail) || "-"}`,
+    `Document ID: ${text(docId) || "-"}`,
+    `Document name: ${text(docName) || "-"}`,
+    `Panel: ${text(panel) || "-"}`,
+    "",
+    "[Content]",
+    text(content),
+    metadataText
+      ? `
+[Metadata]
+${metadataText}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+};
+
+const buildEmailHtml = ({ category, content, docId, docName, panel, metadata, userId, userEmail, userName, submittedAt }) => {
+  const categoryLabel = CATEGORY_LABELS[category] || CATEGORY_LABELS.general;
+  const metadataText = formatMetadata(metadata);
+  const rows = [
+    ["Category", `${escapeHtml(categoryLabel)} (${escapeHtml(category || "general")})`],
+    ["Submitted at", escapeHtml(submittedAt)],
+    ["User ID", escapeHtml(userId)],
+    ["User name", escapeHtml(userName)],
+    ["User email", escapeHtml(userEmail)],
+    ["Document ID", escapeHtml(docId)],
+    ["Document name", escapeHtml(docName)],
+    ["Panel", escapeHtml(panel)],
+  ];
+
+  return `
+    <div style="font-family:Arial,sans-serif;line-height:1.6;color:#0f172a;">
+      <h2 style="margin:0 0 16px;">New Zeusian feedback</h2>
+      <table style="border-collapse:collapse;width:100%;margin-bottom:20px;">
+        <tbody>
+          ${rows
+            .map(
+              ([label, value]) => `
+                <tr>
+                  <th style="text-align:left;padding:8px 10px;border:1px solid #cbd5e1;background:#f8fafc;width:140px;">${label}</th>
+                  <td style="padding:8px 10px;border:1px solid #cbd5e1;">${value || "-"}</td>
+                </tr>`
+            )
+            .join("")}
+        </tbody>
+      </table>
+      <h3 style="margin:0 0 8px;">Content</h3>
+      <div style="white-space:pre-wrap;padding:14px;border:1px solid #cbd5e1;background:#f8fafc;">${escapeHtml(content)}</div>
+      ${
+        metadataText
+          ? `<h3 style="margin:20px 0 8px;">Metadata</h3>
+      <pre style="white-space:pre-wrap;padding:14px;border:1px solid #cbd5e1;background:#f8fafc;overflow:auto;">${escapeHtml(
+        metadataText
+      )}</pre>`
+          : ""
+      }
+    </div>
+  `;
 };
 
 const parseResendResponse = async (response) => {
@@ -101,13 +271,47 @@ const sendWithResend = async ({ apiKey, from, to, subject, textBody, htmlBody, r
   return payload;
 };
 
-const escapeHtml = (value) =>
-  text(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+const normalizeLimit = (value, fallback = 20) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  const normalized = Math.floor(parsed);
+  if (normalized < 1) return fallback;
+  return Math.min(normalized, 100);
+};
+
+const resolveLimitParam = (req) => {
+  const direct = req?.query?.limit;
+  if (direct != null) return direct;
+
+  try {
+    const requestUrl = new URL(req?.url || "/", `http://${req?.headers?.host || "localhost"}`);
+    return requestUrl.searchParams.get("limit");
+  } catch {
+    return null;
+  }
+};
+
+const resolveSyncErrorMessage = (error) => {
+  const rawMessage = text(error?.responseText || error?.response || error?.message);
+  if (error?.authenticationFailed || text(error?.serverResponseCode).toUpperCase() === "AUTH") {
+    return "?ㅼ씠踰?IMAP 濡쒓렇?몄뿉 ?ㅽ뙣?덉뒿?덈떎. ?ㅼ씠踰?硫붿씪??IMAP/SMTP ?ъ슜?? 2?④퀎 ?몄쬆, ?좏뵆由ъ??댁뀡 鍮꾨?踰덊샇瑜??ㅼ떆 ?뺤씤??二쇱꽭??";
+  }
+  return rawMessage || "Feedback reply sync failed.";
+};
+
+const syncRepliesOnDemand = async () => {
+  try {
+    await Promise.race([
+      syncNaverFeedbackReplies(),
+      new Promise((_, reject) => {
+        setTimeout(() => reject(new Error("Feedback reply sync timed out.")), REPLY_SYNC_TIMEOUT_MS);
+      }),
+    ]);
+    return "";
+  } catch (error) {
+    return resolveSyncErrorMessage(error);
+  }
+};
 
 const buildReplySubject = (feedback) => {
   const docName = text(feedback?.doc_name);
@@ -116,15 +320,15 @@ const buildReplySubject = (feedback) => {
 
 const buildReplyText = ({ replyContent, adminName, senderName, originalContent }) =>
   [
-    `안녕하세요${senderName ? `, ${senderName}님` : ""}.`,
+    `?덈뀞?섏꽭??{senderName ? `, ${senderName}?? : ""}.`,
     "",
-    "Zeusian 운영자에서 피드백에 답변드립니다.",
-    adminName ? `담당자: ${adminName}` : "",
+    "Zeusian ?댁쁺?먯뿉???쇰뱶諛깆뿉 ?듬??쒕┰?덈떎.",
+    adminName ? `?대떦?? ${adminName}` : "",
     "",
-    "[답변]",
+    "[?듬?]",
     text(replyContent),
     "",
-    "[보내주신 피드백]",
+    "[蹂대궡二쇱떊 ?쇰뱶諛?",
     text(originalContent),
   ]
     .filter(Boolean)
@@ -132,13 +336,13 @@ const buildReplyText = ({ replyContent, adminName, senderName, originalContent }
 
 const buildReplyHtml = ({ replyContent, adminName, senderName, originalContent }) => `
   <div style="font-family:Arial,sans-serif;line-height:1.7;color:#0f172a;">
-    <p style="margin:0 0 12px;">안녕하세요${senderName ? `, ${escapeHtml(senderName)}님` : ""}.</p>
-    <p style="margin:0 0 16px;">Zeusian 운영자에서 피드백에 답변드립니다.${adminName ? ` 담당자: ${escapeHtml(adminName)}` : ""}</p>
-    <h3 style="margin:0 0 8px;">답변</h3>
+    <p style="margin:0 0 12px;">?덈뀞?섏꽭??{senderName ? `, ${escapeHtml(senderName)}?? : ""}.</p>
+    <p style="margin:0 0 16px;">Zeusian ?댁쁺?먯뿉???쇰뱶諛깆뿉 ?듬??쒕┰?덈떎.${adminName ? ` ?대떦?? ${escapeHtml(adminName)}` : ""}</p>
+    <h3 style="margin:0 0 8px;">?듬?</h3>
     <div style="white-space:pre-wrap;padding:14px;border:1px solid #cbd5e1;background:#f8fafc;">${escapeHtml(
       replyContent
     )}</div>
-    <h3 style="margin:20px 0 8px;">보내주신 피드백</h3>
+    <h3 style="margin:20px 0 8px;">蹂대궡二쇱떊 ?쇰뱶諛?/h3>
     <div style="white-space:pre-wrap;padding:14px;border:1px solid #cbd5e1;background:#f8fafc;">${escapeHtml(
       originalContent
     )}</div>
@@ -263,7 +467,103 @@ const persistReplyRecord = async ({ client, feedbackId, responderUserId, respond
   };
 };
 
-export default async function handler(req, res) {
+const resolveAction = (req) => {
+  const queryAction = req?.query?.action;
+  if (Array.isArray(queryAction) && queryAction.length) return text(queryAction[0]);
+  if (queryAction != null) return text(queryAction);
+
+  try {
+    const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
+    const parts = url.pathname.split("/").filter(Boolean);
+    return text(parts[parts.length - 1]);
+  } catch {
+    return "";
+  }
+};
+
+const sendNotFound = (res) => {
+  res.writeHead(404, {
+    "Content-Type": "application/json",
+    "Cache-Control": "no-store",
+  });
+  res.end(JSON.stringify({ message: "Not found." }));
+};
+
+const notifyHandler = async (req, res) => {
+  const allowOrigin = resolveNotifyAllowOrigin(req);
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, buildNotifyCorsHeaders(allowOrigin));
+    res.end();
+    return;
+  }
+
+  if (req.method !== "POST") {
+    sendNotifyJson(res, 405, { message: "Method not allowed." }, allowOrigin);
+    return;
+  }
+
+  const provider = text(process.env.FEEDBACK_EMAIL_PROVIDER || "resend").toLowerCase();
+  const recipients = text(process.env.FEEDBACK_NOTIFY_EMAIL)
+    .split(/[,\s]+/)
+    .filter(Boolean);
+  const resendApiKey = text(process.env.RESEND_API_KEY);
+  if (!recipients.length || provider !== "resend" || !resendApiKey) {
+    sendNoContent(res, allowOrigin);
+    return;
+  }
+
+  let body;
+  try {
+    body = await parseNotifyBody(req);
+  } catch {
+    sendNotifyJson(res, 400, { message: "Request body is not valid JSON." }, allowOrigin);
+    return;
+  }
+
+  const content = text(body?.content);
+  if (!content) {
+    sendNotifyJson(res, 400, { message: "Feedback content is required." }, allowOrigin);
+    return;
+  }
+
+  const userEmail = text(body?.userEmail);
+  const payload = {
+    feedbackId: Number.isFinite(Number(body?.feedbackId)) ? Number(body.feedbackId) : null,
+    category: text(body?.category) || "general",
+    content,
+    docId: text(body?.docId),
+    docName: text(body?.docName),
+    panel: text(body?.panel),
+    metadata: body?.metadata && typeof body.metadata === "object" ? body.metadata : null,
+    userId: text(body?.userId),
+    userEmail,
+    userName: text(body?.userName),
+    submittedAt: new Date().toISOString(),
+  };
+
+  const fromEmail = text(process.env.FEEDBACK_FROM_EMAIL) || DEFAULT_FROM_EMAIL;
+  const subject = buildSubject(payload);
+  const textBody = buildEmailText(payload);
+  const htmlBody = buildEmailHtml(payload);
+
+  try {
+    const result = await sendWithResend({
+      apiKey: resendApiKey,
+      from: fromEmail,
+      to: recipients,
+      subject,
+      textBody,
+      htmlBody,
+      replyTo: userEmail && userEmail.includes("@") ? userEmail : "",
+    });
+    sendNotifyJson(res, 200, { ok: true, id: result?.id || null }, allowOrigin);
+  } catch (error) {
+    sendNotifyJson(res, 502, { message: `Feedback email request failed: ${error.message}` }, allowOrigin);
+  }
+};
+
+const repliesHandler = async (req, res) => {
   const allowOrigin = resolveAllowOrigin(req);
 
   if (req.method === "OPTIONS") {
@@ -474,7 +774,7 @@ export default async function handler(req, res) {
     const feedbackById = new Map(
       feedbackRows
         .map((row) => [Number(row?.id), row])
-        .filter(([feedbackId]) => Number.isFinite(feedbackId))
+        .filter(([mappedFeedbackId]) => Number.isFinite(mappedFeedbackId))
     );
 
     if (!feedbackById.size) {
@@ -526,4 +826,19 @@ export default async function handler(req, res) {
   } catch (error) {
     sendJson(res, 500, { message: error?.message || "Feedback replies request failed." }, allowOrigin);
   }
+};
+
+const ROUTE_HANDLERS = {
+  notify: notifyHandler,
+  replies: repliesHandler,
+};
+
+export default async function handler(req, res) {
+  const routeHandler = ROUTE_HANDLERS[resolveAction(req)];
+  if (!routeHandler) {
+    sendNotFound(res);
+    return;
+  }
+
+  await routeHandler(req, res);
 }
