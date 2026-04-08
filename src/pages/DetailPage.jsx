@@ -144,6 +144,7 @@ export default function DetailPage({
   detailContainerRef,
   splitStyle,
   pdfUrl,
+  documentUrl,
   file,
   pendingDocumentOpen,
   pageInfo,
@@ -155,6 +156,7 @@ export default function DetailPage({
   requestSummary,
   isLoadingSummary,
   isLoadingText,
+  previewText,
   isFreeTier,
   summary,
   instructorEmphasisInput,
@@ -229,6 +231,8 @@ export default function DetailPage({
   quizMix,
   setQuizMix,
   quizMixError,
+  questionStyleProfileContent,
+  questionStyleProfileScopeLabel,
   quizSets,
   handleChoiceSelect,
   handleShortAnswerChange,
@@ -559,9 +563,6 @@ export default function DetailPage({
           <div className="rounded-3xl border border-white/10 bg-white/[0.04] px-4 py-3 shadow-lg shadow-black/20 lg:hidden">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-emerald-300/75">
-                  Document
-                </p>
                 <p className="truncate text-sm font-semibold text-white">{pendingDocumentName}</p>
               </div>
               <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">
@@ -586,10 +587,7 @@ export default function DetailPage({
 
         <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
           <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-5 shadow-lg shadow-black/30">
-            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300/75">
-              Opening
-            </p>
-            <p className="mt-3 text-lg font-semibold text-white">{pendingDocumentName}</p>
+            <p className="text-lg font-semibold text-white">{pendingDocumentName}</p>
             <p className="mt-2 text-sm text-slate-300">
               파일 준비가 끝나면 요약, 퀴즈, 오답노트 화면이 바로 표시됩니다.
             </p>
@@ -614,10 +612,13 @@ export default function DetailPage({
       >
         <PdfPreview
           pdfUrl={pdfUrl}
+          documentUrl={documentUrl}
           file={file}
           pageInfo={pageInfo}
           currentPage={currentPage}
           onPageChange={handlePageChange}
+          previewText={previewText}
+          isLoadingText={isLoadingText}
         />
       </div>
 
@@ -1325,6 +1326,28 @@ export default function DetailPage({
                 onRequestSummary={handleRequestSummary}
               />
 
+              <div className="rounded-2xl border border-amber-300/20 bg-amber-500/5 p-4 text-sm text-amber-50">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="mt-1 text-base font-semibold text-amber-100">문제 스타일 분석</h3>
+                  </div>
+                  {questionStyleProfileScopeLabel && (
+                    <span className="rounded-full bg-amber-400/10 px-3 py-1 text-[11px] font-semibold text-amber-100 ring-1 ring-amber-300/30">
+                      {questionStyleProfileScopeLabel}
+                    </span>
+                  )}
+                </div>
+                {questionStyleProfileContent ? (
+                  <pre className="mt-3 whitespace-pre-wrap break-words rounded-xl bg-black/20 p-3 text-xs leading-6 text-amber-50/95">
+                    {questionStyleProfileContent}
+                  </pre>
+                ) : (
+                  <p className="mt-3 text-xs text-amber-100/80">
+                    아직 저장된 문제 스타일 분석이 없습니다. 요약을 한 번 생성하면 여기 표시됩니다.
+                  </p>
+                )}
+              </div>
+
               <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <input
@@ -1352,7 +1375,6 @@ export default function DetailPage({
               </div>
 
               <div className="rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-300">문항 비율</p>
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
                   <input
                     type="text"
@@ -1373,7 +1395,6 @@ export default function DetailPage({
               </div>
 
               <div className="hidden rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-300">문항 비율</p>
                 <div
                   ref={quizMixScrollRef}
                   onScroll={handleQuizMixScroll}
@@ -1412,6 +1433,8 @@ export default function DetailPage({
                       title={`퀴즈 세트 ${idx + 1}`}
                       questions={set.questions}
                       summary={null}
+                      questionStyleProfile={set.questionStyleProfile}
+                      questionStyleScopeLabel={set.questionStyleScopeLabel}
                       selectedChoices={set.selectedChoices}
                       revealedChoices={set.revealedChoices}
                       shortAnswerInput={set.shortAnswerInput}
@@ -1496,7 +1519,6 @@ export default function DetailPage({
 
               <div className="hidden mt-4 space-y-4 rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
                 <div>
-                  <p className="text-xs uppercase tracking-[0.2em] text-slate-300">O/X</p>
                   <p className="mt-1 text-sm text-slate-300">퀴즈 안에서 바로 O/X도 같이 풀 수 있습니다.</p>
                 </div>
 

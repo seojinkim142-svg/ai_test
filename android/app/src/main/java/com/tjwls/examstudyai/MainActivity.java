@@ -5,42 +5,26 @@ import android.net.Uri;
 import android.webkit.WebView;
 import com.getcapacitor.Bridge;
 import com.getcapacitor.BridgeActivity;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.Set;
 
 public class MainActivity extends BridgeActivity {
 
     private static final String CALLBACK_HOST = "auth";
     private static final String CALLBACK_PATH_PREFIX = "/callback";
-    private static final Set<String> PAYMENT_QUERY_KEYS = new HashSet<>(
-        Arrays.asList(
-            "pg_token",
-            "kakaoPay",
-            "nicePay",
-            "np_token",
-            "orderId",
-            "amount",
-            "message",
-            "niceBilling",
-            "trial"
-        )
-    );
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        routePaymentCallbackToApp(intent);
+        routeCallbackToApp(intent);
     }
 
-    private void routePaymentCallbackToApp(Intent intent) {
+    private void routeCallbackToApp(Intent intent) {
         if (intent == null) {
             return;
         }
 
         Uri callbackUri = intent.getData();
-        if (!isPaymentCallbackUri(callbackUri)) {
+        if (!isHandledCallbackUri(callbackUri)) {
             return;
         }
 
@@ -65,7 +49,7 @@ public class MainActivity extends BridgeActivity {
         });
     }
 
-    private boolean isPaymentCallbackUri(Uri uri) {
+    private boolean isHandledCallbackUri(Uri uri) {
         if (uri == null) {
             return false;
         }
@@ -83,12 +67,20 @@ public class MainActivity extends BridgeActivity {
         Uri appUri = Uri.parse(bridge.getAppUrl());
         Uri.Builder builder = appUri.buildUpon().clearQuery();
 
-        for (String key : PAYMENT_QUERY_KEYS) {
-            String value = callbackUri.getQueryParameter(key);
-            if (value == null || value.isEmpty()) {
-                continue;
+        // Preserve every callback parameter so OAuth code exchange and payment returns
+        // can both complete inside the WebView.
+        for (String key : callbackUri.getQueryParameterNames()) {
+            for (String value : callbackUri.getQueryParameters(key)) {
+                if (value == null || value.isEmpty()) {
+                    continue;
+                }
+                builder.appendQueryParameter(key, value);
             }
-            builder.appendQueryParameter(key, value);
+        }
+
+        String encodedFragment = callbackUri.getEncodedFragment();
+        if (encodedFragment != null && !encodedFragment.isEmpty()) {
+            builder.encodedFragment(encodedFragment);
         }
 
         return builder.build().toString();

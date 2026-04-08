@@ -295,14 +295,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
         >
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p
-                className={`text-xs uppercase tracking-[0.28em] ${
-                  isLight ? "text-emerald-700/80" : "text-emerald-200/75"
-                }`}
-              >
-                Premium Share
-              </p>
-              <h2 className={`mt-2 text-2xl font-bold sm:text-3xl ${isLight ? "text-slate-900" : "text-white"}`}>
+              <h2 className={`text-2xl font-bold sm:text-3xl ${isLight ? "text-slate-900" : "text-white"}`}>
                 프로필을 선택하세요
               </h2>
               <p className={`mt-2 text-sm ${isLight ? "text-slate-600" : "text-slate-300"}`}>

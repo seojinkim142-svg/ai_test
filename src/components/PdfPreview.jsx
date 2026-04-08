@@ -142,11 +142,24 @@ function PdfPreview({
   const touchStartRef = useRef(null);
   const iframeRetrySrcRef = useRef("");
   const iframeResetTimerRef = useRef(null);
-  const sourceKey = useMemo(
-    () => (file ? buildFileSignature(file) : String(pdfUrl || documentUrl || "")),
-    [documentUrl, file, pdfUrl]
-  );
+  const sourceKey = useMemo(() => {
+    const parts = [
+      file ? buildFileSignature(file) : "",
+      String(pdfUrl || "").trim(),
+      String(documentUrl || "").trim(),
+    ].filter(Boolean);
+    return parts.join("::");
+  }, [documentUrl, file, pdfUrl]);
   const documentKind = useMemo(() => detectSupportedDocumentKind(file), [file]);
+  const isOfficeDocument = useMemo(
+    () => documentKind === "docx" || documentKind === "pptx",
+    [documentKind]
+  );
+  const hasConvertedOfficePdfPreview = useMemo(
+    () => isOfficeDocument && Boolean(String(pdfUrl || "").trim()),
+    [isOfficeDocument, pdfUrl]
+  );
+  const shouldUseOfficeDocumentFallback = isOfficeDocument && !hasConvertedOfficePdfPreview;
   const canPreviewPdf = useMemo(
     () => Boolean(pdfUrl) || isPdfLikeFile(file) || isPdfDocumentKind(documentKind),
     [documentKind, file, pdfUrl]
@@ -199,16 +212,15 @@ function PdfPreview({
   }, [docVersion, pageInfo?.total, pageInfo?.used]);
   const preferredPdfSourceUrl = useMemo(() => {
     const localUrl = String(pdfUrl || "").trim();
-    const remoteUrl = String(documentUrl || "").trim();
+    const remoteUrl = shouldUseOfficeDocumentFallback ? "" : String(documentUrl || "").trim();
     return localUrl || remoteUrl;
-  }, [documentUrl, pdfUrl]);
+  }, [documentUrl, pdfUrl, shouldUseOfficeDocumentFallback]);
   const viewerSrc = useMemo(() => {
     if (!preferredPdfSourceUrl) return "";
     return buildViewerSrc(preferredPdfSourceUrl, currentPage);
   }, [currentPage, preferredPdfSourceUrl]);
   const viewerBaseSrc = useMemo(() => stripUrlHash(viewerSrc), [viewerSrc]);
   const useCanvasPdfPreview = canPreviewPdf && isNativePlatform;
-  const isOfficeDocument = documentKind === "docx" || documentKind === "pptx";
   const canDownloadFile = file instanceof File || Boolean(pdfUrl) || Boolean(documentUrl);
 
   const handleDownloadFile = useCallback(() => {
@@ -1033,7 +1045,7 @@ function PdfPreview({
     );
   }
 
-  if (isOfficeDocument) {
+  if (shouldUseOfficeDocumentFallback) {
     return (
       <div className="relative flex h-[58svh] min-h-[24rem] flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/40 sm:min-h-[72vh] lg:h-full lg:min-h-0">
         <div className="border-b border-white/10 bg-slate-900/90 px-4 py-3">
@@ -1321,4 +1333,3 @@ function PdfPreview({
 }
 
 export default PdfPreview;
-

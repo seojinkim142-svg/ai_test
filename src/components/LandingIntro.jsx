@@ -391,7 +391,6 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
         }}
       >
         <div className="mx-auto flex min-h-[82vh] max-w-6xl flex-col items-center justify-center text-center zeus-hero-reveal">
-          <p className="text-xs uppercase tracking-[0.34em] text-emerald-200/90">공부 AI</p>
           <h1 className="landing-title mt-5 text-5xl font-bold leading-[0.98] text-white drop-shadow-[0_8px_35px_rgba(0,0,0,0.45)] sm:text-7xl md:text-[96px]">
             PDF 하나로
             <br />
@@ -418,9 +417,6 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
             </button>
           </div>
         </div>
-        <div className="absolute bottom-10 left-1/2 z-10 -translate-x-1/2 text-emerald-200/60 zeus-float">
-          <span className="text-xs uppercase tracking-[0.32em]">아래로</span>
-        </div>
       </section>
 
       <section id="features" className="relative bg-black/60 px-6 py-28">
@@ -442,9 +438,6 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
                   >
                     <Icon className="h-10 w-10" />
                   </div>
-                  <p className="mb-3 text-xs uppercase tracking-[0.34em] text-emerald-300/65">
-                    {String(index + 1).padStart(2, "0")} · {feature.kicker}
-                  </p>
                   <h2 className="text-4xl font-bold text-white sm:text-6xl" style={{ opacity: isActive ? 1 : 0.62 }}>
                     {feature.label}
                   </h2>
@@ -471,7 +464,6 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
                   >
                     <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(16,185,129,0.18),transparent_55%)]" />
                     <div className="relative min-h-[18rem] space-y-3 rounded-2xl border border-emerald-100/10 bg-black/45 p-6">
-                      <p className="text-xs uppercase tracking-[0.34em] text-emerald-300/80">미리보기</p>
                       <p className="text-2xl font-semibold text-emerald-50">{feature.label}</p>
                       <p className="text-sm text-emerald-100/70">{feature.description}</p>
                       <div className="mt-4 space-y-2">
@@ -510,8 +502,7 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
       <section id="steps" className="px-6 py-24">
         <div className="mx-auto max-w-7xl">
           <div className="mb-10 text-center">
-            <p className="text-xs uppercase tracking-[0.34em] text-emerald-300/70">학습 흐름</p>
-            <h2 className="mt-3 text-4xl font-bold text-white sm:text-6xl">3단계 자동 학습 루프</h2>
+            <h2 className="text-4xl font-bold text-white sm:text-6xl">3단계 자동 학습 루프</h2>
           </div>
           <div className="grid gap-5 md:grid-cols-3">
             {STEP_ITEMS.map((step) => (
@@ -519,8 +510,7 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
                 key={step.step}
                 className="rounded-3xl border border-emerald-200/15 bg-black/45 p-7 shadow-[0_18px_40px_rgba(0,0,0,0.35)]"
               >
-                <p className="text-xs uppercase tracking-[0.3em] text-emerald-300/80">{step.step}</p>
-                <h3 className="mt-2 text-2xl font-semibold text-emerald-50">{step.title}</h3>
+                <h3 className="text-2xl font-semibold text-emerald-50">{step.title}</h3>
                 <p className="mt-3 text-sm text-emerald-100/70">{step.description}</p>
               </article>
             ))}
@@ -531,8 +521,7 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
       <section id="pricing" className="px-6 py-24">
         <div className="mx-auto max-w-7xl">
           <div className="mb-10 text-center">
-            <p className="text-xs uppercase tracking-[0.34em] text-emerald-300/70">요금제</p>
-            <h2 className="mt-3 text-4xl font-bold text-white sm:text-6xl">필요한 만큼 선택하세요</h2>
+            <h2 className="text-4xl font-bold text-white sm:text-6xl">필요한 만큼 선택하세요</h2>
           </div>
           <div className="grid gap-6 md:grid-cols-3">
             {PLAN_ITEMS.map((plan) => {
@@ -562,11 +551,6 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
                       : "border-emerald-200/15 bg-black/45"
                   }`}
                 >
-                  {plan.featured && (
-                    <p className="mb-4 inline-flex rounded-full bg-emerald-300 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-emerald-950">
-                      추천
-                    </p>
-                  )}
                   <h3 className="text-2xl font-bold text-emerald-50">{plan.name}</h3>
                   <p className="mt-2 text-sm text-emerald-100/70">{plan.description}</p>
                   <p className="mt-5 text-4xl font-extrabold text-white">{plan.price}</p>
@@ -586,8 +570,7 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
           <div className="mt-10 overflow-hidden rounded-[2rem] border border-emerald-300/15 bg-[#06110e]/95 shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
             <div className="flex flex-col gap-2 px-6 py-6 md:flex-row md:items-end md:justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300/80">Compare</p>
-                <h3 className="mt-2 text-3xl font-bold text-white">구독권 비교</h3>
+                <h3 className="text-3xl font-bold text-white">구독권 비교</h3>
               </div>
               <p className="text-sm text-emerald-100/60">원하는 열을 누르면 위 요금제 카드와 함께 강조됩니다.</p>
             </div>
@@ -700,7 +683,6 @@ const LandingIntro = memo(function LandingIntro({ onStart }) {
       <footer className="border-t border-emerald-300/10 px-6 py-10">
         <div className="mx-auto flex max-w-7xl flex-col gap-6 text-sm text-emerald-100/65 md:flex-row md:items-start md:justify-between">
           <div className="text-center md:text-left">
-            <p className="uppercase tracking-[0.24em] text-emerald-300/75">회사 정보</p>
             {FOOTER_COMPANY_INFO ? (
               <div className="mt-3 space-y-1 leading-6">
                 <p>

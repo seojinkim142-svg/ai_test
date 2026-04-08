@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Zeusian Clip",
+  "description": "Capture selected text or the current page and keep it ready for Zeusian.ai study sessions.",
+  "version": "0.1.0",
+  "permissions": ["activeTab", "contextMenus", "scripting", "storage", "tabs"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Zeusian Clip",
+    "default_popup": "popup.html"
+  },
+  "icons": {
+    "16": "assets/icon.png",
+    "32": "assets/icon.png",
+    "48": "assets/icon.png",
+    "128": "assets/icon.png"
+  }
+}

@@ -144,9 +144,8 @@ function AiTutorPanel({
     <div className="flex h-full min-h-[65vh] flex-col gap-4 rounded-3xl border border-white/10 bg-slate-950/80 p-6 shadow-lg shadow-black/30">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-[0.3em] text-slate-400">AI TUTOR</p>
           <h3 className="text-2xl font-semibold text-white">AI 튜터</h3>
-          {fileName && <p className="mt-1 text-xs text-slate-400">현재 문서: {fileName}</p>}
+          {fileName && <p className="mt-2 text-xs text-slate-400">현재 문서: {fileName}</p>}
         </div>
         <button
           type="button"
@@ -181,14 +180,6 @@ function AiTutorPanel({
                     : "self-start border-white/10 bg-slate-950/60"
                 }`}
               >
-                <p
-                  className={`text-[11px] uppercase tracking-[0.18em] ${
-                    isUser ? "text-emerald-200" : "text-slate-400"
-                  }`}
-                >
-                  {isUser ? "나" : "튜터"}
-                </p>
-
                 {isUser ? (
                   <p className="mt-2 whitespace-pre-wrap break-all leading-relaxed">
                     {message.content}
@@ -210,7 +201,6 @@ function AiTutorPanel({
 
           {!showEmptyState && isLoading && (
             <div className="max-w-[75%] self-start rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-200">
-              <p className="text-[11px] uppercase tracking-[0.18em] text-emerald-200">AI</p>
               <p className="mt-2">답변 생성 중...</p>
             </div>
           )}

@@ -857,7 +857,6 @@ function PaymentPage({
       >
         <div className={`flex items-center justify-between border-b px-5 py-4 ${headerClass}`}>
           <div>
-            <p className={`text-xs tracking-[0.2em] ${accentText}`}>요금제</p>
             <h2 className="text-xl font-bold">요금제 결제</h2>
           </div>
           <button

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Zeusian Clip</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <div class="ambient ambient-a" aria-hidden="true"></div>
+      <div class="ambient ambient-b" aria-hidden="true"></div>
+      <div class="grid-mask" aria-hidden="true"></div>
+
+      <section class="hero">
+        <div class="hero-body">
+          <div class="hero-copy">
+            <h1>읽는 순간, 바로 학습 재료로.</h1>
+            <p class="lede">
+              웹에서 찾은 문장과 페이지를 모아두고 Zeusian.ai 공부 흐름으로 바로 넘깁니다.
+            </p>
+            <div class="hero-pills" aria-hidden="true">
+              <span>Capture</span>
+              <span>Organize</span>
+              <span>Review</span>
+            </div>
+          </div>
+          <div class="hero-mark" aria-hidden="true">
+            <div class="hero-mark-ring"></div>
+            <img src="./assets/icon.png" alt="" class="hero-logo" />
+          </div>
+        </div>
+      </section>
+
+      <section class="actions">
+        <button id="capture-selection" class="button primary" type="button">
+          <span class="button-label">선택 텍스트 가져오기</span>
+        </button>
+        <button id="capture-page" class="button secondary" type="button">
+          <span class="button-label">현재 페이지 저장</span>
+        </button>
+        <button id="copy-current" class="button ghost" type="button">
+          <span class="button-label">현재 클립 복사</span>
+        </button>
+        <button id="open-zeusian" class="button ghost" type="button">
+          <span class="button-label">Zeusian.ai 열기</span>
+        </button>
+      </section>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>방금 저장한 내용</h2>
+          </div>
+        </div>
+        <article id="current-clip" class="clip-empty">
+          선택 텍스트를 가져오면 여기에 미리보기가 표시됩니다.
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>최근 저장 목록</h2>
+          </div>
+          <button id="clear-history" class="text-button" type="button">모두 비우기</button>
+        </div>
+        <div id="history-list" class="history-empty">아직 저장된 클립이 없습니다.</div>
+      </section>
+    </main>
+
+    <script type="module" src="./popup.js"></script>
+  </body>
+</html>

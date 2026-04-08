@@ -606,7 +606,6 @@ function SummaryCard({
       >
         <div className="block">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-300">요약</p>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
@@ -677,7 +676,6 @@ function SummaryCard({
                 style={{ fontVariantNumeric: "lining-nums tabular-nums" }}
               >
                 <div className="mb-5 flex items-center justify-between border-b border-slate-200 pb-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-600">요약</p>
                   <span className="text-[11px] font-medium text-slate-500">
                     페이지 {index + 1} / {totalPages}
                   </span>
@@ -703,7 +701,6 @@ function SummaryCard({
           >
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-6">
               <div>
-                <p className="text-xs uppercase tracking-[0.24em] text-slate-400">Expanded Summary</p>
                 <p className="mt-1 text-sm text-slate-200">웹과 태블릿에서 더 크게 읽을 수 있는 요약 뷰입니다.</p>
               </div>
               <div className="flex flex-wrap items-center gap-2">

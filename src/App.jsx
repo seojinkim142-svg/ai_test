@@ -9,6 +9,7 @@ import { AUTH_ENABLED } from "./config/auth";
 import {
   supabase,
   uploadPdfToStorage,
+  getAccessToken,
   saveMockExam,
   fetchMockExams,
   deleteMockExam,
@@ -31,12 +32,14 @@ import {
   getPremiumProfileStateFromUser,
   savePremiumProfileState,
 } from "./services/supabase";
+import { ensureUploadPreviewPdf as ensureUploadPreviewPdfRequest } from "./services/document";
 import {
   extractPdfText,
   extractPdfTextByRanges,
   extractChapterRangesFromToc,
   extractPdfTextFromPages,
   extractPdfPageTexts,
+  generatePdfThumbnail,
 } from "./utils/pdf";
 import {
   detectSupportedDocumentKind,
@@ -104,7 +107,9 @@ import {
 import {
   normalizeReviewNoteEntries,
   readExamCramFromHighlights,
+  readQuestionStyleProfileFromHighlights,
   readReviewNotesFromHighlights,
+  writeQuestionStyleProfileToHighlights,
 } from "./utils/studyArtifacts";
 import { clearPaymentReturnPending, readPaymentReturnPending } from "./utils/paymentReturn";
 
@@ -134,6 +139,19 @@ const PAYMENT_RETURN_QUERY_KEYS = [
 ];
 const NATIVE_PAYMENT_RETURN_FALLBACK_MS = 1200;
 const trimSchemeSeparators = (value) => String(value || "").trim().replace(/:\/*$/, "");
+const revokeObjectUrlIfNeeded = (value) => {
+  const normalized = String(value || "").trim();
+  if (normalized.startsWith("blob:")) {
+    URL.revokeObjectURL(normalized);
+  }
+};
+const isConvertibleOfficeDocumentKind = (kind) => kind === "docx" || kind === "pptx";
+const hasOfficePlaceholderThumbnail = (thumbnail) =>
+  String(thumbnail || "").trim().startsWith("data:image/svg+xml");
+const toPreviewPdfFileName = (fileName) => {
+  const normalized = String(fileName || "document").trim();
+  return normalized.replace(/\.[^.]+$/, "") + ".pdf";
+};
 const NATIVE_PAYMENT_RETURN_SCHEME = trimSchemeSeparators(
   import.meta.env.VITE_NATIVE_APP_SCHEME || "com.tjwls.examstudyai"
 );
@@ -911,6 +929,8 @@ function App() {
   const [isExportingSummary, setIsExportingSummary] = useState(false);
   const [theme, setTheme] = useState("dark");
   const [summary, setSummary] = useState("");
+  const [questionStyleProfileContent, setQuestionStyleProfileContent] = useState("");
+  const [questionStyleProfileScopeLabel, setQuestionStyleProfileScopeLabel] = useState("");
   const [quizSets, setQuizSets] = useState([]);
   const [quizMixInput, setQuizMixInput] = useState(DEFAULT_QUIZ_MIX_INPUT);
   const [oxItems, setOxItems] = useState(null);
@@ -1123,6 +1143,111 @@ function App() {
     }
     return openAiModulePromiseRef.current;
   }, []);
+  const requestPreviewPdfConversion = useCallback(
+    async (item, { force = false } = {}) => {
+      const uploadId = item?.id;
+      const storagePath = item?.remotePath || item?.path;
+      const fileName = item?.name || item?.file?.name || "";
+      const documentKind = detectSupportedDocumentKind(item?.file || fileName);
+
+      if (!user || !supabase || !AUTH_ENABLED) return item;
+      if (!uploadId || !storagePath || !isConvertibleOfficeDocumentKind(documentKind)) return item;
+
+      const accessToken = await getAccessToken();
+      if (!accessToken) return item;
+
+      const result = await ensureUploadPreviewPdfRequest(
+        {
+          uploadId,
+          bucket: item?.bucket,
+          storagePath,
+          fileName,
+          force,
+        },
+        { accessToken }
+      );
+
+      const nextItem = {
+        ...item,
+        previewPdfPath: result?.previewPdfPath || item?.previewPdfPath || null,
+        previewPdfBucket: result?.previewPdfBucket || item?.previewPdfBucket || item?.bucket || null,
+        previewPdfUrl: result?.signedUrl || item?.previewPdfUrl || "",
+      };
+
+      setUploadedFiles((prev) =>
+        prev.map((entry) =>
+          entry.id?.toString() === uploadId?.toString()
+            ? { ...entry, ...nextItem }
+            : entry
+        )
+      );
+      return nextItem;
+    },
+    [user, supabase]
+  );
+  const resolvePreviewPdfUrlForItem = useCallback(async (item) => {
+    const previewPdfPath = String(item?.previewPdfPath || "").trim();
+    if (!previewPdfPath) return "";
+
+    const cachedUrl = String(item?.previewPdfUrl || "").trim();
+    if (cachedUrl) return cachedUrl;
+
+    const previewPdfBucket = item?.previewPdfBucket || item?.bucket || import.meta.env.VITE_SUPABASE_BUCKET;
+    const signedUrl = await getSignedStorageUrl({
+      bucket: previewPdfBucket,
+      path: previewPdfPath,
+      expiresIn: 60 * 60 * 24,
+    });
+
+    setUploadedFiles((prev) =>
+      prev.map((entry) =>
+        entry.id?.toString() === item?.id?.toString()
+          ? {
+              ...entry,
+              previewPdfPath,
+              previewPdfBucket,
+              previewPdfUrl: signedUrl,
+            }
+          : entry
+      )
+    );
+    return signedUrl;
+  }, []);
+  const refreshUploadThumbnailFromPreviewPdf = useCallback(
+    async (item) => {
+      const documentKind = detectSupportedDocumentKind(item?.file || item?.name || "");
+      if (!isConvertibleOfficeDocumentKind(documentKind)) return item;
+      if (!item?.id || !String(item?.previewPdfPath || "").trim()) return item;
+      if (item?.thumbnail && !hasOfficePlaceholderThumbnail(item.thumbnail)) return item;
+
+      const previewPdfUrl = await resolvePreviewPdfUrlForItem(item);
+      if (!previewPdfUrl) return item;
+
+      const response = await fetch(previewPdfUrl);
+      if (!response.ok) {
+        throw new Error(`Preview PDF thumbnail fetch failed. (status: ${response.status})`);
+      }
+
+      const blob = await response.blob();
+      const previewPdfFile = new File([blob], toPreviewPdfFileName(item?.name), {
+        type: "application/pdf",
+      });
+      const thumbnail = await generatePdfThumbnail(previewPdfFile);
+      if (!thumbnail) return item;
+
+      await updateUploadThumbnail({ id: item.id, thumbnail });
+      const updatedItem = { ...item, thumbnail, previewPdfUrl };
+      setUploadedFiles((prev) =>
+        prev.map((entry) =>
+          entry.id?.toString() === item.id?.toString()
+            ? { ...entry, thumbnail, previewPdfUrl }
+            : entry
+        )
+      );
+      return updatedItem;
+    },
+    [resolvePreviewPdfUrlForItem]
+  );
 
   const limits = useMemo(() => {
     if (tier === "free") {
@@ -1273,7 +1398,7 @@ function App() {
   const resetActiveDocumentState = useCallback(() => {
     fileOpenRequestSeqRef.current += 1;
     if (pdfUrl) {
-      URL.revokeObjectURL(pdfUrl);
+      revokeObjectUrlIfNeeded(pdfUrl);
     }
     setSelectedFileId(null);
     setPendingDocumentOpen(null);
@@ -1865,6 +1990,8 @@ function App() {
           uploadId,
           bucket: upload.bucket,
           path: storagePath,
+          previewPdfBucket: upload.previewPdfBucket,
+          previewPdfPath: upload.previewPdfPath,
         });
         if (uploadId) {
           persistChapterRangeInput(uploadId, "");
@@ -2179,6 +2306,9 @@ function App() {
             size: u.file_size,
             path: u.storage_path,
             bucket: u.bucket,
+            previewPdfPath: u.preview_pdf_path || null,
+            previewPdfBucket: u.preview_pdf_bucket || null,
+            previewPdfUrl: "",
             thumbnail: u.thumbnail || null,
             remote: true,
             hash: u.file_hash || null,
@@ -2261,6 +2391,8 @@ function App() {
         setExamCramScopeLabel("");
         setExamCramStatus("");
         setExamCramError("");
+        setQuestionStyleProfileContent("");
+        setQuestionStyleProfileScopeLabel("");
         return null;
       }
       try {
@@ -2274,6 +2406,7 @@ function App() {
         const partialBundle = readPartialSummaryBundleFromHighlights(mapped.highlights);
         const reviewNoteEntries = readReviewNotesFromHighlights(mapped.highlights);
         const examCramBundle = readExamCramFromHighlights(mapped.highlights);
+        const questionStyleBundle = readQuestionStyleProfileFromHighlights(mapped.highlights);
         const activeInstructorText = normalizeInstructorEmphasisInput(
           partialBundle.instructorEmphasisLibrary.find(
             (item) => item.id === partialBundle.activeInstructorEmphasisId
@@ -2294,6 +2427,8 @@ function App() {
         setExamCramScopeLabel(examCramBundle.scopeLabel);
         setExamCramStatus("");
         setExamCramError("");
+        setQuestionStyleProfileContent(questionStyleBundle.content);
+        setQuestionStyleProfileScopeLabel(questionStyleBundle.scopeLabel);
         reviewNotesRef.current = reviewNoteEntries;
         if (mapped.summary) {
           setSummary(mapped.summary);
@@ -2307,7 +2442,11 @@ function App() {
               shortAnswer: normalizedQuiz.shortAnswer,
               ox: [],
             },
-            `quiz-cached-${docId}`
+            `quiz-cached-${docId}`,
+            {
+              questionStyleProfile: questionStyleBundle.content,
+              questionStyleScopeLabel: questionStyleBundle.scopeLabel,
+            }
           );
           setQuizSets([cachedSet]);
           quizAutoRequestedRef.current = true;
@@ -2526,7 +2665,7 @@ function App() {
   useEffect(() => {
     return () => {
       if (pdfUrl) {
-        URL.revokeObjectURL(pdfUrl);
+        revokeObjectUrlIfNeeded(pdfUrl);
       }
     };
   }, [pdfUrl]);
@@ -2579,6 +2718,21 @@ function App() {
         setError("지원하지 않는 파일 형식입니다. PDF, DOCX, PPTX만 지원합니다.");
         return;
       }
+      let previewPdfSourceUrl = "";
+      if (isConvertibleOfficeDocumentKind(targetFileKind)) {
+        try {
+          if (!resolvedItem?.previewPdfPath) {
+            resolvedItem = await requestPreviewPdfConversion(resolvedItem);
+            if (fileOpenRequestSeqRef.current !== requestSeq) return;
+          }
+          resolvedItem = await refreshUploadThumbnailFromPreviewPdf(resolvedItem);
+          if (fileOpenRequestSeqRef.current !== requestSeq) return;
+          previewPdfSourceUrl = await resolvePreviewPdfUrlForItem(resolvedItem);
+          if (fileOpenRequestSeqRef.current !== requestSeq) return;
+        } catch (previewError) {
+          console.warn("Office preview PDF preparation failed", previewError);
+        }
+      }
       const savedChapterRangeInput = isPdfDocumentKind(targetFileKind)
         ? loadSavedChapterRangeInput(nextDocId)
         : "";
@@ -2605,9 +2759,13 @@ function App() {
       }
 
       if (pdfUrl) {
-        URL.revokeObjectURL(pdfUrl);
+        revokeObjectUrlIfNeeded(pdfUrl);
       }
-      setPdfUrl(isPdfDocumentKind(targetFileKind) ? URL.createObjectURL(targetFile) : null);
+      setPdfUrl(
+        isPdfDocumentKind(targetFileKind)
+          ? URL.createObjectURL(targetFile)
+          : previewPdfSourceUrl || null
+      );
       setFile(targetFile);
       setSelectedFileId(nextDocId);
       setPanelTab("summary");
@@ -2722,6 +2880,9 @@ function App() {
       loadPageProgressSnapshot,
       normalizeSupportedFile,
       pdfUrl,
+      refreshUploadThumbnailFromPreviewPdf,
+      requestPreviewPdfConversion,
+      resolvePreviewPdfUrlForItem,
       savePageProgressSnapshot,
       selectedFileId,
       visitedPages,
@@ -2818,6 +2979,9 @@ function App() {
                 remotePath: existing.remotePath || existing.path,
                 remoteUrl: existing.remoteUrl,
                 bucket: existing.bucket,
+                previewPdfPath: existing.previewPdfPath || existing.preview_pdf_path || null,
+                previewPdfBucket: existing.previewPdfBucket || existing.preview_pdf_bucket || null,
+                previewPdfUrl: existing.previewPdfUrl || "",
                 thumbnail: existing.thumbnail || item.thumbnail,
                 hash: existing.hash || item.hash,
                 folderId: existing.folderId || existing.folder_id || item.folderId || null,
@@ -2848,7 +3012,7 @@ function App() {
             const ownerProfileId = isPremiumTier
               ? decodedRecordName.ownerProfileId || activeProfileScopeId || premiumOwnerProfileId || null
               : null;
-            return {
+            const uploadedItem = {
               ...item,
               id: record.id || item.id,
               remotePath: uploaded.path,
@@ -2861,6 +3025,16 @@ function App() {
               infolder: Number(record.infolder ?? (record.folder_id || activeFolderId ? 1 : 0)),
               ownerProfileId,
             };
+            if (!isConvertibleOfficeDocumentKind(detectSupportedDocumentKind(item.file))) {
+              return uploadedItem;
+            }
+            try {
+              const convertedItem = await requestPreviewPdfConversion(uploadedItem);
+              return await refreshUploadThumbnailFromPreviewPdf(convertedItem);
+            } catch (previewError) {
+              console.warn("Upload preview PDF conversion failed", previewError);
+              return uploadedItem;
+            }
           } catch (err) {
             // Roll back orphaned storage files when metadata insert fails.
             if (uploaded?.bucket && uploaded?.path) {
@@ -2924,6 +3098,8 @@ function App() {
       isPremiumTier,
       premiumScopeProfileId,
       premiumOwnerProfileId,
+      refreshUploadThumbnailFromPreviewPdf,
+      requestPreviewPdfConversion,
       tier,
       processSelectedFile,
     ]
@@ -2932,6 +3108,14 @@ function App() {
   const showDetail = Boolean(selectedFileId || pendingDocumentOpen?.id);
   const shouldShowPremiumProfilePicker = Boolean(
     user && isPremiumTier && !loadingTier && showPremiumProfilePicker
+  );
+  const activeUploadItem = useMemo(() => {
+    if (!selectedFileId) return null;
+    return uploadedFiles.find((item) => String(item?.id || "") === String(selectedFileId)) || null;
+  }, [selectedFileId, uploadedFiles]);
+  const activeDocumentUrl = useMemo(
+    () => String(activeUploadItem?.remoteUrl || "").trim(),
+    [activeUploadItem]
   );
 
   const goBackToList = useCallback(() => {
@@ -2944,7 +3128,7 @@ function App() {
       });
     }
     if (pdfUrl) {
-      URL.revokeObjectURL(pdfUrl);
+      revokeObjectUrlIfNeeded(pdfUrl);
     }
     setSelectedFileId(null);
     setPendingDocumentOpen(null);
@@ -3649,6 +3833,7 @@ function App() {
       }
       const nextMultipleChoice = [];
       const nextShortAnswer = [];
+      let questionStyleProfile = "";
 
       const { generateQuiz } = await getOpenAiService();
       const maxAttempts = Math.max(
@@ -3669,14 +3854,17 @@ function App() {
           targetSaCount > nextShortAnswer.length
             ? Math.min(5, targetSaCount - nextShortAnswer.length + 1)
             : 0;
-        const quiz = normalizeQuizPayload(
-          await generateQuiz(quizSourceText, {
-            multipleChoiceCount: requestMcCount,
-            shortAnswerCount: requestSaCount,
-            avoidQuestions: avoidQuestionTexts,
-            scopeLabel,
-          })
-        );
+        const rawQuizResult = await generateQuiz(quizSourceText, {
+          multipleChoiceCount: requestMcCount,
+          shortAnswerCount: requestSaCount,
+          avoidQuestions: avoidQuestionTexts,
+          scopeLabel,
+          questionStyleProfile: questionStyleProfileContent,
+        });
+        if (!questionStyleProfile) {
+          questionStyleProfile = String(rawQuizResult?.questionStyleProfile || "").trim();
+        }
+        const quiz = normalizeQuizPayload(rawQuizResult);
 
         pushUniqueByQuestionKey(
           nextMultipleChoice,
@@ -3709,7 +3897,10 @@ function App() {
         multipleChoice: nextMultipleChoice.slice(0, targetMcCount),
         shortAnswer: nextShortAnswer.slice(0, targetSaCount),
       };
-      const newSet = createQuizSetState(trimmedQuiz);
+      const newSet = createQuizSetState(trimmedQuiz, undefined, {
+        questionStyleProfile,
+        questionStyleScopeLabel: scopeLabel || questionStyleProfileScopeLabel,
+      });
       setQuizSets((prev) => [...prev, newSet]);
       setStatus(scopeLabel ? `퀴즈 세트가 생성되었습니다. (${scopeLabel})` : "퀴즈 세트가 생성되었습니다.");
       setUsageCounts((prev) => ({ ...prev, quiz: prev.quiz + 1 }));
@@ -4585,22 +4776,46 @@ function App() {
         }
       }
 
-      setStatus("AI로 요약을 생성하는 중...");
-      const { generateSummary } = await getOpenAiService();
-      const summarized = customChapterSections
-        ? await generateSummary("", {
-            scope: "사용자 지정 챕터 범위",
-            chapterized: true,
-            chapterSections: customChapterSections,
-            instructorEmphasis: instructorEmphasisText,
-          })
-        : await generateSummary(summarySourceText, {
-            instructorEmphasis: instructorEmphasisText,
-          });
+      setStatus("AI로 요약과 문제 스타일을 분석하는 중...");
+      const { generateSummary, generateQuestionStyleProfile } = await getOpenAiService();
+      const questionStyleScopeLabel = customChapterSections ? "사용자 지정 챕터 범위" : "문서 전체";
+      const questionStyleSourceText = customChapterSections
+        ? customChapterSections
+            .map((chapter) => {
+              const title = String(chapter?.chapterTitle || chapter?.id || "").trim();
+              const text = String(chapter?.text || "").trim();
+              return [title ? `[${title}]` : "", text].filter(Boolean).join("\n");
+            })
+            .filter(Boolean)
+            .join("\n\n")
+        : summarySourceText;
+      const [summarized, generatedQuestionStyleProfile] = await Promise.all([
+        customChapterSections
+          ? generateSummary(questionStyleSourceText, {
+              scope: "사용자 지정 챕터 범위",
+              chapterized: true,
+              chapterSections: customChapterSections,
+              instructorEmphasis: instructorEmphasisText,
+            })
+          : generateSummary(summarySourceText, {
+              instructorEmphasis: instructorEmphasisText,
+            }),
+        generateQuestionStyleProfile(questionStyleSourceText, {
+          scopeLabel: questionStyleScopeLabel,
+        }),
+      ]);
+      const nextQuestionStyleProfile = String(generatedQuestionStyleProfile || "").trim();
+      const nextHighlights = writeQuestionStyleProfileToHighlights(artifacts?.highlights, {
+        content: nextQuestionStyleProfile,
+        scopeLabel: questionStyleScopeLabel,
+        updatedAt: new Date().toISOString(),
+      });
       setSummary(summarized);
+      setQuestionStyleProfileContent(nextQuestionStyleProfile);
+      setQuestionStyleProfileScopeLabel(nextQuestionStyleProfile ? questionStyleScopeLabel : "");
       setUsageCounts((prev) => ({ ...prev, summary: prev.summary + 1 }));
       setStatus("요약이 생성되었습니다.");
-      persistArtifacts({ summary: summarized });
+      persistArtifacts({ summary: summarized, highlights: nextHighlights });
     } catch (err) {
       setError(`요약 생성에 실패했습니다: ${err.message}`);
       setStatus("");
@@ -5703,6 +5918,8 @@ function App() {
         const hardResult = await ai.generateHardQuiz(sourceText, {
           count: requestCount,
           avoidQuestions: avoidMockQuestionTexts,
+          scopeLabel,
+          questionStyleProfile: questionStyleProfileContent,
         });
         const rawHardItems = (Array.isArray(hardResult?.items) ? hardResult.items : []).filter(
           (item) => !isLowValueStudyPrompt(String(item?.question || "").trim())
@@ -6295,6 +6512,7 @@ function App() {
     detailContainerRef,
     splitStyle,
     pdfUrl,
+    documentUrl: activeDocumentUrl,
     file,
     pendingDocumentOpen,
     pageInfo,
@@ -6306,6 +6524,7 @@ function App() {
     requestSummary,
     isLoadingSummary,
     isLoadingText,
+    previewText,
     isFreeTier,
     summary,
     instructorEmphasisInput,
@@ -6386,6 +6605,8 @@ function App() {
       setQuizMixInput(`${nextMultipleChoice}-${nextShortAnswer}`);
     },
     quizMixError,
+    questionStyleProfileContent,
+    questionStyleProfileScopeLabel,
     quizSets,
     deleteQuiz: handleDeleteQuiz,
     deleteQuizItem: handleDeleteQuizItem,
