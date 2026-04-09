@@ -2932,6 +2932,7 @@ function App() {
         ]);
         if (fileOpenRequestSeqRef.current !== requestSeq) return;
         const { text, pagesUsed, totalPages } = textResult;
+        const normalizedInitialText = String(text || "").trim();
         setExtractedText(text);
         setPreviewText(text);
         setPageInfo({ used: pagesUsed, total: totalPages });
@@ -2941,7 +2942,12 @@ function App() {
             ? performance.now()
             : Date.now();
         const elapsedSeconds = Math.max(0, (extractEnd - extractStart) / 1000);
-        setStatus(`텍스트 추출 완료 (${elapsedSeconds.toFixed(1)}s)`);
+        const extractionStatusSuffix = normalizedInitialText
+          ? ""
+          : isPdfDocumentKind(detectSupportedDocumentKind(targetFile))
+            ? ", 텍스트 없음 - 요약 시 OCR 자동 시도"
+            : ", 텍스트 없음";
+        setStatus(`텍스트 추출 완료 (${elapsedSeconds.toFixed(1)}s${extractionStatusSuffix})`);
         setError("");
         await Promise.all([loadMockExams(nextDocId), loadFlashcards(nextDocId)]);
         if (fileOpenRequestSeqRef.current !== requestSeq) return;
@@ -4767,7 +4773,6 @@ function App() {
     const hasExistingSummary = Boolean(String(summary || "").trim());
     const shouldReplaceExisting = replaceExisting && hasExistingSummary;
     if (isLoadingSummary || (!force && summaryRequestedRef.current && !shouldReplaceExisting)) return;
-    const hasManualChapterConfig = Boolean(String(chapterRangeInput || "").trim());
     const instructorEmphasisText = getEffectiveInstructorEmphasisText();
     const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
     if (!file) {
@@ -4776,10 +4781,6 @@ function App() {
     }
     if (!force && hasReached("maxSummary") && !shouldReplaceExisting) {
       setError("현재 요금제의 요약 생성 한도에 도달했습니다.");
-      return;
-    }
-    if (!extractedText && !hasManualChapterConfig) {
-      setError("추출된 텍스트가 없습니다. 챕터 범위를 입력하거나 PDF 텍스트 추출을 먼저 실행해주세요.");
       return;
     }
 
@@ -4844,28 +4845,68 @@ function App() {
         }
       }
 
-      let summarySourceText = extractedText;
+      let summarySourceText = String(extractedText || previewText || "").trim();
+      const summaryCacheKey = selectedFileId || file?.name || null;
       if (!customChapterSections) {
-        const summaryCacheKey = selectedFileId || file?.name || null;
         const cachedSummaryText = summaryCacheKey
           ? summaryContextCacheRef.current.get(summaryCacheKey)
           : null;
 
-        if (typeof cachedSummaryText === "string" && cachedSummaryText.length > summarySourceText.length) {
+        if (
+          typeof cachedSummaryText === "string" &&
+          String(cachedSummaryText).trim().length > summarySourceText.length
+        ) {
           summarySourceText = cachedSummaryText;
-        } else if (file && summaryCacheKey && isPdfSource) {
+        }
+
+        if (file && isPdfSource) {
           try {
             setStatus("요약 정확도 향상을 위해 추출 범위를 확장하는 중...");
             const extended = await extractPdfText(file, 80, 50000, { useOcr: false });
             const extendedText = String(extended?.text || "").trim();
             if (extendedText.length > summarySourceText.length) {
               summarySourceText = extendedText;
-              summaryContextCacheRef.current.set(summaryCacheKey, extendedText);
+              if (summaryCacheKey) {
+                summaryContextCacheRef.current.set(summaryCacheKey, extendedText);
+              }
             }
           } catch {
             // fallback to already extracted text
           }
         }
+
+        if (!summarySourceText && file && isPdfSource) {
+          try {
+            setStatus("텍스트가 보이지 않아 OCR로 다시 추출하는 중...");
+            const ocrExtracted = await extractPdfText(file, 80, 28000, {
+              useOcr: true,
+              ocrLang: "kor+eng",
+              ocrScale: 1.35,
+              ocrMaxPixels: 1000000,
+              ocrPageOrder: "spread",
+              maxOcrPages: 16,
+              onOcrProgress: (message) => setStatus(message),
+            });
+            const ocrText = String(ocrExtracted?.text || "").trim();
+            if (ocrText) {
+              summarySourceText = ocrText;
+              setExtractedText((prev) => (String(prev || "").trim() ? prev : ocrText));
+              setPreviewText((prev) => (String(prev || "").trim() ? prev : ocrText));
+              if (summaryCacheKey) {
+                summaryContextCacheRef.current.set(summaryCacheKey, ocrText);
+              }
+            }
+          } catch {
+            // fallback to already extracted text
+          }
+        }
+      }
+
+      if (!customChapterSections && !summarySourceText) {
+        if (isPdfSource) {
+          throw new Error("문서에서 요약할 텍스트를 찾지 못했습니다. OCR까지 시도했지만 추출 가능한 텍스트가 없습니다.");
+        }
+        throw new Error("문서에서 요약할 텍스트를 찾지 못했습니다.");
       }
 
       setStatus("AI로 요약과 문제 스타일을 분석하는 중...");
