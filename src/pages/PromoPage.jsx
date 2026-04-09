@@ -25,7 +25,7 @@ const PromoPage = memo(function PromoPage() {
   }, []);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#f5f7fb] text-slate-900">
+    <div className="relative min-h-screen overflow-x-hidden bg-[#f5f7fb] text-slate-900">
       <main className="relative z-10 min-h-screen">
         <PromoIntro
           onStart={handleStart}

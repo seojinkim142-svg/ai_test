@@ -1554,7 +1554,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
   const heroGridShift = Math.min(scrollY * 0.24, 240);
 
   return (
-    <div className="zeus-landing relative overflow-hidden bg-[#f5f7fb] text-slate-900">
+    <div className="zeus-landing relative overflow-x-hidden bg-[#f5f7fb] text-slate-900">
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Sora:wght@400;500;600;700;800&display=swap');
         .zeus-landing {
@@ -1973,7 +1973,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
         </div>
       </section>
 
-      <section id="pricing" className="relative px-5 py-24 sm:px-6 lg:px-8 lg:py-32">
+      <section id="pricing" className="relative scroll-mt-28 px-5 py-24 sm:px-6 lg:px-8 lg:py-32">
         <div className="mx-auto max-w-7xl">
           <div
             ref={(node) => registerRevealNode("pricing-heading", node)}
@@ -1989,7 +1989,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
             <p className="landing-subtitle mt-6 text-base leading-8 text-slate-600 sm:text-lg">{copy.sections.pricingDescription}</p>
           </div>
 
-          <div className="mt-16 grid gap-5 lg:grid-cols-3">
+          <div className="mobile-card-rail mt-16 flex gap-5 md:grid md:grid-cols-2 lg:grid-cols-3">
             {PLAN_ITEMS.map((plan, index) => {
               const isActive = activePlanId === plan.id;
               return (
@@ -2011,7 +2011,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                       handlePlanInteract(plan.id);
                     }
                   }}
-                  className="relative overflow-hidden rounded-[2rem] border bg-white/[0.82] p-6 shadow-[0_28px_70px_-48px_rgba(15,23,42,0.24)] backdrop-blur transition-all duration-300 sm:p-7"
+                  className="relative min-w-[280px] flex-1 overflow-hidden rounded-[2rem] border bg-white/[0.82] p-6 shadow-[0_28px_70px_-48px_rgba(15,23,42,0.24)] backdrop-blur transition-all duration-300 sm:min-w-[320px] sm:p-7 md:min-w-0"
                   style={{
                     ...getRevealStyle(isVisible("pricing-heading"), { y: 28, delay: 120 + index * 80 }),
                     borderColor: isActive ? "rgba(99, 102, 241, 0.28)" : "rgba(255, 255, 255, 0.78)",
@@ -2059,92 +2059,60 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
               );
             })}
           </div>
+
           <div
-            className="mt-10 grid gap-4 md:hidden"
+            className="mt-8 rounded-[2rem] border border-white/80 bg-white/[0.82] shadow-[0_34px_90px_-54px_rgba(15,23,42,0.28)] backdrop-blur"
             style={getRevealStyle(isVisible("pricing-heading"), { y: 28, delay: 180 })}
           >
-            {PLAN_ITEMS.map((plan) => {
-              const isActive = activePlanId === plan.id;
-              return (
-                <article
-                  key={`${plan.name}-mobile-compare`}
-                  className={`rounded-[1.8rem] border bg-white/[0.82] p-5 shadow-[0_24px_60px_-46px_rgba(15,23,42,0.24)] ${
-                    isActive ? "border-violet-200" : "border-white/80"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xl font-bold text-slate-950">{plan.name}</p>
-                      <p className="mt-1 text-sm text-slate-500">{plan.price}</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => handlePlanInteract(plan.id)}
-                      className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
-                        isActive ? "bg-slate-950 text-white" : "border border-slate-200 bg-white text-slate-600"
-                      }`}
-                    >
-                      {isActive ? copy.pricing.selected : copy.pricing.choose}
-                    </button>
+            <div className="show-scrollbar overflow-x-auto overflow-y-visible pb-3">
+              <div className="min-w-[720px]">
+                <div className="grid grid-cols-[160px_repeat(3,minmax(180px,1fr))] border-b border-slate-200/80 md:grid-cols-[180px_repeat(3,minmax(0,1fr))]">
+                  <div className="sticky left-0 z-20 bg-white/[0.96] px-4 py-5 text-sm font-semibold uppercase tracking-[0.22em] text-slate-400 backdrop-blur md:px-5">
+                    {copy.pricing.compare}
                   </div>
-                  <div className="mt-4 space-y-3">
-                    {PLAN_COMPARISON_ROWS.map((row) => (
-                      <div key={`${plan.name}-${row.label}`} className="rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">{row.label}</p>
-                        <p className="mt-2 text-sm font-medium leading-6 text-slate-700">{row.values[plan.id]}</p>
-                      </div>
-                    ))}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-
-          <div
-            className="mt-12 hidden overflow-hidden rounded-[2rem] border border-white/80 bg-white/[0.82] shadow-[0_34px_90px_-54px_rgba(15,23,42,0.28)] backdrop-blur md:block"
-            style={getRevealStyle(isVisible("pricing-heading"), { y: 28, delay: 220 })}
-          >
-            <div className="grid grid-cols-[180px_repeat(3,minmax(0,1fr))] border-b border-slate-200/80">
-              <div className="px-5 py-5 text-sm font-semibold uppercase tracking-[0.22em] text-slate-400">{copy.pricing.compare}</div>
-              {PLAN_ITEMS.map((plan) => {
-                const isActive = activePlanId === plan.id;
-                return (
-                  <button
-                    key={`${plan.name}-header`}
-                    type="button"
-                    onClick={() => handlePlanInteract(plan.id)}
-                    className={`border-l px-5 py-5 text-left transition ${
-                      isActive ? "bg-slate-950 text-white" : "bg-white/75 text-slate-900 hover:bg-slate-50"
-                    }`}
-                  >
-                    <p className="text-2xl font-bold">{plan.name}</p>
-                    <p className={`mt-2 text-sm ${isActive ? "text-slate-300" : "text-slate-500"}`}>{plan.description}</p>
-                    <p className={`mt-4 text-2xl font-bold ${isActive ? "text-white" : "text-slate-900"}`}>{plan.price}</p>
-                  </button>
-                );
-              })}
-            </div>
-
-            {PLAN_COMPARISON_ROWS.map((row) => (
-              <Fragment key={row.label}>
-                <div className="grid grid-cols-[180px_repeat(3,minmax(0,1fr))] border-b border-slate-200/80 last:border-b-0">
-                  <div className="bg-slate-50/80 px-5 py-4 text-sm font-semibold text-slate-500">{row.label}</div>
                   {PLAN_ITEMS.map((plan) => {
                     const isActive = activePlanId === plan.id;
                     return (
-                      <div
-                        key={`${row.label}-${plan.id}`}
-                        className={`border-l px-5 py-4 text-sm leading-7 ${
-                          isActive ? "bg-violet-50/70 text-slate-900" : "bg-white/70 text-slate-600"
+                      <button
+                        key={`${plan.name}-header`}
+                        type="button"
+                        onClick={() => handlePlanInteract(plan.id)}
+                        className={`border-l px-4 py-5 text-left transition md:px-5 ${
+                          isActive ? "bg-slate-950 text-white" : "bg-white/75 text-slate-900 hover:bg-slate-50"
                         }`}
                       >
-                        {row.values[plan.id]}
-                      </div>
+                        <p className="text-xl font-bold md:text-2xl">{plan.name}</p>
+                        <p className={`mt-2 text-sm ${isActive ? "text-slate-300" : "text-slate-500"}`}>{plan.description}</p>
+                        <p className={`mt-4 text-xl font-bold md:text-2xl ${isActive ? "text-white" : "text-slate-900"}`}>{plan.price}</p>
+                      </button>
                     );
                   })}
                 </div>
-              </Fragment>
-            ))}
+
+                {PLAN_COMPARISON_ROWS.map((row) => (
+                  <Fragment key={row.label}>
+                    <div className="grid grid-cols-[160px_repeat(3,minmax(180px,1fr))] border-b border-slate-200/80 last:border-b-0 md:grid-cols-[180px_repeat(3,minmax(0,1fr))]">
+                      <div className="sticky left-0 z-10 bg-slate-50/95 px-4 py-4 text-sm font-semibold text-slate-500 backdrop-blur md:px-5">
+                        {row.label}
+                      </div>
+                      {PLAN_ITEMS.map((plan) => {
+                        const isActive = activePlanId === plan.id;
+                        return (
+                          <div
+                            key={`${row.label}-${plan.id}`}
+                            className={`border-l px-4 py-4 text-sm leading-7 md:px-5 ${
+                              isActive ? "bg-violet-50/70 text-slate-900" : "bg-white/70 text-slate-600"
+                            }`}
+                          >
+                            {row.values[plan.id]}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </Fragment>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </section>
