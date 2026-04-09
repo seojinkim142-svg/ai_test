@@ -31,6 +31,8 @@ const StartPage = memo(function StartPage({
   onRequireAuth,
   currentTier = "free",
   maxPdfSizeBytes = 0,
+  outputLanguage = "ko",
+  setOutputLanguage,
 }) {
   const uploadRef = useRef(null);
   const showPromo = isGuest || showIntro;
@@ -46,7 +48,13 @@ const StartPage = memo(function StartPage({
 
   return (
     <section className="grid grid-cols-1 gap-6">
-      {showPromo && <PromoIntro onStart={handleStart} />}
+      {showPromo && (
+        <PromoIntro
+          onStart={handleStart}
+          outputLanguage={outputLanguage}
+          setOutputLanguage={setOutputLanguage}
+        />
+      )}
       {!isGuest && !showPromo && (
         <Suspense fallback={<div className="min-h-[40vh]" />}>
           <div ref={uploadRef} className="scroll-mt-24">
@@ -76,6 +84,7 @@ const StartPage = memo(function StartPage({
               onRequireAuth={onRequireAuth}
               currentTier={currentTier}
               maxPdfSizeBytes={maxPdfSizeBytes}
+              outputLanguage={outputLanguage}
             />
           </div>
         </Suspense>

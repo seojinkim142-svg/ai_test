@@ -102,6 +102,15 @@ function detectTabletDevice() {
   return isIpad || isAndroidTablet || isLargeTouchDevice;
 }
 
+function detectMobilePhoneViewport() {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  const ua = String(navigator.userAgent || "");
+  const width = Number(window.innerWidth || 0);
+  const isPhoneUserAgent =
+    /iPhone|iPod|Android.+Mobile|Windows Phone|webOS|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  return isPhoneUserAgent || (width > 0 && width < 768 && !detectTabletDevice());
+}
+
 function PdfPreview({
   pdfUrl,
   documentUrl = "",
@@ -123,11 +132,14 @@ function PdfPreview({
   const [nativeError, setNativeError] = useState("");
   const [isNativeLoading, setIsNativeLoading] = useState(false);
   const [isTabletDevice, setIsTabletDevice] = useState(() => detectTabletDevice());
+  const [isMobilePhoneViewport, setIsMobilePhoneViewport] = useState(() => detectMobilePhoneViewport());
+  const [mobileFrameHeight, setMobileFrameHeight] = useState(null);
   const [highlightRects, setHighlightRects] = useState([]);
   const [pageJumpInput, setPageJumpInput] = useState(() =>
     String(normalizePageNumber(currentPage))
   );
   const [docVersion, setDocVersion] = useState(0);
+  const previewRootRef = useRef(null);
   const iframeRef = useRef(null);
   const canvasRef = useRef(null);
   const canvasShellRef = useRef(null);
@@ -221,7 +233,31 @@ function PdfPreview({
   }, [currentPage, preferredPdfSourceUrl]);
   const viewerBaseSrc = useMemo(() => stripUrlHash(viewerSrc), [viewerSrc]);
   const useCanvasPdfPreview = canPreviewPdf && isNativePlatform;
+  const isMobileFullScreenPreview = isMobilePhoneViewport && !isTabletDevice;
   const canDownloadFile = file instanceof File || Boolean(pdfUrl) || Boolean(documentUrl);
+
+  const previewShellClassName = useMemo(() => {
+    if (isMobileFullScreenPreview) {
+      return "relative flex flex-1 overflow-hidden bg-slate-950/88";
+    }
+    return "relative flex h-[58svh] min-h-[24rem] flex-1 overflow-hidden rounded-3xl border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/40 sm:min-h-[72vh] lg:h-full lg:min-h-0";
+  }, [isMobileFullScreenPreview]);
+  const previewColumnShellClassName = useMemo(() => {
+    if (isMobileFullScreenPreview) {
+      return "relative flex flex-1 flex-col overflow-hidden bg-slate-950/88";
+    }
+    return "relative flex h-[58svh] min-h-[24rem] flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/40 sm:min-h-[72vh] lg:h-full lg:min-h-0";
+  }, [isMobileFullScreenPreview]);
+  const previewShellStyle = useMemo(() => {
+    if (!isMobileFullScreenPreview || !Number.isFinite(mobileFrameHeight) || mobileFrameHeight <= 0) {
+      return undefined;
+    }
+    const height = `${mobileFrameHeight}px`;
+    return {
+      height,
+      minHeight: height,
+    };
+  }, [isMobileFullScreenPreview, mobileFrameHeight]);
 
   const handleDownloadFile = useCallback(() => {
     const targetUrl =
@@ -364,18 +400,51 @@ function PdfPreview({
   }, [goToNextPage, goToPreviousPage, useCanvasPdfPreview]);
 
   useEffect(() => {
-    if (!useCanvasPdfPreview) return undefined;
-    const syncTabletState = () => {
+    const syncViewportFrame = () => {
       setIsTabletDevice(detectTabletDevice());
+      setIsMobilePhoneViewport(detectMobilePhoneViewport());
     };
-    syncTabletState();
-    window.addEventListener("resize", syncTabletState);
-    window.addEventListener("orientationchange", syncTabletState);
+    syncViewportFrame();
+    window.addEventListener("resize", syncViewportFrame);
+    window.addEventListener("orientationchange", syncViewportFrame);
     return () => {
-      window.removeEventListener("resize", syncTabletState);
-      window.removeEventListener("orientationchange", syncTabletState);
+      window.removeEventListener("resize", syncViewportFrame);
+      window.removeEventListener("orientationchange", syncViewportFrame);
     };
-  }, [useCanvasPdfPreview]);
+  }, []);
+
+  useEffect(() => {
+    if (!isMobileFullScreenPreview) {
+      setMobileFrameHeight(null);
+      return undefined;
+    }
+
+    let frame = 0;
+    const measure = () => {
+      const root = previewRootRef.current;
+      if (!root || typeof window === "undefined") return;
+      const top = root.getBoundingClientRect().top;
+      const availableHeight = Math.max(320, Math.floor(window.innerHeight - Math.max(0, top)));
+      setMobileFrameHeight((prev) => (prev === availableHeight ? prev : availableHeight));
+    };
+
+    const scheduleMeasure = () => {
+      if (typeof window === "undefined") return;
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(measure);
+    };
+
+    scheduleMeasure();
+    window.addEventListener("resize", scheduleMeasure);
+    window.addEventListener("orientationchange", scheduleMeasure);
+    return () => {
+      window.removeEventListener("resize", scheduleMeasure);
+      window.removeEventListener("orientationchange", scheduleMeasure);
+      if (frame && typeof window !== "undefined") {
+        window.cancelAnimationFrame(frame);
+      }
+    };
+  }, [isMobileFullScreenPreview, officeViewMode, sourceKey, useCanvasPdfPreview]);
 
   const handleNativeWheel = useCallback(
     (event) => {
@@ -596,7 +665,14 @@ function PdfPreview({
   ]);
 
   const pageController = (
-    <div className="pointer-events-none absolute inset-x-0 bottom-2 z-30 flex justify-center px-2 sm:bottom-3 sm:px-3">
+    <div
+      className="pointer-events-none absolute inset-x-0 bottom-2 z-30 flex justify-center px-2 sm:bottom-3 sm:px-3"
+      style={
+        isMobileFullScreenPreview
+          ? { bottom: "calc(env(safe-area-inset-bottom, 0px) + 0.5rem)" }
+          : undefined
+      }
+    >
       <div className="pointer-events-auto inline-flex w-full max-w-[22rem] items-center justify-between gap-1 rounded-[1.35rem] border border-white/15 bg-slate-900/92 px-2 py-1.5 text-[11px] text-slate-100 shadow-lg shadow-black/40 sm:w-auto sm:max-w-none sm:gap-2 sm:rounded-2xl sm:px-2 sm:py-1 sm:text-xs">
         <button
           type="button"
@@ -1047,7 +1123,7 @@ function PdfPreview({
 
   if (shouldUseOfficeDocumentFallback) {
     return (
-      <div className="relative flex h-[58svh] min-h-[24rem] flex-1 flex-col overflow-hidden rounded-3xl border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/40 sm:min-h-[72vh] lg:h-full lg:min-h-0">
+      <div ref={previewRootRef} className={previewColumnShellClassName} style={previewShellStyle}>
         <div className="border-b border-white/10 bg-slate-900/90 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -1203,7 +1279,7 @@ function PdfPreview({
 
   if (useCanvasPdfPreview) {
     return (
-      <div className="relative flex h-[58svh] min-h-[24rem] flex-1 overflow-hidden rounded-3xl border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/40 sm:min-h-[72vh] lg:h-full lg:min-h-0">
+      <div ref={previewRootRef} className={previewShellClassName} style={previewShellStyle}>
         {canDownloadFile && (
           <div className="absolute right-3 top-3 z-30">
             <button
@@ -1217,7 +1293,9 @@ function PdfPreview({
         )}
         <div
           ref={nativeScrollRef}
-          className="h-full w-full overflow-y-auto overflow-x-hidden p-1.5 sm:p-3"
+          className={`h-full w-full overflow-y-auto overflow-x-hidden ${
+            isMobileFullScreenPreview ? "p-0" : "p-1.5 sm:p-3"
+          }`}
           onWheel={handleNativeWheel}
           onTouchStart={handleNativeTouchStart}
           onTouchEnd={handleNativeTouchEnd}
@@ -1226,7 +1304,7 @@ function PdfPreview({
             <canvas
               ref={canvasRef}
               onClick={handleNativeCanvasClick}
-              className={`mx-auto block rounded-xl bg-white shadow-lg shadow-black/30 ${
+              className={`mx-auto block bg-white ${isMobileFullScreenPreview ? "" : "rounded-xl shadow-lg shadow-black/30"} ${
                 isTabletDevice ? "cursor-pointer" : ""
               }`}
             />
@@ -1275,7 +1353,7 @@ function PdfPreview({
   const isLoading = Boolean(viewerSrc) && !hasLoadError && stripUrlHash(loadedSrc) !== viewerBaseSrc;
 
   return (
-    <div className="relative flex h-[58svh] min-h-[24rem] flex-1 overflow-hidden rounded-3xl border border-white/10 bg-slate-950/70 shadow-2xl shadow-black/40 sm:min-h-[72vh] lg:h-full lg:min-h-0">
+    <div ref={previewRootRef} className={previewShellClassName} style={previewShellStyle}>
       {!hasLoadError && hasViewer && (
         <iframe
           ref={iframeRef}

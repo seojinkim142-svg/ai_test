@@ -271,12 +271,15 @@ textarea,
 }
 
 .landing-title {
-  word-break: keep-all;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  line-break: strict;
   text-wrap: balance;
 }
 
 .landing-subtitle {
-  word-break: keep-all;
+  overflow-wrap: anywhere;
+  word-break: normal;
   line-break: strict;
   text-wrap: balance;
   hyphens: none;

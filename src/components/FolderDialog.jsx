@@ -9,6 +9,7 @@ function FolderDialog({
   submitLabel = "생성",
   initialValue = "",
   placeholder = "예: 1주차 강의, 중간고사 요약",
+  cancelLabel = "취소",
 }) {
   if (!open) return null;
 
@@ -43,7 +44,7 @@ function FolderDialog({
               data-ghost-size="sm"
               style={{ "--ghost-color": "148, 163, 184" }}
             >
-              취소
+              {cancelLabel}
             </button>
             <button
               type="submit"
@@ -69,6 +70,7 @@ FolderDialog.propTypes = {
   submitLabel: PropTypes.string,
   initialValue: PropTypes.string,
   placeholder: PropTypes.string,
+  cancelLabel: PropTypes.string,
 };
 
 export default FolderDialog;

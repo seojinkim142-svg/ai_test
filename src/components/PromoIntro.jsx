@@ -7,7 +7,7 @@ const SPLASH_TIMING = {
   reduced: { startExitDelay: 90, fadeDuration: 220 },
 };
 
-const PromoIntro = memo(function PromoIntro({ onStart }) {
+const PromoIntro = memo(function PromoIntro({ onStart, outputLanguage = "ko", setOutputLanguage }) {
   const [showLandingIntro, setShowLandingIntro] = useState(false);
   const [showSplash, setShowSplash] = useState(true);
   const [isSplashExiting, setIsSplashExiting] = useState(false);
@@ -104,7 +104,11 @@ const PromoIntro = memo(function PromoIntro({ onStart }) {
       )}
       {showLandingIntro && (
         <Suspense fallback={null}>
-          <LandingIntro onStart={onStart} />
+          <LandingIntro
+            onStart={onStart}
+            outputLanguage={outputLanguage}
+            setOutputLanguage={setOutputLanguage}
+          />
         </Suspense>
       )}
     </>

@@ -157,6 +157,9 @@ const NATIVE_PAYMENT_RETURN_SCHEME = trimSchemeSeparators(
 );
 const NATIVE_PAYMENT_RETURN_HOST = "auth";
 const NATIVE_PAYMENT_RETURN_PATH = "/callback";
+const OUTPUT_LANGUAGE_STORAGE_KEY = "zeusian-output-language";
+const DEFAULT_OUTPUT_LANGUAGE = "ko";
+const AVAILABLE_OUTPUT_LANGUAGES = ["en", "zh", "ja", "hi", "ko"];
 
 function extractPaymentReturnParams(rawUrl) {
   const source = String(rawUrl || "").trim();
@@ -928,6 +931,13 @@ function App() {
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
   const [isExportingSummary, setIsExportingSummary] = useState(false);
   const [theme, setTheme] = useState("dark");
+  const [outputLanguage, setOutputLanguage] = useState(() => {
+    if (typeof window === "undefined") return DEFAULT_OUTPUT_LANGUAGE;
+    const stored = String(window.localStorage.getItem(OUTPUT_LANGUAGE_STORAGE_KEY) || "")
+      .trim()
+      .toLowerCase();
+    return AVAILABLE_OUTPUT_LANGUAGES.includes(stored) ? stored : DEFAULT_OUTPUT_LANGUAGE;
+  });
   const [summary, setSummary] = useState("");
   const [questionStyleProfileContent, setQuestionStyleProfileContent] = useState("");
   const [questionStyleProfileScopeLabel, setQuestionStyleProfileScopeLabel] = useState("");
@@ -1143,6 +1153,10 @@ function App() {
     }
     return openAiModulePromiseRef.current;
   }, []);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(OUTPUT_LANGUAGE_STORAGE_KEY, outputLanguage);
+  }, [outputLanguage]);
   const requestPreviewPdfConversion = useCallback(
     async (item, { force = false } = {}) => {
       const uploadId = item?.id;
@@ -3860,6 +3874,7 @@ function App() {
           avoidQuestions: avoidQuestionTexts,
           scopeLabel,
           questionStyleProfile: questionStyleProfileContent,
+          outputLanguage,
         });
         if (!questionStyleProfile) {
           questionStyleProfile = String(rawQuizResult?.questionStyleProfile || "").trim();
@@ -4796,9 +4811,11 @@ function App() {
               chapterized: true,
               chapterSections: customChapterSections,
               instructorEmphasis: instructorEmphasisText,
+              outputLanguage,
             })
           : generateSummary(summarySourceText, {
               instructorEmphasis: instructorEmphasisText,
+              outputLanguage,
             }),
         generateQuestionStyleProfile(questionStyleSourceText, {
           scopeLabel: questionStyleScopeLabel,
@@ -4975,6 +4992,7 @@ function App() {
         scope: "선택 범위에서 추출한 텍스트",
         chapterized: false,
         instructorEmphasis: getEffectiveInstructorEmphasisText(),
+        outputLanguage,
       });
       setPartialSummary(summarized);
       setPartialSummaryRange(selectionLabel);
@@ -5030,6 +5048,7 @@ function App() {
     pageInfo.used,
     pageSummaryInput,
     getEffectiveInstructorEmphasisText,
+    outputLanguage,
     persistPartialSummaryBundle,
     savedPartialSummaries,
     selectedFileId,
@@ -5277,6 +5296,7 @@ function App() {
       const ox = await generateOxQuiz(oxSourceText, {
         avoidStatements: avoidStatementTexts,
         scopeLabel,
+        outputLanguage,
       });
       const rawItems = Array.isArray(ox?.items) ? ox.items : [];
       const qualityRawItems = rawItems.filter(
@@ -5441,7 +5461,7 @@ function App() {
         scopeLabel ? `AI ?뚮옒?쒖뭅???앹꽦 以?(${scopeLabel})...` : "AI ?뚮옒?쒖뭅???앹꽦 以?.."
       );
       const { generateFlashcards } = await getOpenAiService();
-      const result = await generateFlashcards(sourceText, { count: 8 });
+      const result = await generateFlashcards(sourceText, { count: 8, outputLanguage });
       const rawCards = Array.isArray(result?.cards)
         ? result.cards
         : Array.isArray(result)
@@ -5491,6 +5511,7 @@ function App() {
     flashcardChapterSelectionInput,
     extractTextForChapterSelection,
     getOpenAiService,
+    outputLanguage,
   ]);
 
   const handleResetTutor = useCallback(() => {
@@ -5709,6 +5730,7 @@ function App() {
           question: trimmed,
           extractedText: tutorSourceText,
           messages: history,
+          outputLanguage,
         });
         const safeReply = resolveTutorReplyText(reply, {
           question: trimmed,
@@ -5726,11 +5748,12 @@ function App() {
       currentPage,
       file,
       getOpenAiService,
-      isLoadingText,
-      isTutorLoading,
-      pageInfo?.total,
-      selectedFileId,
-      tutorMessages,
+    isLoadingText,
+    isTutorLoading,
+    outputLanguage,
+    pageInfo?.total,
+    selectedFileId,
+    tutorMessages,
     ]
   );
 
@@ -5800,12 +5823,14 @@ function App() {
           ai.generateOxQuiz(sourceText, {
             instructorEmphasis: instructorEmphasisText,
             avoidStatements: avoidMockQuestionTexts,
+            outputLanguage,
           }),
           ai.generateQuiz(sourceText, {
             multipleChoiceCount: 4,
             shortAnswerCount: 1,
             instructorEmphasis: instructorEmphasisText,
             avoidQuestions: avoidMockQuestionTexts,
+            outputLanguage,
           }),
         ]);
 
@@ -5920,6 +5945,7 @@ function App() {
           avoidQuestions: avoidMockQuestionTexts,
           scopeLabel,
           questionStyleProfile: questionStyleProfileContent,
+          outputLanguage,
         });
         const rawHardItems = (Array.isArray(hardResult?.items) ? hardResult.items : []).filter(
           (item) => !isLowValueStudyPrompt(String(item?.question || "").trim())
@@ -6037,6 +6063,7 @@ function App() {
     selectedFileId,
     getOpenAiService,
     getEffectiveInstructorEmphasisText,
+    outputLanguage,
     resolveQuestionSourceText,
     user,
   ]);
@@ -6091,6 +6118,7 @@ function App() {
           quizItems: quizReferenceItems,
           reviewNotes: reviewNoteReferences,
           scopeLabel,
+          outputLanguage,
         });
         const trimmed = String(generated || "").trim();
         if (!trimmed) {
@@ -6125,6 +6153,7 @@ function App() {
       selectReviewNotesBySection,
       selectedFileId,
       summary,
+      outputLanguage,
     ]
   );
 
@@ -6507,6 +6536,8 @@ function App() {
     onRequireAuth: openAuth,
     currentTier: tier,
     maxPdfSizeBytes: limits.maxPdfSizeBytes,
+    outputLanguage,
+    setOutputLanguage,
   };
   const detailPageProps = {
     detailContainerRef,
@@ -6521,6 +6552,7 @@ function App() {
     handleDragStart,
     panelTab,
     setPanelTab,
+    outputLanguage,
     requestSummary,
     isLoadingSummary,
     isLoadingText,
@@ -6676,10 +6708,15 @@ function App() {
         <LoginBackground theme={theme}>
           <div className="relative z-10 min-h-screen px-6 py-6 sm:px-8 sm:py-8">
             <div className="flex items-center justify-start">
-              <div className="text-sm font-semibold tracking-[0.18em] text-slate-100/92">Zeusian.ai</div>
+              <a
+                href="/start"
+                className="text-sm font-semibold tracking-[0.18em] text-slate-100/92 transition hover:text-white"
+              >
+                Zeusian.ai
+              </a>
             </div>
             <div className="flex min-h-[calc(100vh-96px)] items-center justify-center">
-              <AuthPanel user={user} onAuth={refreshSession} theme={theme} />
+              <AuthPanel user={user} onAuth={refreshSession} theme={theme} outputLanguage={outputLanguage} />
             </div>
           </div>
         </LoginBackground>
@@ -6718,6 +6755,8 @@ function App() {
             onClose={closeSettings}
             theme={theme}
             onThemeChange={setTheme}
+            outputLanguage={outputLanguage}
+            onOutputLanguageChange={setOutputLanguage}
             user={user}
             authEnabled={AUTH_ENABLED}
             currentTier={tier}
@@ -6961,6 +7000,7 @@ function App() {
               onOpenProfilePinDialog={handleOpenProfilePinDialog}
               premiumSpaceMode={premiumSpaceMode}
               onTogglePremiumSpaceMode={handleTogglePremiumSpaceMode}
+              outputLanguage={outputLanguage}
             />
           </Suspense>
         )}

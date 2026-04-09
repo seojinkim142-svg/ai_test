@@ -3,6 +3,8 @@ import PropTypes from "prop-types";
 function FolderTile({
   name,
   count,
+  folderLabel = "폴더",
+  countLabel,
   active,
   onClick,
   onDelete,
@@ -12,6 +14,7 @@ function FolderTile({
   onDragLeave,
   canDrop,
   onAdd,
+  addButtonLabel = "여기에 새 파일 추가",
   compactGrid = false,
   dragHighlight = false,
 }) {
@@ -46,11 +49,11 @@ function FolderTile({
       <div className="flex flex-1 flex-col justify-between px-4 py-4">
         <div className="flex items-start justify-between gap-2">
           <div
-            className={`flex h-10 w-10 items-center justify-center rounded-xl text-xl text-emerald-200 transition ${
+            className={`inline-flex min-h-9 min-w-fit items-center justify-center rounded-full px-3 text-xs font-semibold tracking-[0.08em] whitespace-nowrap text-emerald-200 transition ${
               dragHighlight ? "bg-emerald-500/30 ring-2 ring-emerald-300/70" : "bg-emerald-500/15"
             }`}
           >
-            폴더
+            {folderLabel}
           </div>
           {onDelete && (
             <button
@@ -67,7 +70,7 @@ function FolderTile({
         </div>
         <div className="mt-4">
           <p className="truncate text-base font-semibold text-white">{name}</p>
-          <p className="text-xs text-slate-300">{count}개 파일</p>
+          <p className="text-xs text-slate-300">{countLabel || `${count}개 파일`}</p>
           {active && (
             <button
               type="button"
@@ -77,7 +80,7 @@ function FolderTile({
               }}
               className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-emerald-100 underline underline-offset-4 hover:text-emerald-50"
             >
-              여기에 새 파일 추가
+              {addButtonLabel}
             </button>
           )}
         </div>
@@ -89,6 +92,8 @@ function FolderTile({
 FolderTile.propTypes = {
   name: PropTypes.string,
   count: PropTypes.number,
+  folderLabel: PropTypes.string,
+  countLabel: PropTypes.string,
   active: PropTypes.bool,
   onClick: PropTypes.func,
   onDelete: PropTypes.func,
@@ -98,6 +103,7 @@ FolderTile.propTypes = {
   onDragLeave: PropTypes.func,
   canDrop: PropTypes.bool,
   onAdd: PropTypes.func,
+  addButtonLabel: PropTypes.string,
   compactGrid: PropTypes.bool,
   dragHighlight: PropTypes.bool,
 };

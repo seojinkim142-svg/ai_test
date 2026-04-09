@@ -1,7 +1,15 @@
 ﻿import PropTypes from "prop-types";
 import { SUPPORTED_UPLOAD_ACCEPT } from "../utils/document";
 
-function UploadTile({ onFileChange, onOpenMenu, inputRef, compactGrid = false }) {
+function UploadTile({
+  onFileChange,
+  onOpenMenu,
+  inputRef,
+  compactGrid = false,
+  title = "문서 추가",
+  description = "PDF, DOCX, PPTX 파일을 업로드하세요",
+  caption = "미리보기는 PDF만 지원됩니다",
+}) {
   return (
     <div
       className={`relative flex h-full min-h-[208px] w-full min-w-0 aspect-[4/5] sm:min-h-[170px] sm:max-w-none sm:aspect-auto ${
@@ -16,9 +24,9 @@ function UploadTile({ onFileChange, onOpenMenu, inputRef, compactGrid = false })
         <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-500/15 text-2xl font-bold text-emerald-200">
           +
         </div>
-        <p className="text-base font-semibold text-white">문서 추가</p>
-        <p className="max-w-xs text-sm text-slate-200">PDF, DOCX, PPTX 파일을 업로드하세요</p>
-        <p className="max-w-xs text-xs text-slate-400">미리보기는 PDF만 지원됩니다</p>
+        <p className="text-base font-semibold text-white">{title}</p>
+        <p className="max-w-xs text-sm text-slate-200">{description}</p>
+        <p className="max-w-xs text-xs text-slate-400">{caption}</p>
       </button>
       <input
         ref={inputRef}
@@ -39,6 +47,9 @@ UploadTile.propTypes = {
   onOpenMenu: PropTypes.func,
   inputRef: PropTypes.shape({ current: PropTypes.instanceOf(Element) }),
   compactGrid: PropTypes.bool,
+  title: PropTypes.string,
+  description: PropTypes.string,
+  caption: PropTypes.string,
 };
 
 export default UploadTile;

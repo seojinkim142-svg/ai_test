@@ -15,6 +15,7 @@ import ReviewNotesPanel from "../components/ReviewNotesPanel";
 import SummaryCard from "../components/SummaryCard";
 import { useQuizMixCarousel } from "../hooks/useQuizMixCarousel";
 import { LETTERS } from "../constants";
+import { getDetailCopy } from "../utils/detailCopy";
 
 const MOCK_BARE_LATEX_RE =
   /\\(?:frac|dfrac|tfrac|sum|prod|int|sqrt|left|right|cdot|times|to|infty|leq?|geq?|neq?|approx|mathbb|mathbf|mathrm|text|lim)\b/;
@@ -140,6 +141,7 @@ function toMarkdownWithLatexMath(rawText) {
     })
     .join("\n");
 }
+
 export default function DetailPage({
   detailContainerRef,
   splitStyle,
@@ -153,6 +155,7 @@ export default function DetailPage({
   handleDragStart,
   panelTab,
   setPanelTab,
+  outputLanguage = "ko",
   requestSummary,
   isLoadingSummary,
   isLoadingText,
@@ -292,14 +295,26 @@ export default function DetailPage({
   handleResetTutor,
 }) {
   const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
+  const copy = useMemo(() => getDetailCopy(outputLanguage), [outputLanguage]);
+  const detailTabs = useMemo(
+    () => [
+      { id: "summary", label: copy.tabs.summary },
+      { id: "quiz", label: copy.tabs.quiz },
+      { id: "reviewNotes", label: copy.tabs.reviewNotes },
+      { id: "mockExam", label: copy.tabs.mockExam },
+      { id: "flashcards", label: copy.tabs.flashcards },
+      { id: "tutor", label: copy.tabs.tutor },
+    ],
+    [copy]
+  );
   const quizMixOptions = useMemo(
     () => [
-      { multipleChoice: 5, shortAnswer: 0, label: "개관식 5 / 주관식 0" },
-      { multipleChoice: 4, shortAnswer: 1, label: "개관식 4 / 주관식 1" },
-      { multipleChoice: 3, shortAnswer: 2, label: "개관식 3 / 주관식 2" },
-      { multipleChoice: 2, shortAnswer: 3, label: "개관식 2 / 주관식 3" },
-      { multipleChoice: 1, shortAnswer: 4, label: "개관식 1 / 주관식 4" },
-      { multipleChoice: 0, shortAnswer: 5, label: "개관식 0 / 주관식 5" },
+      { multipleChoice: 5, shortAnswer: 0, label: "媛쒓???5 / 二쇨???0" },
+      { multipleChoice: 4, shortAnswer: 1, label: "媛쒓???4 / 二쇨???1" },
+      { multipleChoice: 3, shortAnswer: 2, label: "媛쒓???3 / 二쇨???2" },
+      { multipleChoice: 2, shortAnswer: 3, label: "媛쒓???2 / 二쇨???3" },
+      { multipleChoice: 1, shortAnswer: 4, label: "媛쒓???1 / 二쇨???4" },
+      { multipleChoice: 0, shortAnswer: 5, label: "媛쒓???0 / 二쇨???5" },
     ],
     []
   );
@@ -355,7 +370,7 @@ export default function DetailPage({
           <p className="text-[13px] font-semibold text-black">{number}.</p>
           {renderMockRichText(item?.prompt, "text-[13px] text-black")}
           {isOx && <p className="text-[12px] text-black/80">1) O  2) X</p>}
-          {isShort && <p className="text-[12px] text-black/80">답: ____________________</p>}
+          {isShort && <p className="text-[12px] text-black/80">?? ____________________</p>}
           {isMultiple && choices.length > 0 && (
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[12px] text-black/85">
               {choices.slice(0, 4).map((choice, idx) => (
@@ -444,7 +459,8 @@ export default function DetailPage({
   const pendingDocumentId = String(pendingDocumentOpen?.id || "").trim();
   const isPendingDocumentOpen = Boolean(pendingDocumentId);
   const pendingDocumentName =
-    String(pendingDocumentOpen?.name || file?.name || "문서").trim() || "문서";
+    String(pendingDocumentOpen?.name || file?.name || copy.pending.fallbackDocumentName).trim() ||
+    copy.pending.fallbackDocumentName;
   const handleRequestSummary = useCallback(
     () => requestSummary({ force: true, replaceExisting: true }),
     [requestSummary]
@@ -518,9 +534,9 @@ export default function DetailPage({
         onPointerDown={handleDragStart}
         className="group relative flex h-full w-full cursor-col-resize touch-none items-center justify-center border-0 bg-transparent p-0 outline-none"
         role="separator"
-        aria-label="PDF와 패널 크기 조절"
+        aria-label="PDF? ?⑤꼸 ?ш린 議곗젅"
         aria-orientation="vertical"
-        title="PDF와 패널 크기 조절"
+        title="PDF? ?⑤꼸 ?ш린 議곗젅"
       >
         <span className="pointer-events-none h-full w-px rounded-full bg-white/12 transition group-hover:bg-emerald-300/35" />
         <span className="pointer-events-none absolute left-1/2 top-1/2 flex h-20 w-5 -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-1 rounded-full border border-white/12 bg-slate-950/92 shadow-[0_14px_32px_rgba(2,6,23,0.45)] transition group-hover:border-emerald-300/35 group-hover:bg-slate-900/95">
@@ -566,7 +582,7 @@ export default function DetailPage({
                 <p className="truncate text-sm font-semibold text-white">{pendingDocumentName}</p>
               </div>
               <span className="shrink-0 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200">
-                준비 중
+                {copy.pending.status}
               </span>
             </div>
           </div>
@@ -575,9 +591,9 @@ export default function DetailPage({
             <div className="max-w-sm">
               <div className="mx-auto mb-4 h-12 w-12 animate-pulse rounded-2xl border border-emerald-300/20 bg-emerald-400/10" />
               <p className="text-base font-semibold text-white">{pendingDocumentName}</p>
-              <p className="mt-2 text-sm text-slate-300">문서를 여는 중입니다.</p>
+              <p className="mt-2 text-sm text-slate-300">{copy.pending.opening}</p>
               <p className="mt-2 text-xs text-slate-400">
-                원격 저장소에서 파일을 불러오고 미리보기를 준비하고 있습니다.
+                {copy.pending.previewing}
               </p>
             </div>
           </div>
@@ -588,11 +604,9 @@ export default function DetailPage({
         <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
           <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-5 shadow-lg shadow-black/30">
             <p className="text-lg font-semibold text-white">{pendingDocumentName}</p>
-            <p className="mt-2 text-sm text-slate-300">
-              파일 준비가 끝나면 요약, 퀴즈, 오답노트 화면이 바로 표시됩니다.
-            </p>
+            <p className="mt-2 text-sm text-slate-300">{copy.pending.readySoon}</p>
             <div className="mt-4 rounded-2xl border border-emerald-300/15 bg-emerald-400/5 px-4 py-3 text-sm text-emerald-100">
-              잠시만 기다려 주세요. 첫 진입에서는 원격 저장소 다운로드 때문에 시간이 조금 걸릴 수 있습니다.
+              {copy.pending.firstLoadNotice}
             </div>
           </div>
         </div>
@@ -626,14 +640,7 @@ export default function DetailPage({
 
       <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
         <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 sm:grid-cols-6 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
-          {[
-            { id: "summary", label: "\uC694\uC57D", type: "tab" },
-            { id: "quiz", label: "\uD034\uC988", type: "tab" },
-            { id: "reviewNotes", label: "\uC624\uB2F5\uB178\uD2B8", type: "tab" },
-            { id: "mockExam", label: "\uBAA8\uC758\uACE0\uC0AC", type: "tab" },
-            { id: "flashcards", label: "\uCE74\uB4DC", type: "tab" },
-            { id: "tutor", label: "AI 튜터", type: "tab" },
-          ].map((item) => {
+          {detailTabs.map((item) => {
             const active = panelTab === item.id;
             return (
               <button
@@ -655,7 +662,7 @@ export default function DetailPage({
           {panelTab === "summary" && (
             <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
               <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-semibold text-emerald-200">요약</p>
+                <p className="text-sm font-semibold text-emerald-200">{copy.summary.title}</p>
                 <div className="flex flex-wrap justify-end gap-2">
                   <button
                     type="button"
@@ -664,7 +671,7 @@ export default function DetailPage({
                     className="ghost-button text-xs text-emerald-100"
                     style={{ "--ghost-color": "16, 185, 129" }}
                   >
-                    {isLoadingSummary ? "요약 생성 중..." : "요약 생성"}
+                    {isLoadingSummary ? copy.summary.generating : copy.summary.generate}
                   </button>
                   <button
                     type="button"
@@ -675,7 +682,7 @@ export default function DetailPage({
                     className="ghost-button text-xs text-slate-200"
                     style={{ "--ghost-color": "148, 163, 184" }}
                   >
-                    선택 페이지 요약
+                    {copy.summary.pageSummary}
                   </button>
                   <button
                     type="button"
@@ -686,7 +693,7 @@ export default function DetailPage({
                     className="ghost-button text-xs text-slate-200"
                     style={{ "--ghost-color": "148, 163, 184" }}
                   >
-                    챕터 범위 설정
+                    {copy.summary.chapterRange}
                   </button>
                   <button
                     type="button"
@@ -697,7 +704,7 @@ export default function DetailPage({
                     className="ghost-button text-xs text-indigo-100"
                     style={{ "--ghost-color": "99, 102, 241" }}
                   >
-                    {isExportingSummary ? "PDF 내보내는 중..." : "요약 PDF 다운로드"}
+                    {isExportingSummary ? copy.summary.exporting : copy.summary.export}
                   </button>
                 </div>
               </div>
@@ -711,10 +718,8 @@ export default function DetailPage({
                 <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
-                      <p className="text-sm font-semibold text-slate-100">선택 페이지 요약</p>
-                      <p className="text-xs text-slate-400">
-                        예: 1-3,5,8 (총 {pageInfo.total || pageInfo.used || "-"}p)
-                      </p>
+                      <p className="text-sm font-semibold text-slate-100">{copy.summary.pageSummaryTitle}</p>
+                      <p className="text-xs text-slate-400">{copy.summary.pageSummaryHint(pageInfo.total || pageInfo.used || "-")}</p>
                     </div>
                     <button
                       type="button"
@@ -723,7 +728,7 @@ export default function DetailPage({
                       data-ghost-size="sm"
                       style={{ "--ghost-color": "148, 163, 184" }}
                     >
-                      닫기
+                      {copy.summary.close}
                     </button>
                   </div>
                   <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -734,7 +739,7 @@ export default function DetailPage({
                         setPageSummaryInput(event.target.value);
                         setPageSummaryError("");
                       }}
-                      placeholder="페이지 번호 또는 범위를 입력하세요"
+                      placeholder={copy.summary.pageSummaryPlaceholder}
                       className="w-full flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none ring-1 ring-transparent transition focus:border-emerald-300/50 focus:ring-emerald-300/40"
                     />
                     <button
@@ -745,7 +750,7 @@ export default function DetailPage({
                       data-ghost-size="sm"
                       style={{ "--ghost-color": "52, 211, 153" }}
                     >
-                      {isPageSummaryLoading ? "생성 중..." : "선택 페이지 요약"}
+                      {isPageSummaryLoading ? copy.summary.pageSummaryLoading : copy.summary.pageSummary}
                     </button>
                   </div>
                   {pageSummaryError && (

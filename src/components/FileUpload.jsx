@@ -3,6 +3,7 @@ import { Capacitor } from "@capacitor/core";
 import FolderDialog from "./FolderDialog";
 import { SUPPORTED_UPLOAD_ACCEPT } from "../utils/document";
 import { buildFolderAggregateDocId, buildFolderAggregateThumbnail } from "../utils/appShared";
+import { getUiCopy } from "../utils/uiCopy";
 import UploadTile from "./UploadTile";
 import PdfTile from "./PdfTile";
 import FolderTile from "./FolderTile";
@@ -14,10 +15,11 @@ const TIER_LABEL = {
   premium: "Premium",
 };
 
-const formatUploadLimitText = (tier, maxPdfSizeBytes) => {
+const formatUploadLimitText = (tier, maxPdfSizeBytes, copy) => {
   const safeBytes = Number(maxPdfSizeBytes) || 0;
   const sizeLabel = `${Math.max(1, Math.round(safeBytes / MB))}MB`;
-  return `${TIER_LABEL[tier] || "Free"} 요금제: 파일 1개당 최대 ${sizeLabel}`;
+  const tierLabel = copy?.planNames?.[tier] || TIER_LABEL[tier] || "Free";
+  return copy?.upload?.limitText?.(tierLabel, sizeLabel) || `${tierLabel}: ${sizeLabel}`;
 };
 
 const FileUpload = memo(function FileUpload({
@@ -46,7 +48,9 @@ const FileUpload = memo(function FileUpload({
   onRequireAuth,
   currentTier = "free",
   maxPdfSizeBytes = 0,
+  outputLanguage = "ko",
 }) {
+  const copy = getUiCopy(outputLanguage);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const addMenuRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -129,10 +133,10 @@ const FileUpload = memo(function FileUpload({
     () => buildFolderAggregateThumbnail(folderModalName),
     [folderModalName]
   );
-  const folderDialogTitle = folderDialogMode === "rename" ? "폴더 이름 변경" : "폴더 만들기";
+  const folderDialogTitle = folderDialogMode === "rename" ? copy.upload.folderRenameTitle : copy.upload.folderCreateTitle;
   const folderDialogDescription =
-    folderDialogMode === "rename" ? "새 폴더 이름을 입력해 주세요." : "폴더 이름을 입력해 주세요.";
-  const folderDialogSubmitLabel = folderDialogMode === "rename" ? "변경" : "생성";
+    folderDialogMode === "rename" ? copy.upload.folderRenameDescription : copy.upload.folderCreateDescription;
+  const folderDialogSubmitLabel = folderDialogMode === "rename" ? copy.upload.folderRenameSubmit : copy.upload.folderCreateSubmit;
   const folderDialogInitialValue = folderDialogMode === "rename" ? String(folderModalName || "") : "";
 
   const folderCounts = useMemo(() => {
@@ -150,8 +154,8 @@ const FileUpload = memo(function FileUpload({
   };
 
   const uploadLimitText = useMemo(
-    () => formatUploadLimitText(currentTier, maxPdfSizeBytes),
-    [currentTier, maxPdfSizeBytes]
+    () => formatUploadLimitText(currentTier, maxPdfSizeBytes, copy),
+    [currentTier, maxPdfSizeBytes, copy]
   );
   const uploadGridClassName = isNativePlatform
     ? "relative mt-1 grid grid-cols-2 gap-3 sm:mt-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
@@ -250,7 +254,7 @@ const FileUpload = memo(function FileUpload({
         <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-slate-300">{uploadLimitText}</p>
           {!isFolderFeatureEnabled && (
-            <p className="text-xs text-slate-400">폴더 기능은 Pro/Premium에서 제공됩니다.</p>
+            <p className="text-xs text-slate-400">{copy.upload.folderFeatureLocked}</p>
           )}
         </div>
       </div>
@@ -262,6 +266,9 @@ const FileUpload = memo(function FileUpload({
             onOpenMenu={handleOpenAddMenu}
             inputRef={fileInputRef}
             compactGrid={isNativePlatform}
+            title={copy.upload.addDocument}
+            description={copy.upload.uploadPrompt}
+            caption={copy.upload.previewPdfOnly}
           />
           {showAddMenu && (
             <div className="absolute left-0 top-full z-10 mt-2 flex w-48 flex-col overflow-hidden rounded-xl border border-white/10 bg-slate-900/90 text-sm text-slate-100 shadow-lg ring-1 ring-white/10">
@@ -273,7 +280,7 @@ const FileUpload = memo(function FileUpload({
                   handleTriggerFileInput();
                 }}
               >
-                문서 추가
+                {copy.upload.addDocument}
               </button>
               <button
                 type="button"
@@ -286,7 +293,7 @@ const FileUpload = memo(function FileUpload({
                   setShowAddMenu(false);
                 }}
               >
-                폴더 생성
+                {copy.upload.createFolder}
               </button>
             </div>
           )}
@@ -299,12 +306,15 @@ const FileUpload = memo(function FileUpload({
                 key={folder.id}
                 name={folder.label}
                 count={folderCounts.get(folder.id) || 0}
+                folderLabel={copy.upload.folderLabel}
+                countLabel={copy.upload.filesCount(folderCounts.get(folder.id) || 0)}
                 active={active}
                 compactGrid={isNativePlatform}
                 canDrop={false}
                 onClick={() => handleOpenFolderModal(folder.id)}
                 onDelete={() => onDeleteFolder?.(folder.id)}
                 onAdd={() => fileInputRef.current?.click()}
+                addButtonLabel={copy.upload.addNewFileHere}
                 dragHighlight={false}
               />
             );
@@ -313,8 +323,8 @@ const FileUpload = memo(function FileUpload({
         {showEmptyState && (
           <div className={emptyStateClassName}>
             {selectedFolderId === "all"
-              ? "파일이 없습니다."
-              : "이 폴더에 파일이 없습니다."}
+              ? copy.upload.noFiles
+              : copy.upload.noFilesInFolder}
           </div>
         )}
         {visibleUploads.map((item) => {
@@ -350,6 +360,8 @@ const FileUpload = memo(function FileUpload({
         description={folderDialogDescription}
         submitLabel={folderDialogSubmitLabel}
         initialValue={folderDialogInitialValue}
+        placeholder={copy.upload.folderPlaceholder}
+        cancelLabel={copy.upload.cancel}
         onSubmit={(name) => {
           try {
             if (folderDialogMode === "rename" && folderModalId) {
@@ -387,8 +399,8 @@ const FileUpload = memo(function FileUpload({
               type="button"
               onClick={handleCloseFolderModal}
               className="absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-full border border-white/15 bg-black/30 text-lg text-slate-100 transition hover:border-white/30 hover:bg-white/10 hover:text-white sm:right-6 sm:top-6"
-              aria-label="폴더 닫기"
-              title="닫기"
+              aria-label={copy.upload.closeFolderAria}
+              title={copy.upload.close}
             >
               ×
             </button>
@@ -404,7 +416,7 @@ const FileUpload = memo(function FileUpload({
                   data-ghost-size="sm"
                   style={{ "--ghost-color": "148, 163, 184" }}
                 >
-                  이름 변경
+                  {copy.upload.rename}
                 </button>
                 <button
                   type="button"
@@ -416,7 +428,7 @@ const FileUpload = memo(function FileUpload({
                   data-ghost-size="sm"
                   style={{ "--ghost-color": "52, 211, 153" }}
                 >
-                  폴더에 문서 추가
+                  {copy.upload.addDocumentToFolder}
                 </button>
                 <button
                   type="button"
@@ -425,7 +437,7 @@ const FileUpload = memo(function FileUpload({
                   data-ghost-size="sm"
                   style={{ "--ghost-color": "148, 163, 184" }}
                 >
-                  닫기
+                  {copy.upload.close}
                 </button>
               </div>
             </div>
@@ -444,9 +456,9 @@ const FileUpload = memo(function FileUpload({
                     <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/15 text-2xl font-bold text-emerald-200">
                       +
                     </div>
-                    <p className="text-base font-semibold text-white">이 폴더에 파일 추가</p>
+                    <p className="text-base font-semibold text-white">{copy.upload.addFileToFolder}</p>
                     <p className="max-w-md text-sm text-slate-300">
-                      아직 문서가 없습니다. PDF, DOCX, PPTX 파일을 바로 업로드하세요.
+                      {copy.upload.emptyFolderDescription}
                     </p>
                   </button>
                 )}
@@ -455,7 +467,7 @@ const FileUpload = memo(function FileUpload({
                     key={folderAggregateDocId}
                     file={{
                       id: folderAggregateDocId,
-                      name: `${folderModalName} 전체 요약본`,
+                      name: copy.upload.folderSummaryName(folderModalName),
                       size: folderAggregateSize,
                     }}
                     thumbnailUrl={folderAggregateThumbnail}
@@ -472,7 +484,7 @@ const FileUpload = memo(function FileUpload({
                       onSelectFolderSummary?.(folderModalId);
                     }}
                     fullWidth
-                    metaText={`${folderItemsList.length}개 파일 요약 기반`}
+                    metaText={copy.upload.folderSummaryMeta(folderItemsList.length)}
                   />
                 )}
                 {folderItemsList.map((item) => {
@@ -523,13 +535,13 @@ const FileUpload = memo(function FileUpload({
                 className="flex w-full items-center px-4 py-2 text-left hover:bg-white/10"
                 onClick={() => handleContextAction(null)}
               >
-                폴더 밖으로 이동
+                {copy.upload.moveOutOfFolder}
               </button>
               <div className="my-1 h-px bg-white/10" />
             </>
           )}
           {folderItems.length === 0 && (
-            <div className="px-4 py-2 text-xs text-slate-400">폴더가 없습니다.</div>
+            <div className="px-4 py-2 text-xs text-slate-400">{copy.upload.noFolders}</div>
           )}
           {folderItems.map((folder) => (
             <button
