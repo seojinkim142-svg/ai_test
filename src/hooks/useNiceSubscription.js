@@ -1,5 +1,4 @@
-import { Capacitor } from "@capacitor/core";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   chargeNicePaymentsSubscription,
   fetchNicePaymentsSubscriptionStatus,
@@ -7,12 +6,14 @@ import {
   prepareNicePaymentsSubscription,
 } from "../services/nicepayments";
 import { getAccessToken } from "../services/supabase";
-import { clearPaymentReturnPending, markPaymentReturnPending } from "../utils/paymentReturn";
 
-const NICE_BILLING_SCRIPT_ID = "nicepayments-billing-sdk";
-const DEFAULT_NICE_BILLING_SCRIPT = "https://pg-web.nicepay.co.kr/v3/common/js/nicepay-pgweb.js";
-const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
-const NICE_BILLING_RETURN_QUERY_KEYS = ["niceBilling", "trial", "orderId", "amount", "message"];
+const EMPTY_CARD_FORM = {
+  cardNumber: "",
+  expiryMonth: "",
+  expiryYear: "",
+  birth: "",
+  cardPassword: "",
+};
 
 const cardSubscriptionPlans = {
   Pro: {
@@ -27,75 +28,52 @@ const cardSubscriptionPlans = {
   },
 };
 
-let billingScriptPromise = null;
+const digitsOnly = (value) => String(value ?? "").replace(/\D+/g, "");
+const maskMessage = (message) => String(message || "").trim();
 
-function getNiceBillingReturnKey(params) {
-  const parts = NICE_BILLING_RETURN_QUERY_KEYS.map((key) => `${key}:${String(params.get(key) || "").trim()}`);
-  const hasValue = parts.some((entry) => !entry.endsWith(":"));
-  return hasValue ? parts.join("|") : "";
-}
+const normalizeCardInput = (field, value) => {
+  const digits = digitsOnly(value);
+  if (field === "cardNumber") return digits.slice(0, 19);
+  if (field === "expiryMonth") return digits.slice(0, 2);
+  if (field === "expiryYear") return digits.slice(0, 2);
+  if (field === "birth") return digits.slice(0, 10);
+  if (field === "cardPassword") return digits.slice(0, 2);
+  return value;
+};
 
-function loadNiceBillingScript(src) {
-  if (typeof window === "undefined") {
-    return Promise.reject(new Error("window is undefined"));
+const validateCardForm = ({ cardNumber, expiryMonth, expiryYear, birth, cardPassword }) => {
+  if (cardNumber.length < 14 || cardNumber.length > 19) {
+    return "카드번호를 다시 확인해주세요.";
   }
 
-  if (typeof window.goPay === "function") {
-    return Promise.resolve(window.goPay);
+  if (!/^\d{2}$/.test(expiryMonth)) {
+    return "카드 유효기간 월을 두 자리로 입력해주세요.";
+  }
+  const month = Number(expiryMonth);
+  if (!Number.isFinite(month) || month < 1 || month > 12) {
+    return "카드 유효기간 월이 올바르지 않습니다.";
   }
 
-  if (billingScriptPromise) return billingScriptPromise;
+  if (!/^\d{2}$/.test(expiryYear)) {
+    return "카드 유효기간 연도를 두 자리로 입력해주세요.";
+  }
 
-  billingScriptPromise = new Promise((resolve, reject) => {
-    const existing = document.getElementById(NICE_BILLING_SCRIPT_ID);
-    const script = existing || document.createElement("script");
+  if (!(birth.length === 6 || birth.length === 10)) {
+    return "생년월일 6자리 또는 사업자번호 10자리를 입력해주세요.";
+  }
 
-    if (!existing) {
-      script.id = NICE_BILLING_SCRIPT_ID;
-      script.src = src || DEFAULT_NICE_BILLING_SCRIPT;
-      script.async = true;
-      script.defer = true;
-      document.head.appendChild(script);
-    }
+  if (!/^\d{2}$/.test(cardPassword)) {
+    return "카드 비밀번호 앞 두 자리를 입력해주세요.";
+  }
 
-    const handleLoad = () => {
-      if (typeof window.goPay === "function") {
-        resolve(window.goPay);
-      } else {
-        billingScriptPromise = null;
-        reject(new Error("goPay is not available"));
-      }
-    };
-
-    const handleError = () => {
-      billingScriptPromise = null;
-      reject(new Error("Failed to load NICEPAYMENTS billing SDK"));
-    };
-
-    script.addEventListener("load", handleLoad, { once: true });
-    script.addEventListener("error", handleError, { once: true });
-  });
-
-  return billingScriptPromise;
-}
-
-function appendHiddenInput(form, name, value) {
-  const input = document.createElement("input");
-  input.type = "hidden";
-  input.name = name;
-  input.value = String(value ?? "");
-  form.appendChild(input);
-}
-
-function maskMessage(message) {
-  return String(message || "").trim();
-}
+  return "";
+};
 
 export function useNiceSubscription({
   user,
   selectedPlan,
   billingMonths = 1,
-  paymentReturnSignal = 0,
+  paymentReturnSignal: _paymentReturnSignal = 0,
   enabled = true,
   proTrialEligible = false,
   onTierUpdated,
@@ -107,7 +85,9 @@ export function useNiceSubscription({
   const [isStartingSubscription, setIsStartingSubscription] = useState(false);
   const [isChargingSubscription, setIsChargingSubscription] = useState(false);
   const [isCancellingSubscription, setIsCancellingSubscription] = useState(false);
-  const handledReturnRef = useRef("");
+  const [showSubscriptionForm, setShowSubscriptionForm] = useState(false);
+  const [subscriptionFormMode, setSubscriptionFormMode] = useState("subscription");
+  const [subscriptionCardForm, setSubscriptionCardForm] = useState(EMPTY_CARD_FORM);
 
   const selectedPlanConfig = cardSubscriptionPlans[selectedPlan];
   const normalizedBillingMonths =
@@ -130,6 +110,18 @@ export function useNiceSubscription({
     (canStartProTrial || normalizedBillingMonths >= 2) &&
     !isStartingSubscription &&
     !isLoadingSubscription;
+  const isSubscriptionTrialForm = subscriptionFormMode === "trial";
+
+  const resetSubscriptionCardForm = useCallback(() => {
+    setSubscriptionCardForm(EMPTY_CARD_FORM);
+  }, []);
+
+  const closeSubscriptionForm = useCallback((options = {}) => {
+    if (isStartingSubscription && options.force !== true) return;
+    setShowSubscriptionForm(false);
+    setSubscriptionFormMode("subscription");
+    resetSubscriptionCardForm();
+  }, [isStartingSubscription, resetSubscriptionCardForm]);
 
   const loadSubscriptionStatus = useCallback(
     async ({ showLoading = false } = {}) => {
@@ -164,76 +156,44 @@ export function useNiceSubscription({
     if (!enabled) {
       setSubscriptionState(null);
       setIsLoadingSubscription(false);
+      closeSubscriptionForm({ force: true });
       return;
     }
     loadSubscriptionStatus({ showLoading: true });
-  }, [enabled, loadSubscriptionStatus]);
+  }, [closeSubscriptionForm, enabled, loadSubscriptionStatus]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
+    if (!showSubscriptionForm) return;
+    if (!selectedPlanConfig) {
+      closeSubscriptionForm({ force: true });
+    }
+  }, [closeSubscriptionForm, selectedPlanConfig, showSubscriptionForm]);
 
-    const params = new URLSearchParams(window.location.search);
-    const billingState = params.get("niceBilling");
-    const message = params.get("message");
-    const trialMode = params.get("trial") === "1";
-    const handledKey = getNiceBillingReturnKey(params);
+  const updateSubscriptionCardField = (field, value) => {
+    setSubscriptionCardForm((prev) => ({
+      ...prev,
+      [field]: normalizeCardInput(field, value),
+    }));
+  };
 
-    if (!billingState) return;
-    if (handledKey && handledReturnRef.current === handledKey) return;
-    if (billingState === "success" && !user?.id) return;
-    handledReturnRef.current = handledKey;
-
-    const clearUrl = () => {
-      const cleanUrl = `${window.location.origin}${window.location.pathname}`;
-      window.history.replaceState({}, document.title, cleanUrl);
-    };
-
-    (async () => {
-      try {
-        if (billingState === "success") {
-          await loadSubscriptionStatus();
-          onTierUpdated?.();
-          const noticeParts = [
-            trialMode
-              ? "나이스페이 결제수단 등록과 Pro 1개월 무료체험이 시작되었습니다. 다음 달부터 자동결제됩니다."
-              : "나이스페이 카드 정기결제 등록과 첫 결제가 완료되었습니다.",
-          ];
-          if (maskMessage(message)) {
-            noticeParts.push(`주의: ${maskMessage(message)}`);
-          }
-          setPaymentError("");
-          setPaymentNotice(noticeParts.join(" "));
-        } else {
-          setPaymentNotice("");
-          setPaymentError(
-            maskMessage(message) || "나이스페이 카드 정기결제 등록에 실패했습니다."
-          );
-        }
-      } finally {
-        clearPaymentReturnPending();
-        clearUrl();
-      }
-    })();
-  }, [loadSubscriptionStatus, onTierUpdated, paymentReturnSignal, setPaymentError, setPaymentNotice, user?.id]);
-
-  const startSubscription = async ({ proTrial = false } = {}) => {
+  const startSubscription = ({ proTrial = false } = {}) => {
     const useProTrial = proTrial === true && canStartProTrial;
 
     if (!user?.id) {
       setPaymentNotice("");
-      setPaymentError("카드 정기결제에는 로그인 세션이 필요합니다.");
+      setPaymentError("카드 정기결제는 로그인 후에 이용할 수 있습니다.");
       return;
     }
 
     if (!selectedPlanConfig) {
       setPaymentNotice("");
-      setPaymentError("카드 정기결제는 Pro/Premium 플랜에서만 사용할 수 있습니다.");
+      setPaymentError("카드 정기결제는 Pro 또는 Premium에서만 사용할 수 있습니다.");
       return;
     }
 
     if (!useProTrial && normalizedBillingMonths < 2) {
       setPaymentError("");
-      setPaymentNotice("카드 정기결제는 2개월 이상부터 등록할 수 있습니다.");
+      setPaymentNotice("카드 정기결제는 현재 결제 설정에서 바로 시작할 수 없습니다.");
       return;
     }
 
@@ -251,6 +211,26 @@ export function useNiceSubscription({
 
     setPaymentError("");
     setPaymentNotice("");
+    setSubscriptionFormMode(useProTrial ? "trial" : "subscription");
+    setShowSubscriptionForm(true);
+  };
+
+  const submitSubscription = async () => {
+    const formError = validateCardForm(subscriptionCardForm);
+    if (formError) {
+      setPaymentNotice("");
+      setPaymentError(formError);
+      return;
+    }
+
+    if (!user?.id || !selectedPlanConfig) {
+      setPaymentNotice("");
+      setPaymentError("구독 등록을 다시 시작해주세요.");
+      return;
+    }
+
+    setPaymentError("");
+    setPaymentNotice("");
     setIsStartingSubscription(true);
 
     try {
@@ -259,62 +239,51 @@ export function useNiceSubscription({
         throw new Error("카드 정기결제 준비에는 로그인 세션이 필요합니다.");
       }
 
-      const prepared = await prepareNicePaymentsSubscription(
+      const result = await prepareNicePaymentsSubscription(
         {
           amount: selectedAmount,
           tier: selectedPlanConfig.tier,
           billingMonths: subscriptionBillingMonths,
           itemName: selectedItemName,
-          proTrial: useProTrial,
-          nativeReturn: IS_NATIVE_PLATFORM,
+          proTrial: isSubscriptionTrialForm,
           buyerName: user?.user_metadata?.name || user?.email?.split("@")[0] || "user",
           buyerEmail: user?.email || "",
+          cardNumber: subscriptionCardForm.cardNumber,
+          expiryMonth: subscriptionCardForm.expiryMonth,
+          expiryYear: subscriptionCardForm.expiryYear,
+          birth: subscriptionCardForm.birth,
+          cardPassword: subscriptionCardForm.cardPassword,
         },
         { accessToken }
       );
 
-      await loadNiceBillingScript(prepared?.scriptUrl || DEFAULT_NICE_BILLING_SCRIPT);
-
-      if (typeof window === "undefined" || typeof window.goPay !== "function") {
-        throw new Error("NICEPAYMENTS billing module is not available.");
+      if (result?.subscription) {
+        setSubscriptionState(result.subscription);
+      } else {
+        await loadSubscriptionStatus();
       }
 
-      const form = document.createElement("form");
-      form.method = "POST";
-      form.action = String(prepared?.action || "").trim();
-      form.acceptCharset = "utf-8";
-      form.style.display = "none";
-
-      Object.entries(prepared?.fields || {}).forEach(([key, value]) => {
-        appendHiddenInput(form, key, value);
-      });
-
-      const previousSubmit = window.nicepaySubmit;
-      window.nicepaySubmit = () => {
-        form.submit();
-      };
-
-      document.body.appendChild(form);
-      markPaymentReturnPending({
-        provider: "nicepayments-billing",
-        paymentMode: useProTrial ? "subscription-trial" : "subscription",
-      });
-
-      try {
-        window.goPay(form);
-      } finally {
-        window.setTimeout(() => {
-          if (form.parentNode) form.parentNode.removeChild(form);
-          if (previousSubmit) {
-            window.nicepaySubmit = previousSubmit;
-          } else {
-            delete window.nicepaySubmit;
-          }
-        }, 2000);
+      if (result?.tierUpdated) {
+        onTierUpdated?.();
       }
+
+      const noticeParts = [
+        isSubscriptionTrialForm
+          ? "카드가 등록되었고 Pro 1개월 무료 체험이 시작되었습니다."
+          : "신용카드 정기결제가 등록되고 첫 결제가 완료되었습니다.",
+      ];
+      if (maskMessage(result?.message)) {
+        noticeParts.push(`주의: ${maskMessage(result.message)}`);
+      }
+      setPaymentNotice(noticeParts.join(" "));
+      closeSubscriptionForm();
     } catch (error) {
-      clearPaymentReturnPending();
-      setPaymentError(error?.message || (useProTrial ? "무료체험 준비에 실패했습니다." : "카드 정기결제 준비에 실패했습니다."));
+      setPaymentError(
+        error?.message ||
+          (isSubscriptionTrialForm
+            ? "카드 무료 체험 등록에 실패했습니다."
+            : "카드 정기결제 등록에 실패했습니다.")
+      );
     } finally {
       setIsStartingSubscription(false);
     }
@@ -346,7 +315,7 @@ export function useNiceSubscription({
         onTierUpdated?.();
       }
 
-      const noticeParts = ["나이스페이 카드 정기결제 재청구가 완료되었습니다."];
+      const noticeParts = ["신용카드 정기결제 재청구가 완료되었습니다."];
       if (maskMessage(result?.message)) {
         noticeParts.push(`주의: ${maskMessage(result.message)}`);
       }
@@ -376,7 +345,8 @@ export function useNiceSubscription({
         setSubscriptionState(result.subscription);
       }
       await loadSubscriptionStatus();
-      setPaymentNotice("나이스페이 카드 정기결제를 해지했습니다. 현재 이용 중인 기간은 만료일까지 유지됩니다.");
+      setPaymentNotice("신용카드 정기결제가 해지되었습니다. 현재 이용 중인 기간 만료 전까지는 계속 사용할 수 있습니다.");
+      closeSubscriptionForm();
     } catch (error) {
       setPaymentError(error?.message || "카드 정기결제 해지에 실패했습니다.");
     } finally {
@@ -393,6 +363,12 @@ export function useNiceSubscription({
     isStartingSubscription,
     isChargingSubscription,
     isCancellingSubscription,
+    showSubscriptionForm,
+    isSubscriptionTrialForm,
+    subscriptionCardForm,
+    updateSubscriptionCardField,
+    closeSubscriptionForm,
+    submitSubscription,
     loadSubscriptionStatus,
     startSubscription,
     chargeSubscription,
