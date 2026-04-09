@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { getUiCopy } from "../utils/uiCopy";
 
 const DEFAULT_PROFILE_AVATAR = "/pngegg.png";
 const BACKUP_PROFILE_AVATAR = "/profile-default-character.svg";
@@ -21,7 +22,9 @@ const Header = memo(function Header({
   premiumSpaceMode = "profile",
   onTogglePremiumSpaceMode,
   authEnabled = true,
+  outputLanguage = "ko",
 }) {
+  const copy = getUiCopy(outputLanguage);
   const handleAvatarError = (event) => {
     const img = event.currentTarget;
     const step = Number(img.dataset.fallbackStep || "0");
@@ -31,7 +34,7 @@ const Header = memo(function Header({
   };
 
   const showPremiumButtons = Boolean(user && !loadingTier && isPremiumTier && activeProfile);
-  const brandTierLabel = !loadingTier && isPremiumTier ? "Premium" : null;
+  const brandTierLabel = !loadingTier && isPremiumTier ? copy.planNames.premium : null;
   return (
     <header className="app-safe-top sticky top-0 z-40 flex w-full items-center border-b border-white/10 bg-slate-950/72 px-3 pb-3 backdrop-blur-xl sm:px-6 lg:px-10">
       <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:flex sm:flex-row sm:items-start sm:justify-between">
@@ -40,7 +43,7 @@ const Header = memo(function Header({
             <button
               type="button"
               onClick={onGoHome}
-              aria-label={"\uD648\uC73C\uB85C \uC774\uB3D9"}
+              aria-label={copy.header.homeAria}
               className="group rounded-xl px-1 py-0.5 text-left transition hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/55"
             >
               <div className="flex items-end gap-2 sm:gap-3">
@@ -79,7 +82,7 @@ const Header = memo(function Header({
                 data-ghost-size="sm"
                 style={{ "--ghost-color": "52, 211, 153" }}
               >
-                {isRefreshing ? "\uB3D9\uAE30\uD654 \uC911..." : "\uC0C8\uB85C\uACE0\uCE68"}
+                {isRefreshing ? copy.header.refreshing : copy.header.refresh}
               </button>
             )}
 
@@ -91,7 +94,7 @@ const Header = memo(function Header({
                 data-ghost-size="sm"
                 style={{ "--ghost-color": "16, 185, 129" }}
               >
-                {"\uC694\uAE08\uC81C"}
+                {copy.header.billing}
               </button>
             )}
 
@@ -103,7 +106,7 @@ const Header = memo(function Header({
                 data-ghost-size="sm"
                 style={{ "--ghost-color": theme === "light" ? "14, 116, 144" : "148, 163, 184" }}
               >
-                설정
+                {copy.header.settings}
               </button>
             )}
 
@@ -143,8 +146,8 @@ const Header = memo(function Header({
                   }}
                 >
                   {premiumSpaceMode === "shared"
-                    ? "\uACF5\uC720 \uC2A4\uD398\uC774\uC2A4"
-                    : "\uAC1C\uC778 \uC2A4\uD398\uC774\uC2A4"}
+                    ? copy.header.sharedSpace
+                    : copy.header.personalSpace}
                 </button>
 
                 <button
@@ -154,7 +157,7 @@ const Header = memo(function Header({
                   data-ghost-size="sm"
                   style={{ "--ghost-color": "52, 211, 153" }}
                 >
-                  PIN {"\uBCC0\uACBD"}
+                  {copy.header.pinChange}
                 </button>
               </>
             )}
@@ -167,7 +170,7 @@ const Header = memo(function Header({
                 data-ghost-size="sm"
                 style={{ "--ghost-color": "52, 211, 153" }}
               >
-                {"\uB85C\uADF8\uC778"}
+                {copy.header.login}
               </button>
             )}
           </div>

@@ -52,6 +52,88 @@ const TUTOR_FALLBACK_MODELS = [
   .filter(Boolean)
   .filter((name, index, arr) => arr.indexOf(name) === index);
 
+const OUTPUT_LANGUAGE_SPECS = {
+  en: {
+    code: "en",
+    label: "English",
+  },
+  zh: {
+    code: "zh",
+    label: "Chinese",
+  },
+  ja: {
+    code: "ja",
+    label: "Japanese",
+  },
+  hi: {
+    code: "hi",
+    label: "Hindi",
+  },
+  ko: {
+    code: "ko",
+    label: "Korean",
+  },
+};
+
+function resolveOutputLanguage(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return OUTPUT_LANGUAGE_SPECS[normalized] || OUTPUT_LANGUAGE_SPECS.ko;
+}
+
+function getOutputLanguageLabel(value) {
+  return resolveOutputLanguage(value).label;
+}
+
+const OUTPUT_LANGUAGE_TUTOR_FALLBACK_COPY = {
+  en: {
+    empty: "The model returned an empty response. Here is a quick evidence-first summary from the document:",
+    evidenceLabel: "document evidence",
+    closing: "I can explain your exact question step by step from this evidence.",
+    noSource: "Could not generate an answer. Reload the document text and retry the same question.",
+    noEvidence:
+      "Could not generate an answer. Text recognition may be incomplete; reopen the PDF and try again.",
+    debugPrefix: "debug",
+  },
+  zh: {
+    empty: "模型返回了空响应。下面先给出基于文档证据的简要整理：",
+    evidenceLabel: "文档证据",
+    closing: "我现在可以基于这些证据按步骤解释你的具体问题。",
+    noSource: "无法生成答案。请重新加载文档文本后再试一次相同的问题。",
+    noEvidence: "无法生成答案。文本识别可能不完整，请重新打开 PDF 后再试。",
+    debugPrefix: "调试",
+  },
+  ja: {
+    empty: "モデルの応答が空でした。まず文書の根拠ベースで簡潔に整理します:",
+    evidenceLabel: "文書の根拠",
+    closing: "この根拠をもとに、質問を順番に説明できます。",
+    noSource: "回答を生成できませんでした。文書テキストを再読み込みして同じ質問をもう一度試してください。",
+    noEvidence: "回答を生成できませんでした。テキスト認識が不完全な可能性があります。PDF を開き直して再試行してください。",
+    debugPrefix: "debug",
+  },
+  hi: {
+    empty: "मॉडल ने खाली उत्तर लौटाया। पहले दस्तावेज़ के प्रमाण पर आधारित एक त्वरित सारांश दिया जा रहा है:",
+    evidenceLabel: "दस्तावेज़ प्रमाण",
+    closing: "अब मैं इन्हीं प्रमाणों के आधार पर आपके प्रश्न को चरणबद्ध समझा सकता हूँ।",
+    noSource: "उत्तर तैयार नहीं हो सका। दस्तावेज़ का टेक्स्ट फिर से लोड करके वही प्रश्न दोबारा पूछें।",
+    noEvidence:
+      "उत्तर तैयार नहीं हो सका। टेक्स्ट पहचान अधूरी हो सकती है। PDF फिर से खोलकर दोबारा प्रयास करें।",
+    debugPrefix: "debug",
+  },
+  ko: {
+    empty: "모델이 빈 응답을 반환했습니다. 먼저 문서 근거 중심으로 빠르게 정리합니다:",
+    evidenceLabel: "문서 근거",
+    closing: "이 근거를 바탕으로 질문 내용을 단계별로 바로 설명할 수 있습니다.",
+    noSource: "답변을 생성하지 못했습니다. 문서 텍스트를 다시 불러온 뒤 같은 질문으로 다시 시도해 주세요.",
+    noEvidence: "답변을 생성하지 못했습니다. 텍스트 인식이 불완전할 수 있으니 PDF를 다시 열고 재시도해 주세요.",
+    debugPrefix: "debug",
+  },
+};
+
+function getTutorFallbackCopy(outputLanguage) {
+  const normalized = resolveOutputLanguage(outputLanguage).code;
+  return OUTPUT_LANGUAGE_TUTOR_FALLBACK_COPY[normalized] || OUTPUT_LANGUAGE_TUTOR_FALLBACK_COPY.ko;
+}
+
 function buildAvoidReuseBlock(items, { title = "Do not reuse these prompts", maxItems = 40, maxLength = 120 } = {}) {
   const normalized = [];
   const seen = new Set();
@@ -443,8 +525,10 @@ function buildQuizPrompt(
     avoidQuestions = [],
     scopeLabel = "",
     questionStyleProfile = "",
+    outputLanguage = "ko",
   }
 ) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const avoidBlock = buildAvoidReuseBlock(avoidQuestions, {
     title: "Do not reuse these previously asked questions",
     maxItems: 16,
@@ -466,7 +550,7 @@ You are a professor creating quiz questions from lecture material.
 - evidencePages must use only page numbers that actually appear in the provided page tags.
 - If the tagged evidence does not support the question, omit that item instead of using outside knowledge or other pages.
 - Never guess missing page numbers, and never assign a broad page range when the exact supporting page is unclear.
-- evidenceSnippet should be a short Korean source phrase copied or lightly normalized from the document so it can be highlighted later.
+- evidenceSnippet should be a short source phrase copied or lightly normalized from the document so it can be highlighted later.
 - Short-answer items must have one exact, short answer only: a number, formula, term, concept name, or short phrase.
 - Do not generate essay-style prompts such as "설명하라", "서술하라", "논하라", "기술하라", or questions that require long prose.
 - The short-answer answer field must be concise and directly gradable, not a sentence.
@@ -505,7 +589,7 @@ You are a professor creating quiz questions from lecture material.
 }
 
 [Language]
-- Write all question/explanation text in Korean.
+- Write all question/explanation text in ${outputLanguageLabel}.
 ${avoidBlock ? `\n\n${avoidBlock}` : ""}
 ${questionStyleProfile ? `\n\n[Document question style profile]\n${questionStyleProfile}` : ""}
 ${scopeLabel ? `\n\n[Selected chapter range]\n${scopeLabel}` : ""}
@@ -517,8 +601,9 @@ ${extractedText}
 function buildHardQuizPrompt(
   extractedText,
   count,
-  { avoidQuestions = [], questionStyleProfile = "", scopeLabel = "" } = {}
+  { avoidQuestions = [], questionStyleProfile = "", scopeLabel = "", outputLanguage = "ko" } = {}
 ) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const avoidBlock = buildAvoidReuseBlock(avoidQuestions, { title: "Do not reuse these previously asked questions" });
   return `
 You are creating high-difficulty mock exam items from the document.
@@ -561,7 +646,7 @@ You are creating high-difficulty mock exam items from the document.
 }
 
 [Language]
-- Write all question/explanation text in Korean.
+- Write all question/explanation text in ${outputLanguageLabel}.
 ${avoidBlock ? `\n\n${avoidBlock}` : ""}
 ${questionStyleProfile ? `\n\n[Document question style profile]\n${questionStyleProfile}` : ""}
 ${scopeLabel ? `\n\n[Selected chapter range]\n${scopeLabel}` : ""}
@@ -570,7 +655,14 @@ ${scopeLabel ? `\n\n[Selected chapter range]\n${scopeLabel}` : ""}
 ${extractedText}
   `.trim();
 }
-function buildOxPrompt(contextText, highlightText = "", avoidStatements = [], scopeLabel = "") {
+function buildOxPrompt(
+  contextText,
+  highlightText = "",
+  avoidStatements = [],
+  scopeLabel = "",
+  outputLanguage = "ko"
+) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const avoidBlock = buildAvoidReuseBlock(avoidStatements, { title: "Do not reuse these previously asked statements" });
   return `
 You create O/X (true/false) quiz items from PDF content.
@@ -617,15 +709,16 @@ ${avoidBlock ? `- ${avoidBlock.replace(/\n/g, "\n  ")}` : ""}
 }
 
 [Language]
-- Write statement/explanation/evidence in Korean.
+- Write statement/explanation/evidence in ${outputLanguageLabel}.
 
 [Document]
 ${contextText}
   `.trim();
 }
-function buildSummaryPrompt(extractedText) {
+function buildSummaryPrompt(extractedText, outputLanguage = "ko") {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   return `
-You are a teaching assistant who writes a detailed Korean markdown summary.
+You are a teaching assistant who writes a detailed ${outputLanguageLabel} markdown summary.
 
 [Pre-check]
 - First decide whether the text actually contains learning content.
@@ -648,7 +741,7 @@ You are a teaching assistant who writes a detailed Korean markdown summary.
    - Explain variables/symbols right after formulas when useful.
 4. Include a separate "Key formulas" section when formulas are important.
 5. Compare related concepts when relevant.
-6. Add glossary-style term notes (Korean with English term if needed).
+6. Add glossary-style term notes in the requested language (include original English term if helpful).
 7. Use lists/tables where they improve readability.
 8. Emphasize key ideas with markdown.
 9. Keep it sufficiently detailed for study (long-form when source is long).
@@ -659,7 +752,7 @@ You are a teaching assistant who writes a detailed Korean markdown summary.
 
 [Output]
 - Markdown only.
-- Language: Korean.
+- Language: ${outputLanguageLabel}.
 
 [Document]
 ${extractedText}
@@ -688,9 +781,10 @@ function looksLikeProblemPageContent(text) {
   );
 }
 
-function buildProblemPageSummaryPrompt(extractedText) {
+function buildProblemPageSummaryPrompt(extractedText, outputLanguage = "ko") {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   return `
-You are a teaching assistant who writes a Korean markdown study summary for problem-heavy pages.
+You are a teaching assistant who writes a ${outputLanguageLabel} markdown study summary for problem-heavy pages.
 
 [Goal]
 - The source may be mostly exercises, mock-test items, answer choices, or short explanations.
@@ -699,7 +793,7 @@ You are a teaching assistant who writes a Korean markdown study summary for prob
 
 [Output]
 - Markdown only.
-- Language: Korean.
+- Language: ${outputLanguageLabel}.
 
 [Required sections]
 1. ## 페이지 성격
@@ -714,6 +808,8 @@ You are a teaching assistant who writes a Korean markdown study summary for prob
    - 시험 전에 확인할 공식, 용어, 체크포인트를 간단히 정리
 
 [Rules]
+- Render the section headings in the requested output language.
+- Preferred heading meanings: Page type, Core concepts, Common solving criteria, Frequent traps, Last-minute checklist.
 - Provided text only.
 - If the page includes answer choices or short answer blanks, use them as evidence for what is being tested.
 - Avoid saying there is "no learning content" unless the text is truly only cover/TOC/publisher metadata.
@@ -724,7 +820,7 @@ ${extractedText}
   `.trim();
 }
 
-async function generateProblemPageSummary(extractedText, { scope } = {}) {
+async function generateProblemPageSummary(extractedText, { scope, outputLanguage = "ko" } = {}) {
   const scopeGuard = scope
     ? {
         role: "system",
@@ -738,10 +834,10 @@ async function generateProblemPageSummary(extractedText, { scope } = {}) {
         {
           role: "system",
           content:
-            "Produce a Korean markdown study summary for problem-heavy academic pages. Focus on the concepts, traps, and solving criteria the page is testing.",
+            "Produce a markdown study summary for problem-heavy academic pages in the requested output language. Focus on the concepts, traps, and solving criteria the page is testing.",
         },
         ...(scopeGuard ? [scopeGuard] : []),
-        { role: "user", content: buildProblemPageSummaryPrompt(extractedText) },
+        { role: "user", content: buildProblemPageSummaryPrompt(extractedText, outputLanguage) },
       ],
       temperature: 1,
     },
@@ -832,7 +928,9 @@ function buildExamCramPrompt({
   quizItems = [],
   reviewNotes = [],
   scopeLabel = "",
+  outputLanguage = "ko",
 } = {}) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const sections = [];
   const summaryBlock = limitText(String(summaryText || "").trim(), 7000);
   const oxBlock = formatExamCramOxBlock(oxItems);
@@ -856,7 +954,7 @@ function buildExamCramPrompt({
   }
 
   return `
-You create a last-minute Korean exam cram sheet from study artifacts.
+You create a last-minute ${outputLanguageLabel} exam cram sheet from study artifacts.
 
 [Goal]
 - Build a dense, practical guide that answers: "What should I read right before the exam?"
@@ -868,7 +966,7 @@ You create a last-minute Korean exam cram sheet from study artifacts.
 - Prioritize high-yield concepts, distinctions, formulas, definitions, exceptions, traps, and likely exam pivots.
 - When quizzes or O/X reveal a misconception, rewrite it as a compact caution point.
 - Keep it concise enough to scan in 5-10 minutes, but dense enough to be useful.
-- Write in Korean markdown.
+- Write in ${outputLanguageLabel} markdown.
 - Use headings and bullets, not long paragraphs.
 - If formulas or symbols matter, preserve them with LaTeX-friendly markdown.
 - End with a very short final checklist.
@@ -894,17 +992,18 @@ function buildFlashcardsContext(extractedText, count) {
   return chunked || limitText(trimmed, 6000);
 }
 
-function buildFlashcardsPrompt(contextText, count) {
+function buildFlashcardsPrompt(contextText, count, outputLanguage = "ko") {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   return `
 You generate study flashcards from a PDF.
 
 [Flashcard rules]
-- Create ${count} cards in Korean.
+- Create ${count} cards in ${outputLanguageLabel}.
 - Focus on key concepts/definitions/principles/terms.
 - Remove duplicates or near-duplicates.
 - front: question/term, back: concise answer/explanation, hint: only if needed (optional).
 - Do not repeat identical meaning.
-- If the source is English, translate to Korean.
+- If the source is written in another language, translate it to ${outputLanguageLabel}.
 
 [Output format (JSON)]
 {
@@ -918,10 +1017,11 @@ ${contextText}
   `.trim();
 }
 
-function buildTutorSystemPrompt() {
+function buildTutorSystemPrompt(outputLanguage = "ko") {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   return `
 You are an AI tutor helping the user study with their PDF.
-- Answer in Korean using polite speech by default.
+- Answer in ${outputLanguageLabel} using polite speech by default.
 - If the user explicitly asks for a different tone (e.g., casual, formal, concise), follow that tone.
 - Be friendly and concise.
 - Treat provided document excerpts as the primary source.
@@ -1781,7 +1881,8 @@ function formatChapterSummaryMarkdown(parsed, summaryInput) {
   return markdown.join("\n").trim();
 }
 
-async function generateChapterSummary(extractedText, { scope, chapterSections } = {}) {
+async function generateChapterSummary(extractedText, { scope, chapterSections, outputLanguage = "ko" } = {}) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const summaryInput = buildChapterSummaryInput(extractedText, { scope, chapterSections });
   if (!summaryInput.chapters.length) return "";
 
@@ -1798,12 +1899,12 @@ async function generateChapterSummary(extractedText, { scope, chapterSections } 
         {
           role: "system",
           content:
-            "You summarize academic PDFs in Korean. Return JSON only. Use only provided chapter data. For visuals, estimate importance as high|medium|low only when supported by chapter text or visual hints.",
+            `You summarize academic PDFs in ${outputLanguageLabel}. Return JSON only. Use only provided chapter data. For visuals, estimate importance as high|medium|low only when supported by chapter text or visual hints.`,
         },
         {
           role: "user",
           content: `
-Analyze the chapter input and return Korean JSON with this schema:
+Analyze the chapter input and return ${outputLanguageLabel} JSON with this schema:
 {
   "overview": ["..."],
   "chapters": [
@@ -1831,7 +1932,7 @@ Analyze the chapter input and return Korean JSON with this schema:
 }
 
 Rules:
-- Output language: Korean.
+- Output language: ${outputLanguageLabel}.
 - Include 3-6 summary points per chapter.
 - Every summary point must include BOTH:
   - "point": concise concept/topic line
@@ -1915,15 +2016,53 @@ function chunkText(text, { maxChunks = 5, maxChunkLength = 1400 } = {}) {
   return chunks.join("\n\n");
 }
 
-function fallbackOxItems(extractedText) {
+function fallbackOxItems(extractedText, outputLanguage = "ko") {
   const clean = (extractedText || "").replace(/\s+/g, " ").trim();
   const sentences = clean.split(/(?<=[.!?])\s+/).filter(Boolean).slice(0, 5);
+  const outputLanguageCode = resolveOutputLanguage(outputLanguage).code;
+  const fallbackCopy = {
+    en: {
+      judge: "Judge O/X using text evidence:",
+      emptyStatement: "Use evidence from the PDF text before deciding O/X.",
+      emptyExplanation: "Without textual evidence, the statement cannot be trusted.",
+      sentenceExplanation: "Compare the statement with nearby context in the provided text.",
+    },
+    zh: {
+      judge: "请根据文本证据判断 O/X：",
+      emptyStatement: "请先依据 PDF 文本证据再判断 O/X。",
+      emptyExplanation: "如果没有文本证据，这个陈述就不能被信任。",
+      sentenceExplanation: "请把该陈述与附近上下文进行对照后再判断。",
+    },
+    ja: {
+      judge: "本文の根拠を使って O/X を判断してください:",
+      emptyStatement: "まず PDF 本文の根拠を確認してから O/X を判断してください。",
+      emptyExplanation: "本文の根拠がない場合、その記述は信頼できません。",
+      sentenceExplanation: "提示された記述を周辺文脈と照らして判断してください。",
+    },
+    hi: {
+      judge: "टेक्स्ट प्रमाण के आधार पर O/X तय करें:",
+      emptyStatement: "O/X तय करने से पहले PDF टेक्स्ट के प्रमाण की जाँच करें।",
+      emptyExplanation: "यदि टेक्स्ट प्रमाण नहीं है, तो इस कथन पर भरोसा नहीं किया जा सकता।",
+      sentenceExplanation: "दिए गए कथन की तुलना आसपास के संदर्भ से करें।",
+    },
+    ko: {
+      judge: "텍스트 근거로 O/X를 판단하세요:",
+      emptyStatement: "PDF 텍스트 근거를 먼저 확인한 뒤 O/X를 판단하세요.",
+      emptyExplanation: "텍스트 근거가 없으면 이 진술은 신뢰할 수 없습니다.",
+      sentenceExplanation: "제공된 진술을 주변 문맥과 비교해 판단하세요.",
+    },
+  }[outputLanguageCode] || {
+    judge: "텍스트 근거로 O/X를 판단하세요:",
+    emptyStatement: "PDF 텍스트 근거를 먼저 확인한 뒤 O/X를 판단하세요.",
+    emptyExplanation: "텍스트 근거가 없으면 이 진술은 신뢰할 수 없습니다.",
+    sentenceExplanation: "제공된 진술을 주변 문맥과 비교해 판단하세요.",
+  };
   if (!sentences.length) {
     return [
       {
-        statement: "Use evidence from the PDF text before deciding O/X.",
+        statement: fallbackCopy.emptyStatement,
         answer: true,
-        explanation: "Without textual evidence, the statement cannot be trusted.",
+        explanation: fallbackCopy.emptyExplanation,
         evidence: "",
         evidencePages: [],
         evidenceSnippet: "",
@@ -1932,9 +2071,9 @@ function fallbackOxItems(extractedText) {
   }
 
   return sentences.map((s, idx) => ({
-    statement: `Judge O/X using text evidence: ${s}`,
+    statement: `${fallbackCopy.judge} ${s}`,
     answer: idx % 2 === 0, // true/false alternation
-    explanation: "Compare the statement with nearby context in the provided text.",
+    explanation: fallbackCopy.sentenceExplanation,
     evidence: "",
     evidencePages: [],
     evidenceSnippet: "",
@@ -2151,10 +2290,12 @@ export async function generateQuiz(
     avoidQuestions = [],
     scopeLabel = "",
     questionStyleProfile = "",
+    outputLanguage = "ko",
   } = {}
 ) {
   const mcCount = Math.max(0, Math.min(10, Number(multipleChoiceCount) || 0));
   const saCount = Math.max(0, Math.min(10, Number(shortAnswerCount) || 0));
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   
   // 캐싱 키 생성
   const cacheKey = getCacheKey(extractedText, {
@@ -2164,6 +2305,7 @@ export async function generateQuiz(
     saCount,
     avoidQuestions,
     scopeLabel,
+    outputLanguage,
   });
   
   // 캐시 확인
@@ -2182,6 +2324,7 @@ export async function generateQuiz(
     avoidQuestions,
     scopeLabel,
     questionStyleProfile: resolvedQuestionStyleProfile,
+    outputLanguage,
   });
 
   const data = await postChatRequest(
@@ -2190,7 +2333,7 @@ export async function generateQuiz(
       messages: [
         {
           role: "system",
-          content: `Generate ${mcCount} Korean multiple-choice items (4 options each) plus ${saCount} Korean short-answer items from the user's text only. Each question must assess understanding/apply/disambiguate/misconception check, not verbatim recall. If a document question style profile is provided, the output must feel like that document's own problem style rather than a generic AI quiz style. Match the original stem tone, distractor logic, and reasoning grain without copying sample stems. Avoid asking for raw facts/URLs/names/numbers. Short-answer items must have one exact, short answer only, such as a number, formula, term, concept name, or short phrase. Do not generate essay-style prompts like 설명하라, 서술하라, 논하라, or 기술하라. The shortAnswer answer field must be directly gradable and must not be a sentence. Exclude textbook/preface metadata questions (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure). Before returning, reject any item whose tone or structure feels mismatched with the detected document question style. Respond with JSON only using the provided schema. shortAnswer must be an array with ${saCount} items (empty if 0).`,
+          content: `Generate ${mcCount} ${outputLanguageLabel} multiple-choice items (4 options each) plus ${saCount} ${outputLanguageLabel} short-answer items from the user's text only. Each question must assess understanding/apply/disambiguate/misconception check, not verbatim recall. If a document question style profile is provided, the output must feel like that document's own problem style rather than a generic AI quiz style. Match the original stem tone, distractor logic, and reasoning grain without copying sample stems. Avoid asking for raw facts/URLs/names/numbers. Short-answer items must have one exact, short answer only, such as a number, formula, term, concept name, or short phrase. Do not generate essay-style prompts like 설명하라, 서술하라, 논하라, or 기술하라. The shortAnswer answer field must be directly gradable and must not be a sentence. Exclude textbook/preface metadata questions (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure). Before returning, reject any item whose tone or structure feels mismatched with the detected document question style. Respond with JSON only using the provided schema. shortAnswer must be an array with ${saCount} items (empty if 0).`,
         },
         { role: "user", content: prompt },
       ],
@@ -2224,8 +2367,9 @@ export async function generateQuiz(
 
 export async function generateHardQuiz(
   extractedText,
-  { count = 3, avoidQuestions = [], scopeLabel = "", questionStyleProfile = "" } = {}
+  { count = 3, avoidQuestions = [], scopeLabel = "", questionStyleProfile = "", outputLanguage = "ko" } = {}
 ) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const resolvedQuestionStyleProfile =
     String(questionStyleProfile || "").trim() ||
     formatQuestionStyleProfile(await deriveQuestionStyleProfile(extractedText, { scopeLabel }));
@@ -2233,6 +2377,7 @@ export async function generateHardQuiz(
     avoidQuestions,
     questionStyleProfile: resolvedQuestionStyleProfile,
     scopeLabel,
+    outputLanguage,
   });
 
   const data = await postChatRequest(
@@ -2242,7 +2387,7 @@ export async function generateHardQuiz(
         {
           role: "system",
           content:
-            "Generate high-difficulty Korean multiple-choice questions from the user's text only. Each item must test reasoning/application, not verbatim recall. If a document question style profile is provided, keep the document's native phrasing, distractor shape, and misconception pattern instead of falling back to a generic AI exam tone. Exclude textbook/preface metadata questions (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure). Before returning, reject any item whose tone or structure feels unlike the document's own question style. Output JSON only with the provided schema.",
+            `Generate high-difficulty ${outputLanguageLabel} multiple-choice questions from the user's text only. Each item must test reasoning/application, not verbatim recall. If a document question style profile is provided, keep the document's native phrasing, distractor shape, and misconception pattern instead of falling back to a generic AI exam tone. Exclude textbook/preface metadata questions (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure). Before returning, reject any item whose tone or structure feels unlike the document's own question style. Output JSON only with the provided schema.`,
         },
         { role: "user", content: prompt },
       ],
@@ -2263,10 +2408,11 @@ export async function generateHardQuiz(
 
 export async function generateOxQuiz(
   extractedText,
-  { avoidStatements = [], count = 10, skipEnrichment = false, scopeLabel = "" } = {}
+  { avoidStatements = [], count = 10, skipEnrichment = false, scopeLabel = "", outputLanguage = "ko" } = {}
 ) {
   const oxCount = Math.max(1, Math.min(12, Number(count) || 0));
   const minFalseCount = Math.max(1, Math.min(4, Math.floor(oxCount / 2)));
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const hasPageTaggedContext = /\[p\.\d+\]/i.test(String(extractedText || ""));
   const chunked = hasPageTaggedContext
     ? limitText(extractedText, 12000)
@@ -2274,7 +2420,7 @@ export async function generateOxQuiz(
   let summaryForOx = "";
   if (!hasPageTaggedContext && !skipEnrichment) {
     try {
-      summaryForOx = await generateSummary(extractedText, { chapterized: false });
+      summaryForOx = await generateSummary(extractedText, { chapterized: false, outputLanguage });
     } catch {
       // Fallback to chunked context when summary generation fails.
     }
@@ -2305,7 +2451,7 @@ export async function generateOxQuiz(
     };
   }
 
-  const prompt = buildOxPrompt(contextForOx, highlightText, avoidStatements, scopeLabel);
+  const prompt = buildOxPrompt(contextForOx, highlightText, avoidStatements, scopeLabel, outputLanguage);
 
   const data = await postChatRequest(
     {
@@ -2314,7 +2460,7 @@ export async function generateOxQuiz(
         {
           role: "system",
           content:
-            `Generate ${oxCount} Korean true/false (O/X) quiz statements strictly from the user's text. All statements, explanations, and evidence must be in Korean (translate/rephrase even if the source is English). Ensure at least ${minFalseCount} are false; if not possible, generate as many as possible but prefer false items. Each statement <=80 chars, explanation/evidence <=150 chars, no duplication, and every explanation cites the PDF as evidence where possible (e.g., p.3 definition paragraph, section 2.1 second sentence; if unavailable, evidence may be empty). Exclude low-value textbook metadata/trivia (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure).`,
+            `Generate ${oxCount} ${outputLanguageLabel} true/false (O/X) quiz statements strictly from the user's text. All statements, explanations, and evidence must be in ${outputLanguageLabel} (translate/rephrase even if the source is another language). Ensure at least ${minFalseCount} are false; if not possible, generate as many as possible but prefer false items. Each statement <=80 chars, explanation/evidence <=150 chars, no duplication, and every explanation cites the PDF as evidence where possible (e.g., p.3 definition paragraph, section 2.1 second sentence; if unavailable, evidence may be empty). Exclude low-value textbook metadata/trivia (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure).`,
         },
         { role: "user", content: prompt },
       ],
@@ -2343,7 +2489,7 @@ export async function generateOxQuiz(
   }
 
   return {
-    items: fallbackOxItems(extractedText),
+    items: fallbackOxItems(extractedText, outputLanguage),
     debug: true,
     reason: "O/X generation failed; fallback items returned",
   };
@@ -2351,8 +2497,9 @@ export async function generateOxQuiz(
 
 export async function generateSummary(
   extractedText,
-  { scope, chapterized = true, chapterSections = null } = {}
+  { scope, chapterized = true, chapterSections = null, outputLanguage = "ko" } = {}
 ) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const normalized = normalizeSummarySource(extractedText);
   const hasManualChapters = Array.isArray(chapterSections) && chapterSections.length > 0;
   if (!normalized && !hasManualChapters) {
@@ -2361,7 +2508,7 @@ export async function generateSummary(
 
   if (chapterized) {
     try {
-      const chapterSummary = await generateChapterSummary(normalized, { scope, chapterSections });
+      const chapterSummary = await generateChapterSummary(normalized, { scope, chapterSections, outputLanguage });
       if (chapterSummary) return chapterSummary;
     } catch {
       // fallback to legacy summary
@@ -2373,7 +2520,7 @@ export async function generateSummary(
   }
 
   const summaryContext = shrinkWithTail(normalized, MAX_LEGACY_SUMMARY_SOURCE_CHARS);
-  const prompt = buildSummaryPrompt(summaryContext);
+  const prompt = buildSummaryPrompt(summaryContext, outputLanguage);
   const scopeGuard = scope
     ? {
         role: "system",
@@ -2388,7 +2535,7 @@ export async function generateSummary(
         {
           role: "system",
           content:
-            "Produce a detailed Korean markdown summary of the user's academic text. Follow their instructions for sections, subsections, bold emphasis, LaTeX math, tables/lists, and sufficient length (long-form; do not shorten to a few lines).",
+            `Produce a detailed ${outputLanguageLabel} markdown summary of the user's academic text. Follow their instructions for sections, subsections, bold emphasis, LaTeX math, tables/lists, and sufficient length (long-form; do not shorten to a few lines).`,
         },
         ...(scopeGuard ? [scopeGuard] : []),
         { role: "user", content: prompt },
@@ -2401,7 +2548,7 @@ export async function generateSummary(
   const content = data.choices?.[0]?.message?.content?.trim() || "";
   const sanitized = sanitizeMarkdown(content);
   if (looksLikeSummaryRefusal(sanitized) && looksLikeProblemPageContent(summaryContext)) {
-    return generateProblemPageSummary(summaryContext, { scope });
+    return generateProblemPageSummary(summaryContext, { scope, outputLanguage });
   }
   return sanitized;
 }
@@ -2412,7 +2559,9 @@ export async function generateExamCramSheet({
   quizItems = [],
   reviewNotes = [],
   scopeLabel = "",
+  outputLanguage = "ko",
 } = {}) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const hasSources =
     Boolean(String(summaryText || "").trim()) ||
     (Array.isArray(oxItems) && oxItems.length > 0) ||
@@ -2428,6 +2577,7 @@ export async function generateExamCramSheet({
     quizItems,
     reviewNotes,
     scopeLabel,
+    outputLanguage,
   });
   const data = await postChatRequest(
     {
@@ -2436,7 +2586,7 @@ export async function generateExamCramSheet({
         {
           role: "system",
           content:
-            "Create a Korean markdown exam cram sheet from the provided study artifacts only. Keep it high-yield, compact, and immediately useful before an exam.",
+            `Create a ${outputLanguageLabel} markdown exam cram sheet from the provided study artifacts only. Keep it high-yield, compact, and immediately useful before an exam.`,
         },
         { role: "user", content: prompt },
       ],
@@ -2449,12 +2599,13 @@ export async function generateExamCramSheet({
   return sanitizeMarkdown(content);
 }
 
-export async function generateFlashcards(extractedText, { count = 8 } = {}) {
+export async function generateFlashcards(extractedText, { count = 8, outputLanguage = "ko" } = {}) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const contextText = buildFlashcardsContext(extractedText, count);
   if (!contextText) {
     throw new Error("No text available for flashcards. Extract PDF text first.");
   }
-  const prompt = buildFlashcardsPrompt(contextText, count);
+  const prompt = buildFlashcardsPrompt(contextText, count, outputLanguage);
 
   const data = await postChatRequest(
     {
@@ -2463,7 +2614,7 @@ export async function generateFlashcards(extractedText, { count = 8 } = {}) {
         {
           role: "system",
           content:
-            "Create Korean flashcards strictly from the user's text. Return JSON only with an array of {front, back, hint}. Keep front/back concise, avoid duplicates, and translate to Korean if needed.",
+            `Create ${outputLanguageLabel} flashcards strictly from the user's text. Return JSON only with an array of {front, back, hint}. Keep front/back concise, avoid duplicates, and translate to ${outputLanguageLabel} if needed.`,
         },
         { role: "user", content: prompt },
       ],
@@ -2610,10 +2761,11 @@ function pickTutorEvidenceSnippet(text, terms, maxChars = 320) {
   return `${prefix}${compact.slice(start, end).trim()}${suffix}`;
 }
 
-function buildTutorEvidenceFallback({ question, contextText, reason = "" }) {
+function buildTutorEvidenceFallback({ question, contextText, reason = "", outputLanguage = "ko" }) {
   const source = String(contextText || "").trim();
+  const copy = getTutorFallbackCopy(outputLanguage);
   if (!source) {
-    return "Could not generate an answer. Reload the document text and retry the same question.";
+    return copy.noSource;
   }
 
   const terms = extractTutorSearchTerms(question).slice(0, 10);
@@ -2639,18 +2791,18 @@ function buildTutorEvidenceFallback({ question, contextText, reason = "" }) {
   const selected = matched.length > 0 ? matched : scoredBlocks.slice(0, 2);
 
   if (!selected.length) {
-    return "Could not generate an answer. Text recognition may be incomplete; reopen the PDF and try again.";
+    return copy.noEvidence;
   }
 
-  const lines = ["The model returned empty output. Here is a quick evidence-first summary from the document:"];
+  const lines = [copy.empty];
   for (const item of selected) {
-    const label = Number.isFinite(item.pageNumber) ? `p.${item.pageNumber}` : "document evidence";
+    const label = Number.isFinite(item.pageNumber) ? `p.${item.pageNumber}` : copy.evidenceLabel;
     const snippet = pickTutorEvidenceSnippet(item.text, terms, 320);
     lines.push(`- ${label}: ${snippet}`);
   }
-  lines.push("I can now explain your exact question step-by-step from this evidence.");
+  lines.push(copy.closing);
   if (reason) {
-    lines.push(`(debug: model response failed: ${String(reason).slice(0, 140)})`);
+    lines.push(`(${copy.debugPrefix}: ${String(reason).slice(0, 140)})`);
   }
   return lines.join("\n");
 }
@@ -2672,8 +2824,9 @@ async function requestTutorCompletion({
   history = [],
   extraSystem = "",
   maxTokens = 900,
+  outputLanguage = "ko",
 }) {
-  const messages = [{ role: "system", content: buildTutorSystemPrompt() }];
+  const messages = [{ role: "system", content: buildTutorSystemPrompt(outputLanguage) }];
   const guard = String(extraSystem || "").trim();
   if (guard) {
     messages.push({ role: "system", content: guard });
@@ -2729,7 +2882,8 @@ async function requestTutorCompletion({
   };
 }
 
-export async function generateTutorReply({ question, extractedText, messages = [] }) {
+export async function generateTutorReply({ question, extractedText, messages = [], outputLanguage = "ko" }) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const contextText = buildTutorContext(extractedText, { question, messages });
   if (!contextText) {
     throw new Error("Tutor context is empty. Reload PDF text before asking questions.");
@@ -2746,6 +2900,7 @@ export async function generateTutorReply({ question, extractedText, messages = [
       extraSystem: "",
       maxTokens: 1000,
       rejectCoverageRefusal: true,
+      outputLanguage,
     },
     {
       context: limitText(contextText, 12000),
@@ -2754,14 +2909,16 @@ export async function generateTutorReply({ question, extractedText, messages = [
         "Do not ask the user to paste text, choose an option, or say the section is missing. Answer now using available evidence plus clearly-labeled supplemental explanation.",
       maxTokens: 1000,
       rejectCoverageRefusal: false,
+      outputLanguage,
     },
     {
       context: buildTutorRetrySnippet(contextText, question),
       history: [],
       extraSystem:
-        "Answer immediately in Korean with 4-7 concise bullet points and one short concluding sentence. Do not output empty text.",
+        `Answer immediately in ${outputLanguageLabel} with 4-7 concise bullet points and one short concluding sentence. Do not output empty text.`,
       maxTokens: 1000,
       rejectCoverageRefusal: false,
+      outputLanguage,
     },
   ];
 
@@ -2777,6 +2934,7 @@ export async function generateTutorReply({ question, extractedText, messages = [
           history: strategy.history,
           extraSystem: strategy.extraSystem,
           maxTokens: strategy.maxTokens,
+          outputLanguage: strategy.outputLanguage,
         });
         const content = String(result?.content || "").trim();
         lastFinishReason = String(result?.finishReason || lastFinishReason || "");
@@ -2790,7 +2948,7 @@ export async function generateTutorReply({ question, extractedText, messages = [
   }
 
   const reason = lastErrorMessage || (lastFinishReason ? `finish_reason: ${lastFinishReason}` : "");
-  return buildTutorEvidenceFallback({ question, contextText, reason });
+  return buildTutorEvidenceFallback({ question, contextText, reason, outputLanguage });
 }
 export async function generateHighlights(extractedText) {
   const data = await postChatRequest(
