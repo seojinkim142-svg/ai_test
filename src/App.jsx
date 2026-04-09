@@ -560,14 +560,25 @@ function extractTutorEvidenceEntries(rawEvidenceText) {
   const source = String(rawEvidenceText || "");
   if (!source) return [];
   const entries = [];
-  const re = /\[p\.(\d+)\]\s*\n([\s\S]*?)(?=\n\s*\[p\.\d+\]\s*\n|$)/gi;
+  const re = /\[(p\.\d+|img(?:\.\d+)?)\]\s*\n([\s\S]*?)(?=\n\s*\[(?:p\.\d+|img(?:\.\d+)?)\]\s*\n|$)/gi;
   for (const match of source.matchAll(re)) {
-    const pageNumber = Number.parseInt(match?.[1], 10);
+    const rawLabel = String(match?.[1] || "").trim().toLowerCase();
+    const pageNumber = Number.parseInt(rawLabel.match(/^p\.(\d+)$/i)?.[1] || "", 10);
     const text = String(match?.[2] || "").replace(/\s+/g, " ").trim();
-    if (!Number.isFinite(pageNumber) || !text) continue;
-    entries.push({ pageNumber, text });
+    if (!rawLabel || !text) continue;
+    entries.push({ label: rawLabel, pageNumber, text });
   }
   return entries;
+}
+
+function formatTutorEvidenceLabel(entry) {
+  if (Number.isFinite(entry?.pageNumber)) {
+    return `p.${entry.pageNumber}`;
+  }
+  if (/^img(?:\.\d+)?$/i.test(String(entry?.label || ""))) {
+    return "screenshot";
+  }
+  return "evidence";
 }
 
 function buildTutorForcedFallbackAnswer(question, rawEvidenceText) {
@@ -598,7 +609,7 @@ function buildTutorForcedFallbackAnswer(question, rawEvidenceText) {
   ];
   for (const item of selected) {
     const snippet = item.text.length > 280 ? `${item.text.slice(0, 280)}...` : item.text;
-    lines.push(`- p.${item.pageNumber}: ${snippet}`);
+    lines.push(`- ${formatTutorEvidenceLabel(item)}: ${snippet}`);
   }
   lines.push(
     "\uC6D0\uD558\uC2DC\uBA74 \uC704 \uADFC\uAC70 \uD398\uC774\uC9C0\uB97C \uAE30\uC900\uC73C\uB85C \uC9C8\uBB38\uD558\uC2E0 \uD56D\uBAA9\uC744 \uB2E8\uACC4\uBCC4\uB85C \uC774\uC5B4\uC11C \uC790\uC138\uD788 \uC124\uBA85\uD558\uACA0\uC2B5\uB2C8\uB2E4."
@@ -619,6 +630,68 @@ function resolveTutorReplyText(rawReply, { question, rawEvidenceText }) {
     return buildTutorForcedFallbackAnswer(question, rawEvidenceText);
   }
   return reply;
+}
+
+function normalizeTutorRequestPayload(rawInput) {
+  if (typeof rawInput === "string") {
+    const prompt = String(rawInput || "").trim();
+    return {
+      prompt,
+      displayPrompt: prompt,
+      attachmentFile: null,
+    };
+  }
+
+  const prompt = String(rawInput?.prompt || rawInput?.text || "").trim();
+  const displayPrompt = String(rawInput?.displayPrompt || prompt).trim();
+  const attachmentFile =
+    rawInput?.attachmentFile instanceof File
+      ? rawInput.attachmentFile
+      : rawInput?.attachment?.file instanceof File
+        ? rawInput.attachment.file
+        : null;
+
+  return {
+    prompt,
+    displayPrompt: displayPrompt || prompt,
+    attachmentFile,
+  };
+}
+
+function buildTutorHistoryMessageContent(message) {
+  const baseContent = String(message?.content || "").trim();
+  const attachmentName = String(message?.attachmentName || "").trim();
+  const attachmentText = String(message?.attachmentText || "").trim();
+  const parts = [];
+
+  if (baseContent) parts.push(baseContent);
+  if (attachmentName) parts.push(`[Attached image: ${attachmentName}]`);
+  if (attachmentText) parts.push(`[Screenshot OCR]\n${attachmentText}`);
+
+  return parts.join("\n\n").trim();
+}
+
+function buildTutorImageEvidenceBlock({ attachmentName, attachmentType, dimensions, ocrText }) {
+  const safeText = String(ocrText || "").trim();
+  if (!safeText) return "";
+
+  const width = Number.parseInt(dimensions?.width, 10);
+  const height = Number.parseInt(dimensions?.height, 10);
+  const sizeLabel =
+    Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+      ? `${width}x${height}`
+      : "";
+
+  return [
+    "[img.1]",
+    `Attached screenshot: ${String(attachmentName || "image").trim() || "image"}`,
+    attachmentType ? `Type: ${attachmentType}` : "",
+    sizeLabel ? `Rendered size: ${sizeLabel}` : "",
+    "",
+    safeText,
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function parseChapterNumberSelectionInput(rawInput, chapters) {
@@ -2098,15 +2171,19 @@ function App() {
   const quizMixError = parsedQuizMix.error;
 
   const tutorNotice = useMemo(() => {
+    const selectedKind = detectSupportedDocumentKind(file);
     if (!file || !selectedFileId) {
-      return "?쒗꽣 梨꾪똿???ъ슜?섎젮硫?PDF瑜?癒쇱? ?댁뼱二쇱꽭??"
+      return "Open a PDF, or attach a screenshot to ask the tutor.";
+    }
+    if (!isPdfDocumentKind(selectedKind)) {
+      return "Page-grounded tutor mode needs a PDF. You can still attach a screenshot and ask from that image.";
     }
     if (isLoadingText) {
-      return "PDF ?띿뒪??異붿텧???꾩쭅 吏꾪뻾 以묒엯?덈떎. ?좎떆留?湲곕떎?ㅼ＜?몄슂."
+      return "PDF text extraction is still running. Screenshot questions can still be sent right away.";
     }
     const trimmed = (extractedText || "").trim();
     if (!trimmed) {
-      return "??PDF?먯꽌 異붿텧???띿뒪?멸? ?놁뒿?덈떎."
+      return "No readable PDF text was found yet. Attach a screenshot if you want the tutor to explain that instead.";
     }
     return "";
   }, [extractedText, file, isLoadingText, selectedFileId]);
@@ -5521,224 +5598,307 @@ function App() {
   }, []);
 
   const handleSendTutorMessage = useCallback(
-    async (prompt) => {
-      const trimmed = String(prompt || "").trim();
-      if (!trimmed || isTutorLoading) return;
-      if (!file || !selectedFileId) {
-        setTutorError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
-        return;
+    async (requestPayload) => {
+      const { prompt, displayPrompt, attachmentFile } = normalizeTutorRequestPayload(requestPayload);
+      const hasAttachment = Boolean(attachmentFile);
+      const effectivePrompt =
+        String(prompt || "").trim() ||
+        (hasAttachment ? "Explain the attached screenshot clearly for a student." : "");
+      const effectiveDisplayPrompt = String(displayPrompt || effectivePrompt).trim();
+      if ((!effectivePrompt && !hasAttachment) || isTutorLoading) return false;
+
+      const selectedKind = detectSupportedDocumentKind(file);
+      const canUsePdfEvidence = Boolean(file && selectedFileId && isPdfDocumentKind(selectedKind));
+      if (!canUsePdfEvidence && !hasAttachment) {
+        setTutorError("Open a PDF or attach a screenshot before asking the tutor.");
+        return false;
       }
-      if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) {
-        setTutorError("AI 튜터의 페이지 근거 모드는 PDF에서만 지원됩니다.");
-        return;
-      }
-      if (isLoadingText) {
-        setTutorError("PDF ?띿뒪??異붿텧???꾩쭅 吏꾪뻾 以묒엯?덈떎. ?좎떆留?湲곕떎?ㅼ＜?몄슂.");
-        return;
-      }
-      const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
-      if (!totalPages) {
-        setTutorError("?섏씠吏 ?뺣낫瑜??쎌? 紐삵뻽?듬땲?? PDF瑜??ㅼ떆 ?댁뼱二쇱꽭??");
-        return;
+      if (canUsePdfEvidence && isLoadingText && !hasAttachment) {
+        setTutorError("PDF text extraction is still running. Attach a screenshot or wait a moment.");
+        return false;
       }
 
-      const requestedPages = buildTutorPageCandidates(trimmed, totalPages);
-      const sectionHints = extractTutorSectionCandidates(trimmed);
-      const problemHints = extractTutorProblemTokenCandidates(trimmed);
-      const targetTokens = [...new Set([...sectionHints, ...problemHints])];
-      const primaryToken = targetTokens[0] || "";
-      const tutorDocKey = String(selectedFileId || file?.name || "").trim();
-      const currentKnownPage = Math.max(1, Number(currentPage || 1));
-      const anchorPage = requestedPages.length
-        ? requestedPages[0]
-        : Math.max(1, Math.min(totalPages, currentKnownPage));
+      let attachmentEvidenceText = "";
+      let attachmentHistoryText = "";
+      let attachmentImageDataUrl = "";
+      let attachmentMeta = null;
 
-      const buildPageRange = (start, end, cap = 120) => {
-        const lo = Math.max(1, Math.min(totalPages, Number.parseInt(start, 10) || 1));
-        const hi = Math.max(lo, Math.min(totalPages, Number.parseInt(end, 10) || lo));
-        const pages = [];
-        for (let page = lo; page <= hi; page += 1) {
-          pages.push(page);
-          if (pages.length >= cap) break;
-        }
-        return pages;
-      };
-      const mergePages = (...lists) =>
-        Array.from(
-          new Set(
-            lists
-              .flat()
-              .map((page) => Number.parseInt(page, 10))
-              .filter((page) => Number.isFinite(page) && page > 0 && page <= totalPages)
-          )
-        ).sort((a, b) => a - b);
-      const pageCacheKey = (pageNumber) => `${tutorDocKey}:${pageNumber}`;
-      const loadPageEntries = async (pages, { useOcr = false, maxCharsPerPage = 5000 } = {}) => {
-        const normalizedPages = mergePages(pages);
-        if (!normalizedPages.length) return [];
-
-        const missing = [];
-        const entriesByPage = new Map();
-        for (const pageNumber of normalizedPages) {
-          const cached = tutorPageTextCacheRef.current.get(pageCacheKey(pageNumber));
-          const shouldReloadForOcr =
-            useOcr &&
-            (!cached ||
-              !cached.ocrUsed ||
-              String(cached.text || "").trim().length < 220);
-          if (!cached || !String(cached.text || "").trim() || shouldReloadForOcr) {
-            missing.push(pageNumber);
-            continue;
+      if (hasAttachment) {
+        try {
+          const { buildVisionImageDataUrl, extractImageText, isTutorImageFile } = await import("./utils/imageOcr");
+          if (!isTutorImageFile(attachmentFile)) {
+            setTutorError("Only image files can be attached to the tutor.");
+            setStatus("");
+            return false;
           }
-          entriesByPage.set(pageNumber, {
-            pageNumber,
-            text: String(cached.text || "").trim(),
-            ocrUsed: Boolean(cached.ocrUsed),
-          });
-        }
 
-        if (missing.length) {
-          const fetched = await extractPdfPageTexts(file, missing, {
-            useOcr,
-            ocrLang: "kor+eng",
-            maxCharsPerPage,
+          setStatus("Preparing screenshot...");
+          const [imageResult, imageDataUrl] = await Promise.all([
+            extractImageText(attachmentFile, {
+              ocrLang: "kor+eng",
+              maxLength: 18000,
+              onProgress: (message) => setStatus(String(message || "")),
+            }),
+            buildVisionImageDataUrl(attachmentFile),
+          ]);
+          attachmentImageDataUrl = String(imageDataUrl || "");
+          attachmentHistoryText = String(imageResult?.text || "").slice(0, 900);
+          attachmentEvidenceText = buildTutorImageEvidenceBlock({
+            attachmentName: attachmentFile.name,
+            attachmentType: attachmentFile.type,
+            dimensions: imageResult,
+            ocrText: imageResult?.text,
           });
-          for (const pageEntry of fetched?.pages || []) {
-            const pageNumber = Number.parseInt(pageEntry?.pageNumber, 10);
-            if (!Number.isFinite(pageNumber)) continue;
-            const text = String(pageEntry?.text || "").trim();
-            const payload = {
-              pageNumber,
-              text,
-              ocrUsed: Boolean(pageEntry?.ocrUsed),
-            };
-            if (text) {
-              tutorPageTextCacheRef.current.set(pageCacheKey(pageNumber), {
-                text,
-                ocrUsed: payload.ocrUsed,
-              });
-              entriesByPage.set(pageNumber, payload);
+          attachmentMeta = {
+            attachmentName: attachmentFile.name,
+            attachmentType: attachmentFile.type,
+            attachmentText: attachmentHistoryText,
+          };
+
+          if (!attachmentEvidenceText && !canUsePdfEvidence) {
+            setTutorError("No readable text was found in the screenshot.");
+            setStatus("");
+            return false;
+          }
+        } catch (err) {
+          setTutorError(`Failed to read the screenshot: ${err.message}`);
+          setStatus("");
+          return false;
+        }
+      }
+
+      let pdfEvidenceText = "";
+      if (canUsePdfEvidence && !isLoadingText) {
+        const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
+        if (!totalPages) {
+          if (!hasAttachment) {
+            setTutorError("Page information is unavailable. Reopen the PDF and try again.");
+            return false;
+          }
+        } else {
+          const requestedPages = buildTutorPageCandidates(effectivePrompt, totalPages);
+          const sectionHints = extractTutorSectionCandidates(effectivePrompt);
+          const problemHints = extractTutorProblemTokenCandidates(effectivePrompt);
+          const targetTokens = [...new Set([...sectionHints, ...problemHints])];
+          const primaryToken = targetTokens[0] || "";
+          const tutorDocKey = String(selectedFileId || file?.name || "").trim();
+          const currentKnownPage = Math.max(1, Number(currentPage || 1));
+          const anchorPage = requestedPages.length
+            ? requestedPages[0]
+            : Math.max(1, Math.min(totalPages, currentKnownPage));
+
+          const buildPageRange = (start, end, cap = 120) => {
+            const lo = Math.max(1, Math.min(totalPages, Number.parseInt(start, 10) || 1));
+            const hi = Math.max(lo, Math.min(totalPages, Number.parseInt(end, 10) || lo));
+            const pages = [];
+            for (let page = lo; page <= hi; page += 1) {
+              pages.push(page);
+              if (pages.length >= cap) break;
             }
+            return pages;
+          };
+          const mergePages = (...lists) =>
+            Array.from(
+              new Set(
+                lists
+                  .flat()
+                  .map((page) => Number.parseInt(page, 10))
+                  .filter((page) => Number.isFinite(page) && page > 0 && page <= totalPages)
+              )
+            ).sort((a, b) => a - b);
+          const pageCacheKey = (pageNumber) => `${tutorDocKey}:${pageNumber}`;
+          const loadPageEntries = async (pages, { useOcr = false, maxCharsPerPage = 5000 } = {}) => {
+            const normalizedPages = mergePages(pages);
+            if (!normalizedPages.length) return [];
+
+            const missing = [];
+            const entriesByPage = new Map();
+            for (const pageNumber of normalizedPages) {
+              const cached = tutorPageTextCacheRef.current.get(pageCacheKey(pageNumber));
+              const shouldReloadForOcr =
+                useOcr &&
+                (!cached || !cached.ocrUsed || String(cached.text || "").trim().length < 220);
+              if (!cached || !String(cached.text || "").trim() || shouldReloadForOcr) {
+                missing.push(pageNumber);
+                continue;
+              }
+              entriesByPage.set(pageNumber, {
+                pageNumber,
+                text: String(cached.text || "").trim(),
+                ocrUsed: Boolean(cached.ocrUsed),
+              });
+            }
+
+            if (missing.length) {
+              const fetched = await extractPdfPageTexts(file, missing, {
+                useOcr,
+                ocrLang: "kor+eng",
+                maxCharsPerPage,
+              });
+              for (const pageEntry of fetched?.pages || []) {
+                const pageNumber = Number.parseInt(pageEntry?.pageNumber, 10);
+                if (!Number.isFinite(pageNumber)) continue;
+                const text = String(pageEntry?.text || "").trim();
+                const payload = {
+                  pageNumber,
+                  text,
+                  ocrUsed: Boolean(pageEntry?.ocrUsed),
+                };
+                if (text) {
+                  tutorPageTextCacheRef.current.set(pageCacheKey(pageNumber), {
+                    text,
+                    ocrUsed: payload.ocrUsed,
+                  });
+                  entriesByPage.set(pageNumber, payload);
+                }
+              }
+            }
+
+            return mergePages(normalizedPages)
+              .map((pageNumber) => entriesByPage.get(pageNumber))
+              .filter((entry) => entry && entry.text);
+          };
+
+          setStatus("Searching relevant PDF pages...");
+          const narrowScanPages = buildPageRange(anchorPage - 20, anchorPage + 90, 130);
+          const broadScanPages = buildPageRange(anchorPage - 70, anchorPage + 220, 260);
+
+          let scannedEntries = await loadPageEntries(narrowScanPages, {
+            useOcr: false,
+            maxCharsPerPage: 4200,
+          });
+
+          let detectedRange =
+            primaryToken && tutorDocKey
+              ? tutorSectionRangeCacheRef.current.get(`${tutorDocKey}:${primaryToken}:${anchorPage}`) || null
+              : null;
+
+          if (!detectedRange && primaryToken) {
+            detectedRange = detectTutorSectionPageRange(scannedEntries, primaryToken);
+          }
+
+          if (!detectedRange && primaryToken) {
+            const broadEntries = await loadPageEntries(broadScanPages, {
+              useOcr: false,
+              maxCharsPerPage: 4200,
+            });
+            if (broadEntries.length > scannedEntries.length) scannedEntries = broadEntries;
+            detectedRange = detectTutorSectionPageRange(scannedEntries, primaryToken);
+          }
+
+          if (!detectedRange && primaryToken) {
+            const ocrProbePages = requestedPages.length
+              ? mergePages(requestedPages, buildPageRange(anchorPage - 10, anchorPage + 30, 60))
+              : buildPageRange(anchorPage - 12, anchorPage + 45, 70);
+            const ocrEntries = await loadPageEntries(ocrProbePages, {
+              useOcr: true,
+              maxCharsPerPage: 4200,
+            });
+            detectedRange = detectTutorSectionPageRange(ocrEntries, primaryToken);
+          }
+
+          if (detectedRange && tutorDocKey && primaryToken) {
+            tutorSectionRangeCacheRef.current.set(
+              `${tutorDocKey}:${primaryToken}:${anchorPage}`,
+              detectedRange
+            );
+          }
+
+          let finalPages = [];
+          if (detectedRange?.startPage && detectedRange?.endPage) {
+            finalPages = buildPageRange(detectedRange.startPage - 1, detectedRange.endPage + 1, 120);
+          } else if (requestedPages.length) {
+            const firstRequested = requestedPages[0];
+            const lastRequested = requestedPages[requestedPages.length - 1];
+            finalPages = buildPageRange(
+              firstRequested - 1,
+              Math.max(lastRequested + 18, firstRequested + 12),
+              120
+            );
+          } else {
+            finalPages = buildPageRange(anchorPage - 3, anchorPage + 15, 40);
+          }
+          finalPages = mergePages(finalPages, requestedPages);
+
+          const finalEntries = await loadPageEntries(finalPages, {
+            useOcr: true,
+            maxCharsPerPage: 5200,
+          });
+          if (!finalEntries.length) {
+            if (!attachmentEvidenceText) {
+              setTutorError("No readable evidence was found on nearby PDF pages. Reopen the PDF and try again.");
+              setStatus("");
+              return false;
+            }
+          } else {
+            const loadedPages = finalEntries.map((entry) => entry.pageNumber);
+            const tutorEvidence = finalEntries
+              .map((entry) => `[p.${entry.pageNumber}]\n${entry.text}`)
+              .join("\n\n")
+              .slice(0, 180000);
+
+            pdfEvidenceText = [
+              "[RAW PDF EVIDENCE]",
+              `- query: ${effectivePrompt}`,
+              `- requested_pages: ${requestedPages.length ? requestedPages.join(", ") : "none"}`,
+              `- requested_problem_or_section: ${primaryToken || "none"}`,
+              detectedRange
+                ? `- detected_range: p.${detectedRange.startPage}-${detectedRange.endPage}`
+                : "- detected_range: not_found",
+              `- loaded_pages: ${loadedPages.join(", ")}`,
+              "",
+              tutorEvidence,
+            ].join("\n");
           }
         }
-
-        return mergePages(normalizedPages)
-          .map((pageNumber) => entriesByPage.get(pageNumber))
-          .filter((entry) => entry && entry.text);
-      };
-
-      setStatus("吏덈Ц 愿??蹂몃Ц ?섏씠吏瑜?寃?됲븯??以?..");
-      const narrowScanPages = buildPageRange(anchorPage - 20, anchorPage + 90, 130);
-      const broadScanPages = buildPageRange(anchorPage - 70, anchorPage + 220, 260);
-
-      let scannedEntries = await loadPageEntries(narrowScanPages, {
-        useOcr: false,
-        maxCharsPerPage: 4200,
-      });
-
-      let detectedRange =
-        primaryToken && tutorDocKey
-          ? tutorSectionRangeCacheRef.current.get(`${tutorDocKey}:${primaryToken}:${anchorPage}`) || null
-          : null;
-
-      if (!detectedRange && primaryToken) {
-        detectedRange = detectTutorSectionPageRange(scannedEntries, primaryToken);
       }
 
-      if (!detectedRange && primaryToken) {
-        const broadEntries = await loadPageEntries(broadScanPages, {
-          useOcr: false,
-          maxCharsPerPage: 4200,
-        });
-        if (broadEntries.length > scannedEntries.length) scannedEntries = broadEntries;
-        detectedRange = detectTutorSectionPageRange(scannedEntries, primaryToken);
-      }
-
-      if (!detectedRange && primaryToken) {
-        const ocrProbePages = requestedPages.length
-          ? mergePages(requestedPages, buildPageRange(anchorPage - 10, anchorPage + 30, 60))
-          : buildPageRange(anchorPage - 12, anchorPage + 45, 70);
-        const ocrEntries = await loadPageEntries(ocrProbePages, {
-          useOcr: true,
-          maxCharsPerPage: 4200,
-        });
-        detectedRange = detectTutorSectionPageRange(ocrEntries, primaryToken);
-      }
-
-      if (detectedRange && tutorDocKey && primaryToken) {
-        tutorSectionRangeCacheRef.current.set(
-          `${tutorDocKey}:${primaryToken}:${anchorPage}`,
-          detectedRange
-        );
-      }
-
-      let finalPages = [];
-      if (detectedRange?.startPage && detectedRange?.endPage) {
-        finalPages = buildPageRange(detectedRange.startPage - 1, detectedRange.endPage + 1, 120);
-      } else if (requestedPages.length) {
-        const firstRequested = requestedPages[0];
-        const lastRequested = requestedPages[requestedPages.length - 1];
-        finalPages = buildPageRange(firstRequested - 1, Math.max(lastRequested + 18, firstRequested + 12), 120);
-      } else {
-        finalPages = buildPageRange(anchorPage - 3, anchorPage + 15, 40);
-      }
-      finalPages = mergePages(finalPages, requestedPages);
-
-      const finalEntries = await loadPageEntries(finalPages, {
-        useOcr: true,
-        maxCharsPerPage: 5200,
-      });
-      if (!finalEntries.length) {
-        setTutorError("吏덈Ц 愿??蹂몃Ц ?섏씠吏?먯꽌 ?띿뒪?몃? 李얠? 紐삵뻽?듬땲?? PDF瑜??ㅼ떆 ?댁뼱二쇱꽭??");
+      const tutorSourceText = [attachmentEvidenceText, pdfEvidenceText].filter(Boolean).join("\n\n");
+      if (!tutorSourceText) {
+        setTutorError("No readable study evidence was available for the tutor.");
         setStatus("");
-        return;
+        return false;
       }
-
-      const loadedPages = finalEntries.map((entry) => entry.pageNumber);
-      const tutorEvidence = finalEntries
-        .map((entry) => `[p.${entry.pageNumber}]\n${entry.text}`)
-        .join("\n\n")
-        .slice(0, 180000);
-
-      const tutorSourceText = [
-        "[RAW PDF EVIDENCE]",
-        `- query: ${trimmed}`,
-        `- requested_pages: ${requestedPages.length ? requestedPages.join(", ") : "none"}`,
-        `- requested_problem_or_section: ${primaryToken || "none"}`,
-        detectedRange
-          ? `- detected_range: p.${detectedRange.startPage}-${detectedRange.endPage}`
-          : "- detected_range: not_found",
-        `- loaded_pages: ${loadedPages.join(", ")}`,
-        "",
-        tutorEvidence,
-      ].join("\n");
 
       setTutorError("");
       const history = tutorMessages
         .slice(-8)
         .map((msg) => ({
-          ...msg,
-          content: String(msg?.content || "").slice(0, 1200),
+          role: msg?.role,
+          content: buildTutorHistoryMessageContent(msg).slice(0, 1200),
         }))
-        .filter((msg) => msg.content.trim());
-      const userMessage = { role: "user", content: trimmed };
+        .filter((msg) => msg.role && msg.content.trim());
+      const userMessage = {
+        role: "user",
+        content: effectiveDisplayPrompt,
+        ...(attachmentMeta || {}),
+      };
       setTutorMessages((prev) => [...prev, userMessage]);
       setIsTutorLoading(true);
       try {
         const { generateTutorReply } = await getOpenAiService();
         const reply = await generateTutorReply({
-          question: trimmed,
+          question: effectivePrompt,
           extractedText: tutorSourceText,
           messages: history,
+          imageAttachment: attachmentImageDataUrl
+            ? {
+                dataUrl: attachmentImageDataUrl,
+                name: attachmentFile?.name || "",
+                mimeType: attachmentFile?.type || "",
+              }
+            : null,
           outputLanguage,
         });
         const safeReply = resolveTutorReplyText(reply, {
-          question: trimmed,
+          question: effectivePrompt,
           rawEvidenceText: tutorSourceText,
         });
         setTutorMessages((prev) => [...prev, { role: "assistant", content: safeReply }]);
+        return true;
       } catch (err) {
-        setTutorError(`AI ?쒗꽣 ?듬? ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+        setTutorError(`AI tutor reply failed: ${err.message}`);
+        return false;
       } finally {
         setIsTutorLoading(false);
         setStatus("");
@@ -5748,12 +5908,13 @@ function App() {
       currentPage,
       file,
       getOpenAiService,
-    isLoadingText,
-    isTutorLoading,
-    outputLanguage,
-    pageInfo?.total,
-    selectedFileId,
-    tutorMessages,
+      isLoadingText,
+      isTutorLoading,
+      outputLanguage,
+      pageInfo?.total,
+      pageInfo?.used,
+      selectedFileId,
+      tutorMessages,
     ]
   );
 

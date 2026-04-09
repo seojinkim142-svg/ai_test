@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
   MARKDOWN_MATH_REHYPE_PLUGINS,
@@ -8,20 +8,21 @@ import {
 
 const TUTOR_BARE_LATEX_RE =
   /\\(?:begin|end|frac|dfrac|tfrac|sum|prod|int|sqrt|left|right|cdot|times|to|infty|leq?|geq?|neq?|approx|mathbb|mathbf|mathrm|text|quad|qquad|lim)\b/;
+const DEFAULT_ATTACHMENT_PROMPT = "Explain the attached screenshot clearly for a student.";
 
 function normalizeTutorMathLine(expr) {
   return String(expr || "")
     .trim()
-    .replace(/<=|≤/g, " \\le ")
-    .replace(/>=|≥/g, " \\ge ")
-    .replace(/!=|≠/g, " \\ne ")
-    .replace(/~=|≈/g, " \\approx ")
-    .replace(/->|→/g, " \\to ")
-    .replace(/∞/g, " \\infty ")
-    .replace(/Σ|∑/g, " \\sum ")
-    .replace(/∫/g, " \\int ")
-    .replace(/×/g, " \\times ")
-    .replace(/·/g, " \\cdot ")
+    .replace(/<=|\u2264/g, " \\le ")
+    .replace(/>=|\u2265/g, " \\ge ")
+    .replace(/!=|\u2260/g, " \\ne ")
+    .replace(/~=|\u2248/g, " \\approx ")
+    .replace(/->|\u2192/g, " \\to ")
+    .replace(/\u221E/g, " \\infty ")
+    .replace(/\u2211/g, " \\sum ")
+    .replace(/\u222B/g, " \\int ")
+    .replace(/\u00D7/g, " \\times ")
+    .replace(/\u00B7/g, " \\cdot ")
     .replace(/\s{2,}/g, " ")
     .trim();
 }
@@ -30,15 +31,12 @@ function looksLikeStandaloneEquation(text) {
   const line = String(text || "").trim();
   if (!line || line.length > 180) return false;
   if (line.includes("$")) return false;
-  const hasKorean = /[가-힣]/.test(line);
+  const hasKorean = /[\uAC00-\uD7A3]/.test(line);
   const hasLatexCommand = TUTOR_BARE_LATEX_RE.test(line);
   const hasExplicitEquation = /[=<>]/.test(line);
   const mathSymbolCount = (line.match(/[=^_{}()[\]+\-*/|\\]/g) || []).length;
   if (!hasLatexCommand && !hasExplicitEquation && mathSymbolCount < 5) return false;
-  if (hasKorean) {
-    // Korean prose that includes tokens like X_n should stay normal text.
-    return false;
-  }
+  if (hasKorean) return false;
   if (!/[A-Za-z0-9]/.test(line)) return false;
   return true;
 }
@@ -85,6 +83,12 @@ function normalizeTutorMathMarkdown(rawContent) {
   return normalized.join("\n");
 }
 
+function buildAttachmentLabel(message) {
+  const attachmentName = String(message?.attachmentName || "").trim();
+  if (!attachmentName) return "";
+  return `Attached image: ${attachmentName}`;
+}
+
 function AiTutorPanel({
   messages,
   onSend,
@@ -96,6 +100,9 @@ function AiTutorPanel({
   fileName,
 }) {
   const [input, setInput] = useState("");
+  const [attachmentFile, setAttachmentFile] = useState(null);
+  const [attachmentError, setAttachmentError] = useState("");
+  const attachmentInputRef = useRef(null);
 
   const markdownComponents = useMemo(
     () => ({
@@ -117,26 +124,56 @@ function AiTutorPanel({
     []
   );
 
-  const handleSubmit = () => {
+  const clearAttachment = () => {
+    setAttachmentFile(null);
+    setAttachmentError("");
+    if (attachmentInputRef.current) {
+      attachmentInputRef.current.value = "";
+    }
+  };
+
+  const handleSubmit = async () => {
     const trimmed = input.trim();
-    if (!trimmed || !canChat || isLoading) return;
-    onSend?.(trimmed);
+    if ((!trimmed && !attachmentFile) || !canChat || isLoading) return;
+
+    const displayPrompt = trimmed || DEFAULT_ATTACHMENT_PROMPT;
+    const accepted = await onSend?.({
+      prompt: displayPrompt,
+      displayPrompt,
+      attachmentFile,
+    });
+    if (accepted === false) return;
+
     setInput("");
+    clearAttachment();
   };
 
   const handleKeyDown = (event) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      handleSubmit();
+      void handleSubmit();
     }
   };
 
   const handleReset = () => {
     setInput("");
+    clearAttachment();
     onReset?.();
   };
 
-  const canReset = Boolean(messages?.length || input.trim() || error);
+  const handleAttachmentChange = (event) => {
+    const nextFile = event.target.files?.[0] || null;
+    if (!nextFile) return;
+    if (!String(nextFile.type || "").toLowerCase().startsWith("image/")) {
+      clearAttachment();
+      setAttachmentError("Only image files can be attached.");
+      return;
+    }
+    setAttachmentFile(nextFile);
+    setAttachmentError("");
+  };
+
+  const canReset = Boolean(messages?.length || input.trim() || attachmentFile || error || attachmentError);
   const hasMessages = Array.isArray(messages) && messages.length > 0;
   const showEmptyState = !hasMessages && !isLoading;
 
@@ -144,8 +181,8 @@ function AiTutorPanel({
     <div className="flex h-full min-h-[65vh] flex-col gap-4 rounded-3xl border border-white/10 bg-slate-950/80 p-6 shadow-lg shadow-black/30">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-2xl font-semibold text-white">AI 튜터</h3>
-          {fileName && <p className="mt-2 text-xs text-slate-400">현재 문서: {fileName}</p>}
+          <h3 className="text-2xl font-semibold text-white">AI Tutor</h3>
+          {fileName && <p className="mt-2 text-xs text-slate-400">Current document: {fileName}</p>}
         </div>
         <button
           type="button"
@@ -155,7 +192,7 @@ function AiTutorPanel({
           data-ghost-size="sm"
           style={{ "--ghost-color": "148, 163, 184" }}
         >
-          대화 초기화
+          Reset chat
         </button>
       </div>
 
@@ -167,10 +204,16 @@ function AiTutorPanel({
 
       <div className="flex-1 overflow-auto">
         <div className="flex flex-col gap-3">
-          {showEmptyState && <p className="self-center text-sm text-slate-500">질문을 입력해 주세요.</p>}
+          {showEmptyState && (
+            <p className="self-center text-sm text-slate-500">
+              Ask a question, or attach a screenshot for the tutor to explain.
+            </p>
+          )}
 
           {messages?.map((message, index) => {
             const isUser = message.role === "user";
+            const attachmentLabel = buildAttachmentLabel(message);
+            const hasContent = Boolean(String(message?.content || "").trim());
             return (
               <div
                 key={`tutor-${index}`}
@@ -180,10 +223,18 @@ function AiTutorPanel({
                     : "self-start border-white/10 bg-slate-950/60"
                 }`}
               >
+                {attachmentLabel && (
+                  <div className="mb-2 inline-flex max-w-full items-center rounded-full border border-white/10 bg-black/20 px-3 py-1 text-[11px] text-slate-200">
+                    <span className="truncate">{attachmentLabel}</span>
+                  </div>
+                )}
+
                 {isUser ? (
-                  <p className="mt-2 whitespace-pre-wrap break-all leading-relaxed">
-                    {message.content}
-                  </p>
+                  hasContent && (
+                    <p className="mt-2 whitespace-pre-wrap break-all leading-relaxed">
+                      {message.content}
+                    </p>
+                  )
                 ) : (
                   <div className="summary-prose prose prose-sm prose-invert mt-2 max-w-none min-w-0 break-all [&_.katex-display]:max-w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:pb-1">
                     <ReactMarkdown
@@ -201,15 +252,15 @@ function AiTutorPanel({
 
           {!showEmptyState && isLoading && (
             <div className="max-w-[75%] self-start rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-200">
-              <p className="mt-2">답변 생성 중...</p>
+              <p className="mt-2">Generating answer...</p>
             </div>
           )}
         </div>
       </div>
 
-      {error && (
+      {(attachmentError || error) && (
         <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-200 ring-1 ring-red-400/30">
-          {error}
+          {attachmentError || error}
         </p>
       )}
 
@@ -221,18 +272,58 @@ function AiTutorPanel({
           onKeyDown={handleKeyDown}
           disabled={!canChat || isLoading}
           className="show-scrollbar h-[96px] w-full resize-none overflow-y-scroll bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
-          placeholder="질문을 입력해 주세요"
+          placeholder="Ask a question. You can also attach a screenshot."
         />
-        <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+
+        <input
+          ref={attachmentInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleAttachmentChange}
+          className="hidden"
+        />
+
+        {attachmentFile && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-200">
+            <span className="rounded-full bg-white/10 px-2 py-1 font-medium text-slate-100">Screenshot</span>
+            <span className="max-w-full truncate">{attachmentFile.name}</span>
+          </div>
+        )}
+
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => attachmentInputRef.current?.click()}
+              disabled={!canChat || isLoading}
+              className="ghost-button text-sm text-slate-100"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "148, 163, 184" }}
+            >
+              {attachmentFile ? "Replace screenshot" : "Attach screenshot"}
+            </button>
+            {attachmentFile && (
+              <button
+                type="button"
+                onClick={clearAttachment}
+                disabled={isLoading}
+                className="ghost-button text-sm text-slate-100"
+                data-ghost-size="sm"
+                style={{ "--ghost-color": "148, 163, 184" }}
+              >
+                Remove
+              </button>
+            )}
+          </div>
           <button
             type="button"
-            onClick={handleSubmit}
-            disabled={!canChat || isLoading || !input.trim()}
+            onClick={() => void handleSubmit()}
+            disabled={!canChat || isLoading || (!input.trim() && !attachmentFile)}
             className="ghost-button text-sm text-emerald-100"
             data-ghost-size="lg"
             style={{ "--ghost-color": "52, 211, 153" }}
           >
-            {isLoading ? "전송 중..." : "보내기"}
+            {isLoading ? "Sending..." : "Send"}
           </button>
         </div>
       </div>

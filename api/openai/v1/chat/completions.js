@@ -122,9 +122,25 @@ const extractBearerToken = (authHeader) => {
   return match ? text(match[1]) : "";
 };
 
-const resolveUpstreamUrl = () =>
-  text(process.env.DEEPSEEK_UPSTREAM_URL || process.env.OPENAI_UPSTREAM_URL) ||
-  "https://api.deepseek.com/v1/chat/completions";
+const normalizeRequestedProvider = (value) => {
+  const normalized = text(value).toLowerCase();
+  if (normalized === "openai") return "OpenAI";
+  if (normalized === "deepseek") return "DeepSeek";
+  return "";
+};
+
+const resolveUpstreamUrl = (requestedProvider = "") => {
+  if (requestedProvider === "OpenAI") {
+    return text(process.env.OPENAI_UPSTREAM_URL) || "https://api.openai.com/v1/chat/completions";
+  }
+  if (requestedProvider === "DeepSeek") {
+    return text(process.env.DEEPSEEK_UPSTREAM_URL) || "https://api.deepseek.com/v1/chat/completions";
+  }
+  return (
+    text(process.env.DEEPSEEK_UPSTREAM_URL || process.env.OPENAI_UPSTREAM_URL) ||
+    "https://api.deepseek.com/v1/chat/completions"
+  );
+};
 
 const detectProviderName = (url) => {
   const normalized = text(url).toLowerCase();
@@ -173,7 +189,10 @@ export default async function handler(req, res) {
     return;
   }
 
-  const upstreamUrl = resolveUpstreamUrl();
+  const requestedProvider = normalizeRequestedProvider(
+    body?.provider || body?._provider || req.headers["x-llm-provider"]
+  );
+  const upstreamUrl = resolveUpstreamUrl(requestedProvider);
   const providerName = detectProviderName(upstreamUrl);
   const incomingApiKey = extractBearerToken(req.headers.authorization);
   const serverApiKey = resolveServerApiKey(providerName);
@@ -192,13 +211,20 @@ export default async function handler(req, res) {
   }
 
   try {
+    const upstreamPayload =
+      body && typeof body === "object" && !Array.isArray(body)
+        ? { ...body }
+        : {};
+    delete upstreamPayload.provider;
+    delete upstreamPayload._provider;
+
     const upstream = await fetch(upstreamUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify(body || {}),
+      body: JSON.stringify(upstreamPayload),
     });
 
     const rawBody = await upstream.text();
