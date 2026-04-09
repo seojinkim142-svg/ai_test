@@ -1,14 +1,12 @@
 import chargeHandler from "../../../lib/payments/nicepayments/subscription/charge.js";
 import inactiveHandler from "../../../lib/payments/nicepayments/subscription/inactive.js";
 import prepareHandler from "../../../lib/payments/nicepayments/subscription/prepare.js";
-import returnHandler from "../../../lib/payments/nicepayments/subscription/return.js";
 import statusHandler from "../../../lib/payments/nicepayments/subscription/status.js";
 
 const ROUTE_HANDLERS = {
   charge: chargeHandler,
   inactive: inactiveHandler,
   prepare: prepareHandler,
-  return: returnHandler,
   status: statusHandler,
 };
 

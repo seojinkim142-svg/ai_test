@@ -255,6 +255,9 @@ function PaymentPage({
   const headerClass = isLight ? "border-slate-200/80 bg-white/80" : "border-white/5 bg-white/5";
   const pillClass = isLight ? "bg-slate-100 text-slate-700" : "bg-white/10 text-slate-100";
   const accentText = isLight ? "text-emerald-600" : "text-emerald-300";
+  const cardInputClass = isLight
+    ? "border-slate-300 bg-white/80 text-slate-900 placeholder:text-slate-400 focus:border-slate-500 focus:ring-slate-300/60"
+    : "border-white/12 bg-white/[0.03] text-slate-100 placeholder:text-slate-500 focus:border-white/30 focus:ring-white/15";
   const planSectionClass = isLight
     ? "bg-gradient-to-br from-white via-slate-50 to-white"
     : "bg-gradient-to-br from-slate-950/60 via-slate-900/50 to-slate-950/60";
@@ -334,6 +337,12 @@ function PaymentPage({
     isStartingSubscription: isStartingNiceSubscription,
     isChargingSubscription: isChargingNiceSubscription,
     isCancellingSubscription: isCancellingNiceSubscription,
+    showSubscriptionForm: showNiceSubscriptionForm,
+    isSubscriptionTrialForm: isNiceSubscriptionTrialForm,
+    subscriptionCardForm: niceSubscriptionCardForm,
+    updateSubscriptionCardField: updateNiceSubscriptionCardField,
+    closeSubscriptionForm: closeNiceSubscriptionForm,
+    submitSubscription: submitNiceSubscription,
     loadSubscriptionStatus: loadNiceSubscriptionStatus,
     startSubscription: startNiceSubscription,
     chargeSubscription: chargeNiceSubscription,
@@ -1024,6 +1033,134 @@ function PaymentPage({
           </div>
         </div>
 
+        {showNiceSubscriptionForm && (
+          <section
+            className={`mx-6 mt-4 rounded-2xl border px-4 py-4 text-sm ${
+              isLight
+                ? "border-slate-200 bg-white text-slate-700"
+                : "border-white/10 bg-white/5 text-slate-200"
+            }`}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold">
+                  {isNiceSubscriptionTrialForm ? "무료체험용 카드 등록" : "정기결제 카드 등록"}
+                </p>
+                <p className={isLight ? "text-slate-600" : "text-slate-300"}>
+                  입력한 카드 정보는 빌링 키 발급과 첫 결제 처리에만 사용됩니다.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeNiceSubscriptionForm}
+                disabled={isStartingNiceSubscription}
+                className={`ghost-button text-xs ${isLight ? "text-slate-600" : "text-slate-200"}`}
+                style={{ "--ghost-color": isLight ? "100, 116, 139" : "148, 163, 184" }}
+              >
+                닫기
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label className="space-y-1.5">
+                <span className={isLight ? "text-slate-600" : "text-slate-300"}>카드번호</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="cc-number"
+                  placeholder="1234123412341234"
+                  value={niceSubscriptionCardForm.cardNumber}
+                  onChange={(event) => updateNiceSubscriptionCardField("cardNumber", event.target.value)}
+                  className={`w-full rounded-xl border px-3 py-2 text-sm outline-none transition focus:ring ${cardInputClass}`}
+                />
+              </label>
+
+              <label className="space-y-1.5">
+                <span className={isLight ? "text-slate-600" : "text-slate-300"}>생년월일 6자리</span>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder="900101"
+                  value={niceSubscriptionCardForm.birth}
+                  onChange={(event) => updateNiceSubscriptionCardField("birth", event.target.value)}
+                  className={`w-full rounded-xl border px-3 py-2 text-sm outline-none transition focus:ring ${cardInputClass}`}
+                />
+              </label>
+
+              <label className="space-y-1.5">
+                <span className={isLight ? "text-slate-600" : "text-slate-300"}>유효기간 월 / 년</span>
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="cc-exp-month"
+                    placeholder="MM"
+                    value={niceSubscriptionCardForm.expiryMonth}
+                    onChange={(event) => updateNiceSubscriptionCardField("expiryMonth", event.target.value)}
+                    className={`w-full rounded-xl border px-3 py-2 text-sm outline-none transition focus:ring ${cardInputClass}`}
+                  />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="cc-exp-year"
+                    placeholder="YY"
+                    value={niceSubscriptionCardForm.expiryYear}
+                    onChange={(event) => updateNiceSubscriptionCardField("expiryYear", event.target.value)}
+                    className={`w-full rounded-xl border px-3 py-2 text-sm outline-none transition focus:ring ${cardInputClass}`}
+                  />
+                </div>
+              </label>
+
+              <label className="space-y-1.5">
+                <span className={isLight ? "text-slate-600" : "text-slate-300"}>카드 비밀번호 앞 2자리</span>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder="12"
+                  value={niceSubscriptionCardForm.cardPassword}
+                  onChange={(event) => updateNiceSubscriptionCardField("cardPassword", event.target.value)}
+                  className={`w-full rounded-xl border px-3 py-2 text-sm outline-none transition focus:ring ${cardInputClass}`}
+                />
+              </label>
+            </div>
+
+            <p className={isLight ? "mt-3 text-xs text-slate-500" : "mt-3 text-xs text-slate-300"}>
+              {isNiceSubscriptionTrialForm
+                ? "오늘은 결제 없이 카드만 등록되고, 다음 결제일부터 정기 청구가 시작됩니다."
+                : "카드 등록 후 첫 결제가 즉시 진행되고 이후부터 정기 청구됩니다."}
+            </p>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={submitNiceSubscription}
+                disabled={isStartingNiceSubscription}
+                className={`ghost-button text-sm ${isLight ? "text-emerald-700" : "text-emerald-100"}`}
+                style={{ "--ghost-color": "16, 185, 129" }}
+              >
+                {isStartingNiceSubscription
+                  ? isNiceSubscriptionTrialForm
+                    ? "무료체험 등록 중.."
+                    : "정기결제 등록 중.."
+                  : isNiceSubscriptionTrialForm
+                    ? "카드 등록하고 무료체험 시작"
+                    : "카드 등록하고 정기결제 시작"}
+              </button>
+              <button
+                type="button"
+                onClick={closeNiceSubscriptionForm}
+                disabled={isStartingNiceSubscription}
+                className={`ghost-button text-sm ${isLight ? "text-slate-700" : "text-slate-200"}`}
+                style={{ "--ghost-color": isLight ? "100, 116, 139" : "148, 163, 184" }}
+              >
+                취소
+              </button>
+            </div>
+          </section>
+        )}
+
         {shouldShowSubscriptionSettings && (
         <section
           className={`mx-6 mt-4 rounded-2xl border px-4 py-4 text-sm ${
@@ -1229,13 +1366,13 @@ function PaymentPage({
                       >
                         {niceSubscriptionStatusLabel}
                       </span>
-                      {niceSubscriptionData?.isTestMid && (
+                      {(niceSubscriptionData?.isTestClientKey ?? niceSubscriptionData?.isTestMid) && (
                         <span
                           className={`rounded-full px-2.5 py-1 text-xs font-semibold ${
                             isLight ? "bg-amber-100 text-amber-700" : "bg-amber-500/15 text-amber-200"
                           }`}
                         >
-                          테스트 MID
+                          테스트 키
                         </span>
                       )}
                     </div>
@@ -1297,7 +1434,7 @@ function PaymentPage({
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {activeNiceSubscription?.isTestMid && (
+                  {(activeNiceSubscription?.isTestClientKey ?? activeNiceSubscription?.isTestMid) && (
                     <button
                       type="button"
                       onClick={chargeNiceSubscription}
@@ -1321,9 +1458,9 @@ function PaymentPage({
                   )}
                 </div>
 
-                {activeNiceSubscription?.isTestMid ? (
+                {(activeNiceSubscription?.isTestClientKey ?? activeNiceSubscription?.isTestMid) ? (
                   <p className={isLight ? "mt-3 text-xs text-slate-500" : "mt-3 text-xs text-slate-300"}>
-                    테스트 MID에서만 즉시 재청구 버튼을 노출합니다. 운영 MID는 서버 스케줄러에서 자동 청구해야 합니다.
+                    테스트 키에서만 즉시 재청구 버튼을 노출합니다. 운영 키는 서버 스케줄러에서 자동 청구해야 합니다.
                   </p>
                 ) : activeNiceSubscription ? (
                   <p className={isLight ? "mt-3 text-xs text-slate-500" : "mt-3 text-xs text-slate-300"}>

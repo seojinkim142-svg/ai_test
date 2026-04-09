@@ -255,6 +255,28 @@ Recent app updates now reflected in the codebase:
   - The original Office file remains stored as uploaded.
   - A generated preview PDF is stored separately and used by the detail preview pipeline.
   - Upload cards now refresh their thumbnail from the generated preview PDF so Office uploads visually behave more like PDFs after conversion.
+- NICE recurring billing was migrated from the legacy MID/goPay billing-auth popup flow to the NicePayments Postart REST bill-key flow.
+  - Registration now uses encrypted card data with `POST /v1/subscribe/regist`.
+  - First recurring payment uses the issued `BID` with `POST /v1/subscribe/{bid}/payments`.
+  - Cancellation expires the `BID` with `POST /v1/subscribe/{bid}/expire`.
+  - Existing subscription persistence, tier sync, and cron-based follow-up charging remain in place.
+
+### NicePayments Recurring Billing
+
+The current recurring card implementation assumes the NicePayments Postart contract model:
+
+- `client key + secret key`
+- REST bill-key APIs
+- No `goPay` popup or MID-based billing-auth return flow for recurring registration
+
+Recommended recurring billing environment values:
+
+- `NICEPAYMENTS_CLIENT_ID`
+- `NICEPAYMENTS_SECRET_KEY`
+- `NICEPAYMENTS_SUBSCRIPTION_API_BASE=https://api.nicepay.co.kr`
+- `NICEPAYMENTS_BILLING_CRON_SECRET`
+
+Legacy recurring billing variables such as `NICEPAYMENTS_BILLING_MID` and `NICEPAYMENTS_BILLING_MERCHANT_KEY` are no longer used by the recurring subscription endpoints.
 
 ## Build Verification
 

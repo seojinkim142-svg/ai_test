@@ -17,7 +17,6 @@ const ROUTES = new Map([
   ["/api/nicepayments/pro-trial", proTrialHandler],
   ["/api/nicepayments/return", returnHandler],
   ["/api/nicepayments/subscription/prepare", subscriptionHandler],
-  ["/api/nicepayments/subscription/return", subscriptionHandler],
   ["/api/nicepayments/subscription/status", subscriptionHandler],
   ["/api/nicepayments/subscription/charge", subscriptionHandler],
   ["/api/nicepayments/subscription/inactive", subscriptionHandler],
