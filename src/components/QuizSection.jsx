@@ -161,8 +161,6 @@ function QuizSection({
   title = "생성된 퀴즈",
   questions,
   summary,
-  questionStyleProfile,
-  questionStyleScopeLabel,
   selectedChoices,
   revealedChoices,
   shortAnswerInput,
@@ -190,22 +188,6 @@ function QuizSection({
       </div>
 
       {summary}
-
-      {questionStyleProfile && (
-        <details className="mt-4 rounded-2xl border border-amber-300/20 bg-amber-500/5 p-3 text-sm text-amber-50">
-          <summary className="cursor-pointer select-none font-semibold text-amber-100">
-            문제 스타일 분석 보기 (임시)
-          </summary>
-          <div className="mt-3 space-y-2">
-            {questionStyleScopeLabel && (
-              <p className="text-xs text-amber-100/80">범위: {questionStyleScopeLabel}</p>
-            )}
-            <pre className="whitespace-pre-wrap break-words rounded-xl bg-black/20 p-3 text-xs leading-6 text-amber-50/95">
-              {questionStyleProfile}
-            </pre>
-          </div>
-        </details>
-      )}
 
       <div className="mt-4 space-y-4">
         {multipleChoice.map((question, idx) => (
