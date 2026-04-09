@@ -34,19 +34,55 @@ function resolveDeepSeekBaseUrl() {
   return "/api/openai";
 }
 
+function resolveOpenAiBaseUrl() {
+  const explicitBase = trimTrailingSlash(import.meta.env.VITE_OPENAI_BASE_URL);
+  if (explicitBase) return explicitBase;
+
+  if (import.meta.env.DEV) {
+    return "https://api.openai.com";
+  }
+
+  const publicAppOrigin = trimTrailingSlash(resolvePublicAppOrigin());
+  if (Capacitor.isNativePlatform() && publicAppOrigin) {
+    return `${publicAppOrigin}/api/openai`;
+  }
+
+  return "/api/openai";
+}
+
+function createChatTarget(provider, baseUrl) {
+  const normalizedBaseUrl = trimTrailingSlash(baseUrl);
+  const usesAppProxy = isAppProxyBaseUrl(normalizedBaseUrl);
+  return {
+    provider,
+    baseUrl: normalizedBaseUrl,
+    chatUrl: `${normalizedBaseUrl}/v1/chat/completions`,
+    isDirectDeepSeekBase: DIRECT_DEEPSEEK_BASE_RE.test(normalizedBaseUrl),
+    isDirectOpenAiBase: DIRECT_OPENAI_BASE_RE.test(normalizedBaseUrl),
+    usesAppProxy,
+    usesDevProxy: import.meta.env.DEV && usesAppProxy,
+    usesRelativeBase: normalizedBaseUrl.startsWith("/"),
+  };
+}
+
 const DEEPSEEK_BASE_URL = resolveDeepSeekBaseUrl();
-const IS_DIRECT_DEEPSEEK_BASE = DIRECT_DEEPSEEK_BASE_RE.test(DEEPSEEK_BASE_URL);
-const IS_DIRECT_OPENAI_BASE = DIRECT_OPENAI_BASE_RE.test(DEEPSEEK_BASE_URL);
-const USES_APP_PROXY = isAppProxyBaseUrl(DEEPSEEK_BASE_URL);
-const USES_DEV_PROXY = import.meta.env.DEV && USES_APP_PROXY;
+const OPENAI_BASE_URL = resolveOpenAiBaseUrl();
+const DEFAULT_CHAT_TARGET = createChatTarget("deepseek", DEEPSEEK_BASE_URL);
+const OPENAI_CHAT_TARGET = createChatTarget("openai", OPENAI_BASE_URL);
 const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
-const USES_RELATIVE_BASE = DEEPSEEK_BASE_URL.startsWith("/");
-const CHAT_URL = `${DEEPSEEK_BASE_URL}/v1/chat/completions`;
 const TUTOR_FALLBACK_MODELS = [
   MODEL,
   import.meta.env.VITE_DEEPSEEK_TUTOR_MODEL || import.meta.env.VITE_OPENAI_TUTOR_MODEL || "",
   "deepseek-chat",
   "deepseek-reasoner",
+]
+  .map((name) => String(name || "").trim())
+  .filter(Boolean)
+  .filter((name, index, arr) => arr.indexOf(name) === index);
+const TUTOR_VISION_MODELS = [
+  import.meta.env.VITE_OPENAI_TUTOR_VISION_MODEL || import.meta.env.VITE_OPENAI_VISION_MODEL || "",
+  "gpt-4.1-mini",
+  "gpt-4o-mini",
 ]
   .map((name) => String(name || "").trim())
   .filter(Boolean)
@@ -2143,34 +2179,50 @@ function parseRetryAfterSeconds(response) {
   return null;
 }
 
-function resolveClientApiKey() {
-  if (IS_DIRECT_DEEPSEEK_BASE || USES_APP_PROXY) {
+function resolveChatTarget(provider = "deepseek") {
+  return String(provider || "").trim().toLowerCase() === "openai"
+    ? OPENAI_CHAT_TARGET
+    : DEFAULT_CHAT_TARGET;
+}
+
+function resolveClientApiKey(target) {
+  if (target?.provider === "openai") {
+    if (target.isDirectOpenAiBase || target.usesDevProxy || target.usesAppProxy) {
+      return String(import.meta.env.VITE_OPENAI_API_KEY || "").trim();
+    }
+    return "";
+  }
+
+  if (target?.isDirectDeepSeekBase || target?.usesDevProxy || target?.usesAppProxy) {
     return String(import.meta.env.VITE_DEEPSEEK_API_KEY || "").trim();
   }
 
-  if (IS_DIRECT_OPENAI_BASE) {
+  if (target?.isDirectOpenAiBase) {
     return String(import.meta.env.VITE_OPENAI_API_KEY || "").trim();
   }
 
   return "";
 }
 
-async function postChatRequest(body, { retries = 1 } = {}) {
-  const apiKey = resolveClientApiKey();
+async function postChatRequest(body, { retries = 1, provider = "deepseek" } = {}) {
+  const target = resolveChatTarget(provider);
+  const apiKey = resolveClientApiKey(target);
 
-  if (IS_NATIVE_PLATFORM && USES_RELATIVE_BASE) {
+  if (IS_NATIVE_PLATFORM && target.usesRelativeBase) {
     throw new Error(
-      "모바일 앱에서는 API 절대 경로가 필요합니다. `VITE_PUBLIC_APP_ORIGIN` 또는 `VITE_DEEPSEEK_BASE_URL`을 설정한 뒤 APK를 다시 빌드해주세요."
+      `Mobile builds need an absolute API base URL. Set \`VITE_PUBLIC_APP_ORIGIN\` or \`${
+        target.provider === "openai" ? "VITE_OPENAI_BASE_URL" : "VITE_DEEPSEEK_BASE_URL"
+      }\` and rebuild the app.`
     );
   }
 
-  if ((IS_DIRECT_DEEPSEEK_BASE || USES_DEV_PROXY) && !apiKey) {
+  if ((target.isDirectDeepSeekBase || target.usesDevProxy) && target.provider === "deepseek" && !apiKey) {
     throw new Error(
       "DeepSeek API key is missing. Add `VITE_DEEPSEEK_API_KEY` to your `.env` and restart the dev server."
     );
   }
 
-  if (IS_DIRECT_OPENAI_BASE && !apiKey) {
+  if ((target.isDirectOpenAiBase || target.usesDevProxy) && target.provider === "openai" && !apiKey) {
     throw new Error(
       "OpenAI API key is missing. Add `VITE_OPENAI_API_KEY` to your `.env` and restart the dev server."
     );
@@ -2180,16 +2232,17 @@ async function postChatRequest(body, { retries = 1 } = {}) {
     "Content-Type": "application/json",
   };
   if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  const requestBody = target.usesAppProxy ? { ...(body || {}), provider: target.provider } : body;
 
   let response;
   try {
-    response = await fetch(CHAT_URL, {
+    response = await fetch(target.chatUrl, {
       method: "POST",
       headers,
-      body: JSON.stringify(body),
+      body: JSON.stringify(requestBody),
     });
   } catch (err) {
-    throw new Error(`DeepSeek request failed: ${err.message || err}`);
+    throw new Error(`${target.provider === "openai" ? "OpenAI" : "DeepSeek"} request failed: ${err.message || err}`);
   }
 
   if (response.status === 429) {
@@ -2206,7 +2259,7 @@ async function postChatRequest(body, { retries = 1 } = {}) {
     if (retries > 0) {
       const delay = (waitSeconds ?? 10) * 1000;
       await sleep(delay);
-      return postChatRequest(body, { retries: retries - 1 });
+      return postChatRequest(body, { retries: retries - 1, provider: target.provider });
     }
 
     throw new Error(waitSeconds ? `${hint} (retry in ${waitSeconds}s)` : hint);
@@ -2223,7 +2276,7 @@ async function postChatRequest(body, { retries = 1 } = {}) {
       // Body was not JSON; keep raw text
     }
 
-    throw new Error(`DeepSeek API error: ${response.status} ${message}`);
+    throw new Error(`${target.provider === "openai" ? "OpenAI" : "DeepSeek"} API error: ${response.status} ${message}`);
   }
 
   return response.json();
@@ -2717,12 +2770,13 @@ function extractTutorEvidenceBlocks(contextText) {
   const source = String(contextText || "");
   if (!source) return [];
   const blocks = [];
-  const re = /\[p\.(\d+)\]\s*\n([\s\S]*?)(?=\n\s*\[p\.\d+\]\s*\n|$)/gi;
+  const re = /\[(p\.\d+|img(?:\.\d+)?)\]\s*\n([\s\S]*?)(?=\n\s*\[(?:p\.\d+|img(?:\.\d+)?)\]\s*\n|$)/gi;
   for (const match of source.matchAll(re)) {
-    const pageNumber = Number.parseInt(match?.[1], 10);
+    const label = String(match?.[1] || "").trim().toLowerCase();
+    const pageNumber = Number.parseInt(label.match(/^p\.(\d+)$/i)?.[1] || "", 10);
     const text = String(match?.[2] || "").trim();
-    if (!Number.isFinite(pageNumber) || !text) continue;
-    blocks.push({ pageNumber, text });
+    if (!label || !text) continue;
+    blocks.push({ label, pageNumber, text });
   }
   return blocks;
 }
@@ -2796,7 +2850,11 @@ function buildTutorEvidenceFallback({ question, contextText, reason = "", output
 
   const lines = [copy.empty];
   for (const item of selected) {
-    const label = Number.isFinite(item.pageNumber) ? `p.${item.pageNumber}` : copy.evidenceLabel;
+    const label = Number.isFinite(item.pageNumber)
+      ? `p.${item.pageNumber}`
+      : /^img(?:\.\d+)?$/i.test(String(item.label || ""))
+        ? "screenshot"
+        : copy.evidenceLabel;
     const snippet = pickTutorEvidenceSnippet(item.text, terms, 320);
     lines.push(`- ${label}: ${snippet}`);
   }
@@ -2882,16 +2940,160 @@ async function requestTutorCompletion({
   };
 }
 
-export async function generateTutorReply({ question, extractedText, messages = [], outputLanguage = "ko" }) {
+async function requestTutorVisionCompletion({
+  model,
+  context,
+  question,
+  history = [],
+  extraSystem = "",
+  maxTokens = 900,
+  outputLanguage = "ko",
+  imageAttachment = null,
+}) {
+  const imageUrl = String(imageAttachment?.dataUrl || "").trim();
+  if (!imageUrl) {
+    throw new Error("Tutor vision request is missing an image.");
+  }
+
+  const messages = [{ role: "system", content: buildTutorSystemPrompt(outputLanguage) }];
+  const guard = String(extraSystem || "").trim();
+  if (guard) {
+    messages.push({ role: "system", content: guard });
+  }
+  if (context) {
+    messages.push({ role: "system", content: `Document content:\n${context}` });
+  }
+  messages.push(...(Array.isArray(history) ? history : []));
+  messages.push({
+    role: "user",
+    content: [
+      { type: "text", text: question },
+      {
+        type: "image_url",
+        image_url: {
+          url: imageUrl,
+          detail: "high",
+        },
+      },
+    ],
+  });
+
+  const basePayload = {
+    model,
+    messages,
+    temperature: 0.2,
+  };
+  let data = null;
+  let lastError = null;
+
+  try {
+    data = await postChatRequest(
+      {
+        ...basePayload,
+        max_completion_tokens: maxTokens,
+      },
+      { retries: 0, provider: "openai" }
+    );
+  } catch (err) {
+    lastError = err;
+    if (isTutorTokenLimitParamError(err)) {
+      try {
+        data = await postChatRequest(
+          {
+            ...basePayload,
+            max_tokens: maxTokens,
+          },
+          { retries: 0, provider: "openai" }
+        );
+      } catch (fallbackErr) {
+        lastError = fallbackErr;
+      }
+    }
+  }
+
+  if (!data && lastError) {
+    throw lastError;
+  }
+  if (!data) {
+    throw new Error("Tutor vision completion failed: empty API response");
+  }
+
+  return {
+    content: extractTutorCompletionText(data),
+    finishReason: data?.choices?.[0]?.finish_reason || "",
+    raw: data,
+  };
+}
+
+export async function generateTutorReply({
+  question,
+  extractedText,
+  messages = [],
+  outputLanguage = "ko",
+  imageAttachment = null,
+}) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const contextText = buildTutorContext(extractedText, { question, messages });
   if (!contextText) {
     throw new Error("Tutor context is empty. Reload PDF text before asking questions.");
   }
 
+  const hasImageAttachment = Boolean(String(imageAttachment?.dataUrl || "").trim());
   const history = (messages || [])
     .filter((msg) => msg && (msg.role === "user" || msg.role === "assistant") && msg.content)
     .map((msg) => ({ role: msg.role, content: String(msg.content) }));
+
+  if (hasImageAttachment) {
+    const visionStrategies = [
+      {
+        context: limitText(contextText, 16000),
+        history,
+        extraSystem:
+          `Analyze the attached screenshot first, then use the supplied OCR/document evidence to make the explanation more reliable. Answer in ${outputLanguageLabel}.`,
+        maxTokens: 1000,
+        rejectCoverageRefusal: true,
+        outputLanguage,
+      },
+      {
+        context: buildTutorRetrySnippet(contextText, question),
+        history: [],
+        extraSystem:
+          `Focus on the attached screenshot and answer immediately in ${outputLanguageLabel}. If any part is hard to read, say what is uncertain briefly and continue with the clearest explanation possible.`,
+        maxTokens: 1000,
+        rejectCoverageRefusal: false,
+        outputLanguage,
+      },
+    ];
+
+    let lastVisionFinishReason = "";
+    let lastVisionErrorMessage = "";
+    for (const strategy of visionStrategies) {
+      for (const model of TUTOR_VISION_MODELS) {
+        try {
+          const result = await requestTutorVisionCompletion({
+            model,
+            context: strategy.context,
+            question,
+            history: strategy.history,
+            extraSystem: strategy.extraSystem,
+            maxTokens: strategy.maxTokens,
+            outputLanguage: strategy.outputLanguage,
+            imageAttachment,
+          });
+          const content = String(result?.content || "").trim();
+          lastVisionFinishReason = String(result?.finishReason || lastVisionFinishReason || "");
+          if (!content) continue;
+          if (strategy.rejectCoverageRefusal && looksLikeTutorCoverageRefusal(content)) continue;
+          return content;
+        } catch (err) {
+          lastVisionErrorMessage = String(err?.message || lastVisionErrorMessage || "");
+        }
+      }
+    }
+    if (lastVisionErrorMessage || lastVisionFinishReason) {
+      // Fall through to the text-only tutor path using OCR/document evidence.
+    }
+  }
 
   const strategies = [
     {

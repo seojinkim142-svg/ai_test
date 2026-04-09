@@ -1801,7 +1801,7 @@ export default function DetailPage({
               messages={tutorMessages}
               isLoading={isTutorLoading}
               error={tutorError}
-              canChat={!tutorNotice}
+              canChat={!isTutorLoading}
               notice={tutorNotice}
               fileName={file?.name || ""}
               onSend={handleSendTutorMessage}
