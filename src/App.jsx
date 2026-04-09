@@ -1083,6 +1083,7 @@ function App() {
   const [mockExamChapterSelectionInput, setMockExamChapterSelectionInput] = useState("");
   const [isChapterRangeOpen, setIsChapterRangeOpen] = useState(false);
   const [chapterRangeInput, setChapterRangeInput] = useState("");
+  const [autoChapterRangeInput, setAutoChapterRangeInput] = useState("");
   const [chapterRangeError, setChapterRangeError] = useState("");
   const [isDetectingChapterRanges, setIsDetectingChapterRanges] = useState(false);
   const [artifacts, setArtifacts] = useState(null);
@@ -1514,6 +1515,7 @@ function App() {
     setOxChapterSelectionInput("");
     setFlashcardChapterSelectionInput("");
     setMockExamChapterSelectionInput("");
+    setAutoChapterRangeInput("");
     tutorPageTextCacheRef.current.clear();
     tutorSectionRangeCacheRef.current.clear();
     chapterScopeTextCacheRef.current.clear();
@@ -2915,6 +2917,7 @@ function App() {
       setIsPageSummaryLoading(false);
       setIsChapterRangeOpen(false);
       setChapterRangeInput(savedChapterRangeInput);
+      setAutoChapterRangeInput("");
       setChapterRangeError("");
       oxAutoRequestedRef.current = false;
       const artifactsPromise = loadArtifacts(nextDocId);
@@ -3254,6 +3257,7 @@ function App() {
     setOxChapterSelectionInput("");
     setFlashcardChapterSelectionInput("");
     setMockExamChapterSelectionInput("");
+    setAutoChapterRangeInput("");
     tutorPageTextCacheRef.current.clear();
     tutorSectionRangeCacheRef.current.clear();
     chapterScopeTextCacheRef.current.clear();
@@ -3281,6 +3285,7 @@ function App() {
     setIsPageSummaryLoading(false);
     setIsChapterRangeOpen(false);
     setChapterRangeInput("");
+    setAutoChapterRangeInput("");
     setChapterRangeError("");
     setOxItems(null);
     setOxSelections({});
@@ -3742,12 +3747,49 @@ function App() {
     "--split-basis": `${splitPercent}%`,
   };
 
+  const buildChapterRangeInputFromChapters = useCallback((chapters = []) => {
+    return (Array.isArray(chapters) ? chapters : [])
+      .map((chapter, index) => {
+        const start = Number.parseInt(chapter?.pageStart, 10);
+        const end = Number.parseInt(chapter?.pageEnd, 10);
+        if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end < start) return "";
+        return `${index + 1}:${start}-${end}`;
+      })
+      .filter(Boolean)
+      .join("\n");
+  }, []);
+
+  const buildAutomaticChapterRangeInput = useCallback((totalPages, startPage = 1) => {
+    const normalizedTotalPages = Number.parseInt(totalPages, 10);
+    if (!Number.isFinite(normalizedTotalPages) || normalizedTotalPages <= 0) return "";
+
+    const normalizedStartPage = Math.min(
+      normalizedTotalPages,
+      Math.max(1, Number.parseInt(startPage, 10) || 1)
+    );
+    const remainingPages = normalizedTotalPages - normalizedStartPage + 1;
+    if (remainingPages <= 0) return "";
+
+    const targetSectionCount = Math.max(1, Math.min(8, Math.ceil(remainingPages / 18)));
+    const pagesPerSection = Math.max(1, Math.ceil(remainingPages / targetSectionCount));
+    const sections = [];
+    let index = 1;
+
+    for (let currentPage = normalizedStartPage; currentPage <= normalizedTotalPages; currentPage += pagesPerSection) {
+      const endPage = Math.min(normalizedTotalPages, currentPage + pagesPerSection - 1);
+      sections.push(`${index}:${currentPage}-${endPage}`);
+      index += 1;
+    }
+
+    return sections.join("\n");
+  }, []);
+
   const resolveChapterOneStartPage = useCallback(async () => {
     if (!file || !isPdfDocumentKind(detectSupportedDocumentKind(file))) return 1;
     const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
     if (!Number.isFinite(totalPages) || totalPages <= 0) return 1;
 
-    const manualRangeRaw = String(chapterRangeInput || "").trim();
+    const manualRangeRaw = String(chapterRangeInput || autoChapterRangeInput || "").trim();
     if (manualRangeRaw) {
       const parsed = parseChapterRangeSelectionInput(manualRangeRaw, totalPages);
       if (!parsed.error && Array.isArray(parsed.chapters) && parsed.chapters.length > 0) {
@@ -3793,7 +3835,76 @@ function App() {
 
     chapterOneStartPageCacheRef.current.set(docKey, 1);
     return 1;
-  }, [chapterRangeInput, file, pageInfo?.total, pageInfo?.used, selectedFileId]);
+  }, [autoChapterRangeInput, chapterRangeInput, file, pageInfo?.total, pageInfo?.used, selectedFileId]);
+
+  useEffect(() => {
+    if (!file || !isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+      setAutoChapterRangeInput("");
+      return;
+    }
+    if (String(chapterRangeInput || "").trim()) {
+      setAutoChapterRangeInput("");
+      return;
+    }
+    if (String(autoChapterRangeInput || "").trim()) return;
+
+    const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
+    if (!Number.isFinite(totalPages) || totalPages <= 0) return;
+
+    const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
+    let cancelled = false;
+
+    (async () => {
+      let resolvedInput = "";
+      try {
+        const detected = await extractChapterRangesFromToc(file, {
+          maxScanPages: totalPages ? Math.min(totalPages, 30) : 24,
+        });
+        const chapters = Array.isArray(detected?.chapters) ? detected.chapters : [];
+        const detectedInput = buildChapterRangeInputFromChapters(chapters);
+        const parsed = detectedInput
+          ? parseChapterRangeSelectionInput(detectedInput, totalPages || Number(detected?.totalPages) || 0)
+          : { error: "empty", chapters: [] };
+
+        if (!parsed.error && parsed.chapters.length > 0) {
+          resolvedInput = detectedInput;
+          const sorted = [...parsed.chapters].sort(
+            (left, right) => (Number(left?.pageStart) || 0) - (Number(right?.pageStart) || 0)
+          );
+          const chapterOne =
+            sorted.find((chapter) => Number.parseInt(chapter?.chapterNumber, 10) === 1) || sorted[0];
+          const start = Number.parseInt(chapterOne?.pageStart, 10);
+          if (Number.isFinite(start) && start > 0) {
+            chapterOneStartPageCacheRef.current.set(docKey, Math.min(totalPages, Math.max(1, start)));
+          }
+        }
+      } catch {
+        resolvedInput = "";
+      }
+
+      if (!resolvedInput) {
+        const cachedStartPage = Number(chapterOneStartPageCacheRef.current.get(docKey));
+        resolvedInput = buildAutomaticChapterRangeInput(totalPages, cachedStartPage);
+      }
+
+      if (!cancelled) {
+        setAutoChapterRangeInput(resolvedInput);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    autoChapterRangeInput,
+    buildAutomaticChapterRangeInput,
+    buildChapterRangeInputFromChapters,
+    chapterRangeInput,
+    file,
+    pageInfo?.total,
+    pageInfo?.used,
+    selectedFileId,
+  ]);
 
   const resolveQuestionSourceText = useCallback(
     async ({ featureLabel, chapterSelectionInput, baseText }) => {
@@ -3911,7 +4022,7 @@ function App() {
       const quizSourceText = String(scopedSource?.text || "").trim();
       const scopeLabel = String(scopedSource?.scopeLabel || "").trim();
       if (!quizSourceText) {
-        throw new Error("챕터 1 이후 텍스트를 찾지 못했습니다. 챕터 범위를 먼저 설정해주세요.");
+        throw new Error("문서에서 퀴즈에 사용할 본문 텍스트를 찾지 못했습니다.");
       }
       if (scopeLabel) {
         setStatus(`퀴즈 세트 생성 중... (${scopeLabel})`);
@@ -4554,13 +4665,38 @@ function App() {
     [file, pageInfo.total, pageInfo.used]
   );
 
+  const effectiveChapterRangeInput = useMemo(() => {
+    const manualInput = String(chapterRangeInput || "").trim();
+    if (manualInput) return manualInput;
+
+    const autoInput = String(autoChapterRangeInput || "").trim();
+    if (autoInput) return autoInput;
+
+    if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) return "";
+    const totalPages = Number(pageInfo.total || pageInfo.used || 0);
+    if (!Number.isFinite(totalPages) || totalPages <= 0) return "";
+
+    const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
+    const cachedStartPage = Number(chapterOneStartPageCacheRef.current.get(docKey));
+    return buildAutomaticChapterRangeInput(totalPages, cachedStartPage);
+  }, [
+    autoChapterRangeInput,
+    buildAutomaticChapterRangeInput,
+    chapterRangeInput,
+    file,
+    pageInfo.total,
+    pageInfo.used,
+    selectedFileId,
+  ]);
+
   const configuredReviewSections = useMemo(() => {
-    const raw = String(chapterRangeInput || "").trim();
+    const raw = String(effectiveChapterRangeInput || "").trim();
     if (!raw) return [];
     const limit = resolveChapterRangeLimit(raw);
     if (!limit) return [];
     const parsed = parseChapterRangeSelectionInput(raw, limit);
     if (parsed.error) return [];
+    const isAutoGenerated = !String(chapterRangeInput || "").trim();
     return (Array.isArray(parsed.chapters) ? parsed.chapters : [])
       .map((chapter, index) => {
         const chapterNumber = Number.parseInt(chapter?.chapterNumber, 10);
@@ -4576,12 +4712,12 @@ function App() {
           chapterNumber: normalizedChapterNumber,
           pageStart,
           pageEnd,
-          label: `섹션 ${normalizedChapterNumber}`,
-          detailLabel: `섹션 ${normalizedChapterNumber} · ${pageStart}-${pageEnd}p`,
+          label: `${isAutoGenerated ? "자동 섹션" : "섹션"} ${normalizedChapterNumber}`,
+          detailLabel: `${isAutoGenerated ? "자동 섹션" : "섹션"} ${normalizedChapterNumber} · ${pageStart}-${pageEnd}p`,
         };
       })
       .filter(Boolean);
-  }, [chapterRangeInput, resolveChapterRangeLimit]);
+  }, [chapterRangeInput, effectiveChapterRangeInput, resolveChapterRangeLimit]);
 
   const reviewNotesWithSections = useMemo(() => {
     const notes = Array.isArray(reviewNotes) ? reviewNotes : [];
@@ -4612,7 +4748,7 @@ function App() {
       if (!configuredReviewSections.length) {
         return {
           items: list,
-          error: "먼저 요약 탭에서 챕터 범위를 설정해주세요.",
+          error: "문서 범위를 아직 준비하지 못했습니다. 잠시 후 다시 시도해주세요.",
           selectedSectionNumbers: [],
         };
       }
@@ -4727,7 +4863,7 @@ function App() {
         throw new Error("챕터/페이지 범위 기능은 PDF에서만 지원됩니다.");
       }
 
-      let chapterConfigRaw = String(chapterRangeInput || "").trim();
+      let chapterConfigRaw = String(effectiveChapterRangeInput || "").trim();
       if (!chapterConfigRaw) {
         const totalPages = pageInfo.total || pageInfo.used || 0;
         let autoChapterInput = "";
@@ -4737,25 +4873,23 @@ function App() {
             maxScanPages: totalPages ? Math.min(totalPages, 30) : 24,
           });
           const chapters = Array.isArray(detected?.chapters) ? detected.chapters : [];
-          autoChapterInput = chapters
-            .map((chapter, index) => {
-              const start = Number.parseInt(chapter?.pageStart, 10);
-              const end = Number.parseInt(chapter?.pageEnd, 10);
-              if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end < start) return "";
-              return `${index + 1}:${start}-${end}`;
-            })
-            .filter(Boolean)
-            .join("\n");
+          autoChapterInput = buildChapterRangeInputFromChapters(chapters);
 
           if (autoChapterInput) {
             const limit = totalPages || Number(detected?.totalPages) || 0;
             const parsedAuto = parseChapterRangeSelectionInput(autoChapterInput, limit);
             if (!parsedAuto.error && parsedAuto.chapters.length > 0) {
-              setChapterRangeInput(autoChapterInput);
+              setAutoChapterRangeInput(autoChapterInput);
               setChapterRangeError("");
-              const targetDocId = selectedFileId || file?.name || "";
-              if (targetDocId) {
-                persistChapterRangeInput(targetDocId, autoChapterInput);
+              const sorted = [...parsedAuto.chapters].sort(
+                (left, right) => (Number(left?.pageStart) || 0) - (Number(right?.pageStart) || 0)
+              );
+              const chapterOne =
+                sorted.find((chapter) => Number.parseInt(chapter?.chapterNumber, 10) === 1) || sorted[0];
+              const start = Number.parseInt(chapterOne?.pageStart, 10);
+              if (Number.isFinite(start) && start > 0) {
+                const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
+                chapterOneStartPageCacheRef.current.set(docKey, Math.min(limit, Math.max(1, start)));
               }
             } else {
               autoChapterInput = "";
@@ -4766,13 +4900,19 @@ function App() {
         }
 
         if (!autoChapterInput) {
-          throw new Error("먼저 챕터 범위를 설정해주세요. 요약 탭의 챕터 범위 설정에서 다시 시도해주세요.");
+          const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
+          const cachedStartPage = Number(chapterOneStartPageCacheRef.current.get(docKey));
+          autoChapterInput = buildAutomaticChapterRangeInput(totalPages, cachedStartPage);
+          if (autoChapterInput) {
+            setAutoChapterRangeInput(autoChapterInput);
+            setChapterRangeError("");
+          }
         }
         chapterConfigRaw = autoChapterInput;
       }
 
       if (!chapterConfigRaw) {
-        throw new Error("먼저 챕터 범위를 설정해주세요.");
+        throw new Error("문서 범위를 자동으로 준비하지 못했습니다.");
       }
 
       const totalPages = pageInfo.total || pageInfo.used || 0;
@@ -4831,11 +4971,12 @@ function App() {
       return { text: scopedText, scopeLabel };
     },
     [
-      chapterRangeInput,
+      buildAutomaticChapterRangeInput,
+      buildChapterRangeInputFromChapters,
+      effectiveChapterRangeInput,
       file,
       pageInfo.total,
       pageInfo.used,
-      persistChapterRangeInput,
       selectedFileId,
     ]
   );
@@ -5107,7 +5248,7 @@ function App() {
       setChapterRangeError("챕터 범위 설정은 PDF에서만 지원됩니다.");
       return;
     }
-    const raw = String(chapterRangeInput || "").trim();
+    const raw = String(chapterRangeInput || autoChapterRangeInput || "").trim();
     if (!raw) {
       setChapterRangeError("먼저 챕터 범위를 입력해주세요.");
       return;
@@ -5123,11 +5264,15 @@ function App() {
       setChapterRangeError("먼저 PDF를 열어주세요.");
       return;
     }
+    if (!String(chapterRangeInput || "").trim()) {
+      setChapterRangeInput(raw);
+    }
     persistChapterRangeInput(targetDocId, raw);
     setChapterRangeError("");
     setStatus(`챕터 범위를 저장했습니다. (${parsed.chapters.length} sections)`);
     setIsChapterRangeOpen(false);
   }, [
+    autoChapterRangeInput,
     chapterRangeInput,
     file,
     pageInfo.total,
@@ -5473,7 +5618,7 @@ function App() {
       const oxSourceText = String(scopedSource?.text || "").trim();
       const scopeLabel = String(scopedSource?.scopeLabel || "").trim();
       if (!oxSourceText) {
-        throw new Error("챕터 1 이후 텍스트를 찾지 못했습니다. 챕터 범위를 먼저 설정해주세요.");
+        throw new Error("문서에서 O/X 문제에 사용할 본문 텍스트를 찾지 못했습니다.");
       }
       if (scopeLabel) {
         setStatus(`O/X 문제 생성 중... (${scopeLabel})`);
