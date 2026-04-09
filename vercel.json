@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/nicepayments/subscription/charge",
+      "schedule": "0 0 * * *"
+    }
+  ]
+}
