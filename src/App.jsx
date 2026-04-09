@@ -3918,8 +3918,8 @@ function App() {
       }
 
       const historicalQuizTexts = collectQuestionTextsFromQuizSets(quizSets);
-      const historicalMockTexts = collectQuestionTextsFromMockExams(mockExams);
-      const avoidQuestionTexts = dedupeQuestionTexts([...historicalQuizTexts, ...historicalMockTexts]).slice(0, 80);
+      const canReuseHistoricalQuizPrompts = historicalQuizTexts.length > 0;
+      const avoidQuestionTexts = dedupeQuestionTexts(historicalQuizTexts).slice(0, 80);
       const seenQuestionKeys = createQuestionKeySet(avoidQuestionTexts);
 
       const targetMcCount = Math.max(0, Number(quizMix.multipleChoice) || 0);
@@ -3931,6 +3931,7 @@ function App() {
       const nextMultipleChoice = [];
       const nextShortAnswer = [];
       let questionStyleProfile = "";
+      let reusedPreviousQuizPrompts = false;
 
       const { generateQuiz } = await getOpenAiService();
       const maxAttempts = Math.max(
@@ -3988,7 +3989,73 @@ function App() {
       }
 
       if (nextMultipleChoice.length < targetMcCount || nextShortAnswer.length < targetSaCount) {
-        throw new Error("중복 문항을 제외하느라 충분한 새 문항을 만들지 못했습니다. 범위를 바꿔 다시 시도해 주세요.");
+        const relaxedSeenQuestionKeys = createQuestionKeySet([
+          ...nextMultipleChoice.map(getQuizPromptText),
+          ...nextShortAnswer.map(getQuizPromptText),
+        ]);
+        const relaxedAvoidQuestions = dedupeQuestionTexts([
+          ...nextMultipleChoice.map(getQuizPromptText),
+          ...nextShortAnswer.map(getQuizPromptText),
+        ]).slice(0, 40);
+        const relaxedAttempts = 2;
+
+        for (let attempt = 0; attempt < relaxedAttempts; attempt += 1) {
+          if (nextMultipleChoice.length >= targetMcCount && nextShortAnswer.length >= targetSaCount) {
+            break;
+          }
+
+          const remainingMcCount = Math.max(0, targetMcCount - nextMultipleChoice.length);
+          const remainingSaCount = Math.max(0, targetSaCount - nextShortAnswer.length);
+          const requestMcCount = remainingMcCount > 0 ? Math.min(8, remainingMcCount + 2 + attempt) : 0;
+          const requestSaCount = remainingSaCount > 0 ? Math.min(6, remainingSaCount + 1 + attempt) : 0;
+          const rawQuizResult = await generateQuiz(quizSourceText, {
+            multipleChoiceCount: requestMcCount,
+            shortAnswerCount: requestSaCount,
+            avoidQuestions: relaxedAvoidQuestions,
+            scopeLabel,
+            questionStyleProfile: questionStyleProfile || questionStyleProfileContent,
+            outputLanguage,
+          });
+          if (!questionStyleProfile) {
+            questionStyleProfile = String(rawQuizResult?.questionStyleProfile || "").trim();
+          }
+          const quiz = normalizeQuizPayload(rawQuizResult);
+          const prevMcLength = nextMultipleChoice.length;
+          const prevSaLength = nextShortAnswer.length;
+
+          pushUniqueByQuestionKey(
+            nextMultipleChoice,
+            Array.isArray(quiz.multipleChoice) ? quiz.multipleChoice : [],
+            getQuizPromptText,
+            relaxedSeenQuestionKeys,
+            targetMcCount
+          );
+          pushUniqueByQuestionKey(
+            nextShortAnswer,
+            Array.isArray(quiz.shortAnswer) ? quiz.shortAnswer : [],
+            getQuizPromptText,
+            relaxedSeenQuestionKeys,
+            targetSaCount
+          );
+
+          if (
+            canReuseHistoricalQuizPrompts &&
+            (nextMultipleChoice.length > prevMcLength || nextShortAnswer.length > prevSaLength)
+          ) {
+            reusedPreviousQuizPrompts = true;
+          }
+
+          const mergedRelaxedAvoidQuestions = mergeQuestionHistory(
+            relaxedAvoidQuestions,
+            [...nextMultipleChoice.map(getQuizPromptText), ...nextShortAnswer.map(getQuizPromptText)],
+            60
+          );
+          relaxedAvoidQuestions.splice(0, relaxedAvoidQuestions.length, ...mergedRelaxedAvoidQuestions);
+        }
+      }
+
+      if (nextMultipleChoice.length < targetMcCount || nextShortAnswer.length < targetSaCount) {
+        throw new Error("충분한 퀴즈 문항을 만들지 못했습니다. 챕터 범위나 페이지 범위를 바꿔 다시 시도해 주세요.");
       }
 
       const trimmedQuiz = {
@@ -4000,7 +4067,14 @@ function App() {
         questionStyleScopeLabel: scopeLabel || questionStyleProfileScopeLabel,
       });
       setQuizSets((prev) => [...prev, newSet]);
-      setStatus(scopeLabel ? `퀴즈 세트가 생성되었습니다. (${scopeLabel})` : "퀴즈 세트가 생성되었습니다.");
+      const quizStatusLabel = reusedPreviousQuizPrompts
+        ? scopeLabel
+          ? `퀴즈 세트가 생성되었습니다. 일부 문항은 기존 세트와 겹칠 수 있습니다. (${scopeLabel})`
+          : "퀴즈 세트가 생성되었습니다. 일부 문항은 기존 세트와 겹칠 수 있습니다."
+        : scopeLabel
+          ? `퀴즈 세트가 생성되었습니다. (${scopeLabel})`
+          : "퀴즈 세트가 생성되었습니다.";
+      setStatus(quizStatusLabel);
       setUsageCounts((prev) => ({ ...prev, quiz: prev.quiz + 1 }));
       persistArtifacts({ quiz: trimmedQuiz });
     } catch (err) {
@@ -4909,7 +4983,7 @@ function App() {
         throw new Error("문서에서 요약할 텍스트를 찾지 못했습니다.");
       }
 
-      setStatus("AI로 요약과 문제 스타일을 분석하는 중...");
+      setStatus("AI로 요약을 생성하는 중...");
       const { generateSummary, generateQuestionStyleProfile } = await getOpenAiService();
       const questionStyleScopeLabel = customChapterSections ? "사용자 지정 챕터 범위" : "문서 전체";
       const questionStyleSourceText = customChapterSections
@@ -6839,8 +6913,6 @@ function App() {
       setQuizMixInput(`${nextMultipleChoice}-${nextShortAnswer}`);
     },
     quizMixError,
-    questionStyleProfileContent,
-    questionStyleProfileScopeLabel,
     quizSets,
     deleteQuiz: handleDeleteQuiz,
     deleteQuizItem: handleDeleteQuizItem,

@@ -234,8 +234,6 @@ export default function DetailPage({
   quizMix,
   setQuizMix,
   quizMixError,
-  questionStyleProfileContent,
-  questionStyleProfileScopeLabel,
   quizSets,
   handleChoiceSelect,
   handleShortAnswerChange,
@@ -536,7 +534,6 @@ export default function DetailPage({
         role="separator"
         aria-label="PDF? ?⑤꼸 ?ш린 議곗젅"
         aria-orientation="vertical"
-        title="PDF? ?⑤꼸 ?ш린 議곗젅"
       >
         <span className="pointer-events-none h-full w-px rounded-full bg-white/12 transition group-hover:bg-emerald-300/35" />
         <span className="pointer-events-none absolute left-1/2 top-1/2 flex h-20 w-5 -translate-x-1/2 -translate-y-1/2 flex-col items-center justify-center gap-1 rounded-full border border-white/12 bg-slate-950/92 shadow-[0_14px_32px_rgba(2,6,23,0.45)] transition group-hover:border-emerald-300/35 group-hover:bg-slate-900/95">
@@ -1331,28 +1328,6 @@ export default function DetailPage({
                 onRequestSummary={handleRequestSummary}
               />
 
-              <div className="rounded-2xl border border-amber-300/20 bg-amber-500/5 p-4 text-sm text-amber-50">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="mt-1 text-base font-semibold text-amber-100">문제 스타일 분석</h3>
-                  </div>
-                  {questionStyleProfileScopeLabel && (
-                    <span className="rounded-full bg-amber-400/10 px-3 py-1 text-[11px] font-semibold text-amber-100 ring-1 ring-amber-300/30">
-                      {questionStyleProfileScopeLabel}
-                    </span>
-                  )}
-                </div>
-                {questionStyleProfileContent ? (
-                  <pre className="mt-3 whitespace-pre-wrap break-words rounded-xl bg-black/20 p-3 text-xs leading-6 text-amber-50/95">
-                    {questionStyleProfileContent}
-                  </pre>
-                ) : (
-                  <p className="mt-3 text-xs text-amber-100/80">
-                    아직 저장된 문제 스타일 분석이 없습니다. 요약을 한 번 생성하면 여기 표시됩니다.
-                  </p>
-                )}
-              </div>
-
               <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <input
@@ -1438,8 +1413,6 @@ export default function DetailPage({
                       title={`퀴즈 세트 ${idx + 1}`}
                       questions={set.questions}
                       summary={null}
-                      questionStyleProfile={set.questionStyleProfile}
-                      questionStyleScopeLabel={set.questionStyleScopeLabel}
                       selectedChoices={set.selectedChoices}
                       revealedChoices={set.revealedChoices}
                       shortAnswerInput={set.shortAnswerInput}
