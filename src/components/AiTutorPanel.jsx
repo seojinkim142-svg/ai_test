@@ -103,6 +103,9 @@ function AiTutorPanel({
   const [attachmentFile, setAttachmentFile] = useState(null);
   const [attachmentError, setAttachmentError] = useState("");
   const attachmentInputRef = useRef(null);
+  const textareaRef = useRef(null);
+  const isComposingRef = useRef(false);
+  const submitTriggeredAtRef = useRef(0);
   const copy = useMemo(() => getTutorCopy(outputLanguage), [outputLanguage]);
 
   const markdownComponents = useMemo(
@@ -134,7 +137,11 @@ function AiTutorPanel({
   };
 
   const handleSubmit = async () => {
-    const trimmed = input.trim();
+    const liveInput = String(textareaRef.current?.value ?? input ?? "");
+    if (liveInput !== input) {
+      setInput(liveInput);
+    }
+    const trimmed = liveInput.trim();
     if ((!trimmed && !attachmentFile) || !canChat || isLoading) return;
 
     const displayPrompt = trimmed || copy.defaultAttachmentPrompt;
@@ -146,14 +153,29 @@ function AiTutorPanel({
     if (accepted === false) return;
 
     setInput("");
+    if (textareaRef.current) {
+      textareaRef.current.value = "";
+    }
     clearAttachment();
   };
 
+  const triggerSubmit = () => {
+    const now = Date.now();
+    if (now - submitTriggeredAtRef.current < 350) return;
+    submitTriggeredAtRef.current = now;
+    void handleSubmit();
+  };
+
   const handleKeyDown = (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && !event.shiftKey && !isComposingRef.current && !event.nativeEvent?.isComposing) {
       event.preventDefault();
-      void handleSubmit();
+      triggerSubmit();
     }
+  };
+
+  const handleFormSubmit = (event) => {
+    event.preventDefault();
+    triggerSubmit();
   };
 
   const handleReset = () => {
@@ -267,12 +289,23 @@ function AiTutorPanel({
         </p>
       )}
 
-      <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-4 shadow-lg shadow-black/20 focus-within:border-emerald-300/40">
+      <form
+        onSubmit={handleFormSubmit}
+        className="rounded-3xl border border-white/10 bg-slate-900/70 p-4 shadow-lg shadow-black/20 focus-within:border-emerald-300/40"
+      >
         <textarea
+          ref={textareaRef}
           name="ai-tutor-input"
-          value={input}
           onChange={(event) => setInput(event.target.value)}
+          onInput={(event) => setInput(event.currentTarget.value)}
           onKeyDown={handleKeyDown}
+          onCompositionStart={() => {
+            isComposingRef.current = true;
+          }}
+          onCompositionEnd={(event) => {
+            isComposingRef.current = false;
+            setInput(event.currentTarget.value);
+          }}
           disabled={!canChat || isLoading}
           className="show-scrollbar h-[96px] w-full resize-none overflow-y-scroll bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
           placeholder={copy.placeholder}
@@ -321,8 +354,13 @@ function AiTutorPanel({
             )}
           </div>
           <button
-            type="button"
-            onClick={() => void handleSubmit()}
+            type="submit"
+            onPointerUp={(event) => {
+              if (event.pointerType && event.pointerType !== "mouse") {
+                event.preventDefault();
+                triggerSubmit();
+              }
+            }}
             disabled={!canChat || isLoading || (!input.trim() && !attachmentFile)}
             className="ghost-button text-sm text-emerald-100"
             data-ghost-size="lg"
@@ -331,7 +369,7 @@ function AiTutorPanel({
             {isLoading ? copy.sending : copy.send}
           </button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }
