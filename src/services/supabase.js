@@ -501,7 +501,7 @@ export async function fetchDocArtifacts({ userId, docId }) {
   return data || null;
 }
 
-export async function saveDocArtifacts({ userId, docId, summary, quiz, ox, highlights }) {
+export async function saveDocArtifacts({ userId, docId, summary, quiz, ox, highlights, extractedText, extractedTextMetadata }) {
   const client = requireSupabase();
   if (!userId || !docId) throw new Error("userId and docId are required.");
   const payload = {
@@ -513,6 +513,14 @@ export async function saveDocArtifacts({ userId, docId, summary, quiz, ox, highl
   if (quiz !== undefined) payload.quiz_json = quiz;
   if (ox !== undefined) payload.ox_json = ox;
   if (highlights !== undefined) payload.highlights_json = highlights;
+  
+  // OCR 텍스트 추가
+  if (extractedText !== undefined) {
+    payload.extracted_text = extractedText;
+    payload.extracted_text_metadata = extractedTextMetadata || {};
+    payload.extracted_at = new Date().toISOString();
+    payload.text_size_bytes = new Blob([extractedText]).size;
+  }
 
   const { data, error } = await client
     .from(ARTIFACTS_TABLE)
@@ -520,6 +528,64 @@ export async function saveDocArtifacts({ userId, docId, summary, quiz, ox, highl
     .select()
     .single();
 
+  if (error) throw error;
+  return data;
+}
+
+// OCR 텍스트 저장 함수
+export async function saveExtractedText({ userId, docId, extractedText, metadata = {} }) {
+  const client = requireSupabase();
+  if (!userId || !docId || !extractedText) {
+    throw new Error("userId, docId, and extractedText are required.");
+  }
+  
+  const payload = {
+    user_id: userId,
+    doc_id: docId,
+    extracted_text: extractedText,
+    extracted_text_metadata: metadata,
+    extracted_at: new Date().toISOString(),
+    text_size_bytes: new Blob([extractedText]).size,
+  };
+  
+  const { data, error } = await client
+    .from(ARTIFACTS_TABLE)
+    .upsert(payload, { onConflict: "user_id,doc_id" })
+    .select()
+    .single();
+    
+  if (error) throw error;
+  return data;
+}
+
+// OCR 텍스트 조회 함수
+export async function fetchExtractedText({ userId, docId }) {
+  const client = requireSupabase();
+  if (!userId || !docId) return null;
+  
+  const { data, error } = await client
+    .from(ARTIFACTS_TABLE)
+    .select("extracted_text, extracted_text_metadata, extracted_at, text_size_bytes")
+    .eq("user_id", userId)
+    .eq("doc_id", docId)
+    .maybeSingle();
+    
+  if (error) throw error;
+  return data;
+}
+
+// 백필 마이그레이션 함수
+export async function backfillOcrText({ userId, docId, extractedText, metadata = {} }) {
+  const client = requireSupabase();
+  
+  // 저장 프로시저 호출 (SQL 함수)
+  const { data, error } = await client.rpc('backfill_ocr_text_for_document', {
+    p_user_id: userId,
+    p_doc_id: docId,
+    p_extracted_text: extractedText,
+    p_metadata: metadata,
+  });
+  
   if (error) throw error;
   return data;
 }

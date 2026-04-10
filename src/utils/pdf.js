@@ -1320,3 +1320,198 @@ export async function generatePdfThumbnail(file, { scale = 0.2, quality = 1.0 } 
   return canvas.toDataURL("image/png");
 }
 
+// OCR 텍스트 추출 with 캐싱 (데이터베이스 캐시 사용)
+const DEFAULT_CACHED_TEXT_PAGE_LIMIT = 30;
+const DEFAULT_CACHED_TEXT_MAX_LENGTH = 12000;
+const STRONG_NON_OCR_TEXT_LENGTH = 220;
+const MAX_LENGTH_TRUNCATION_HEADROOM = 200;
+
+function normalizePositiveInteger(value, fallback = 0) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function normalizeStoredExtractedTextMetadata(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+function createExtractedTextRecord(record, requestOptions = {}) {
+  const metadata = normalizeStoredExtractedTextMetadata(
+    record?.extracted_text_metadata || record?.metadata || {}
+  );
+  const text = String(record?.extracted_text || record?.text || "").trim();
+  return {
+    text,
+    pagesUsed: normalizePositiveInteger(record?.pagesUsed ?? metadata.pages_used, 0),
+    totalPages: normalizePositiveInteger(record?.totalPages ?? metadata.total_pages, 0),
+    ocrUsed: Boolean(record?.ocrUsed ?? metadata.ocr_used),
+    pageLimit: normalizePositiveInteger(
+      metadata.page_limit,
+      normalizePositiveInteger(requestOptions.pageLimit, DEFAULT_CACHED_TEXT_PAGE_LIMIT)
+    ),
+    maxLength: normalizePositiveInteger(
+      metadata.max_length,
+      normalizePositiveInteger(requestOptions.maxLength, DEFAULT_CACHED_TEXT_MAX_LENGTH)
+    ),
+    textLength: normalizePositiveInteger(metadata.text_length, text.length),
+    extractedAt: String(record?.extracted_at || metadata.extracted_at || "").trim(),
+    fromCache: Boolean(record?.fromCache),
+  };
+}
+
+function getRequestedPageCount(record, requestedPageLimit) {
+  const pageLimit = normalizePositiveInteger(requestedPageLimit, DEFAULT_CACHED_TEXT_PAGE_LIMIT);
+  if (!pageLimit) return 0;
+  if (record?.totalPages) {
+    return Math.min(record.totalPages, pageLimit);
+  }
+  return pageLimit;
+}
+
+function coversRequestedPageScope(record, requestOptions = {}) {
+  if (!record?.text) return false;
+  const requestedPages = getRequestedPageCount(record, requestOptions.pageLimit);
+  if (!requestedPages) return true;
+  return normalizePositiveInteger(record.pagesUsed, 0) >= requestedPages;
+}
+
+function isLikelyTruncatedForRequest(record, requestOptions = {}) {
+  if (!record?.text) return false;
+  const requestedMaxLength = normalizePositiveInteger(
+    requestOptions.maxLength,
+    DEFAULT_CACHED_TEXT_MAX_LENGTH
+  );
+  const storedMaxLength = normalizePositiveInteger(record.maxLength, 0);
+  if (!storedMaxLength || storedMaxLength >= requestedMaxLength) return false;
+  return (
+    record.text.length >=
+    Math.max(STRONG_NON_OCR_TEXT_LENGTH, storedMaxLength - MAX_LENGTH_TRUNCATION_HEADROOM)
+  );
+}
+
+function shouldUseCachedExtractedText(record, requestOptions = {}) {
+  if (!record?.text || requestOptions.forceRefresh) return false;
+  if (!coversRequestedPageScope(record, requestOptions)) return false;
+  if (isLikelyTruncatedForRequest(record, requestOptions)) return false;
+  if (!requestOptions.useOcr) return true;
+  if (record.ocrUsed) return true;
+  return record.text.length >= STRONG_NON_OCR_TEXT_LENGTH;
+}
+
+function scoreExtractedTextRecord(record, requestOptions = {}) {
+  if (!record?.text) return Number.NEGATIVE_INFINITY;
+
+  let score = record.text.length;
+  if (coversRequestedPageScope(record, requestOptions)) score += 1000000;
+  if (!isLikelyTruncatedForRequest(record, requestOptions)) score += 500000;
+  score += Math.min(normalizePositiveInteger(record.pagesUsed, 0), 500) * 50;
+
+  if (
+    requestOptions.useOcr &&
+    record.ocrUsed &&
+    record.text.length >= STRONG_NON_OCR_TEXT_LENGTH
+  ) {
+    score += 2000;
+  }
+
+  if (record.fromCache) score += 1;
+  return score;
+}
+
+function pickPreferredExtractedTextRecord(records, requestOptions = {}) {
+  return records
+    .filter((record) => record?.text)
+    .reduce((best, candidate) => {
+      if (!best) return candidate;
+      return scoreExtractedTextRecord(candidate, requestOptions) >
+        scoreExtractedTextRecord(best, requestOptions)
+        ? candidate
+        : best;
+    }, null);
+}
+
+export async function extractPdfTextWithCaching(file, docId, userId, options = {}) {
+  const {
+    useOcr = false,
+    forceRefresh = false,
+    pageLimit: requestedPageLimit = DEFAULT_CACHED_TEXT_PAGE_LIMIT,
+    maxLength: requestedMaxLength = DEFAULT_CACHED_TEXT_MAX_LENGTH,
+  } = options;
+  const requestOptions = {
+    useOcr: Boolean(useOcr),
+    forceRefresh: Boolean(forceRefresh),
+    pageLimit: normalizePositiveInteger(requestedPageLimit, DEFAULT_CACHED_TEXT_PAGE_LIMIT),
+    maxLength: normalizePositiveInteger(requestedMaxLength, DEFAULT_CACHED_TEXT_MAX_LENGTH),
+  };
+  
+  // 1. 캐시된 텍스트 확인 (forceRefresh가 아닌 경우)
+  let cachedRecord = null;
+  if (docId && userId) {
+    try {
+      const { fetchExtractedText } = await import("../services/supabase.js");
+      const cached = await fetchExtractedText({ userId, docId });
+      cachedRecord = createExtractedTextRecord({ ...cached, fromCache: true }, requestOptions);
+      if (shouldUseCachedExtractedText(cachedRecord, requestOptions)) {
+        console.log("Using cached extracted text from database");
+        return cachedRecord;
+      }
+    } catch (error) {
+      console.warn("Failed to fetch cached text:", error);
+    }
+  }
+  
+  // 2. 새로 추출
+  const result = await extractPdfText(file, requestOptions.pageLimit, requestOptions.maxLength, {
+    ...options,
+    pageLimit: requestOptions.pageLimit,
+    maxLength: requestOptions.maxLength,
+    useOcr: requestOptions.useOcr,
+  });
+  const freshMetadata = {
+    ocr_used: Boolean(result?.ocrUsed),
+    pages_used: normalizePositiveInteger(result?.pagesUsed, 0),
+    total_pages: normalizePositiveInteger(result?.totalPages, 0),
+    extracted_at: new Date().toISOString(),
+    page_limit: requestOptions.pageLimit,
+    max_length: requestOptions.maxLength,
+    text_length: String(result?.text || "").trim().length,
+  };
+  const freshRecord = createExtractedTextRecord(
+    {
+      ...result,
+      metadata: freshMetadata,
+      fromCache: false,
+    },
+    requestOptions
+  );
+  const preferredRecord = pickPreferredExtractedTextRecord(
+    [freshRecord, cachedRecord],
+    requestOptions
+  );
+  
+  // Persist the stronger extraction result back to the database cache.
+  if (docId && userId && freshRecord.text) {
+    const shouldPersistFresh =
+      !cachedRecord ||
+      preferredRecord === freshRecord ||
+      scoreExtractedTextRecord(freshRecord, requestOptions) >
+        scoreExtractedTextRecord(cachedRecord, requestOptions);
+
+    if (shouldPersistFresh) {
+      try {
+        const { saveExtractedText } = await import("../services/supabase.js");
+        await saveExtractedText({
+          userId,
+          docId,
+          extractedText: freshRecord.text,
+          metadata: freshMetadata,
+        });
+        console.log("Extracted text saved to database");
+      } catch (error) {
+        console.warn("Failed to save extracted text:", error);
+      }
+    }
+  }
+  
+  return preferredRecord || freshRecord || cachedRecord || createExtractedTextRecord({}, requestOptions);
+}

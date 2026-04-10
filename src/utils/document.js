@@ -1,5 +1,5 @@
 import { strFromU8, unzipSync } from "fflate";
-import { extractPdfText, generatePdfThumbnail } from "./pdf";
+import { extractPdfText, extractPdfTextWithCaching, generatePdfThumbnail } from "./pdf";
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const PPTX_MIME = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
@@ -205,6 +205,15 @@ export async function extractDocumentText(file, options = {}) {
   const maxLength = Number(options?.maxLength || 12000);
 
   if (kind === DOC_KIND_PDF) {
+    const docId = String(options?.docId || options?.documentId || "").trim();
+    const userId = String(options?.userId || "").trim();
+    if (docId && userId) {
+      return extractPdfTextWithCaching(file, docId, userId, {
+        ...options,
+        pageLimit,
+        maxLength,
+      });
+    }
     return extractPdfText(file, pageLimit, maxLength, options);
   }
   if (kind === DOC_KIND_DOCX) {
