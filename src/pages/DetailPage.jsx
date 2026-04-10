@@ -1763,7 +1763,7 @@ export default function DetailPage({
                 onDelete={handleDeleteFlashcard}
                 onGenerate={handleGenerateFlashcards}
                 isGenerating={isGeneratingFlashcards}
-                canGenerate={Boolean(file && selectedFileId && extractedText && !isLoadingText)}
+                canGenerate={Boolean(file && selectedFileId && !isLoadingText)}
                 status={flashcardStatus}
                 error={flashcardError}
               />
