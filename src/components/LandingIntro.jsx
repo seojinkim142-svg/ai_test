@@ -1548,7 +1548,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
   const navSolid = scrollY > 24;
   const heroOpacity = Math.max(0.52, 1 - scrollY / 1100);
   const heroTranslate = Math.min(scrollY * 0.145, 168);
-  const pricingSectionVisible = isVisible("pricing-stage");
+  const pricingSectionVisible = isVisible("pricing-stage") && !isVisible("pricing-fade-end");
   const heroScale = Math.max(0.88, 1 - scrollY / 2100);
   const heroGlowShift = Math.min(scrollY * 0.18, 180);
   const heroGlowSpread = Math.min(scrollY * 0.065, 56);
@@ -2117,6 +2117,13 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
               </div>
             </div>
           </div>
+
+          <div
+            ref={(node) => registerRevealNode("pricing-fade-end", node)}
+            data-reveal-key="pricing-fade-end"
+            className="mt-8 h-px w-full"
+            aria-hidden="true"
+          />
         </div>
       </section>
 
