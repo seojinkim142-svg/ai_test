@@ -5,11 +5,10 @@ import {
   MARKDOWN_MATH_REMARK_PLUGINS,
   normalizeMathMarkdown,
 } from "./MathMarkdown";
+import { getTutorCopy } from "../utils/tutorCopy";
 
 const TUTOR_BARE_LATEX_RE =
   /\\(?:begin|end|frac|dfrac|tfrac|sum|prod|int|sqrt|left|right|cdot|times|to|infty|leq?|geq?|neq?|approx|mathbb|mathbf|mathrm|text|quad|qquad|lim)\b/;
-const DEFAULT_ATTACHMENT_PROMPT = "Explain the attached screenshot clearly for a student.";
-
 function normalizeTutorMathLine(expr) {
   return String(expr || "")
     .trim()
@@ -83,10 +82,10 @@ function normalizeTutorMathMarkdown(rawContent) {
   return normalized.join("\n");
 }
 
-function buildAttachmentLabel(message) {
+function buildAttachmentLabel(message, copy) {
   const attachmentName = String(message?.attachmentName || "").trim();
   if (!attachmentName) return "";
-  return `Attached image: ${attachmentName}`;
+  return copy.attachmentLabel(attachmentName);
 }
 
 function AiTutorPanel({
@@ -98,11 +97,13 @@ function AiTutorPanel({
   canChat,
   notice,
   fileName,
+  outputLanguage = "ko",
 }) {
   const [input, setInput] = useState("");
   const [attachmentFile, setAttachmentFile] = useState(null);
   const [attachmentError, setAttachmentError] = useState("");
   const attachmentInputRef = useRef(null);
+  const copy = useMemo(() => getTutorCopy(outputLanguage), [outputLanguage]);
 
   const markdownComponents = useMemo(
     () => ({
@@ -136,7 +137,7 @@ function AiTutorPanel({
     const trimmed = input.trim();
     if ((!trimmed && !attachmentFile) || !canChat || isLoading) return;
 
-    const displayPrompt = trimmed || DEFAULT_ATTACHMENT_PROMPT;
+    const displayPrompt = trimmed || copy.defaultAttachmentPrompt;
     const accepted = await onSend?.({
       prompt: displayPrompt,
       displayPrompt,
@@ -166,7 +167,7 @@ function AiTutorPanel({
     if (!nextFile) return;
     if (!String(nextFile.type || "").toLowerCase().startsWith("image/")) {
       clearAttachment();
-      setAttachmentError("Only image files can be attached.");
+      setAttachmentError(copy.errors.onlyImageFiles);
       return;
     }
     setAttachmentFile(nextFile);
@@ -181,8 +182,10 @@ function AiTutorPanel({
     <div className="flex h-full min-h-[65vh] flex-col gap-4 rounded-3xl border border-white/10 bg-slate-950/80 p-6 shadow-lg shadow-black/30">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-2xl font-semibold text-white">AI Tutor</h3>
-          {fileName && <p className="mt-2 text-xs text-slate-400">Current document: {fileName}</p>}
+          <h3 className="text-2xl font-semibold text-white">{copy.title}</h3>
+          {fileName && (
+            <p className="mt-2 text-xs text-slate-400">{copy.currentDocument(fileName)}</p>
+          )}
         </div>
         <button
           type="button"
@@ -192,7 +195,7 @@ function AiTutorPanel({
           data-ghost-size="sm"
           style={{ "--ghost-color": "148, 163, 184" }}
         >
-          Reset chat
+          {copy.resetChat}
         </button>
       </div>
 
@@ -206,13 +209,13 @@ function AiTutorPanel({
         <div className="flex flex-col gap-3">
           {showEmptyState && (
             <p className="self-center text-sm text-slate-500">
-              Ask a question, or attach a screenshot for the tutor to explain.
+              {copy.emptyState}
             </p>
           )}
 
           {messages?.map((message, index) => {
             const isUser = message.role === "user";
-            const attachmentLabel = buildAttachmentLabel(message);
+            const attachmentLabel = buildAttachmentLabel(message, copy);
             const hasContent = Boolean(String(message?.content || "").trim());
             return (
               <div
@@ -252,7 +255,7 @@ function AiTutorPanel({
 
           {!showEmptyState && isLoading && (
             <div className="max-w-[75%] self-start rounded-2xl border border-white/10 bg-slate-950/60 px-4 py-3 text-sm text-slate-200">
-              <p className="mt-2">Generating answer...</p>
+              <p className="mt-2">{copy.generatingAnswer}</p>
             </div>
           )}
         </div>
@@ -272,7 +275,7 @@ function AiTutorPanel({
           onKeyDown={handleKeyDown}
           disabled={!canChat || isLoading}
           className="show-scrollbar h-[96px] w-full resize-none overflow-y-scroll bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
-          placeholder="Ask a question. You can also attach a screenshot."
+          placeholder={copy.placeholder}
         />
 
         <input
@@ -285,7 +288,9 @@ function AiTutorPanel({
 
         {attachmentFile && (
           <div className="mt-3 flex flex-wrap items-center gap-2 rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-xs text-slate-200">
-            <span className="rounded-full bg-white/10 px-2 py-1 font-medium text-slate-100">Screenshot</span>
+            <span className="rounded-full bg-white/10 px-2 py-1 font-medium text-slate-100">
+              {copy.screenshotBadge}
+            </span>
             <span className="max-w-full truncate">{attachmentFile.name}</span>
           </div>
         )}
@@ -300,7 +305,7 @@ function AiTutorPanel({
               data-ghost-size="sm"
               style={{ "--ghost-color": "148, 163, 184" }}
             >
-              {attachmentFile ? "Replace screenshot" : "Attach screenshot"}
+              {attachmentFile ? copy.replaceScreenshot : copy.attachScreenshot}
             </button>
             {attachmentFile && (
               <button
@@ -311,7 +316,7 @@ function AiTutorPanel({
                 data-ghost-size="sm"
                 style={{ "--ghost-color": "148, 163, 184" }}
               >
-                Remove
+                {copy.remove}
               </button>
             )}
           </div>
@@ -323,7 +328,7 @@ function AiTutorPanel({
             data-ghost-size="lg"
             style={{ "--ghost-color": "52, 211, 153" }}
           >
-            {isLoading ? "Sending..." : "Send"}
+            {isLoading ? copy.sending : copy.send}
           </button>
         </div>
       </div>

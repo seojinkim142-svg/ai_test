@@ -111,6 +111,7 @@ import {
   writeQuestionStyleProfileToHighlights,
 } from "./utils/studyArtifacts";
 import { clearPaymentReturnPending, readPaymentReturnPending } from "./utils/paymentReturn";
+import { getTutorCopy } from "./utils/tutorCopy";
 
 const AuthPanel = lazy(() => import("./components/AuthPanel"));
 const Header = lazy(() => import("./components/Header"));
@@ -2175,17 +2176,18 @@ function App() {
   const parsedQuizMix = useMemo(() => parseQuizMixInput(quizMixInput), [quizMixInput]);
   const quizMix = parsedQuizMix.mix;
   const quizMixError = parsedQuizMix.error;
+  const tutorCopy = useMemo(() => getTutorCopy(outputLanguage), [outputLanguage]);
 
   const tutorNotice = useMemo(() => {
     const selectedKind = detectSupportedDocumentKind(file);
     if (!file || !selectedFileId) {
-      return "Open a PDF, or attach a screenshot to ask the tutor.";
+      return tutorCopy.notices.openFileOrAttach;
     }
     if (!isPdfDocumentKind(selectedKind)) {
-      return "Page-grounded tutor mode needs a PDF. You can still attach a screenshot and ask from that image.";
+      return tutorCopy.notices.pdfOnlyForPageGrounded;
     }
     if (isLoadingText) {
-      return "PDF text extraction is still running. Screenshot questions can still be sent right away.";
+      return tutorCopy.notices.extractingText;
     }
     const summaryCacheKey = selectedFileId || file?.name || null;
     const docCacheKey = String(selectedFileId || file?.name || "").trim() || "__active__";
@@ -2198,10 +2200,10 @@ function App() {
       .find(Boolean);
     const trimmed = String(cachedRecoveredText || "").trim();
     if (!trimmed) {
-      return "Scanned PDFs can still work. The tutor will inspect nearby pages and try OCR automatically when needed.";
+      return tutorCopy.notices.scannedPdfFallback;
     }
     return "";
-  }, [extractedText, file, isLoadingText, selectedFileId]);
+  }, [extractedText, file, isLoadingText, selectedFileId, tutorCopy]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -6047,18 +6049,18 @@ function App() {
       const hasAttachment = Boolean(attachmentFile);
       const effectivePrompt =
         String(prompt || "").trim() ||
-        (hasAttachment ? "Explain the attached screenshot clearly for a student." : "");
+        (hasAttachment ? tutorCopy.defaultAttachmentPrompt : "");
       const effectiveDisplayPrompt = String(displayPrompt || effectivePrompt).trim();
       if ((!effectivePrompt && !hasAttachment) || isTutorLoading) return false;
 
       const selectedKind = detectSupportedDocumentKind(file);
       const canUsePdfEvidence = Boolean(file && selectedFileId && isPdfDocumentKind(selectedKind));
       if (!canUsePdfEvidence && !hasAttachment) {
-        setTutorError("Open a PDF or attach a screenshot before asking the tutor.");
+        setTutorError(tutorCopy.errors.openFileOrAttach);
         return false;
       }
       if (canUsePdfEvidence && isLoadingText && !hasAttachment) {
-        setTutorError("PDF text extraction is still running. Attach a screenshot or wait a moment.");
+        setTutorError(tutorCopy.errors.waitForPdfOrAttach);
         return false;
       }
 
@@ -6071,12 +6073,12 @@ function App() {
         try {
           const { buildVisionImageDataUrl, extractImageText, isTutorImageFile } = await import("./utils/imageOcr");
           if (!isTutorImageFile(attachmentFile)) {
-            setTutorError("Only image files can be attached to the tutor.");
+            setTutorError(tutorCopy.errors.onlyImageFiles);
             setStatus("");
             return false;
           }
 
-          setStatus("Preparing screenshot...");
+          setStatus(tutorCopy.status.preparingScreenshot);
           const [imageResult, imageDataUrl] = await Promise.all([
             extractImageText(attachmentFile, {
               ocrLang: "kor+eng",
@@ -6100,12 +6102,12 @@ function App() {
           };
 
           if (!attachmentEvidenceText && !canUsePdfEvidence) {
-            setTutorError("No readable text was found in the screenshot.");
+            setTutorError(tutorCopy.errors.noReadableScreenshotText);
             setStatus("");
             return false;
           }
         } catch (err) {
-          setTutorError(`Failed to read the screenshot: ${err.message}`);
+          setTutorError(tutorCopy.errors.failedToReadScreenshot(err.message));
           setStatus("");
           return false;
         }
@@ -6127,7 +6129,7 @@ function App() {
           if (recoveredTutorDocText.length < 80) {
             recoveredTutorDocText = String(
               await recoverQuestionSourceText({
-                featureLabel: "AI 튜터",
+                featureLabel: tutorCopy.title,
                 sourceText: recoveredTutorDocText,
               })
             ).trim();
@@ -6146,7 +6148,7 @@ function App() {
         if (!totalPages) {
           pdfEvidenceText = await buildRecoveredPdfEvidence();
           if (!pdfEvidenceText && !hasAttachment) {
-            setTutorError("Page information is unavailable. Reopen the PDF and try again.");
+            setTutorError(tutorCopy.errors.pageInfoUnavailable);
             return false;
           }
         } else {
@@ -6372,7 +6374,7 @@ function App() {
         setTutorMessages((prev) => [...prev, { role: "assistant", content: safeReply }]);
         return true;
       } catch (err) {
-        setTutorError(`AI tutor reply failed: ${err.message}`);
+        setTutorError(tutorCopy.errors.replyFailed(err.message));
         return false;
       } finally {
         setIsTutorLoading(false);
@@ -6392,6 +6394,7 @@ function App() {
       previewText,
       recoverQuestionSourceText,
       selectedFileId,
+      tutorCopy,
       tutorMessages,
     ]
   );

@@ -1777,6 +1777,7 @@ export default function DetailPage({
               canChat={!isTutorLoading}
               notice={tutorNotice}
               fileName={file?.name || ""}
+              outputLanguage={outputLanguage}
               onSend={handleSendTutorMessage}
               onReset={handleResetTutor}
             />
