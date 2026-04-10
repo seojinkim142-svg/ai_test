@@ -1034,6 +1034,7 @@ function App() {
   const [showAuth, setShowAuth] = useState(false);
   const [showGuestIntro, setShowGuestIntro] = useState(() => !AUTH_ENABLED);
   const [skipPromoSplash, setSkipPromoSplash] = useState(false);
+  const [allowGuestLandingAfterSignOut, setAllowGuestLandingAfterSignOut] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [visitedPages, setVisitedPages] = useState(() => new Set());
   const [mockExams, setMockExams] = useState([]);
@@ -1179,7 +1180,8 @@ function App() {
     [profilePinError]
   );
   const isNativePlatform = Capacitor.isNativePlatform();
-  const shouldForceNativeAuthEntry = AUTH_ENABLED && isNativePlatform && authReady && !user;
+  const shouldForceNativeAuthEntry =
+    AUTH_ENABLED && isNativePlatform && authReady && !user && !allowGuestLandingAfterSignOut;
   const shouldRenderAuthScreen = AUTH_ENABLED && !user && (showAuth || shouldForceNativeAuthEntry);
   const shouldShowAdBanner = !loadingTier && tier === "free" && !shouldRenderAuthScreen;
   const { bannerHeight } = useAdMobBanner({ enabled: shouldShowAdBanner });
@@ -1886,6 +1888,7 @@ function App() {
     if (user) {
       setShowAuth(false);
       setSkipPromoSplash(false);
+      setAllowGuestLandingAfterSignOut(false);
     }
   }, [user]);
 
@@ -2593,6 +2596,7 @@ function App() {
     setStatus("濡쒓렇?꾩썐 以?..");
     try {
       setShowSettings(false);
+      setShowAuth(false);
       setSkipPromoSplash(true);
       setShowPremiumProfilePicker(false);
       setShowProfilePinDialog(false);
@@ -2605,6 +2609,18 @@ function App() {
       setPremiumProfiles([]);
       setPremiumSpaceMode(PREMIUM_SPACE_MODE_PROFILE);
       await authSignOut();
+      if (pdfUrl) {
+        revokeObjectUrlIfNeeded(pdfUrl);
+      }
+      setAllowGuestLandingAfterSignOut(true);
+      setSelectedFileId(null);
+      setPendingDocumentOpen(null);
+      setFile(null);
+      setPdfUrl(null);
+      setCurrentPage(1);
+      setVisitedPages(new Set());
+      setPanelTab("summary");
+      updateHistoryState("replace", { view: "list" });
       await refreshSession();
       setStatus("濡쒓렇?꾩썐?섏뿀?듬땲??");
     } catch (err) {
@@ -2613,7 +2629,7 @@ function App() {
     } finally {
       setIsSigningOut(false);
     }
-  }, [authSignOut, refreshSession]);
+  }, [authSignOut, pdfUrl, refreshSession, updateHistoryState]);
 
   useEffect(() => {
     if (user) {
