@@ -1548,6 +1548,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
   const navSolid = scrollY > 24;
   const heroOpacity = Math.max(0.52, 1 - scrollY / 1100);
   const heroTranslate = Math.min(scrollY * 0.145, 168);
+  const pricingSectionVisible = isVisible("pricing-stage");
   const heroScale = Math.max(0.88, 1 - scrollY / 2100);
   const heroGlowShift = Math.min(scrollY * 0.18, 180);
   const heroGlowSpread = Math.min(scrollY * 0.065, 56);
@@ -1974,12 +1975,14 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
       </section>
 
       <section id="pricing" className="relative scroll-mt-28 px-5 py-24 sm:px-6 lg:px-8 lg:py-32">
-        <div className="mx-auto max-w-7xl">
+        <div
+          ref={(node) => registerRevealNode("pricing-stage", node)}
+          data-reveal-key="pricing-stage"
+          className="mx-auto max-w-7xl"
+        >
           <div
-            ref={(node) => registerRevealNode("pricing-heading", node)}
-            data-reveal-key="pricing-heading"
             className="mx-auto max-w-3xl text-center"
-            style={getRevealStyle(isVisible("pricing-heading"), { y: 28 })}
+            style={getRevealStyle(pricingSectionVisible, { y: 28 })}
           >
             <h2 className="landing-title text-4xl font-bold leading-tight text-slate-950 sm:text-5xl lg:text-6xl">
               {copy.sections.pricingLead}
@@ -2013,7 +2016,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                   }}
                   className="relative min-w-[280px] flex-1 overflow-hidden rounded-[2rem] border bg-white/[0.82] p-6 shadow-[0_28px_70px_-48px_rgba(15,23,42,0.24)] backdrop-blur transition-all duration-300 sm:min-w-[320px] sm:p-7 md:min-w-0"
                   style={{
-                    ...getRevealStyle(isVisible("pricing-heading"), { y: 28, delay: 120 + index * 80 }),
+                    ...getRevealStyle(pricingSectionVisible, { y: 28, delay: 120 + index * 80 }),
                     borderColor: isActive ? "rgba(99, 102, 241, 0.28)" : "rgba(255, 255, 255, 0.78)",
                     boxShadow: isActive
                       ? `0 34px 84px -44px ${plan.glow}, inset 0 1px 0 rgba(255,255,255,0.72)`
@@ -2062,7 +2065,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
 
           <div
             className="mt-8 rounded-[2rem] border border-white/80 bg-white/[0.82] shadow-[0_34px_90px_-54px_rgba(15,23,42,0.28)] backdrop-blur"
-            style={getRevealStyle(isVisible("pricing-heading"), { y: 28, delay: 180 })}
+            style={getRevealStyle(pricingSectionVisible, { y: 28, delay: 180 })}
           >
             <div className="show-scrollbar overflow-x-auto overflow-y-visible pb-3">
               <div className="min-w-[720px]">
