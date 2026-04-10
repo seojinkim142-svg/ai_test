@@ -355,7 +355,10 @@ function AiTutorPanel({
             )}
           </div>
           <button
-            type="submit"
+            type="button"
+            onClick={() => {
+              triggerSubmit();
+            }}
             onPointerUp={(event) => {
               if (event.pointerType && event.pointerType !== "mouse") {
                 event.preventDefault();
