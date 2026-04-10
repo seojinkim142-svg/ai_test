@@ -296,6 +296,7 @@ function AiTutorPanel({
         <textarea
           ref={textareaRef}
           name="ai-tutor-input"
+          value={input}
           onChange={(event) => setInput(event.target.value)}
           onInput={(event) => setInput(event.currentTarget.value)}
           onKeyDown={handleKeyDown}
@@ -361,7 +362,7 @@ function AiTutorPanel({
                 triggerSubmit();
               }
             }}
-            disabled={!canChat || isLoading || (!input.trim() && !attachmentFile)}
+            disabled={!canChat || isLoading}
             className="ghost-button text-sm text-emerald-100"
             data-ghost-size="lg"
             style={{ "--ghost-color": "52, 211, 153" }}
