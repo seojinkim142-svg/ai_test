@@ -3910,6 +3910,71 @@ function App() {
     selectedFileId,
   ]);
 
+  const recoverQuestionSourceText = useCallback(
+    async ({ featureLabel, sourceText }) => {
+      let nextSourceText = String(sourceText || "").trim();
+      if (!file || !isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+        return nextSourceText;
+      }
+
+      const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
+      const cacheKey = `${docKey}:full-doc`;
+      const cachedText = questionSourceTextCacheRef.current.get(cacheKey);
+      if (typeof cachedText === "string" && cachedText.trim().length > nextSourceText.length) {
+        nextSourceText = cachedText.trim();
+      }
+
+      if (nextSourceText.length >= 80) {
+        return nextSourceText;
+      }
+
+      try {
+        setStatus(`${featureLabel}: 전체 본문을 다시 확인하는 중...`);
+        const extended = await extractPdfText(file, 80, 50000, { useOcr: false });
+        const extendedText = String(extended?.text || "").trim();
+        if (extendedText.length > nextSourceText.length) {
+          nextSourceText = extendedText;
+        }
+      } catch {
+        // Keep the currently available text.
+      }
+
+      if (nextSourceText.length < 80) {
+        try {
+          setStatus(`${featureLabel}: 텍스트가 부족해 OCR로 다시 추출하는 중...`);
+          const ocrExtracted = await extractPdfText(file, 80, 28000, {
+            useOcr: true,
+            ocrLang: "kor+eng",
+            ocrScale: 1.35,
+            ocrMaxPixels: 1000000,
+            ocrPageOrder: "spread",
+            maxOcrPages: 16,
+            onOcrProgress: (message) => setStatus(message),
+          });
+          const ocrText = String(ocrExtracted?.text || "").trim();
+          if (ocrText.length > nextSourceText.length) {
+            nextSourceText = ocrText;
+          }
+        } catch {
+          // Keep the currently available text.
+        }
+      }
+
+      if (nextSourceText) {
+        questionSourceTextCacheRef.current.set(cacheKey, nextSourceText);
+        setExtractedText((prev) =>
+          String(prev || "").trim().length >= nextSourceText.length ? prev : nextSourceText
+        );
+        setPreviewText((prev) =>
+          String(prev || "").trim().length >= nextSourceText.length ? prev : nextSourceText
+        );
+      }
+
+      return nextSourceText;
+    },
+    [file, selectedFileId]
+  );
+
   const resolveQuestionSourceText = useCallback(
     async ({ featureLabel, chapterSelectionInput, baseText }) => {
       const chapterSelectionRaw = String(chapterSelectionInput || "").trim();
@@ -3928,18 +3993,20 @@ function App() {
         };
       }
 
-      let sourceText = String(baseText || "").trim();
+      let sourceText = String(baseText || previewText || "").trim();
       if (!file || !isPdfDocumentKind(detectSupportedDocumentKind(file))) {
         return { text: sourceText, scopeLabel: "" };
       }
 
       const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
       if (!Number.isFinite(totalPages) || totalPages <= 0) {
+        sourceText = await recoverQuestionSourceText({ featureLabel, sourceText });
         return { text: sourceText, scopeLabel: "" };
       }
 
       const chapterOneStartPage = await resolveChapterOneStartPage();
       if (!Number.isFinite(chapterOneStartPage) || chapterOneStartPage <= 1) {
+        sourceText = await recoverQuestionSourceText({ featureLabel, sourceText });
         return { text: sourceText, scopeLabel: "" };
       }
 
@@ -3978,13 +4045,24 @@ function App() {
         sourceText = filteredText;
         filteredApplied = true;
       }
+      if (sourceText.length < 80) {
+        sourceText = await recoverQuestionSourceText({ featureLabel, sourceText });
+      }
 
       return {
         text: sourceText,
         scopeLabel: filteredApplied ? `chapter 1+ (p.${chapterOneStartPage}~)` : "",
       };
     },
-    [file, pageInfo?.total, pageInfo?.used, resolveChapterOneStartPage, selectedFileId]
+    [
+      file,
+      pageInfo?.total,
+      pageInfo?.used,
+      previewText,
+      recoverQuestionSourceText,
+      resolveChapterOneStartPage,
+      selectedFileId,
+    ]
   );
 
   const requestQuestions = async ({ force = false } = {}) => {
@@ -5776,8 +5854,8 @@ function App() {
       return;
     }
     const chapterSelectionRaw = String(flashcardChapterSelectionInput || "").trim();
-    let sourceText = (extractedText || "").trim();
-    if (!sourceText && !chapterSelectionRaw) {
+    const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
+    if (!extractedText && !chapterSelectionRaw && !isPdfSource) {
       setFlashcardError("?뚮옒?쒖뭅?쒕? ?앹꽦?섍린??異붿텧???띿뒪?멸? 遺議깊빀?덈떎.");
       return;
     }
@@ -5785,15 +5863,13 @@ function App() {
     setFlashcardError("");
     setIsGeneratingFlashcards(true);
     try {
-      let scopeLabel = "";
-      if (chapterSelectionRaw) {
-        const scoped = await extractTextForChapterSelection({
-          featureLabel: "移대뱶",
-          chapterSelectionInput: chapterSelectionRaw,
-        });
-        sourceText = String(scoped.text || "").trim();
-        scopeLabel = scoped.scopeLabel;
-      }
+      const scoped = await resolveQuestionSourceText({
+        featureLabel: "移대뱶",
+        chapterSelectionInput: chapterSelectionRaw,
+        baseText: extractedText,
+      });
+      let sourceText = String(scoped?.text || "").trim();
+      const scopeLabel = String(scoped?.scopeLabel || "").trim();
       if (sourceText.length < 80) {
         throw new Error("?뚮옒?쒖뭅?쒕? ?앹꽦?섍린??異붿텧???띿뒪?멸? 遺議깊빀?덈떎.");
       }
@@ -5850,9 +5926,9 @@ function App() {
     isLoadingText,
     extractedText,
     flashcardChapterSelectionInput,
-    extractTextForChapterSelection,
     getOpenAiService,
     outputLanguage,
+    resolveQuestionSourceText,
   ]);
 
   const handleResetTutor = useCallback(() => {
