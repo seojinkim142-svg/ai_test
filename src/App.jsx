@@ -5804,15 +5804,15 @@ function App() {
           };
           setFlashcardError("");
           setFlashcards((prev) => [localCard, ...prev]);
-          setFlashcardStatus("Flashcard added (local mode).");
+          setFlashcardStatus("플래시카드를 추가했습니다.");
           return;
         }
-        setFlashcardError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
+        setFlashcardError("먼저 로그인해 주세요.");
         return;
       }
       const deckId = selectedFileId || "default";
       setFlashcardError("");
-      setFlashcardStatus("?뚮옒?쒖뭅?????以?..");
+      setFlashcardStatus("플래시카드를 저장하는 중...");
       try {
         const saved = await addFlashcard({
           userId: user.id,
@@ -5822,9 +5822,9 @@ function App() {
           hint,
         });
         setFlashcards((prev) => [saved, ...prev]);
-        setFlashcardStatus("?뚮옒?쒖뭅?쒓? ??λ릺?덉뒿?덈떎.");
+        setFlashcardStatus("플래시카드를 추가했습니다.");
       } catch (err) {
-        setFlashcardError(`?뚮옒?쒖뭅????μ뿉 ?ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+        setFlashcardError(`플래시카드 저장에 실패했습니다: ${err.message}`);
         setFlashcardStatus("");
       }
     },
@@ -5837,19 +5837,19 @@ function App() {
         if (!AUTH_ENABLED) {
           setFlashcardError("");
           setFlashcards((prev) => prev.filter((c) => c.id !== cardId));
-          setFlashcardStatus("Flashcard removed (local mode).");
+          setFlashcardStatus("플래시카드를 삭제했습니다.");
           return;
         }
-        setFlashcardError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
+        setFlashcardError("먼저 로그인해 주세요.");
         return;
       }
       setFlashcardError("");
       try {
         await deleteFlashcard({ userId: user.id, cardId });
         setFlashcards((prev) => prev.filter((c) => c.id !== cardId));
-        setFlashcardStatus("?뚮옒?쒖뭅?쒕? ??젣?덉뒿?덈떎.");
+        setFlashcardStatus("플래시카드를 삭제했습니다.");
       } catch (err) {
-        setFlashcardError(`?뚮옒?쒖뭅????젣???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+        setFlashcardError(`플래시카드 삭제에 실패했습니다: ${err.message}`);
       }
     },
     [user]
@@ -5858,21 +5858,21 @@ function App() {
   const handleGenerateFlashcards = useCallback(async () => {
     if (isGeneratingFlashcards) return;
     if (AUTH_ENABLED && !user) {
-      setFlashcardError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
+      setFlashcardError("먼저 로그인해 주세요.");
       return;
     }
     if (!file || !selectedFileId) {
-      setFlashcardError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+      setFlashcardError("먼저 PDF를 열어 주세요.");
       return;
     }
     if (isLoadingText) {
-      setFlashcardError("PDF ?띿뒪??異붿텧???꾩쭅 吏꾪뻾 以묒엯?덈떎. ?좎떆留?湲곕떎?ㅼ＜?몄슂.");
+      setFlashcardError("PDF 텍스트 추출이 아직 진행 중입니다. 잠시만 기다려 주세요.");
       return;
     }
     const chapterSelectionRaw = String(flashcardChapterSelectionInput || "").trim();
     const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
     if (!extractedText && !chapterSelectionRaw && !isPdfSource) {
-      setFlashcardError("?뚮옒?쒖뭅?쒕? ?앹꽦?섍린??異붿텧???띿뒪?멸? 遺議깊빀?덈떎.");
+      setFlashcardError("플래시카드를 생성하기에 추출된 텍스트가 부족합니다.");
       return;
     }
 
@@ -5880,18 +5880,18 @@ function App() {
     setIsGeneratingFlashcards(true);
     try {
       const scoped = await resolveQuestionSourceText({
-        featureLabel: "移대뱶",
+        featureLabel: "플래시카드",
         chapterSelectionInput: chapterSelectionRaw,
         baseText: extractedText,
       });
       let sourceText = String(scoped?.text || "").trim();
       const scopeLabel = String(scoped?.scopeLabel || "").trim();
       if (sourceText.length < 80) {
-        throw new Error("?뚮옒?쒖뭅?쒕? ?앹꽦?섍린??異붿텧???띿뒪?멸? 遺議깊빀?덈떎.");
+        throw new Error("플래시카드를 생성하기에 추출된 텍스트가 부족합니다.");
       }
 
       setFlashcardStatus(
-        scopeLabel ? `AI ?뚮옒?쒖뭅???앹꽦 以?(${scopeLabel})...` : "AI ?뚮옒?쒖뭅???앹꽦 以?.."
+        scopeLabel ? `AI 플래시카드 생성 중 (${scopeLabel})...` : "AI 플래시카드 생성 중..."
       );
       const { generateFlashcards } = await getOpenAiService();
       const result = await generateFlashcards(sourceText, { count: 8, outputLanguage });
@@ -5908,7 +5908,7 @@ function App() {
         }))
         .filter((card) => card.front && card.back);
       if (cleaned.length === 0) {
-        throw new Error("蹂몃Ц?먯꽌 ?좏슚???뚮옒?쒖뭅?쒕? ?앹꽦?섏? 紐삵뻽?듬땲??");
+        throw new Error("본문에서 유효한 플래시카드를 생성하지 못했습니다.");
       }
       const deckId = selectedFileId || "default";
       const saved = user
@@ -5922,14 +5922,16 @@ function App() {
             created_at: new Date().toISOString(),
           }));
       if (!saved.length) {
-        throw new Error("?앹꽦???뚮옒?쒖뭅????μ뿉 ?ㅽ뙣?덉뒿?덈떎.");
+        throw new Error("생성된 플래시카드 저장에 실패했습니다.");
       }
       setFlashcards((prev) => [...saved, ...prev]);
       setFlashcardStatus(
-        scopeLabel ? `${saved.length}媛쒖쓽 AI ?뚮옒?쒖뭅?쒕? ?앹꽦?덉뒿?덈떎 (${scopeLabel}).` : `${saved.length}媛쒖쓽 AI ?뚮옒?쒖뭅?쒕? ?앹꽦?덉뒿?덈떎.`
+        scopeLabel
+          ? `${saved.length}개의 AI 플래시카드를 생성했습니다 (${scopeLabel}).`
+          : `${saved.length}개의 AI 플래시카드를 생성했습니다.`
       );
     } catch (err) {
-      setFlashcardError(`AI ?뚮옒?쒖뭅???앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+      setFlashcardError(`AI 플래시카드 생성에 실패했습니다: ${err.message}`);
       setFlashcardStatus("");
     } finally {
       setIsGeneratingFlashcards(false);

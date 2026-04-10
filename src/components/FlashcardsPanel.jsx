@@ -95,10 +95,7 @@ function FlashcardsPanel({
         const next = [record, ...prev].slice(0, 50);
         try {
           if (typeof window !== "undefined") {
-            window.localStorage.setItem(
-              SCORE_HISTORY_STORAGE_KEY,
-              JSON.stringify(next)
-            );
+            window.localStorage.setItem(SCORE_HISTORY_STORAGE_KEY, JSON.stringify(next));
           }
         } catch {
           // ignore storage errors
@@ -225,7 +222,7 @@ function FlashcardsPanel({
           data-ghost-size="sm"
           style={{ "--ghost-color": "52, 211, 153" }}
         >
-          {isGenerating ? "AI 플래시카드 생성 중.." : "AI 플래시카드 생성"}
+          {isGenerating ? "AI 플래시카드 생성 중..." : "AI 플래시카드 생성"}
         </button>
         <p className="text-xs text-slate-400">PDF 기반 자동 생성</p>
         <button
@@ -264,9 +261,7 @@ function FlashcardsPanel({
                 <span>
                   {examIndex + 1} / {examCards.length}
                 </span>
-                <span>
-                  알고있음 {knownCount} · 모름 {unknownCount}
-                </span>
+                <span>알고있음 {knownCount} / 모름 {unknownCount}</span>
               </div>
               <div className="mt-3 grid min-h-[40vh] w-full flex-1 grid-cols-[auto,1fr,auto] items-center gap-3">
                 <button
@@ -277,7 +272,7 @@ function FlashcardsPanel({
                   style={{ "--ghost-color": "52, 211, 153" }}
                   aria-label="모름"
                 >
-                  <span className="text-xl">←</span>
+                  <span className="text-xl">X</span>
                 </button>
                 <button
                   type="button"
@@ -310,19 +305,19 @@ function FlashcardsPanel({
                   style={{ "--ghost-color": "52, 211, 153" }}
                   aria-label="알고있음"
                 >
-                  <span className="text-xl">→</span>
+                  <span className="text-xl">O</span>
                 </button>
               </div>
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
                 <span>탭: 뒷면 보기</span>
-                <span>← 모름 · → 알고있음</span>
+                <span>좌: 모름 / 우: 알고있음</span>
               </div>
             </>
           )}
           {isExamComplete && (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
               <p className="text-sm text-emerald-200">시험 완료</p>
-              <p className="text-2xl font-semibold text-white">{examCards.length}장</p>
+              <p className="text-2xl font-semibold text-white">{examCards.length}문항</p>
               <p className="text-sm text-slate-200">정답률 {accuracy}%</p>
               <div className="flex flex-wrap items-center justify-center gap-2 text-sm text-slate-200">
                 <span className="rounded-xl border border-white/10 bg-white/5 px-3 py-1">
@@ -374,9 +369,7 @@ function FlashcardsPanel({
                   <span className="text-slate-300">
                     {new Date(item.createdAt).toLocaleString("ko-KR")}
                   </span>
-                  <span>
-                    {item.total}장 · 알고있음 {item.known} · 모름 {item.unknown}
-                  </span>
+                  <span>{item.total}문항 / 알고있음 {item.known} / 모름 {item.unknown}</span>
                   <span className="font-semibold text-emerald-200">정답률 {item.accuracy}%</span>
                 </div>
               ))}
@@ -424,12 +417,14 @@ function FlashcardsPanel({
             data-ghost-size="lg"
             style={{ "--ghost-color": "52, 211, 153" }}
           >
-            {isLoading ? "저장 중.." : "카드 추가"}
+            {isLoading ? "저장 중..." : "카드 추가"}
           </button>
 
           <div className="mt-4 space-y-2">
-            {isLoading && <p className="text-sm text-slate-300">불러오는 중..</p>}
-            {!isLoading && cards.length === 0 && <p className="text-sm text-slate-400">저장된 카드가 없습니다.</p>}
+            {isLoading && <p className="text-sm text-slate-300">불러오는 중...</p>}
+            {!isLoading && cards.length === 0 && (
+              <p className="text-sm text-slate-400">저장된 카드가 없습니다.</p>
+            )}
             {!isLoading &&
               cards.map((card) => (
                 <div

@@ -155,10 +155,10 @@ const LANDING_COPY = {
       pricing: "요금제",
     },
     hero: {
-      line1: "강의 PDF가",
-      line2: "요약, 퀴즈, 카드까지",
+      line1: "시험 직전",
+      line2: "벼락치기용 PDF 공부 AI",
       description:
-        "Zeusian.ai는 PDF 강의자료를 요약하고 문제를 만드는 공부 AI입니다. 요약부터 퀴즈, 카드, AI 튜터까지 자동으로 연결하고 반복 복습 루프를 한 곳에서 완성하세요.",
+        "Zeusian.ai(제우시안 AI)는 시험 직전 빠르게 복습해야 할 때, PDF 강의자료를 요약, 퀴즈, 카드, AI 튜터 흐름으로 바로 바꿔주는 공부 AI입니다.",
       primary: "시작하기",
       secondary: "기능 보기",
     },
@@ -300,7 +300,7 @@ const LANDING_COPY = {
       companyLabel: "상호",
       titleLine1: "PDF 한 장에서",
       titleLine2: "복습 루프까지",
-      description: "Zeusian.ai는 PDF 요약, 퀴즈, 카드, AI 튜터 흐름을 한곳에서 이어줍니다.",
+      description: "Zeusian.ai(제우시안 AI)는 PDF 요약, 퀴즈, 카드, AI 튜터 흐름을 한곳에서 이어줍니다.",
       legal: "법률",
       legalLinks: { terms: "이용약관", privacy: "개인정보처리방침" },
       groups: [
