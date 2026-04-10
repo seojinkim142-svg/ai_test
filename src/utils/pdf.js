@@ -865,7 +865,11 @@ async function recognizePdfPage(
     }
   });
 
-  cache.set(cacheKey, text);
+  if (text) {
+    cache.set(cacheKey, text);
+  } else if (cache.has(cacheKey)) {
+    cache.delete(cacheKey);
+  }
   return text;
 }
 

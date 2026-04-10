@@ -3960,6 +3960,87 @@ function App() {
     selectedFileId,
   ]);
 
+  const recoverSummarySourceText = useCallback(
+    async (sourceText) => {
+      let nextSourceText = String(sourceText || "").trim();
+      let attemptedOcr = false;
+      let lastOcrError = null;
+
+      if (!file || !isPdfDocumentKind(detectSupportedDocumentKind(file))) {
+        return { text: nextSourceText, attemptedOcr, lastOcrError };
+      }
+
+      const summaryCacheKey = selectedFileId || file?.name || null;
+      const cachedSummaryText = summaryCacheKey
+        ? summaryContextCacheRef.current.get(summaryCacheKey)
+        : null;
+      if (
+        typeof cachedSummaryText === "string" &&
+        String(cachedSummaryText).trim().length > nextSourceText.length
+      ) {
+        nextSourceText = String(cachedSummaryText).trim();
+      }
+
+      if (nextSourceText.length < 120) {
+        try {
+          setStatus("요약 정확도 향상을 위해 전체 본문을 다시 확인하는 중...");
+          const extended = await extractPdfTextWithCaching(file, selectedFileId, user?.id, {
+            pageLimit: 80,
+            maxLength: 50000,
+            useOcr: false,
+          });
+          const extendedText = String(extended?.text || "").trim();
+          if (extendedText.length > nextSourceText.length) {
+            nextSourceText = extendedText;
+          }
+        } catch (error) {
+          console.warn("Failed to refresh summary source text:", error);
+        }
+      }
+
+      if (nextSourceText.length < 120) {
+        attemptedOcr = true;
+        try {
+          setStatus("텍스트가 부족해 OCR로 다시 추출하는 중...");
+          const ocrExtracted = await extractPdfTextWithCaching(file, selectedFileId, user?.id, {
+            pageLimit: 80,
+            maxLength: 28000,
+            useOcr: true,
+            forceRefresh: true,
+            ocrLang: "kor+eng",
+            ocrScale: 2,
+            ocrMaxPixels: 2200000,
+            ocrPageOrder: "spread",
+            maxOcrPages: 24,
+            onOcrProgress: (message) => setStatus(message),
+          });
+          const ocrText = String(ocrExtracted?.text || "").trim();
+          if (ocrText.length > nextSourceText.length) {
+            nextSourceText = ocrText;
+          }
+        } catch (error) {
+          lastOcrError = error;
+          console.warn("Failed to recover summary source text with OCR:", error);
+        }
+      }
+
+      if (nextSourceText) {
+        if (summaryCacheKey) {
+          summaryContextCacheRef.current.set(summaryCacheKey, nextSourceText);
+        }
+        setExtractedText((prev) =>
+          String(prev || "").trim().length >= nextSourceText.length ? prev : nextSourceText
+        );
+        setPreviewText((prev) =>
+          String(prev || "").trim().length >= nextSourceText.length ? prev : nextSourceText
+        );
+      }
+
+      return { text: nextSourceText, attemptedOcr, lastOcrError };
+    },
+    [file, selectedFileId, user]
+  );
+
   const recoverQuestionSourceText = useCallback(
     async ({ featureLabel, sourceText }) => {
       let nextSourceText = String(sourceText || "").trim();
@@ -5203,76 +5284,26 @@ function App() {
       }
 
       let summarySourceText = String(extractedText || previewText || "").trim();
-      const summaryCacheKey = selectedFileId || file?.name || null;
+      let summaryRecoveryMeta = {
+        attemptedOcr: false,
+        lastOcrError: null,
+      };
       if (!customChapterSections) {
-        const cachedSummaryText = summaryCacheKey
-          ? summaryContextCacheRef.current.get(summaryCacheKey)
-          : null;
-
-        if (
-          typeof cachedSummaryText === "string" &&
-          String(cachedSummaryText).trim().length > summarySourceText.length
-        ) {
-          summarySourceText = cachedSummaryText;
-        }
-
-        if (file && isPdfSource) {
-          try {
-            setStatus("요약 정확도 향상을 위해 추출 범위를 확장하는 중...");
-            const docId = selectedFileId || file?.name || null;
-            const userId = user?.id || null;
-            const extended = await extractPdfTextWithCaching(file, docId, userId, {
-              pageLimit: 80,
-              maxLength: 50000,
-              useOcr: true,
-            });
-            const extendedText = String(extended?.text || "").trim();
-            if (extendedText.length > summarySourceText.length) {
-              summarySourceText = extendedText;
-              if (summaryCacheKey) {
-                summaryContextCacheRef.current.set(summaryCacheKey, extendedText);
-              }
-            }
-          } catch {
-            // fallback to already extracted text
-          }
-        }
-
-        if (!summarySourceText && file && isPdfSource) {
-          try {
-            setStatus("텍스트가 보이지 않아 OCR로 다시 추출하는 중...");
-            const docId = selectedFileId || file?.name || null;
-            const userId = user?.id || null;
-            const ocrExtracted = await extractPdfTextWithCaching(file, docId, userId, {
-              pageLimit: 80,
-              maxLength: 28000,
-              useOcr: true,
-              forceRefresh: true,
-              ocrLang: "kor+eng",
-              ocrScale: 1.35,
-              ocrMaxPixels: 1000000,
-              ocrPageOrder: "spread",
-              maxOcrPages: 16,
-              onOcrProgress: (message) => setStatus(message),
-            });
-            const ocrText = String(ocrExtracted?.text || "").trim();
-            if (ocrText) {
-              summarySourceText = ocrText;
-              setExtractedText((prev) => (String(prev || "").trim() ? prev : ocrText));
-              setPreviewText((prev) => (String(prev || "").trim() ? prev : ocrText));
-              if (summaryCacheKey) {
-                summaryContextCacheRef.current.set(summaryCacheKey, ocrText);
-              }
-            }
-          } catch {
-            // fallback to already extracted text
-          }
-        }
+        summaryRecoveryMeta = await recoverSummarySourceText(summarySourceText);
+        summarySourceText = String(summaryRecoveryMeta?.text || "").trim();
       }
 
       if (!customChapterSections && !summarySourceText) {
         if (isPdfSource) {
-          throw new Error("문서에서 요약할 텍스트를 찾지 못했습니다. OCR까지 시도했지만 추출 가능한 텍스트가 없습니다.");
+          if (summaryRecoveryMeta?.lastOcrError?.message) {
+            throw new Error(`OCR 중 오류가 발생했습니다: ${summaryRecoveryMeta.lastOcrError.message}`);
+          }
+          if (summaryRecoveryMeta?.attemptedOcr) {
+            throw new Error(
+              "문서에서 요약할 텍스트를 찾지 못했습니다. OCR도 비어 있습니다. 문서를 다시 열거나 더 선명한 PDF로 시도해주세요."
+            );
+          }
+          throw new Error("문서에서 요약할 텍스트를 찾지 못했습니다.");
         }
         throw new Error("문서에서 요약할 텍스트를 찾지 못했습니다.");
       }
