@@ -34,16 +34,15 @@ import {
 } from "./services/supabase";
 import { ensureUploadPreviewPdf as ensureUploadPreviewPdfRequest } from "./services/document";
 import {
-  extractPdfText,
   extractPdfTextByRanges,
   extractChapterRangesFromToc,
   extractPdfTextFromPages,
   extractPdfPageTexts,
   generatePdfThumbnail,
+  extractPdfTextWithCaching,
 } from "./utils/pdf";
 import {
   detectSupportedDocumentKind,
-  extractDocumentText,
   generateDocumentThumbnail,
   isPdfDocumentKind,
   isSupportedUploadFile,
@@ -2519,6 +2518,14 @@ function App() {
             (item) => item.id === partialBundle.activeInstructorEmphasisId
           )?.text
         );
+        const storedExtractedText = String(data?.extracted_text || "").trim();
+        const storedExtractedMetadata =
+          data?.extracted_text_metadata && typeof data.extracted_text_metadata === "object"
+            ? data.extracted_text_metadata
+            : {};
+        const storedPagesUsed = Number.parseInt(storedExtractedMetadata?.pages_used, 10) || 0;
+        const storedTotalPages = Number.parseInt(storedExtractedMetadata?.total_pages, 10) || 0;
+        const docCacheKey = String(docId || "").trim();
         setArtifacts(mapped);
         setPartialSummary(partialBundle.summary);
         setPartialSummaryRange(partialBundle.range);
@@ -2537,6 +2544,24 @@ function App() {
         setQuestionStyleProfileContent(questionStyleBundle.content);
         setQuestionStyleProfileScopeLabel(questionStyleBundle.scopeLabel);
         reviewNotesRef.current = reviewNoteEntries;
+        if (storedExtractedText) {
+          if (docCacheKey) {
+            summaryContextCacheRef.current.set(docCacheKey, storedExtractedText);
+            questionSourceTextCacheRef.current.set(`${docCacheKey}:full-doc`, storedExtractedText);
+          }
+          setExtractedText((prev) =>
+            String(prev || "").trim().length >= storedExtractedText.length ? prev : storedExtractedText
+          );
+          setPreviewText((prev) =>
+            String(prev || "").trim().length >= storedExtractedText.length ? prev : storedExtractedText
+          );
+          if (storedPagesUsed || storedTotalPages) {
+            setPageInfo((prev) => ({
+              used: Math.max(Number(prev?.used || 0), storedPagesUsed),
+              total: Math.max(Number(prev?.total || 0), storedTotalPages),
+            }));
+          }
+        }
         if (mapped.summary) {
           setSummary(mapped.summary);
           summaryRequestedRef.current = true;
@@ -2953,10 +2978,10 @@ function App() {
 
       try {
         const [textResult, thumb, loaded] = await Promise.all([
-          extractDocumentText(targetFile, {
+          extractPdfTextWithCaching(targetFile, nextDocId, user?.id, {
             pageLimit: 30,
             maxLength: 12000,
-            useOcr: false, // PDF 미리보기 로딩 시에는 OCR 사용 안함
+            useOcr: true, // OCR을 사용하여 텍스트 추출
             ocrLang: "kor+eng",
           }),
           generateDocumentThumbnail(targetFile),
@@ -3938,6 +3963,8 @@ function App() {
   const recoverQuestionSourceText = useCallback(
     async ({ featureLabel, sourceText }) => {
       let nextSourceText = String(sourceText || "").trim();
+      
+      // 파일이 없거나 PDF가 아닌 경우 기본 텍스트 반환
       if (!file || !isPdfDocumentKind(detectSupportedDocumentKind(file))) {
         return nextSourceText;
       }
@@ -3955,19 +3982,26 @@ function App() {
 
       try {
         setStatus(`${featureLabel}: 전체 본문을 다시 확인하는 중...`);
-        const extended = await extractPdfText(file, 80, 50000, { useOcr: false });
+        const extended = await extractPdfTextWithCaching(file, selectedFileId, user?.id, {
+          pageLimit: 80,
+          maxLength: 50000,
+          useOcr: false,
+        });
         const extendedText = String(extended?.text || "").trim();
         if (extendedText.length > nextSourceText.length) {
           nextSourceText = extendedText;
         }
-      } catch {
+      } catch (error) {
+        console.warn('Failed to extract PDF text:', error);
         // Keep the currently available text.
       }
 
       if (nextSourceText.length < 80) {
         try {
           setStatus(`${featureLabel}: 텍스트가 부족해 OCR로 다시 추출하는 중...`);
-          const ocrExtracted = await extractPdfText(file, 80, 28000, {
+          const ocrExtracted = await extractPdfTextWithCaching(file, selectedFileId, user?.id, {
+            pageLimit: 80,
+            maxLength: 28000,
             useOcr: true,
             ocrLang: "kor+eng",
             ocrScale: 1.35,
@@ -3980,7 +4014,8 @@ function App() {
           if (ocrText.length > nextSourceText.length) {
             nextSourceText = ocrText;
           }
-        } catch {
+        } catch (error) {
+          console.warn('Failed to extract OCR text:', error);
           // Keep the currently available text.
         }
       }
@@ -3997,7 +4032,7 @@ function App() {
 
       return nextSourceText;
     },
-    [file, selectedFileId]
+    [file, selectedFileId, user]
   );
 
   const resolveQuestionSourceText = useCallback(
@@ -5184,7 +5219,13 @@ function App() {
         if (file && isPdfSource) {
           try {
             setStatus("요약 정확도 향상을 위해 추출 범위를 확장하는 중...");
-            const extended = await extractPdfText(file, 80, 50000, { useOcr: false });
+            const docId = selectedFileId || file?.name || null;
+            const userId = user?.id || null;
+            const extended = await extractPdfTextWithCaching(file, docId, userId, {
+              pageLimit: 80,
+              maxLength: 50000,
+              useOcr: true,
+            });
             const extendedText = String(extended?.text || "").trim();
             if (extendedText.length > summarySourceText.length) {
               summarySourceText = extendedText;
@@ -5200,8 +5241,13 @@ function App() {
         if (!summarySourceText && file && isPdfSource) {
           try {
             setStatus("텍스트가 보이지 않아 OCR로 다시 추출하는 중...");
-            const ocrExtracted = await extractPdfText(file, 80, 28000, {
+            const docId = selectedFileId || file?.name || null;
+            const userId = user?.id || null;
+            const ocrExtracted = await extractPdfTextWithCaching(file, docId, userId, {
+              pageLimit: 80,
+              maxLength: 28000,
               useOcr: true,
+              forceRefresh: true,
               ocrLang: "kor+eng",
               ocrScale: 1.35,
               ocrMaxPixels: 1000000,

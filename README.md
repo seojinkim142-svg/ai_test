@@ -100,6 +100,15 @@ Based on recent code review of `src/App.jsx`, the following improvements are pla
 
 Recent app changes that are already reflected in the current codebase:
 
+### 2026.04.10 15:40 - OCR 텍스트 캐싱 시스템 구현
+- **OCR 텍스트 캐싱 기능 추가**: PDF 파일 해시 기반 캐싱 시스템 구현
+- **Supabase 테이블 통합**: `ocr_text_storage` 테이블을 통한 텍스트 저장 및 검색
+- **성능 최적화**: 반복적인 OCR 처리 방지로 처리 시간 단축
+- **코드 업데이트**:
+  - `src/services/supabase.js`: `extractDocumentText` 함수를 `extractPdfTextWithCaching`으로 교체
+  - `src/utils/pdf.js`: `extractPdfTextWithCaching` 함수를 `extractDocumentText`로 내보내도록 추가
+  - `src/App.jsx`: 모든 `extractDocumentText` 호출을 `extractPdfTextWithCaching`으로 업데이트
+
 ### 성능 최적화 및 사용자 경험 개선
 
 **PDF 처리 최적화**
