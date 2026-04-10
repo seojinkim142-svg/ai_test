@@ -2188,9 +2188,18 @@ function App() {
     if (isLoadingText) {
       return "PDF text extraction is still running. Screenshot questions can still be sent right away.";
     }
-    const trimmed = (extractedText || "").trim();
+    const summaryCacheKey = selectedFileId || file?.name || null;
+    const docCacheKey = String(selectedFileId || file?.name || "").trim() || "__active__";
+    const cachedRecoveredText = [
+      extractedText,
+      summaryCacheKey ? summaryContextCacheRef.current.get(summaryCacheKey) : "",
+      questionSourceTextCacheRef.current.get(`${docCacheKey}:full-doc`),
+    ]
+      .map((value) => String(value || "").trim())
+      .find(Boolean);
+    const trimmed = String(cachedRecoveredText || "").trim();
     if (!trimmed) {
-      return "No readable PDF text was found yet. Attach a screenshot if you want the tutor to explain that instead.";
+      return "Scanned PDFs can still work. The tutor will inspect nearby pages and try OCR automatically when needed.";
     }
     return "";
   }, [extractedText, file, isLoadingText, selectedFileId]);
@@ -6027,9 +6036,39 @@ function App() {
 
       let pdfEvidenceText = "";
       if (canUsePdfEvidence && !isLoadingText) {
+        const summaryCacheKey = selectedFileId || file?.name || null;
+        const docCacheKey = String(selectedFileId || file?.name || "").trim() || "__active__";
+        let recoveredTutorDocText = [
+          extractedText,
+          previewText,
+          summaryCacheKey ? summaryContextCacheRef.current.get(summaryCacheKey) : "",
+          questionSourceTextCacheRef.current.get(`${docCacheKey}:full-doc`),
+        ]
+          .map((value) => String(value || "").trim())
+          .find((value) => value.length >= 80) || "";
+        const buildRecoveredPdfEvidence = async () => {
+          if (recoveredTutorDocText.length < 80) {
+            recoveredTutorDocText = String(
+              await recoverQuestionSourceText({
+                featureLabel: "AI 튜터",
+                sourceText: recoveredTutorDocText,
+              })
+            ).trim();
+          }
+          if (!recoveredTutorDocText) return "";
+          return [
+            "[RAW PDF EVIDENCE]",
+            `- query: ${effectivePrompt}`,
+            "- source: recovered_full_document_text",
+            "",
+            recoveredTutorDocText.slice(0, 180000),
+          ].join("\n");
+        };
+
         const totalPages = Number(pageInfo?.total || pageInfo?.used || 0);
         if (!totalPages) {
-          if (!hasAttachment) {
+          pdfEvidenceText = await buildRecoveredPdfEvidence();
+          if (!pdfEvidenceText && !hasAttachment) {
             setTutorError("Page information is unavailable. Reopen the PDF and try again.");
             return false;
           }
@@ -6183,7 +6222,8 @@ function App() {
             maxCharsPerPage: 5200,
           });
           if (!finalEntries.length) {
-            if (!attachmentEvidenceText) {
+            pdfEvidenceText = await buildRecoveredPdfEvidence();
+            if (!pdfEvidenceText && !attachmentEvidenceText) {
               setTutorError("No readable evidence was found on nearby PDF pages. Reopen the PDF and try again.");
               setStatus("");
               return false;
@@ -6264,6 +6304,7 @@ function App() {
     },
     [
       currentPage,
+      extractedText,
       file,
       getOpenAiService,
       isLoadingText,
@@ -6271,6 +6312,8 @@ function App() {
       outputLanguage,
       pageInfo?.total,
       pageInfo?.used,
+      previewText,
+      recoverQuestionSourceText,
       selectedFileId,
       tutorMessages,
     ]

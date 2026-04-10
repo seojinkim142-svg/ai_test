@@ -1093,6 +1093,10 @@ const OUTPUT_LANGUAGE_OPTIONS = [
   { code: "ko", label: "한국어" },
 ];
 
+const SUMMARY_DEMO_VIDEO_SRC = encodeURI("/화면 녹화 중 2026-04-09 235144.mp4");
+const QUIZ_DEMO_VIDEO_SRC = "/quiz-generation-demo.mp4";
+const FLASHCARD_DEMO_VIDEO_SRC = "/flashcard-demo.mp4";
+
 const getLandingCopy = (outputLanguage) => LANDING_COPY[outputLanguage] ?? LANDING_COPY.ko;
 
 const getFeatureItems = (copy) => [
@@ -1859,25 +1863,51 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                             : "0 28px 70px -54px rgba(15,23,42,0.22), inset 0 1px 0 rgba(255,255,255,0.72)",
                         }}
                       >
-                        <div className="absolute inset-0 opacity-90" style={{ background: feature.theme.tint }} />
-                        <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(255,255,255,0.82),rgba(255,255,255,0.16))]" />
-                        <div
-                          className="absolute inset-0 opacity-[0.2]"
-                          style={{
-                            backgroundImage: "linear-gradient(rgba(15,23,42,0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.18) 1px, transparent 1px)",
-                            backgroundSize: "34px 34px",
-                          }}
-                        />
-                        <div className="absolute -left-8 top-10 h-28 w-28 rounded-full blur-3xl" style={{ background: feature.theme.accent, opacity: 0.3 }} />
-                        <div className="absolute -right-12 bottom-0 h-40 w-40 rounded-full blur-3xl" style={{ background: feature.theme.accent, opacity: 0.22 }} />
-                        <div className="absolute left-[14%] top-[22%] h-px w-[44%] bg-slate-900/16" />
-                        <div className="absolute left-[26%] top-[46%] h-px w-[50%] bg-slate-900/12" />
-                        <div className="absolute left-[18%] top-[68%] h-px w-[36%] bg-slate-900/14" />
-                        <div className="relative flex h-full items-center justify-center p-8 sm:p-10">
-                          <div className="flex h-28 w-28 items-center justify-center rounded-[2rem] border border-white/70 bg-white/85 text-slate-950 shadow-[0_28px_60px_-28px_rgba(15,23,42,0.35)] sm:h-32 sm:w-32">
-                            <Icon className="h-14 w-14 sm:h-16 sm:w-16" />
-                          </div>
-                        </div>
+                        {feature.id === "summary" || feature.id === "quiz" || feature.id === "flashcards" ? (
+                          <>
+                            <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.55),rgba(255,255,255,0.12))]" />
+                            <div className="absolute inset-[3.5%] overflow-hidden rounded-[1.9rem] border border-white/70 bg-slate-950 shadow-[0_32px_70px_-40px_rgba(15,23,42,0.42)]">
+                              <video
+                                className="h-full w-full object-cover object-center"
+                                src={
+                                  feature.id === "summary"
+                                    ? SUMMARY_DEMO_VIDEO_SRC
+                                    : feature.id === "quiz"
+                                      ? QUIZ_DEMO_VIDEO_SRC
+                                      : FLASHCARD_DEMO_VIDEO_SRC
+                                }
+                                autoPlay
+                                muted
+                                loop
+                                playsInline
+                                preload="metadata"
+                              />
+                            </div>
+                            <div className="pointer-events-none absolute inset-[3.5%] rounded-[1.9rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.12),transparent_20%,transparent_80%,rgba(15,23,42,0.08))]" />
+                          </>
+                        ) : (
+                          <>
+                            <div className="absolute inset-0 opacity-90" style={{ background: feature.theme.tint }} />
+                            <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(255,255,255,0.82),rgba(255,255,255,0.16))]" />
+                            <div
+                              className="absolute inset-0 opacity-[0.2]"
+                              style={{
+                                backgroundImage: "linear-gradient(rgba(15,23,42,0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.18) 1px, transparent 1px)",
+                                backgroundSize: "34px 34px",
+                              }}
+                            />
+                            <div className="absolute -left-8 top-10 h-28 w-28 rounded-full blur-3xl" style={{ background: feature.theme.accent, opacity: 0.3 }} />
+                            <div className="absolute -right-12 bottom-0 h-40 w-40 rounded-full blur-3xl" style={{ background: feature.theme.accent, opacity: 0.22 }} />
+                            <div className="absolute left-[14%] top-[22%] h-px w-[44%] bg-slate-900/16" />
+                            <div className="absolute left-[26%] top-[46%] h-px w-[50%] bg-slate-900/12" />
+                            <div className="absolute left-[18%] top-[68%] h-px w-[36%] bg-slate-900/14" />
+                            <div className="relative flex h-full items-center justify-center p-8 sm:p-10">
+                              <div className="flex h-28 w-28 items-center justify-center rounded-[2rem] border border-white/70 bg-white/85 text-slate-950 shadow-[0_28px_60px_-28px_rgba(15,23,42,0.35)] sm:h-32 sm:w-32">
+                                <Icon className="h-14 w-14 sm:h-16 sm:w-16" />
+                              </div>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
