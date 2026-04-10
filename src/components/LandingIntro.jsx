@@ -2208,6 +2208,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                     <p>
                       {copy.footer.companyLabel}: {FOOTER_COMPANY_INFO.value}
                     </p>
+                    <p>contact:hestra.co@gmail.com</p>
                   </div>
                 ) : null}
 

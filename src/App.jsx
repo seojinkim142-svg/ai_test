@@ -1033,6 +1033,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showAuth, setShowAuth] = useState(false);
   const [showGuestIntro, setShowGuestIntro] = useState(() => !AUTH_ENABLED);
+  const [skipPromoSplash, setSkipPromoSplash] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [visitedPages, setVisitedPages] = useState(() => new Set());
   const [mockExams, setMockExams] = useState([]);
@@ -1884,6 +1885,7 @@ function App() {
   useEffect(() => {
     if (user) {
       setShowAuth(false);
+      setSkipPromoSplash(false);
     }
   }, [user]);
 
@@ -2590,6 +2592,8 @@ function App() {
     setError("");
     setStatus("濡쒓렇?꾩썐 以?..");
     try {
+      setShowSettings(false);
+      setSkipPromoSplash(true);
       setShowPremiumProfilePicker(false);
       setShowProfilePinDialog(false);
       setIsFeedbackDialogOpen(false);
@@ -6953,6 +6957,7 @@ function App() {
     onDeleteUpload: handleDeleteUpload,
     isGuest: AUTH_ENABLED && !user,
     showIntro: !AUTH_ENABLED && !user && showGuestIntro,
+    skipPromoSplash,
     onIntroDone: () => setShowGuestIntro(false),
     onRequireAuth: openAuth,
     currentTier: tier,
