@@ -2121,7 +2121,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
           <div
             ref={(node) => registerRevealNode("pricing-fade-end", node)}
             data-reveal-key="pricing-fade-end"
-            className="mt-10 h-px w-full"
+            className="mt-14 h-px w-full"
             aria-hidden="true"
           />
         </div>
