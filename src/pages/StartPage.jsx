@@ -27,6 +27,7 @@ const StartPage = memo(function StartPage({
   onDeleteUpload,
   isGuest = false,
   showIntro = false,
+  skipPromoSplash = false,
   onIntroDone,
   onRequireAuth,
   currentTier = "free",
@@ -51,6 +52,7 @@ const StartPage = memo(function StartPage({
       {showPromo && (
         <PromoIntro
           onStart={handleStart}
+          skipSplash={skipPromoSplash}
           outputLanguage={outputLanguage}
           setOutputLanguage={setOutputLanguage}
         />

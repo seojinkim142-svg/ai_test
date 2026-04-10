@@ -7,9 +7,14 @@ const SPLASH_TIMING = {
   reduced: { startExitDelay: 90, fadeDuration: 220 },
 };
 
-const PromoIntro = memo(function PromoIntro({ onStart, outputLanguage = "ko", setOutputLanguage }) {
-  const [showLandingIntro, setShowLandingIntro] = useState(false);
-  const [showSplash, setShowSplash] = useState(true);
+const PromoIntro = memo(function PromoIntro({
+  onStart,
+  skipSplash = false,
+  outputLanguage = "ko",
+  setOutputLanguage,
+}) {
+  const [showLandingIntro, setShowLandingIntro] = useState(() => skipSplash);
+  const [showSplash, setShowSplash] = useState(() => !skipSplash);
   const [isSplashExiting, setIsSplashExiting] = useState(false);
   const activatedRef = useRef(false);
   const startExitTimerRef = useRef(null);
@@ -39,6 +44,14 @@ const PromoIntro = memo(function PromoIntro({ onStart, outputLanguage = "ko", se
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!skipSplash) return;
+    activatedRef.current = true;
+    setShowLandingIntro(true);
+    setShowSplash(false);
+    setIsSplashExiting(false);
+  }, [skipSplash]);
 
   useEffect(() => {
     if (typeof document === "undefined") return undefined;
