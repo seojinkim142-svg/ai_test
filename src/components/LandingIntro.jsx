@@ -1096,6 +1096,8 @@ const OUTPUT_LANGUAGE_OPTIONS = [
 const SUMMARY_DEMO_VIDEO_SRC = encodeURI("/화면 녹화 중 2026-04-09 235144.mp4");
 const QUIZ_DEMO_VIDEO_SRC = "/quiz-generation-demo.mp4";
 const FLASHCARD_DEMO_VIDEO_SRC = "/flashcard-demo.mp4";
+const TUTOR_DEMO_VIDEO_SRC = "/tutor-demo.mp4";
+const MOCK_EXAM_DEMO_VIDEO_SRC = "/mock-exam-demo.mp4";
 
 const getLandingCopy = (outputLanguage) => LANDING_COPY[outputLanguage] ?? LANDING_COPY.ko;
 
@@ -1863,7 +1865,11 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                             : "0 28px 70px -54px rgba(15,23,42,0.22), inset 0 1px 0 rgba(255,255,255,0.72)",
                         }}
                       >
-                        {feature.id === "summary" || feature.id === "quiz" || feature.id === "flashcards" ? (
+                        {feature.id === "summary" ||
+                        feature.id === "quiz" ||
+                        feature.id === "flashcards" ||
+                        feature.id === "tutor" ||
+                        feature.id === "mockExam" ? (
                           <>
                             <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.55),rgba(255,255,255,0.12))]" />
                             <div className="absolute inset-[3.5%] overflow-hidden rounded-[1.9rem] border border-white/70 bg-slate-950 shadow-[0_32px_70px_-40px_rgba(15,23,42,0.42)]">
@@ -1874,7 +1880,11 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                                     ? SUMMARY_DEMO_VIDEO_SRC
                                     : feature.id === "quiz"
                                       ? QUIZ_DEMO_VIDEO_SRC
-                                      : FLASHCARD_DEMO_VIDEO_SRC
+                                      : feature.id === "flashcards"
+                                        ? FLASHCARD_DEMO_VIDEO_SRC
+                                        : feature.id === "tutor"
+                                          ? TUTOR_DEMO_VIDEO_SRC
+                                          : MOCK_EXAM_DEMO_VIDEO_SRC
                                 }
                                 autoPlay
                                 muted
