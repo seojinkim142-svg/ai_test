@@ -7434,6 +7434,7 @@ function App() {
             currentTierRemainingDays={tierRemainingDays}
             theme={theme}
             user={user}
+            authReady={authReady}
             onTierUpdated={refreshTier}
             paymentReturnSignal={paymentReturnSignal}
           />

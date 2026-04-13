@@ -37,7 +37,7 @@ export const normalizeQuizPayload = (payload) => {
 export const getTierLabel = (tier) => {
   if (tier === "free") return "Free";
   if (tier === "pro") return "Pro";
-  if (tier === "premium") return "Premium";
+  if (tier === "premium") return "Family";
   return "Free";
 };
 

@@ -21,10 +21,10 @@ const cardSubscriptionPlans = {
     tier: "pro",
     itemName: "Zeusian Pro Card Subscription",
   },
-  Premium: {
+  Family: {
     baseAmount: 18900,
     tier: "premium",
-    itemName: "Zeusian Premium Card Subscription",
+    itemName: "Zeusian Family Card Subscription",
   },
 };
 
@@ -187,7 +187,7 @@ export function useNiceSubscription({
 
     if (!selectedPlanConfig) {
       setPaymentNotice("");
-      setPaymentError("카드 정기결제는 Pro 또는 Premium에서만 사용할 수 있습니다.");
+      setPaymentError("카드 정기결제는 Pro 또는 패밀리에서만 사용할 수 있습니다.");
       return;
     }
 

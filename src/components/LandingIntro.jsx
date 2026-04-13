@@ -174,7 +174,7 @@ const LANDING_COPY = {
       pricingLead: "필요한 만큼 시작하고",
       pricingAccent: "학습 범위에 맞게 확장하세요",
       pricingDescription:
-        "무료로 가볍게 시작하고, 더 자주 공부하면 프로로, 함께 쓰면 프리미엄으로 자연스럽게 넘어가면 됩니다.",
+        "무료로 가볍게 시작하고, 더 자주 공부하면 프로로, 함께 쓰면 패밀리로 자연스럽게 넘어가면 됩니다.",
       ctaLead: "이제 공부 루프를",
       ctaAccent: "실제로 돌려보세요",
       ctaDescription:
@@ -259,7 +259,8 @@ const LANDING_COPY = {
         {
           id: "pro",
           name: "프로",
-          price: "월 6,900원",
+          originalPrice: "9,900원",
+          price: "6,900원 / 월",
           description: "혼자 꾸준히 공부하는 사용자용",
           features: ["업로드 무제한", "요약/퀴즈/OX/카드 전체 제공", "AI 튜터"],
           ctaLabel: "프로 선택",
@@ -268,11 +269,12 @@ const LANDING_COPY = {
         },
         {
           id: "premium",
-          name: "프리미엄",
+          name: "패밀리",
+          originalPrice: "36,000원",
           price: "월 18,900원",
           description: "최대 4명 팀 학습",
-          features: ["공유 스페이스로 함께 학습", "팀원별 학습 현황 확인", "프리미엄 자료 관리 기능"],
-          ctaLabel: "프리미엄 선택",
+          features: ["공유 스페이스로 함께 학습", "팀원별 학습 현황 확인", "패밀리 자료 관리 기능"],
+          ctaLabel: "패밀리 선택",
           accent: "linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)",
           glow: "rgba(20, 184, 166, 0.24)",
         },
@@ -362,7 +364,7 @@ const LANDING_COPY = {
       pricingLead: "按需开始",
       pricingAccent: "随学习规模扩展",
       pricingDescription:
-        "可以先免费开始，学习更频繁时升级到 Pro，需要共享学习空间时再选择 Premium。",
+        "可以先免费开始，学习更频繁时升级到 Pro，需要共享学习空间时再选择 Family。",
       ctaLead: "现在就把学习闭环",
       ctaAccent: "真正跑起来",
       ctaDescription:
@@ -456,11 +458,12 @@ const LANDING_COPY = {
         },
         {
           id: "premium",
-          name: "Premium",
+          name: "Family",
+          originalPrice: "₩36,000 / 月",
           price: "₩18,900 / 月",
           description: "最多 4 人共享学习",
           features: ["共享学习空间协作", "查看成员学习进度", "高级资料管理功能"],
-          ctaLabel: "选择 Premium",
+          ctaLabel: "选择 Family",
           accent: "linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)",
           glow: "rgba(20, 184, 166, 0.24)",
         },
@@ -550,7 +553,7 @@ const LANDING_COPY = {
       pricingLead: "必要な分だけ始めて",
       pricingAccent: "学習量に合わせて広げられます",
       pricingDescription:
-        "まずは無料で始め、学習頻度が増えたらProへ、共有スペースが必要ならPremiumへ自然に移行できます。",
+        "まずは無料で始め、学習頻度が増えたらProへ、共有スペースが必要ならFamilyへ自然に移行できます。",
       ctaLead: "学習ループを",
       ctaAccent: "実際に回してみましょう",
       ctaDescription:
@@ -644,11 +647,12 @@ const LANDING_COPY = {
         },
         {
           id: "premium",
-          name: "Premium",
+          name: "Family",
+          originalPrice: "₩36,000 / 月",
           price: "₩18,900 / 月",
           description: "最大4人の共有学習",
           features: ["共有スペースで一緒に学習", "メンバー別の進捗確認", "プレミアム資料管理機能"],
-          ctaLabel: "Premiumを選ぶ",
+          ctaLabel: "Familyを選ぶ",
           accent: "linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)",
           glow: "rgba(20, 184, 166, 0.24)",
         },
@@ -738,7 +742,7 @@ const LANDING_COPY = {
       pricingLead: "जितनी ज़रूरत हो उतना शुरू करें",
       pricingAccent: "और पढ़ाई के साथ बढ़ें",
       pricingDescription:
-        "मुफ़्त में शुरू करें, ज़्यादा नियमित पढ़ाई पर Pro लें, और साझा अध्ययन स्पेस की ज़रूरत हो तो Premium चुनें।",
+        "मुफ़्त में शुरू करें, ज़्यादा नियमित पढ़ाई पर Pro लें, और साझा अध्ययन स्पेस की ज़रूरत हो तो Family चुनें।",
       ctaLead: "अब अपने अध्ययन लूप को",
       ctaAccent: "वास्तव में चलाइए",
       ctaDescription:
@@ -832,11 +836,12 @@ const LANDING_COPY = {
         },
         {
           id: "premium",
-          name: "Premium",
+          name: "Family",
+          originalPrice: "₩36,000 / माह",
           price: "₩18,900 / माह",
           description: "अधिकतम 4 लोगों के लिए साझा अध्ययन",
           features: ["शेयर्ड स्पेस में साथ पढ़ाई", "हर सदस्य की प्रगति देखें", "प्रीमियम सामग्री प्रबंधन"],
-          ctaLabel: "Premium चुनें",
+          ctaLabel: "Family चुनें",
           accent: "linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)",
           glow: "rgba(20, 184, 166, 0.24)",
         },
@@ -926,7 +931,7 @@ const LANDING_COPY = {
       pricingLead: "Start small",
       pricingAccent: "and scale with your workload",
       pricingDescription:
-        "Begin for free, move to Pro when you study more often, or Premium when you need a shared study space.",
+        "Begin for free, move to Pro when you study more often, or Family when you need a shared study space.",
       ctaLead: "Put your study loop",
       ctaAccent: "into motion",
       ctaDescription:
@@ -1020,11 +1025,12 @@ const LANDING_COPY = {
         },
         {
           id: "premium",
-          name: "Premium",
+          name: "Family",
+          originalPrice: "?36,000 / month",
           price: "?18,900 / month",
           description: "Shared study for up to 4 people",
           features: ["Collaborative shared space", "Separate flow for each member", "Better study efficiency together"],
-          ctaLabel: "Choose Premium",
+          ctaLabel: "Choose Family",
           accent: "linear-gradient(135deg, #0f766e 0%, #14b8a6 100%)",
           glow: "rgba(20, 184, 166, 0.24)",
         },
@@ -1331,7 +1337,7 @@ function HeroDashboard({ scrollY = 0 }) {
                     <p className="mt-2 text-sm text-slate-500">한 화면에서 이어지는 복습 흐름</p>
                   </div>
                   <div className="rounded-[1.7rem] border border-slate-200/85 bg-white/90 p-5">
-                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Premium Space</p>
+                    <p className="text-xs font-semibold tracking-[0.24em] text-slate-400">패밀리 스페이스</p>
                     <p className="mt-3 text-3xl font-bold text-slate-900">최대 4명</p>
                     <p className="mt-2 text-sm text-slate-500">공유 스페이스로 함께 학습</p>
                   </div>
@@ -2072,7 +2078,12 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                     </div>
                   </div>
 
-                  <p className="mt-8 text-4xl font-bold text-slate-950">{plan.price}</p>
+                  <div className="mt-8 flex flex-wrap items-end gap-3">
+                    {plan.originalPrice ? (
+                      <span className="text-base font-semibold text-slate-400 line-through">{plan.originalPrice}</span>
+                    ) : null}
+                    <p className="text-4xl font-bold text-slate-950">{plan.price}</p>
+                  </div>
                   <ul className="mt-7 space-y-3 text-sm text-slate-600">
                     {plan.features.map((feature) => (
                       <li key={`${plan.name}-${feature}`} className="flex items-start gap-3">
@@ -2126,7 +2137,14 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                       >
                         <p className="text-xl font-bold md:text-2xl">{plan.name}</p>
                         <p className={`mt-2 text-sm ${isActive ? "text-slate-300" : "text-slate-500"}`}>{plan.description}</p>
-                        <p className={`mt-4 text-xl font-bold md:text-2xl ${isActive ? "text-white" : "text-slate-900"}`}>{plan.price}</p>
+                        <div className="mt-4 flex flex-wrap items-end gap-2">
+                          {plan.originalPrice ? (
+                            <span className={`text-sm font-semibold line-through ${isActive ? "text-slate-400" : "text-slate-400"}`}>
+                              {plan.originalPrice}
+                            </span>
+                          ) : null}
+                          <p className={`text-xl font-bold md:text-2xl ${isActive ? "text-white" : "text-slate-900"}`}>{plan.price}</p>
+                        </div>
                       </button>
                     );
                   })}
