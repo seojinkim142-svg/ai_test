@@ -920,6 +920,9 @@ function PaymentPage({
           {PLAN_OPTIONS.map((plan) => {
             const isProPlan = plan.name === "Pro";
             const showProTrialBadge = isProPlan && isFreeCurrentTier;
+            const showProTrialPrice = isProPlan && hasProTrialAccess;
+            const displayedOriginalPrice = showProTrialPrice ? "6,900원" : plan.originalPrice;
+            const displayedPrice = showProTrialPrice ? "0원 / 월" : plan.price;
             const proTrialCardText = isLoadingProTrial
               ? "무료체험 확인 중"
               : proTrialStatus?.statusError
@@ -974,12 +977,12 @@ function PaymentPage({
                   </span>
                 </div>
                 <div className="mt-2 flex flex-wrap items-end gap-2">
-                  {plan.originalPrice ? (
+                  {displayedOriginalPrice ? (
                     <span className={`text-sm font-semibold line-through ${isLight ? "text-slate-400" : "text-slate-500"}`}>
-                      {plan.originalPrice}
+                      {displayedOriginalPrice}
                     </span>
                   ) : null}
-                  <p className="text-2xl font-bold">{plan.price}</p>
+                  <p className="text-2xl font-bold">{displayedPrice}</p>
                 </div>
                 {showProTrialBadge ? (
                   <p className={`mt-2 text-xs ${isLight ? "text-slate-500" : "text-slate-300"}`}>{proTrialCardText}</p>
