@@ -12,7 +12,7 @@ const MB = 1024 * 1024;
 const TIER_LABEL = {
   free: "Free",
   pro: "Pro",
-  premium: "Premium",
+  premium: "Family",
 };
 
 const formatUploadLimitText = (tier, maxPdfSizeBytes, copy) => {

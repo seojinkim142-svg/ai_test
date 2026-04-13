@@ -12,10 +12,10 @@ const cardPayPlans = {
     tier: "pro",
     orderName: "Zeusian Pro (Monthly)",
   },
-  Premium: {
+  Family: {
     baseAmount: 18900,
     tier: "premium",
-    orderName: "Zeusian Premium (Monthly)",
+    orderName: "Zeusian Family (Monthly)",
   },
 };
 
@@ -371,7 +371,7 @@ export function useCardPayment({
 
     if (!selectedCardPlan) {
       setPaymentNotice("");
-      setPaymentError("신용카드 결제는 Pro/Premium 플랜에서만 지원합니다.");
+      setPaymentError("신용카드 결제는 Pro/패밀리 플랜에서만 지원합니다.");
       return;
     }
 

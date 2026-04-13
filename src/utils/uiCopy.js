@@ -3,7 +3,7 @@ const UI_COPY = {
     planNames: {
       free: "무료",
       pro: "프로",
-      premium: "프리미엄",
+      premium: "패밀리",
     },
     header: {
       homeAria: "홈으로 이동",
@@ -18,7 +18,7 @@ const UI_COPY = {
     },
     upload: {
       limitText: (tierLabel, sizeLabel) => `${tierLabel} 요금제: 파일 1개당 최대 ${sizeLabel}`,
-      folderFeatureLocked: "폴더 기능은 Pro/Premium에서 제공됩니다.",
+      folderFeatureLocked: "폴더 기능은 Pro/패밀리에서 제공됩니다.",
       addDocument: "문서 추가",
       uploadPrompt: "PDF, DOCX, PPTX 파일을 업로드하세요",
       previewPdfOnly: "미리보기는 PDF만 지원됩니다",
@@ -52,7 +52,7 @@ const UI_COPY = {
     planNames: {
       free: "Free",
       pro: "Pro",
-      premium: "Premium",
+      premium: "Family",
     },
     header: {
       homeAria: "Go home",
@@ -67,7 +67,7 @@ const UI_COPY = {
     },
     upload: {
       limitText: (tierLabel, sizeLabel) => `${tierLabel} plan: up to ${sizeLabel} per file`,
-      folderFeatureLocked: "Folders are available on Pro and Premium.",
+      folderFeatureLocked: "Folders are available on Pro and Family.",
       addDocument: "Add Document",
       uploadPrompt: "Upload PDF, DOCX, or PPTX files",
       previewPdfOnly: "Preview is available for PDF only",
@@ -101,7 +101,7 @@ const UI_COPY = {
     planNames: {
       free: "免费",
       pro: "Pro",
-      premium: "Premium",
+      premium: "Family",
     },
     header: {
       homeAria: "返回首页",
@@ -116,7 +116,7 @@ const UI_COPY = {
     },
     upload: {
       limitText: (tierLabel, sizeLabel) => `${tierLabel} 方案: 单个文件最大 ${sizeLabel}`,
-      folderFeatureLocked: "文件夹功能仅在 Pro / Premium 提供。",
+      folderFeatureLocked: "文件夹功能仅在 Pro / Family 提供。",
       addDocument: "添加文档",
       uploadPrompt: "上传 PDF、DOCX、PPTX 文件",
       previewPdfOnly: "仅支持 PDF 预览",
@@ -150,7 +150,7 @@ const UI_COPY = {
     planNames: {
       free: "無料",
       pro: "Pro",
-      premium: "Premium",
+      premium: "Family",
     },
     header: {
       homeAria: "ホームへ移動",
@@ -165,7 +165,7 @@ const UI_COPY = {
     },
     upload: {
       limitText: (tierLabel, sizeLabel) => `${tierLabel}プラン: 1ファイルあたり最大${sizeLabel}`,
-      folderFeatureLocked: "フォルダ機能は Pro / Premium で利用できます。",
+      folderFeatureLocked: "フォルダ機能は Pro / Family で利用できます。",
       addDocument: "文書を追加",
       uploadPrompt: "PDF、DOCX、PPTXファイルをアップロードしてください",
       previewPdfOnly: "プレビューはPDFのみ対応しています",
@@ -199,7 +199,7 @@ const UI_COPY = {
     planNames: {
       free: "मुफ़्त",
       pro: "Pro",
-      premium: "Premium",
+      premium: "Family",
     },
     header: {
       homeAria: "होम पर जाएँ",
@@ -214,7 +214,7 @@ const UI_COPY = {
     },
     upload: {
       limitText: (tierLabel, sizeLabel) => `${tierLabel} प्लान: प्रति फ़ाइल अधिकतम ${sizeLabel}`,
-      folderFeatureLocked: "फ़ोल्डर फीचर केवल Pro / Premium में उपलब्ध है।",
+      folderFeatureLocked: "फ़ोल्डर फीचर केवल Pro / Family में उपलब्ध है।",
       addDocument: "दस्तावेज़ जोड़ें",
       uploadPrompt: "PDF, DOCX, PPTX फ़ाइलें अपलोड करें",
       previewPdfOnly: "प्रीव्यू केवल PDF के लिए उपलब्ध है",

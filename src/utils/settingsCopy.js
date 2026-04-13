@@ -12,7 +12,7 @@ const SETTINGS_COPY = {
     planNames: {
       free: "무료",
       pro: "프로",
-      premium: "프리미엄",
+      premium: "패밀리",
     },
     sections: {
       account: "계정",
@@ -166,7 +166,7 @@ const SETTINGS_COPY = {
     planNames: {
       free: "Free",
       pro: "Pro",
-      premium: "Premium",
+      premium: "Family",
     },
     sections: {
       account: "Account",
@@ -321,7 +321,7 @@ const SETTINGS_COPY = {
     planNames: {
       free: "免费",
       pro: "Pro",
-      premium: "Premium",
+      premium: "Family",
     },
     sections: {
       account: "账户",
@@ -474,7 +474,7 @@ const SETTINGS_COPY = {
     planNames: {
       free: "無料",
       pro: "Pro",
-      premium: "Premium",
+      premium: "Family",
     },
     sections: {
       account: "アカウント",
@@ -629,7 +629,7 @@ const SETTINGS_COPY = {
     planNames: {
       free: "मुफ़्त",
       pro: "Pro",
-      premium: "Premium",
+      premium: "Family",
     },
     sections: {
       account: "खाता",

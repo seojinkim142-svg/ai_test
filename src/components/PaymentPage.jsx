@@ -11,12 +11,12 @@ import { clearPaymentReturnPending, markPaymentReturnPending } from "../utils/pa
 const tierMeta = {
   free: "Free",
   pro: "Pro",
-  premium: "Premium",
+  premium: "Family",
 };
 const planLabelKo = {
   Free: "Free",
   Pro: "Pro",
-  Premium: "Premium",
+  Family: "패밀리",
 };
 
 const KAKAOPAY_STORAGE_KEY = "kakaopay_session";
@@ -28,6 +28,18 @@ const REFUND_POLICY_PRIMARY_ITEMS = [
   "정기구독 상품의 경우, 정기구독 취소 시 결제된 이용일제 서비스가 제공되며, 그 이후 서비스 사용이 중단됩니다.",
 ];
 const REFUND_POLICY_NOTICE = "다음과 같은 내용으로 환불 규정이 적용됩니다.";
+
+function getProTrialStatusErrorMessage(statusError) {
+  const normalized = String(statusError || "").trim().toLowerCase();
+  if (!normalized) return "무료체험 상태 확인에 실패했습니다. 잠시 후 다시 열어주세요.";
+  if (import.meta.env.DEV && (normalized.includes("failed to fetch") || normalized.includes("request failed"))) {
+    return "로컬 개발 환경에서는 `npm run dev:nicepayments` 서버를 함께 실행해야 무료체험 상태를 확인할 수 있습니다.";
+  }
+  if (normalized.includes("로그인 세션")) {
+    return "로그인 세션 확인 후 다시 시도해주세요.";
+  }
+  return "무료체험 상태 확인에 실패했습니다. 잠시 후 다시 열어주세요.";
+}
 const REFUND_POLICY_SECONDARY_ITEMS = [
   "\"소비자보호법 17조 2항의 5조,용역 또는 '문화산업진흥 기본법'제 2조 제 5호의 디지털 콘텐츠의 제공이 개시된 경우\"의 법률에 따라 정보열람 및 다운로드 상품으로 환불이 제한됨을 안내드립니다.",
 ];
@@ -53,6 +65,7 @@ const PLAN_OPTIONS = [
   {
     name: "Pro",
     label: "Pro",
+    originalPrice: "9,900원",
     price: "6,900원 / 월",
     desc: "개인 학습",
     features: ["업로드 무제한", "요약 / 퀴즈 / OX / 플래시카드", "우선 처리"],
@@ -60,12 +73,13 @@ const PLAN_OPTIONS = [
     accent: "16, 185, 129",
   },
   {
-    name: "Premium",
-    label: "Premium",
+    name: "Family",
+    label: "패밀리",
+    originalPrice: "36,000원",
     price: "18,900원 / 월",
     desc: "공유 학습",
     features: ["최대 4명", "공유 워크스페이스", "팀 학습 플로우"],
-    cta: "Premium 업그레이드",
+    cta: "패밀리 업그레이드",
     accent: "56, 189, 248",
   },
 ];
@@ -75,10 +89,10 @@ const kakaoPayPlans = {
     tier: "pro",
     itemName: "제우시안 프로 월간권",
   },
-  Premium: {
+  Family: {
     baseAmount: 18900,
     tier: "premium",
-    itemName: "제우시안 프리미엄 월간권",
+    itemName: "제우시안 패밀리 월간권",
   },
 };
 const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
@@ -227,6 +241,7 @@ function PaymentPage({
   currentTierRemainingDays = null,
   theme = "dark",
   user,
+  authReady = false,
   onTierUpdated,
   paymentReturnSignal = 0,
 }) {
@@ -239,6 +254,7 @@ function PaymentPage({
     eligible: false,
     claimedAt: null,
     currentTier: currentTier || "free",
+    statusError: "",
   });
   const [isLoadingProTrial, setIsLoadingProTrial] = useState(false);
   const [subscriptionState, setSubscriptionState] = useState(null);
@@ -371,8 +387,10 @@ function PaymentPage({
   const canProceedWithKakao = canStartSubscriptionWithKakao;
   const canProceedWithCard = canStartNiceSubscription;
   const shouldShowSubscriptionSettings = false;
+  const isFreeCurrentTier = currentTier === "free";
   const canShowProTrial = currentTier === "free" && selectedPlan === "Pro";
   const isProTrialEligible = canShowProTrial && Boolean(proTrialStatus?.eligible);
+  const hasProTrialAccess = isFreeCurrentTier && Boolean(proTrialStatus?.eligible);
   const canStartKakaoProTrial =
     isProTrialEligible &&
     Boolean(selectedKakaoPlan) &&
@@ -380,6 +398,17 @@ function PaymentPage({
     !isLoadingSubscription &&
     !isSameActiveKakaoSubscription;
   const isUsingProTrialFlow = isProTrialEligible;
+  const proTrialHintText = isLoadingProTrial
+    ? "무료체험 가능 여부를 확인 중입니다."
+    : proTrialStatus?.statusError
+      ? getProTrialStatusErrorMessage(proTrialStatus.statusError)
+    : hasProTrialAccess
+      ? selectedPlan === "Pro"
+        ? "아래 결제수단을 등록하면 Pro 1개월 무료체험이 바로 시작되고, 다음 달부터 자동결제됩니다."
+        : "신규 계정은 Pro 선택 시 1개월 무료체험을 시작할 수 있습니다."
+      : proTrialStatus?.claimedAt
+        ? "이미 Pro 무료체험을 사용했습니다."
+        : "현재 조건에서는 Pro 무료체험을 시작할 수 없습니다.";
 
   const loadKakaoSubscriptionStatus = useCallback(
     async ({ showLoading = false } = {}) => {
@@ -430,8 +459,14 @@ function PaymentPage({
         eligible: false,
         claimedAt: null,
         currentTier: "free",
+        statusError: "",
       });
       setIsLoadingProTrial(false);
+      return undefined;
+    }
+
+    if (!authReady) {
+      setIsLoadingProTrial(true);
       return undefined;
     }
 
@@ -449,6 +484,7 @@ function PaymentPage({
           eligible: result?.eligible === true,
           claimedAt: result?.claimedAt || null,
           currentTier: String(result?.currentTier || currentTier || "free").trim().toLowerCase() || "free",
+          statusError: "",
         });
       })
       .catch((error) => {
@@ -458,6 +494,7 @@ function PaymentPage({
           eligible: false,
           claimedAt: null,
           currentTier: currentTier || "free",
+          statusError: error?.message || "status_load_failed",
         });
       })
       .finally(() => {
@@ -467,7 +504,7 @@ function PaymentPage({
     return () => {
       active = false;
     };
-  }, [currentTier, user?.id]);
+  }, [authReady, currentTier, user?.id]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -617,7 +654,7 @@ function PaymentPage({
 
     if (!selectedKakaoPlan) {
       setPaymentNotice("");
-      setPaymentError("카카오페이는 Pro/Premium 플랜에서만 지원합니다.");
+      setPaymentError("카카오페이는 Pro/패밀리 플랜에서만 지원합니다.");
       return;
     }
 
@@ -880,48 +917,95 @@ function PaymentPage({
         </div>
 
         <div className={`grid gap-4 px-6 py-5 md:grid-cols-2 xl:grid-cols-3 ${planSectionClass}`}>
-          {PLAN_OPTIONS.map((plan) => (
-            <div
-              key={plan.name}
-              onClick={() => setSelectedPlan(plan.name)}
-              className={`flex h-full cursor-pointer flex-col rounded-2xl border px-4 py-5 shadow-lg shadow-black/30 ring-1 ${
-                selectedPlan === plan.name
-                  ? isLight
-                    ? "border-emerald-400/70 ring-emerald-300/50 bg-emerald-50"
-                    : "border-emerald-400/60 ring-emerald-300/50 bg-emerald-500/5"
-                  : isLight
-                    ? "border-slate-200 ring-slate-200/60 bg-white"
-                    : "border-white/10 ring-white/10 bg-white/5"
-              }`}
-            >
-              <div className="flex items-baseline justify-between gap-2">
-                <h3 className="text-lg font-semibold">{plan.label}</h3>
-                <span className={`rounded-full px-3 py-1 text-xs font-semibold ${pillClass}`}>
-                  {plan.desc}
-                </span>
-              </div>
-              <p className="mt-2 text-2xl font-bold">{plan.price}</p>
-              <ul className={`mt-3 flex-1 space-y-2 text-sm ${isLight ? "text-slate-700" : "text-slate-200"}`}>
-                {plan.features.map((feature) => (
-                  <li key={feature} className="flex items-start gap-2">
-                    <span
-                      className="mt-0.5 h-2 w-2 rounded-full"
-                      style={{ backgroundColor: "rgba(52,211,153,0.9)" }}
-                    />
-                    <span>{feature}</span>
-                  </li>
-                ))}
-              </ul>
-              <button
-                type="button"
-                className="ghost-button mt-4 text-sm text-emerald-100"
-                style={{ "--ghost-color": plan.accent }}
-                disabled={currentPlan === plan.name}
+          {PLAN_OPTIONS.map((plan) => {
+            const isProPlan = plan.name === "Pro";
+            const showProTrialBadge = isProPlan && isFreeCurrentTier;
+            const proTrialCardText = isLoadingProTrial
+              ? "무료체험 확인 중"
+              : proTrialStatus?.statusError
+                ? "상태 확인 실패"
+              : hasProTrialAccess
+                ? "신규 계정 첫 1개월 무료"
+                : proTrialStatus?.claimedAt
+                  ? "무료체험 사용 완료"
+                  : "무료체험 대상 아님";
+            const planButtonLabel =
+              currentPlan === plan.name
+                ? "현재 요금제"
+                : isProPlan && hasProTrialAccess
+                  ? "무료체험 시작"
+                  : plan.cta;
+
+            return (
+              <div
+                key={plan.name}
+                onClick={() => setSelectedPlan(plan.name)}
+                className={`flex h-full cursor-pointer flex-col rounded-2xl border px-4 py-5 shadow-lg shadow-black/30 ring-1 ${
+                  selectedPlan === plan.name
+                    ? isLight
+                      ? "border-emerald-400/70 ring-emerald-300/50 bg-emerald-50"
+                      : "border-emerald-400/60 ring-emerald-300/50 bg-emerald-500/5"
+                    : isLight
+                      ? "border-slate-200 ring-slate-200/60 bg-white"
+                      : "border-white/10 ring-white/10 bg-white/5"
+                }`}
               >
-                {currentPlan === plan.name ? "현재 요금제" : plan.cta}
-              </button>
-            </div>
-          ))}
+                <div className="flex items-baseline justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-lg font-semibold">{plan.label}</h3>
+                    {showProTrialBadge ? (
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                          hasProTrialAccess
+                            ? isLight
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-emerald-500/15 text-emerald-200"
+                            : isLight
+                              ? "bg-slate-100 text-slate-500"
+                              : "bg-white/10 text-slate-300"
+                        }`}
+                      >
+                        1개월 무료
+                      </span>
+                    ) : null}
+                  </div>
+                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${pillClass}`}>
+                    {plan.desc}
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap items-end gap-2">
+                  {plan.originalPrice ? (
+                    <span className={`text-sm font-semibold line-through ${isLight ? "text-slate-400" : "text-slate-500"}`}>
+                      {plan.originalPrice}
+                    </span>
+                  ) : null}
+                  <p className="text-2xl font-bold">{plan.price}</p>
+                </div>
+                {showProTrialBadge ? (
+                  <p className={`mt-2 text-xs ${isLight ? "text-slate-500" : "text-slate-300"}`}>{proTrialCardText}</p>
+                ) : null}
+                <ul className={`mt-3 flex-1 space-y-2 text-sm ${isLight ? "text-slate-700" : "text-slate-200"}`}>
+                  {plan.features.map((feature) => (
+                    <li key={feature} className="flex items-start gap-2">
+                      <span
+                        className="mt-0.5 h-2 w-2 rounded-full"
+                        style={{ backgroundColor: "rgba(52,211,153,0.9)" }}
+                      />
+                      <span>{feature}</span>
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  type="button"
+                  className="ghost-button mt-4 text-sm text-emerald-100"
+                  style={{ "--ghost-color": plan.accent }}
+                  disabled={currentPlan === plan.name}
+                >
+                  {planButtonLabel}
+                </button>
+              </div>
+            );
+          })}
         </div>
 
         <div
@@ -961,15 +1045,9 @@ function PaymentPage({
             )}
           </div>
           <div className="flex flex-col gap-2">
-            {canShowProTrial && (
+            {isFreeCurrentTier && (
               <p className={`max-w-xs text-xs ${isLight ? "text-slate-500" : "text-slate-300"}`}>
-                {isLoadingProTrial
-                  ? "무료체험 가능 여부를 확인 중입니다."
-                  : isProTrialEligible
-                    ? "아래 결제수단을 등록하면 Pro 1개월 무료체험이 바로 시작되고, 다음 달부터 자동결제됩니다."
-                    : proTrialStatus?.claimedAt
-                      ? "이미 Pro 무료체험을 사용했습니다."
-                      : "현재 조건에서는 Pro 무료체험을 시작할 수 없습니다."}
+                {proTrialHintText}
               </p>
             )}
           </div>
