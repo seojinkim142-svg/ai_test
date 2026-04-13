@@ -10,11 +10,13 @@ import {
   validateKakaoSubscriptionConfig,
 } from "../../lib/payments/kakaopay.js";
 import {
+  addDaysUtc,
   authenticateSupabaseUserFromRequest,
   syncPaidTierFromAmount,
 } from "../../lib/billing/tier-sync.js";
 import {
   getProTrialStatus,
+  PRO_TRIAL_DAYS,
   grantProTrialTier,
   markProTrialClaimed,
   PRO_TRIAL_RECURRING_AMOUNT,
@@ -148,7 +150,7 @@ export default async function handler(req, res) {
       trialStatus = await getProTrialStatus({ authResult });
       if (!trialStatus.eligible) {
         const message = trialStatus.claimedAt
-          ? "Pro 무료 1개월 체험은 이미 사용했습니다."
+          ? `Pro 무료 ${PRO_TRIAL_DAYS}일 체험은 이미 사용했습니다.`
           : "현재 Free 상태에서만 Pro 무료 체험을 시작할 수 있습니다.";
         sendJson(res, 409, { message }, allowOrigin);
         return;
@@ -242,10 +244,12 @@ export default async function handler(req, res) {
           orderId,
           tid,
           approvedAt: approvedAtIso,
+          nextChargeAt: isProTrialRegistration ? addDaysUtc(approvedAtIso, PRO_TRIAL_DAYS).toISOString() : null,
           rawApprove: data,
           metadata: {
             paymentMode: "subscription",
             proTrial: isProTrialRegistration,
+            trialDays: isProTrialRegistration ? PRO_TRIAL_DAYS : null,
           },
         });
         subscriptionSaved = true;

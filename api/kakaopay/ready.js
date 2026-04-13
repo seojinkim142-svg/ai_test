@@ -11,7 +11,7 @@ import {
   validateKakaoReadyUrls,
 } from "../../lib/payments/kakaopay.js";
 import { authenticateSupabaseUserFromRequest } from "../../lib/billing/tier-sync.js";
-import { getProTrialStatus, PRO_TRIAL_TIER } from "../../lib/billing/pro-trial.js";
+import { getProTrialStatus, PRO_TRIAL_DAYS, PRO_TRIAL_TIER } from "../../lib/billing/pro-trial.js";
 
 const normalizePositiveInteger = (value, fallback = 0) => {
   const parsed = Number(value);
@@ -133,7 +133,7 @@ export default async function handler(req, res) {
       const trialStatus = await getProTrialStatus({ authResult });
       if (!trialStatus.eligible) {
         const message = trialStatus.claimedAt
-          ? "Pro 무료 1개월 체험은 이미 사용했습니다."
+          ? `Pro 무료 ${PRO_TRIAL_DAYS}일 체험은 이미 사용했습니다.`
           : "현재 Free 상태에서만 Pro 무료 체험을 시작할 수 있습니다.";
         sendJson(res, 409, { message }, allowOrigin);
         return;

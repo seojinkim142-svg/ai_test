@@ -15,6 +15,9 @@ const EMPTY_CARD_FORM = {
   cardPassword: "",
 };
 
+const PRO_TRIAL_DAYS = 7;
+const PRO_TRIAL_CARD_ITEM_NAME = `Zeusian Pro ${PRO_TRIAL_DAYS}-Day Free Trial`;
+
 const cardSubscriptionPlans = {
   Pro: {
     baseAmount: 6900,
@@ -244,7 +247,7 @@ export function useNiceSubscription({
           amount: selectedAmount,
           tier: selectedPlanConfig.tier,
           billingMonths: subscriptionBillingMonths,
-          itemName: selectedItemName,
+          itemName: isSubscriptionTrialForm ? PRO_TRIAL_CARD_ITEM_NAME : selectedItemName,
           proTrial: isSubscriptionTrialForm,
           buyerName: user?.user_metadata?.name || user?.email?.split("@")[0] || "user",
           buyerEmail: user?.email || "",
@@ -269,7 +272,7 @@ export function useNiceSubscription({
 
       const noticeParts = [
         isSubscriptionTrialForm
-          ? "카드가 등록되었고 Pro 1개월 무료 체험이 시작되었습니다."
+          ? `카드가 등록되었고 Pro ${PRO_TRIAL_DAYS}일 무료 체험이 시작되었습니다. ${PRO_TRIAL_DAYS}일 후부터 월 ${selectedAmount.toLocaleString()}원이 자동 결제됩니다.`
           : "신용카드 정기결제가 등록되고 첫 결제가 완료되었습니다.",
       ];
       if (maskMessage(result?.message)) {
