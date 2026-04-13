@@ -1081,9 +1081,11 @@ function App() {
   const [examCramStatus, setExamCramStatus] = useState("");
   const [examCramError, setExamCramError] = useState("");
   const [quizChapterSelectionInput, setQuizChapterSelectionInput] = useState("");
+  const [quizPromptAddonInput, setQuizPromptAddonInput] = useState("");
   const [oxChapterSelectionInput, setOxChapterSelectionInput] = useState("");
   const [flashcardChapterSelectionInput, setFlashcardChapterSelectionInput] = useState("");
   const [mockExamChapterSelectionInput, setMockExamChapterSelectionInput] = useState("");
+  const [mockExamPromptAddonInput, setMockExamPromptAddonInput] = useState("");
   const [isChapterRangeOpen, setIsChapterRangeOpen] = useState(false);
   const [chapterRangeInput, setChapterRangeInput] = useState("");
   const [autoChapterRangeInput, setAutoChapterRangeInput] = useState("");
@@ -4228,6 +4230,7 @@ function App() {
       return;
     }
     const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
+    const additionalRequest = String(quizPromptAddonInput || "").trim();
     const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
 
     if (!extractedText && !chapterSelectionRaw && !isPdfSource) {
@@ -4295,6 +4298,7 @@ function App() {
           avoidQuestions: avoidQuestionTexts,
           scopeLabel,
           questionStyleProfile: questionStyleProfileContent,
+          additionalRequest,
           outputLanguage,
         });
         if (!questionStyleProfile) {
@@ -4351,6 +4355,7 @@ function App() {
             avoidQuestions: relaxedAvoidQuestions,
             scopeLabel,
             questionStyleProfile: questionStyleProfile || questionStyleProfileContent,
+            additionalRequest,
             outputLanguage,
           });
           if (!questionStyleProfile) {
@@ -6464,6 +6469,7 @@ function App() {
     }
 
     const chapterSelectionRaw = String(mockExamChapterSelectionInput || "").trim();
+    const additionalRequest = String(mockExamPromptAddonInput || "").trim();
     const hasChapterScope = Boolean(chapterSelectionRaw);
     const isPdfSource = isPdfDocumentKind(detectSupportedDocumentKind(file));
     let sourceText = "";
@@ -6514,6 +6520,7 @@ function App() {
           ai.generateOxQuiz(sourceText, {
             instructorEmphasis: instructorEmphasisText,
             avoidStatements: avoidMockQuestionTexts,
+            additionalRequest,
             outputLanguage,
           }),
           ai.generateQuiz(sourceText, {
@@ -6521,6 +6528,7 @@ function App() {
             shortAnswerCount: 1,
             instructorEmphasis: instructorEmphasisText,
             avoidQuestions: avoidMockQuestionTexts,
+            additionalRequest,
             outputLanguage,
           }),
         ]);
@@ -6636,6 +6644,7 @@ function App() {
           avoidQuestions: avoidMockQuestionTexts,
           scopeLabel,
           questionStyleProfile: questionStyleProfileContent,
+          additionalRequest,
           outputLanguage,
         });
         const rawHardItems = (Array.isArray(hardResult?.items) ? hardResult.items : []).filter(
@@ -6751,6 +6760,7 @@ function App() {
     mockExams,
     quizSets,
     mockExamChapterSelectionInput,
+    mockExamPromptAddonInput,
     selectedFileId,
     getOpenAiService,
     getEffectiveInstructorEmphasisText,
@@ -7304,6 +7314,8 @@ function App() {
     handleCreateMockExam,
     mockExamChapterSelectionInput,
     setMockExamChapterSelectionInput,
+    mockExamPromptAddonInput,
+    setMockExamPromptAddonInput,
     isGeneratingMockExam,
     selectedFileId,
     handleExportMockExam,
@@ -7320,6 +7332,8 @@ function App() {
     requestQuestions,
     quizChapterSelectionInput,
     setQuizChapterSelectionInput,
+    quizPromptAddonInput,
+    setQuizPromptAddonInput,
     quizMixInput,
     setQuizMixInput,
     quizMix,

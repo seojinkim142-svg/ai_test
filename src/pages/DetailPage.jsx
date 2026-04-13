@@ -213,6 +213,8 @@ export default function DetailPage({
   handleCreateMockExam,
   mockExamChapterSelectionInput,
   setMockExamChapterSelectionInput,
+  mockExamPromptAddonInput,
+  setMockExamPromptAddonInput,
   isGeneratingMockExam,
   selectedFileId,
   handleExportMockExam,
@@ -229,6 +231,8 @@ export default function DetailPage({
   requestQuestions,
   quizChapterSelectionInput,
   setQuizChapterSelectionInput,
+  quizPromptAddonInput,
+  setQuizPromptAddonInput,
   quizMixInput,
   setQuizMixInput,
   quizMix,
@@ -1111,6 +1115,17 @@ export default function DetailPage({
                     </button>
                   </div>
                 </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
+                  <label className="block text-xs font-semibold text-slate-300">추가 요청</label>
+                  <textarea
+                    value={mockExamPromptAddonInput}
+                    onChange={(event) => setMockExamPromptAddonInput(event.target.value)}
+                    disabled={isGeneratingMockExam || isLoadingText}
+                    placeholder="예: 계산형 문항 위주로, 헷갈리는 함정 선택지를 더 넣어줘, 정의 비교 문제를 포함해줘"
+                    className="mt-2 min-h-[88px] w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition placeholder:text-slate-500 focus:border-emerald-300/60"
+                  />
+                  <p className="mt-2 text-xs text-slate-400">선택사항. 모의고사 생성 프롬프트에 함께 반영됩니다.</p>
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="relative" ref={mockExamMenuRef}>
                     <button
@@ -1352,6 +1367,17 @@ export default function DetailPage({
                     확인
                   </button>
                 </div>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
+                <label className="block text-xs font-semibold text-slate-300">추가 요청</label>
+                <textarea
+                  value={quizPromptAddonInput}
+                  onChange={(event) => setQuizPromptAddonInput(event.target.value)}
+                  disabled={isLoadingQuiz || isLoadingText}
+                  placeholder="예: 응용형 위주로, 개념 비교 문제를 더 넣어줘, 단답형은 공식/용어 중심으로 만들어줘"
+                  className="mt-2 min-h-[88px] w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition placeholder:text-slate-500 focus:border-emerald-300/60"
+                />
+                <p className="mt-2 text-xs text-slate-400">선택사항. 퀴즈 생성 프롬프트에 함께 반영됩니다.</p>
               </div>
 
               <div className="rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">

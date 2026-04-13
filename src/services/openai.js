@@ -191,6 +191,27 @@ ${lines.join("\n")}
   `.trim();
 }
 
+function normalizeAdditionalRequest(value, maxLength = 500) {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, maxLength);
+}
+
+function buildAdditionalRequestBlock(value, { title = "Additional user request", maxLength = 500 } = {}) {
+  const normalized = normalizeAdditionalRequest(value, maxLength);
+  if (!normalized) return "";
+  return `
+[${title}]
+- Follow this request only if it can be satisfied using the provided document.
+- Keep all output-schema and formatting rules unchanged.
+${normalized}
+  `.trim();
+}
+
 const LOW_VALUE_STUDY_PROMPT_PATTERNS = [
   /(교재|이\s*책|본서|강의노트|강의\s*자료).*(대상|독자|수강생|출신|전공자|비전공자)/i,
   /(교재|이\s*책|본서|강의노트|강의\s*자료).*(연습문제|부록|사이버|온라인|동영상|예제\s*코드|sage\s*코드|코드|자료).*(포함|제공|수록|없|않)/i,
@@ -561,6 +582,7 @@ function buildQuizPrompt(
     avoidQuestions = [],
     scopeLabel = "",
     questionStyleProfile = "",
+    additionalRequest = "",
     outputLanguage = "ko",
   }
 ) {
@@ -569,6 +591,9 @@ function buildQuizPrompt(
     title: "Do not reuse these previously asked questions",
     maxItems: 16,
     maxLength: 90,
+  });
+  const additionalRequestBlock = buildAdditionalRequestBlock(additionalRequest, {
+    title: "Additional quiz request",
   });
   return `
 You are a professor creating quiz questions from lecture material.
@@ -590,6 +615,7 @@ You are a professor creating quiz questions from lecture material.
 - Short-answer items must have one exact, short answer only: a number, formula, term, concept name, or short phrase.
 - Do not generate essay-style prompts such as "설명하라", "서술하라", "논하라", "기술하라", or questions that require long prose.
 - The short-answer answer field must be concise and directly gradable, not a sentence.
+- If an additional user request is provided, follow it only when it stays grounded in the document and still satisfies every rule above.
 
 [Output format]
 - Multiple-choice: ${multipleChoiceCount} questions, 4 options each.
@@ -628,6 +654,7 @@ You are a professor creating quiz questions from lecture material.
 - Write all question/explanation text in ${outputLanguageLabel}.
 ${avoidBlock ? `\n\n${avoidBlock}` : ""}
 ${questionStyleProfile ? `\n\n[Document question style profile]\n${questionStyleProfile}` : ""}
+${additionalRequestBlock ? `\n\n${additionalRequestBlock}` : ""}
 ${scopeLabel ? `\n\n[Selected chapter range]\n${scopeLabel}` : ""}
 
 [Document]
@@ -637,10 +664,13 @@ ${extractedText}
 function buildHardQuizPrompt(
   extractedText,
   count,
-  { avoidQuestions = [], questionStyleProfile = "", scopeLabel = "", outputLanguage = "ko" } = {}
+  { avoidQuestions = [], questionStyleProfile = "", scopeLabel = "", additionalRequest = "", outputLanguage = "ko" } = {}
 ) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const avoidBlock = buildAvoidReuseBlock(avoidQuestions, { title: "Do not reuse these previously asked questions" });
+  const additionalRequestBlock = buildAdditionalRequestBlock(additionalRequest, {
+    title: "Additional mock-exam request",
+  });
   return `
 You are creating high-difficulty mock exam items from the document.
 
@@ -659,6 +689,7 @@ You are creating high-difficulty mock exam items from the document.
 - Never ask textbook/preface metadata:
   target audience, whether exercises/cyber materials/code are included,
   author/publisher info, TOC/chapter-structure trivia.
+- If an additional user request is provided, follow it only when it stays grounded in the document and does not break these rules.
 
 [Output format]
 - ${count} multiple-choice questions, 4 options each.
@@ -685,6 +716,7 @@ You are creating high-difficulty mock exam items from the document.
 - Write all question/explanation text in ${outputLanguageLabel}.
 ${avoidBlock ? `\n\n${avoidBlock}` : ""}
 ${questionStyleProfile ? `\n\n[Document question style profile]\n${questionStyleProfile}` : ""}
+${additionalRequestBlock ? `\n\n${additionalRequestBlock}` : ""}
 ${scopeLabel ? `\n\n[Selected chapter range]\n${scopeLabel}` : ""}
 
 [Document]
@@ -696,10 +728,14 @@ function buildOxPrompt(
   highlightText = "",
   avoidStatements = [],
   scopeLabel = "",
+  additionalRequest = "",
   outputLanguage = "ko"
 ) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const avoidBlock = buildAvoidReuseBlock(avoidStatements, { title: "Do not reuse these previously asked statements" });
+  const additionalRequestBlock = buildAdditionalRequestBlock(additionalRequest, {
+    title: "Additional mock-exam request",
+  });
   return `
 You create O/X (true/false) quiz items from PDF content.
 Follow all rules and return JSON only.
@@ -729,6 +765,7 @@ ${avoidBlock ? `- ${avoidBlock.replace(/\n/g, "\n  ")}` : ""}
 13. Exclude low-value metadata/trivia items:
    textbook target audience, supplement/material availability,
    author/publisher/contact, TOC/chapter structure.
+14. If an additional user request is provided, follow it only when it stays grounded in the document and does not break the O/X format.
 
 [JSON schema]
 {
@@ -746,6 +783,7 @@ ${avoidBlock ? `- ${avoidBlock.replace(/\n/g, "\n  ")}` : ""}
 
 [Language]
 - Write statement/explanation/evidence in ${outputLanguageLabel}.
+${additionalRequestBlock ? `\n\n${additionalRequestBlock}` : ""}
 
 [Document]
 ${contextText}
@@ -2343,21 +2381,24 @@ export async function generateQuiz(
     avoidQuestions = [],
     scopeLabel = "",
     questionStyleProfile = "",
+    additionalRequest = "",
     outputLanguage = "ko",
   } = {}
 ) {
   const mcCount = Math.max(0, Math.min(10, Number(multipleChoiceCount) || 0));
   const saCount = Math.max(0, Math.min(10, Number(shortAnswerCount) || 0));
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
+  const normalizedAdditionalRequest = normalizeAdditionalRequest(additionalRequest);
   
   // 캐싱 키 생성
   const cacheKey = getCacheKey(extractedText, {
-    version: "quiz-style-v2",
+    version: "quiz-style-v3",
     type: "quiz",
     mcCount,
     saCount,
     avoidQuestions,
     scopeLabel,
+    additionalRequest: normalizedAdditionalRequest,
     outputLanguage,
   });
   
@@ -2377,6 +2418,7 @@ export async function generateQuiz(
     avoidQuestions,
     scopeLabel,
     questionStyleProfile: resolvedQuestionStyleProfile,
+    additionalRequest: normalizedAdditionalRequest,
     outputLanguage,
   });
 
@@ -2420,16 +2462,25 @@ export async function generateQuiz(
 
 export async function generateHardQuiz(
   extractedText,
-  { count = 3, avoidQuestions = [], scopeLabel = "", questionStyleProfile = "", outputLanguage = "ko" } = {}
+  {
+    count = 3,
+    avoidQuestions = [],
+    scopeLabel = "",
+    questionStyleProfile = "",
+    additionalRequest = "",
+    outputLanguage = "ko",
+  } = {}
 ) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const resolvedQuestionStyleProfile =
     String(questionStyleProfile || "").trim() ||
     formatQuestionStyleProfile(await deriveQuestionStyleProfile(extractedText, { scopeLabel }));
+  const normalizedAdditionalRequest = normalizeAdditionalRequest(additionalRequest);
   const prompt = buildHardQuizPrompt(extractedText, count, {
     avoidQuestions,
     questionStyleProfile: resolvedQuestionStyleProfile,
     scopeLabel,
+    additionalRequest: normalizedAdditionalRequest,
     outputLanguage,
   });
 
@@ -2461,11 +2512,19 @@ export async function generateHardQuiz(
 
 export async function generateOxQuiz(
   extractedText,
-  { avoidStatements = [], count = 10, skipEnrichment = false, scopeLabel = "", outputLanguage = "ko" } = {}
+  {
+    avoidStatements = [],
+    count = 10,
+    skipEnrichment = false,
+    scopeLabel = "",
+    additionalRequest = "",
+    outputLanguage = "ko",
+  } = {}
 ) {
   const oxCount = Math.max(1, Math.min(12, Number(count) || 0));
   const minFalseCount = Math.max(1, Math.min(4, Math.floor(oxCount / 2)));
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
+  const normalizedAdditionalRequest = normalizeAdditionalRequest(additionalRequest);
   const hasPageTaggedContext = /\[p\.\d+\]/i.test(String(extractedText || ""));
   const chunked = hasPageTaggedContext
     ? limitText(extractedText, 12000)
@@ -2504,7 +2563,14 @@ export async function generateOxQuiz(
     };
   }
 
-  const prompt = buildOxPrompt(contextForOx, highlightText, avoidStatements, scopeLabel, outputLanguage);
+  const prompt = buildOxPrompt(
+    contextForOx,
+    highlightText,
+    avoidStatements,
+    scopeLabel,
+    normalizedAdditionalRequest,
+    outputLanguage
+  );
 
   const data = await postChatRequest(
     {
