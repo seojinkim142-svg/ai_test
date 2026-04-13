@@ -1383,7 +1383,7 @@ export default function DetailPage({
                       value={quizPromptAddonInput}
                       onChange={(event) => setQuizPromptAddonInput(event.target.value)}
                       disabled={isLoadingQuiz || isLoadingText}
-                      placeholder="예: 응용형 위주로, 개념 비교 문제를 더 넣어줘, 단답형은 공식/용어 중심으로 만들어줘"
+                      placeholder="예: 응용형 위주로, 개념 비교 문제를 더 넣어줘, 수능형 문제로 만들어줘, 단답형은 공식/용어 중심으로 만들어줘"
                       className="mt-2 min-h-[104px] w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition placeholder:text-slate-500 focus:border-emerald-300/60"
                     />
                     <p className="mt-2 text-xs text-slate-400">선택사항. 퀴즈 생성 프롬프트에 함께 반영됩니다.</p>
