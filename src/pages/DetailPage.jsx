@@ -1343,61 +1343,52 @@ export default function DetailPage({
                 onRequestSummary={handleRequestSummary}
               />
 
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <input
-                    type="text"
-                    value={quizChapterSelectionInput}
-                    onChange={(event) =>
-                      setQuizChapterSelectionInput(
-                        normalizeChapterSelectionInput(event.target.value)
-                      )
-                    }
-                    placeholder="챕터 범위 (예: 1-3,5)"
-                    className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
-                  />
-                  <button
-                    type="button"
-                    onClick={requestQuestions}
-                    disabled={isLoadingQuiz || isLoadingText || (isFreeTier && quizSets.length > 0)}
-                    className="ghost-button text-xs text-emerald-100"
-                    data-ghost-size="sm"
-                    style={{ "--ghost-color": "52, 211, 153" }}
-                  >
-                    확인
-                  </button>
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200 shadow-lg shadow-black/20">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300">챕터 범위</label>
+                    <input
+                      type="text"
+                      value={quizChapterSelectionInput}
+                      onChange={(event) =>
+                        setQuizChapterSelectionInput(
+                          normalizeChapterSelectionInput(event.target.value)
+                        )
+                      }
+                      placeholder="예: 1-3,5"
+                      className="mt-2 w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition placeholder:text-slate-500 focus:border-emerald-300/60"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300">형식</label>
+                    <input
+                      type="text"
+                      value={quizMixInput}
+                      onChange={(event) => setQuizMixInput(event.target.value)}
+                      disabled={isLoadingQuiz || isLoadingText}
+                      placeholder="객관식-주관식 예: 4-1"
+                      className={`mt-2 w-full rounded-xl border bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition placeholder:text-slate-500 ${
+                        quizMixError
+                          ? "border-red-400/45 focus:border-red-300/60"
+                          : "border-white/15 focus:border-emerald-300/60"
+                      }`}
+                    />
+                    <p className={`mt-2 text-xs ${quizMixError ? "text-red-200" : "text-slate-400"}`}>
+                      {quizMixError || "객관식-주관식 (예: 4-1)"}
+                    </p>
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-300">추가 요청</label>
+                    <textarea
+                      value={quizPromptAddonInput}
+                      onChange={(event) => setQuizPromptAddonInput(event.target.value)}
+                      disabled={isLoadingQuiz || isLoadingText}
+                      placeholder="예: 응용형 위주로, 개념 비교 문제를 더 넣어줘, 단답형은 공식/용어 중심으로 만들어줘"
+                      className="mt-2 min-h-[104px] w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition placeholder:text-slate-500 focus:border-emerald-300/60"
+                    />
+                    <p className="mt-2 text-xs text-slate-400">선택사항. 퀴즈 생성 프롬프트에 함께 반영됩니다.</p>
+                  </div>
                 </div>
-              </div>
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
-                <label className="block text-xs font-semibold text-slate-300">추가 요청</label>
-                <textarea
-                  value={quizPromptAddonInput}
-                  onChange={(event) => setQuizPromptAddonInput(event.target.value)}
-                  disabled={isLoadingQuiz || isLoadingText}
-                  placeholder="예: 응용형 위주로, 개념 비교 문제를 더 넣어줘, 단답형은 공식/용어 중심으로 만들어줘"
-                  className="mt-2 min-h-[88px] w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition placeholder:text-slate-500 focus:border-emerald-300/60"
-                />
-                <p className="mt-2 text-xs text-slate-400">선택사항. 퀴즈 생성 프롬프트에 함께 반영됩니다.</p>
-              </div>
-
-              <div className="rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
-                <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <input
-                    type="text"
-                    value={quizMixInput}
-                    onChange={(event) => setQuizMixInput(event.target.value)}
-                    disabled={isLoadingQuiz || isLoadingText}
-                    placeholder="객관식-주관식 예: 4-1"
-                    className={`w-full rounded-xl border bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition ${
-                      quizMixError
-                        ? "border-red-400/45 focus:border-red-300/60"
-                        : "border-white/15 focus:border-emerald-300/60"
-                    }`}
-                  />
-                </div>
-                <p className={`mt-2 text-xs ${quizMixError ? "text-red-200" : "text-slate-400"}`}>
-                  {quizMixError || "형식: 객관식-주관식 (예: 4-1)"}
-                </p>
               </div>
 
               <div className="hidden rounded-2xl border border-white/5 bg-white/5 p-4 shadow-lg shadow-black/20">
