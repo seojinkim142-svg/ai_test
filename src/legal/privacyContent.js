@@ -217,6 +217,7 @@ export const PRIVACY_CONTENT = {
           type: "ul",
           items: [
             `상호: ${COMPANY_INFO.operatorNameKo} (${COMPANY_INFO.operatorName})`,
+            `이메일: ${COMPANY_INFO.publicContactEmail}`,
           ],
         },
         {

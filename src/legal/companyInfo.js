@@ -7,6 +7,7 @@ export const COMPANY_INFO = {
   address: "부산광역시 금정구 금강로 335번길 125",
   phone: "010-5906-5692",
   privacyContactName: "김서진",
+  publicContactEmail: "hestra.co@gmail.com",
   effectiveDate: "2026.03.17",
 };
 
