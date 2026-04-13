@@ -97,6 +97,9 @@ const kakaoPayPlans = {
 };
 const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
 const KAKAO_RETURN_QUERY_KEYS = ["pg_token", "kakaoPay", "message"];
+const PRO_TRIAL_DAYS = 7;
+const PRO_TRIAL_BADGE_LABEL = `${PRO_TRIAL_DAYS}일 무료`;
+const PRO_TRIAL_CARD_ITEM_NAME = `제우시안 프로 ${PRO_TRIAL_DAYS}일 무료체험`;
 
 function buildKakaoReturnUrl(state) {
   if (typeof window === "undefined") return "";
@@ -224,6 +227,9 @@ function getTierTimeRemaining(expiresAt, nowMs = Date.now()) {
 function formatTierTimeRemainingLabel(remaining) {
   if (!remaining) return "";
   if (remaining.expired) return "만료됨";
+  if (remaining.months > 0) return `${remaining.months}개월 ${remaining.days}일 ${remaining.hours}시간`;
+  if (remaining.days > 0) return `${remaining.days}일 ${remaining.hours}시간`;
+  if (remaining.hours > 0) return `${remaining.hours}시간`;
   return `${remaining.months}개월 ${remaining.days}일 ${remaining.hours}시간`;
 }
 
@@ -300,14 +306,20 @@ function PaymentPage({
   const selectedChargeMonths = 1;
   const selectedKakaoAmount = selectedKakaoPlan ? selectedKakaoPlan.baseAmount * selectedChargeMonths : 0;
   const selectedKakaoItemName = selectedKakaoPlan ? selectedKakaoPlan.itemName : "";
+  const isTrialSummarySelection =
+    currentTier === "free" && selectedPlan === "Pro" && proTrialStatus?.eligible === true;
   const paymentDisclosureSections = selectedPlan === "Free"
     ? []
     : [
         {
           title: "서비스 제공 및 결제 시기",
           items: [
-            "결제 확인 즉시 서비스 이용이 시작되고, 해지 전까지 매월 정기결제로 갱신됩니다.",
-            `첫 결제 금액은 ${selectedKakaoAmount.toLocaleString()}KRW이고, 이후에도 매월 같은 금액이 자동 청구됩니다.`,
+            isTrialSummarySelection
+              ? `결제수단 등록 즉시 Pro ${PRO_TRIAL_DAYS}일 무료체험이 시작되고, ${PRO_TRIAL_DAYS}일 후부터 매월 정기결제로 갱신됩니다.`
+              : "결제 확인 즉시 서비스 이용이 시작되고, 해지 전까지 매월 정기결제로 갱신됩니다.",
+            isTrialSummarySelection
+              ? `오늘 결제 금액은 0KRW이며, 무료체험 종료 뒤부터 매월 ${selectedKakaoAmount.toLocaleString()}KRW가 자동 청구됩니다.`
+              : `첫 결제 금액은 ${selectedKakaoAmount.toLocaleString()}KRW이고, 이후에도 매월 같은 금액이 자동 청구됩니다.`,
             "결제 완료 후 현재 페이지에서 요금제 상태와 만료일이 자동으로 갱신됩니다.",
           ],
         },
@@ -404,8 +416,8 @@ function PaymentPage({
       ? getProTrialStatusErrorMessage(proTrialStatus.statusError)
     : hasProTrialAccess
       ? selectedPlan === "Pro"
-        ? "아래 결제수단을 등록하면 Pro 1개월 무료체험이 바로 시작되고, 다음 달부터 자동결제됩니다."
-        : "신규 계정은 Pro 선택 시 1개월 무료체험을 시작할 수 있습니다."
+        ? `아래 결제수단을 등록하면 Pro ${PRO_TRIAL_DAYS}일 무료체험이 바로 시작되고, ${PRO_TRIAL_DAYS}일 후부터 자동결제됩니다.`
+        : `신규 계정은 Pro 선택 시 ${PRO_TRIAL_DAYS}일 무료체험을 시작할 수 있습니다.`
       : proTrialStatus?.claimedAt
         ? "이미 Pro 무료체험을 사용했습니다."
         : "현재 조건에서는 Pro 무료체험을 시작할 수 없습니다.";
@@ -611,7 +623,7 @@ function PaymentPage({
         const isSubscriptionApproval = approvalResult?.paymentMode === "subscription";
         const noticeParts = [
           storedProTrial || approvalResult?.proTrial
-            ? "카카오페이 결제수단 등록과 Pro 1개월 무료체험이 시작되었습니다. 다음 달부터 자동결제됩니다."
+            ? `카카오페이 결제수단 등록과 Pro ${PRO_TRIAL_DAYS}일 무료체험이 시작되었습니다. ${PRO_TRIAL_DAYS}일 후부터 자동결제됩니다.`
             : isSubscriptionApproval
             ? refreshedSubscription?.status === "active"
               ? "카카오페이 정기결제 등록과 첫 결제가 완료되었습니다."
@@ -784,7 +796,7 @@ function PaymentPage({
           orderId,
           userId: user.id,
           amount: 0,
-          itemName: "제우시안 프로 1개월 무료체험",
+          itemName: PRO_TRIAL_CARD_ITEM_NAME,
           plan: selectedPlan,
           tier: selectedKakaoPlan.tier,
           billingMonths: 1,
@@ -814,7 +826,7 @@ function PaymentPage({
           tier: selectedKakaoPlan.tier,
           billingMonths: 1,
           amount: 0,
-          itemName: "제우시안 프로 1개월 무료체험",
+          itemName: PRO_TRIAL_CARD_ITEM_NAME,
           registerSubscription: true,
           proTrial: true,
           paymentMode: "subscription",
@@ -922,13 +934,13 @@ function PaymentPage({
             const showProTrialBadge = isProPlan && isFreeCurrentTier;
             const showProTrialPrice = isProPlan && hasProTrialAccess;
             const displayedOriginalPrice = showProTrialPrice ? "6,900원" : plan.originalPrice;
-            const displayedPrice = showProTrialPrice ? "0원 / 월" : plan.price;
+            const displayedPrice = showProTrialPrice ? `0원 / ${PRO_TRIAL_DAYS}일` : plan.price;
             const proTrialCardText = isLoadingProTrial
               ? "무료체험 확인 중"
               : proTrialStatus?.statusError
                 ? "상태 확인 실패"
               : hasProTrialAccess
-                ? "신규 계정 첫 1개월 무료"
+                ? `신규 계정 첫 ${PRO_TRIAL_DAYS}일 무료체험`
                 : proTrialStatus?.claimedAt
                   ? "무료체험 사용 완료"
                   : "무료체험 대상 아님";
@@ -968,7 +980,7 @@ function PaymentPage({
                               : "bg-white/10 text-slate-300"
                         }`}
                       >
-                        1개월 무료
+                        {PRO_TRIAL_BADGE_LABEL}
                       </span>
                     ) : null}
                   </div>
@@ -1031,7 +1043,7 @@ function PaymentPage({
                       오늘 결제 0 KRW
                     </span>
                     <span className={isLight ? "text-slate-500" : "text-slate-300"}>
-                      결제수단 등록 후 1개월 뒤부터 매월 6,900 KRW가 자동 결제됩니다.
+                      {`결제수단 등록 후 ${PRO_TRIAL_DAYS}일 뒤부터 매월 6,900 KRW가 자동 결제됩니다.`}
                     </span>
                   </>
                 ) : (
@@ -1125,7 +1137,7 @@ function PaymentPage({
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="font-semibold">
-                  {isNiceSubscriptionTrialForm ? "무료체험용 카드 등록" : "정기결제 카드 등록"}
+                  {isNiceSubscriptionTrialForm ? `${PRO_TRIAL_DAYS}일 무료체험용 카드 등록` : "정기결제 카드 등록"}
                 </p>
                 <p className={isLight ? "text-slate-600" : "text-slate-300"}>
                   입력한 카드 정보는 빌링 키 발급과 첫 결제 처리에만 사용됩니다.
@@ -1209,7 +1221,7 @@ function PaymentPage({
 
             <p className={isLight ? "mt-3 text-xs text-slate-500" : "mt-3 text-xs text-slate-300"}>
               {isNiceSubscriptionTrialForm
-                ? "오늘은 결제 없이 카드만 등록되고, 다음 결제일부터 정기 청구가 시작됩니다."
+                ? `오늘은 결제 없이 카드만 등록되고, ${PRO_TRIAL_DAYS}일 뒤 첫 결제일부터 정기 청구가 시작됩니다.`
                 : "카드 등록 후 첫 결제가 즉시 진행되고 이후부터 정기 청구됩니다."}
             </p>
 
@@ -1226,7 +1238,7 @@ function PaymentPage({
                     ? "무료체험 등록 중.."
                     : "정기결제 등록 중.."
                   : isNiceSubscriptionTrialForm
-                    ? "카드 등록하고 무료체험 시작"
+                    ? `카드 등록하고 ${PRO_TRIAL_DAYS}일 무료체험 시작`
                     : "카드 등록하고 정기결제 시작"}
               </button>
               <button
