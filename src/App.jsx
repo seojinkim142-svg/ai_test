@@ -287,6 +287,27 @@ function createLocalEntityId(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function getChapterRangeSourceLabel(source) {
+  if (source === "outline") return "PDF 개요(북마크)";
+  if (source === "toc_pages_ocr") return "앞쪽 목차 페이지(OCR)";
+  if (source === "toc_pages") return "앞쪽 목차 페이지";
+  return "자동 분석";
+}
+
+function buildDetectedChapterRangeNotice(detected) {
+  const warning = String(detected?.warning || "").trim();
+  if (warning) return warning;
+
+  const label = getChapterRangeSourceLabel(detected?.source);
+  if (detected?.source === "outline") {
+    return `${label} 기준으로 챕터 범위를 자동 설정했습니다.`;
+  }
+  return `${label} 기준으로 챕터 범위를 자동 설정했습니다. 페이지 범위가 맞는지 한 번 확인해주세요.`;
+}
+
+const AUTO_CHAPTER_FALLBACK_NOTICE =
+  "목차를 찾지 못해 페이지 수 기준 임시 범위를 사용 중입니다. 필요하면 '목차 자동 추출'을 다시 누르거나 직접 범위를 수정해주세요.";
+
 function buildChapterRangeStorageKey({ userId, scopeId, docId }) {
   const normalizedDocId = String(docId || "").trim();
   if (!normalizedDocId) return "";
@@ -1090,6 +1111,7 @@ function App() {
   const [chapterRangeInput, setChapterRangeInput] = useState("");
   const [autoChapterRangeInput, setAutoChapterRangeInput] = useState("");
   const [chapterRangeError, setChapterRangeError] = useState("");
+  const [chapterRangeNotice, setChapterRangeNotice] = useState("");
   const [isDetectingChapterRanges, setIsDetectingChapterRanges] = useState(false);
   const [artifacts, setArtifacts] = useState(null);
   const downloadCacheRef = useRef(new Map()); // storagePath -> { file, thumbnail, remoteUrl, bucket }
@@ -1150,6 +1172,14 @@ function App() {
     () => sanitizeUiText(chapterRangeError, "챕터 범위를 다시 확인해주세요."),
     [chapterRangeError]
   );
+  const safeChapterRangeNotice = useMemo(
+    () => sanitizeUiText(chapterRangeNotice, ""),
+    [chapterRangeNotice]
+  );
+
+  useEffect(() => {
+    setChapterRangeNotice("");
+  }, [file, selectedFileId]);
   const safeMockExamStatus = useMemo(
     () => sanitizeUiText(mockExamStatus, "모의고사 작업이 완료되었습니다."),
     [mockExamStatus]
@@ -3927,6 +3957,7 @@ function App() {
 
         if (!parsed.error && parsed.chapters.length > 0) {
           resolvedInput = detectedInput;
+          setChapterRangeNotice(buildDetectedChapterRangeNotice(detected));
           const sorted = [...parsed.chapters].sort(
             (left, right) => (Number(left?.pageStart) || 0) - (Number(right?.pageStart) || 0)
           );
@@ -3944,6 +3975,9 @@ function App() {
       if (!resolvedInput) {
         const cachedStartPage = Number(chapterOneStartPageCacheRef.current.get(docKey));
         resolvedInput = buildAutomaticChapterRangeInput(totalPages, cachedStartPage);
+        if (resolvedInput && !cancelled) {
+          setChapterRangeNotice(AUTO_CHAPTER_FALLBACK_NOTICE);
+        }
       }
 
       if (!cancelled) {
@@ -4902,22 +4936,10 @@ function App() {
 
     const autoInput = String(autoChapterRangeInput || "").trim();
     if (autoInput) return autoInput;
-
-    if (!isPdfDocumentKind(detectSupportedDocumentKind(file))) return "";
-    const totalPages = Number(pageInfo.total || pageInfo.used || 0);
-    if (!Number.isFinite(totalPages) || totalPages <= 0) return "";
-
-    const docKey = String(selectedFileId || file?.name || "").trim() || "__active__";
-    const cachedStartPage = Number(chapterOneStartPageCacheRef.current.get(docKey));
-    return buildAutomaticChapterRangeInput(totalPages, cachedStartPage);
+    return "";
   }, [
     autoChapterRangeInput,
-    buildAutomaticChapterRangeInput,
     chapterRangeInput,
-    file,
-    pageInfo.total,
-    pageInfo.used,
-    selectedFileId,
   ]);
 
   const configuredReviewSections = useMemo(() => {
@@ -5112,6 +5134,7 @@ function App() {
             if (!parsedAuto.error && parsedAuto.chapters.length > 0) {
               setAutoChapterRangeInput(autoChapterInput);
               setChapterRangeError("");
+              setChapterRangeNotice(buildDetectedChapterRangeNotice(detected));
               const sorted = [...parsedAuto.chapters].sort(
                 (left, right) => (Number(left?.pageStart) || 0) - (Number(right?.pageStart) || 0)
               );
@@ -5137,6 +5160,7 @@ function App() {
           if (autoChapterInput) {
             setAutoChapterRangeInput(autoChapterInput);
             setChapterRangeError("");
+            setChapterRangeNotice(AUTO_CHAPTER_FALLBACK_NOTICE);
           }
         }
         chapterConfigRaw = autoChapterInput;
@@ -5381,6 +5405,7 @@ function App() {
 
     setIsDetectingChapterRanges(true);
     setChapterRangeError("");
+    setChapterRangeNotice("");
     setError("");
     setStatus("목차에서 챕터 범위를 자동 추출 중...");
     try {
@@ -5416,12 +5441,13 @@ function App() {
 
       setChapterRangeInput(chapterInput);
       setChapterRangeError("");
-      const sourceLabel =
-        detected?.source === "outline" ? "PDF 개요(북마크)" : "앞쪽 목차 페이지";
+      setChapterRangeNotice(buildDetectedChapterRangeNotice(detected));
+      const sourceLabel = getChapterRangeSourceLabel(detected?.source);
       setStatus(`${sourceLabel}에서 챕터 범위 ${parsed.chapters.length}개를 자동 설정했습니다.`);
       setIsChapterRangeOpen(true);
     } catch (err) {
       setChapterRangeError(err?.message || "목차 자동 추출에 실패했습니다.");
+      setChapterRangeNotice("");
       setStatus("");
     } finally {
       setIsDetectingChapterRanges(false);
@@ -7292,7 +7318,9 @@ function App() {
     chapterRangeInput,
     setChapterRangeInput,
     chapterRangeError: safeChapterRangeError,
+    chapterRangeNotice: safeChapterRangeNotice,
     setChapterRangeError,
+    setChapterRangeNotice,
     handleAutoDetectChapterRanges,
     isDetectingChapterRanges,
     handleConfirmChapterRanges,

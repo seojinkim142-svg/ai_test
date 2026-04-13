@@ -3,6 +3,7 @@ let pdfRuntimePromise = null;
 const pdfDocumentCache = new WeakMap();
 const pdfPageTextCache = new WeakMap();
 const pdfOcrTextCache = new WeakMap();
+const pdfPageLabelNumberMapCache = new WeakMap();
 const ocrWorkerCache = new Map();
 
 const OCR_WORKER_IDLE_MS = 30000;
@@ -75,6 +76,21 @@ function getPerFileCache(store, file) {
 
 function normalizeExtractedText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function splitTextIntoNormalizedLines(value) {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+function normalizeOcrExtractedText(value, { preserveLineBreaks = false } = {}) {
+  if (!preserveLineBreaks) {
+    return normalizeExtractedText(value);
+  }
+  return splitTextIntoNormalizedLines(value).join("\n");
 }
 
 function createOcrProgressReporter(onOcrProgress) {
@@ -305,6 +321,214 @@ function clampPage(value, totalPages) {
   return Math.min(Math.max(1, parsed), totalPages);
 }
 
+function normalizeNumericPageLabel(value) {
+  const match = String(value || "").trim().match(NUMERIC_PAGE_LABEL_RE);
+  if (!match) return null;
+  const pageNumber = Number.parseInt(match[1], 10);
+  return Number.isFinite(pageNumber) && pageNumber > 0 ? pageNumber : null;
+}
+
+async function getPdfNumericPageLabelMap(pdf) {
+  if (!pdf || typeof pdf.getPageLabels !== "function") return new Map();
+
+  let cached = pdfPageLabelNumberMapCache.get(pdf);
+  if (!cached) {
+    cached = (async () => {
+      try {
+        const labels = await pdf.getPageLabels();
+        const map = new Map();
+        if (!Array.isArray(labels)) return map;
+
+        labels.forEach((label, index) => {
+          const numericLabel = normalizeNumericPageLabel(label);
+          if (!Number.isFinite(numericLabel) || numericLabel <= 0) return;
+          if (!map.has(numericLabel)) {
+            map.set(numericLabel, index + 1);
+          }
+        });
+        return map;
+      } catch {
+        return new Map();
+      }
+    })();
+    pdfPageLabelNumberMapCache.set(pdf, cached);
+    cached.catch(() => {
+      pdfPageLabelNumberMapCache.delete(pdf);
+    });
+  }
+  return cached;
+}
+
+function normalizeTocSearchText(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^0-9A-Za-z\uAC00-\uD7A3\u3040-\u30FF\u4E00-\u9FFF\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractTocSearchTokens(value) {
+  const normalized = normalizeTocSearchText(value);
+  const matches = normalized.match(TOC_TITLE_TOKEN_RE) || [];
+  return [...new Set(matches.filter((token) => token.length >= 2 && !TOC_TITLE_TOKEN_STOPWORDS.has(token)))];
+}
+
+function scorePageTextForTocTitle(pageText, title) {
+  const normalizedPage = normalizeTocSearchText(pageText);
+  const normalizedTitle = normalizeTocSearchText(title);
+  if (!normalizedPage || !normalizedTitle) return 0;
+
+  const compactPage = normalizedPage.replace(/\s+/g, "");
+  const compactTitle = normalizedTitle.replace(/\s+/g, "");
+  let score = 0;
+
+  if (compactTitle.length >= 6 && compactPage.includes(compactTitle)) {
+    score += 12;
+  } else if (normalizedTitle.length >= 4 && normalizedPage.includes(normalizedTitle)) {
+    score += 9;
+  }
+
+  const tokens = extractTocSearchTokens(title);
+  if (tokens.length) {
+    const matchedCount = tokens.filter((token) => normalizedPage.includes(token)).length;
+    if (matchedCount === 0 && score === 0) return 0;
+    score += (matchedCount / tokens.length) * 6;
+  }
+
+  return Number(score.toFixed(2));
+}
+
+function pickDominantInteger(values) {
+  const counts = new Map();
+  for (const value of values || []) {
+    const normalized = Number.parseInt(value, 10);
+    if (!Number.isFinite(normalized)) continue;
+    counts.set(normalized, (counts.get(normalized) || 0) + 1);
+  }
+
+  let bestValue = null;
+  let bestCount = 0;
+  for (const [value, count] of counts.entries()) {
+    if (count > bestCount || (count === bestCount && (bestValue == null || value < bestValue))) {
+      bestValue = value;
+      bestCount = count;
+    }
+  }
+  return Number.isFinite(bestValue) ? bestValue : null;
+}
+
+function buildTocOffsetCandidates(entries, totalPages) {
+  const normalizedTotalPages = Number.parseInt(totalPages, 10);
+  const maxOffset = Number.isFinite(normalizedTotalPages) && normalizedTotalPages > 1
+    ? normalizedTotalPages - 1
+    : MAX_TOC_OFFSET_SEARCH;
+  const candidates = new Set([0]);
+  const listedPages = (entries || [])
+    .map((entry) => Number.parseInt(entry?.pageStart, 10))
+    .filter((page) => Number.isFinite(page) && page > 0);
+  const tocPages = (entries || [])
+    .map((entry) => Number.parseInt(entry?.tocPageNumber, 10))
+    .filter((page) => Number.isFinite(page) && page > 0);
+
+  const listedMin = listedPages.length ? Math.min(...listedPages) : 1;
+  const tocAnchors = tocPages.length ? [Math.min(...tocPages), Math.max(...tocPages)] : [1];
+
+  for (const anchor of tocAnchors) {
+    const baseOffset = Math.max(0, anchor - listedMin);
+    const start = Math.max(0, baseOffset - 2);
+    const end = Math.min(maxOffset, baseOffset + MAX_TOC_OFFSET_SEARCH);
+    for (let offset = start; offset <= end; offset += 1) {
+      candidates.add(offset);
+    }
+  }
+
+  return [...candidates].sort((left, right) => left - right);
+}
+
+async function estimateTocPageOffsetFromTitleMatches(file, pdf, entries, totalPages) {
+  const sampleEntries = dedupeChapterStarts(entries)
+    .filter((entry) => isLikelyChapterTitle(entry?.title || ""))
+    .slice(0, MAX_TOC_OFFSET_SAMPLE_ENTRIES);
+  if (!sampleEntries.length) return null;
+
+  let bestOffset = null;
+  let bestMatches = 0;
+  let bestScore = 0;
+
+  for (const offset of buildTocOffsetCandidates(sampleEntries, totalPages)) {
+    let matches = 0;
+    let totalScore = 0;
+
+    for (const entry of sampleEntries) {
+      const candidatePage = Number.parseInt(entry.pageStart, 10) + offset;
+      if (!Number.isFinite(candidatePage) || candidatePage <= 0 || candidatePage > totalPages) continue;
+
+      const pageText = await getCachedPageText(file, pdf, candidatePage);
+      const score = scorePageTextForTocTitle(pageText, entry.title);
+      totalScore += score;
+      if (score >= MIN_TOC_OFFSET_MATCH_SCORE) {
+        matches += 1;
+      }
+    }
+
+    if (
+      matches > bestMatches ||
+      (matches === bestMatches && totalScore > bestScore) ||
+      (matches === bestMatches && totalScore === bestScore && bestOffset != null && offset < bestOffset)
+    ) {
+      bestOffset = offset;
+      bestMatches = matches;
+      bestScore = totalScore;
+    }
+  }
+
+  if (bestMatches >= 2 || bestScore >= MIN_TOC_TOTAL_MATCH_SCORE) {
+    return bestOffset;
+  }
+  return null;
+}
+
+async function normalizeFrontTocEntriesToActualPages(file, pdf, entries, totalPages) {
+  const numericPageLabels = await getPdfNumericPageLabelMap(pdf);
+  const pageLabelOffsets = dedupeChapterStarts(entries)
+    .map((entry) => {
+      const listedPage = Number.parseInt(entry?.pageStart, 10);
+      const actualPage = numericPageLabels.get(listedPage);
+      if (!Number.isFinite(listedPage) || !Number.isFinite(actualPage)) return null;
+      return actualPage - listedPage;
+    })
+    .filter((offset) => Number.isFinite(offset));
+
+  const labelOffset = pickDominantInteger(pageLabelOffsets);
+  if (Number.isFinite(labelOffset)) {
+    return {
+      entries: entries.map((entry) => ({
+        ...entry,
+        pageStart: Math.min(totalPages, Math.max(1, Number.parseInt(entry.pageStart, 10) + labelOffset)),
+      })),
+      warning: "",
+    };
+  }
+
+  const estimatedOffset = await estimateTocPageOffsetFromTitleMatches(file, pdf, entries, totalPages);
+  if (Number.isFinite(estimatedOffset)) {
+    return {
+      entries: entries.map((entry) => ({
+        ...entry,
+        pageStart: Math.min(totalPages, Math.max(1, Number.parseInt(entry.pageStart, 10) + estimatedOffset)),
+      })),
+      warning: "",
+    };
+  }
+
+  return {
+    entries,
+    warning:
+      "목차에 적힌 페이지 번호를 실제 PDF 페이지와 완전히 맞추지 못했습니다. 앞표지/서문이 많은 PDF는 범위를 한 번 확인해주세요.",
+  };
+}
+
 function dedupeChapterStarts(entries) {
   const sorted = [...entries]
     .map((entry) => ({
@@ -353,7 +577,11 @@ function buildChapterRangesFromStarts(entries, totalPages) {
     .map((chapter, index) => ({
       ...chapter,
       id: `chapter-${index + 1}`,
-      chapterNumber: index + 1,
+      chapterNumber:
+        Number.isFinite(Number.parseInt(chapter?.chapterNumber, 10)) &&
+        Number.parseInt(chapter?.chapterNumber, 10) > 0
+          ? Number.parseInt(chapter.chapterNumber, 10)
+          : index + 1,
     }));
 }
 
@@ -416,9 +644,75 @@ async function extractPageLines(page) {
   return lines;
 }
 
+async function extractPageLinesWithFallback(
+  file,
+  pdf,
+  pageNumber,
+  {
+    useOcrFallback = false,
+    ocrLang = "kor+eng",
+    ocrScale = 1.5,
+    ocrMaxPixels = 1200000,
+  } = {}
+) {
+  let lines = [];
+  const page = await pdf.getPage(pageNumber);
+  try {
+    lines = await extractPageLines(page);
+  } catch {
+    lines = [];
+  } finally {
+    if (typeof page.cleanup === "function") page.cleanup();
+  }
+
+  if (lines.length || !useOcrFallback) {
+    return {
+      lines,
+      ocrUsed: false,
+    };
+  }
+
+  const ocrText = await recognizePdfPage(file, pdf, pageNumber, {
+    ocrLang,
+    ocrScale,
+    ocrMaxPixels,
+    preserveLineBreaks: true,
+  });
+
+  return {
+    lines: splitTextIntoNormalizedLines(ocrText),
+    ocrUsed: true,
+  };
+}
+
 // 확장된 페이지 번호 패턴 (다양한 형식 지원)
 const TOC_PAGE_NUMBER_RE = /(?:p\.?\s*|pp\.?\s*|page\s*|쪽\s*|\u30DA\u30FC\u30B8\s*)?(\d{1,4})\s*$/i;
 const TOC_LEADER_RE = /[.\u2024\u2025\u2026\u00b7\u30fb\u2022_-]{2,}/;
+const NUMERIC_PAGE_LABEL_RE = /^(?:p(?:age)?\.?\s*)?(\d{1,4})$/i;
+const TOC_TITLE_TOKEN_STOPWORDS = new Set([
+  "chapter",
+  "chap",
+  "ch",
+  "part",
+  "unit",
+  "section",
+  "sec",
+  "lesson",
+  "module",
+  "topic",
+  "lecture",
+  "lec",
+  "제",
+  "장",
+  "절",
+  "부",
+  "편",
+]);
+const TOC_TITLE_TOKEN_RE = /[0-9A-Za-z\uAC00-\uD7A3\u3040-\u30FF\u4E00-\u9FFF]+/g;
+const MAX_TOC_OFFSET_SEARCH = 40;
+const MAX_TOC_OFFSET_SAMPLE_ENTRIES = 5;
+const MIN_TOC_OFFSET_MATCH_SCORE = 5;
+const MIN_TOC_TOTAL_MATCH_SCORE = 10;
 
 // 목차 항목 패턴 (점선, 공백, 탭 등 다양한 구분자)
 const TOC_ITEM_SEPARATOR_RE = /[.\u2024\u2025\u2026\u00b7\u30fb\u2022_-]{2,}|\s{3,}|\t+/;
@@ -777,14 +1071,20 @@ async function getCachedPageText(file, pdf, pageNumber) {
 
 function buildOcrPageCacheKey(
   pageNumber,
-  { ocrLang = "kor+eng", ocrScale = 2, ocrMaxPixels = DEFAULT_OCR_MAX_PIXELS } = {}
+  {
+    ocrLang = "kor+eng",
+    ocrScale = 2,
+    ocrMaxPixels = DEFAULT_OCR_MAX_PIXELS,
+    preserveLineBreaks = false,
+  } = {}
 ) {
   const parsedScale = Number(ocrScale);
   const scaleKey =
     Number.isFinite(parsedScale) && parsedScale > 0 ? parsedScale.toFixed(2) : "2.00";
   const pixelKey =
     Number.isFinite(ocrMaxPixels) && ocrMaxPixels > 0 ? Math.round(ocrMaxPixels) : "none";
-  return `${pageNumber}:${ocrLang}:${scaleKey}:${pixelKey}`;
+  const formatKey = preserveLineBreaks ? "lines" : "flat";
+  return `${pageNumber}:${ocrLang}:${scaleKey}:${pixelKey}:${formatKey}`;
 }
 
 function buildSpreadOcrPageOrder(pageNumbers) {
@@ -838,6 +1138,7 @@ async function recognizePdfPage(
     ocrLang = "kor+eng",
     ocrScale = 2,
     ocrMaxPixels = DEFAULT_OCR_MAX_PIXELS,
+    preserveLineBreaks = false,
     progressReporter,
   } = {}
 ) {
@@ -846,6 +1147,7 @@ async function recognizePdfPage(
     ocrLang,
     ocrScale,
     ocrMaxPixels,
+    preserveLineBreaks,
   });
   if (cache.has(cacheKey)) return cache.get(cacheKey);
 
@@ -855,7 +1157,7 @@ async function recognizePdfPage(
     try {
       canvas = await renderPageToCanvas(page, ocrScale, { maxPixels: ocrMaxPixels });
       const result = await worker.recognize(canvas);
-      return normalizeExtractedText(result?.data?.text || "");
+      return normalizeOcrExtractedText(result?.data?.text || "", { preserveLineBreaks });
     } finally {
       if (canvas) {
         canvas.width = 0;
@@ -1208,14 +1510,17 @@ async function extractChapterRangesFromOutline(pdf, totalPages) {
   return buildChapterRangesFromStarts(selected, totalPages);
 }
 
-async function extractChapterRangesFromFrontTocPages(pdf, totalPages, maxScanPages = 24) {
+async function collectFrontTocEntries(file, pdf, totalPages, maxScanPages = 24, { useOcrFallback = false } = {}) {
   const scanLimit = Math.min(Math.max(6, Number(maxScanPages) || 24), totalPages);
   const entries = [];
   let tocWindowUntil = 0;
+  let usedOcr = false;
 
   for (let pageNumber = 1; pageNumber <= scanLimit; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const lines = await extractPageLines(page);
+    const { lines, ocrUsed } = await extractPageLinesWithFallback(file, pdf, pageNumber, {
+      useOcrFallback,
+    });
+    if (ocrUsed) usedOcr = true;
     const pageText = lines.join(" ");
     const pageAnalysis = analyzeTocPage(lines, pageText);
     const pageSignals = pageAnalysis.signals;
@@ -1237,6 +1542,7 @@ async function extractChapterRangesFromFrontTocPages(pdf, totalPages, maxScanPag
       entries.push({
         title: parsed.title,
         pageStart: parsed.pageStart,
+        tocPageNumber: pageNumber,
         confidence:
           (parsed.confidence || 0) +
           (inTocWindow ? 1 : 0) +
@@ -1246,19 +1552,74 @@ async function extractChapterRangesFromFrontTocPages(pdf, totalPages, maxScanPag
     }
   }
 
-  if (entries.length < 2) return [];
-  const normalized = entries
+  return {
+    entries,
+    usedOcr,
+  };
+}
+
+async function extractChapterRangesFromFrontTocPages(file, pdf, totalPages, maxScanPages = 24) {
+  const textPass = await collectFrontTocEntries(file, pdf, totalPages, maxScanPages, {
+    useOcrFallback: false,
+  });
+  let mergedEntries = textPass.entries;
+  let usedOcr = false;
+
+  let normalizedEntries = await normalizeFrontTocEntriesToActualPages(file, pdf, mergedEntries, totalPages);
+  let normalized = normalizedEntries.entries
     .map((entry) => ({
       ...entry,
       pageStart: Math.min(entry.pageStart, totalPages),
     }))
     .filter((entry) => entry.pageStart > 0);
 
-  if (normalized.length < 2) return [];
+  if (normalized.length < 2) {
+    const ocrPass = await collectFrontTocEntries(file, pdf, totalPages, Math.min(maxScanPages, 10), {
+      useOcrFallback: true,
+    });
+    mergedEntries = [...mergedEntries, ...ocrPass.entries];
+    usedOcr = usedOcr || ocrPass.usedOcr;
+    normalizedEntries = await normalizeFrontTocEntriesToActualPages(file, pdf, mergedEntries, totalPages);
+    normalized = normalizedEntries.entries
+      .map((entry) => ({
+        ...entry,
+        pageStart: Math.min(entry.pageStart, totalPages),
+      }))
+      .filter((entry) => entry.pageStart > 0);
+    if (normalized.length < 2) {
+      return {
+        chapters: [],
+        usedOcr,
+        warning: normalizedEntries.warning || "",
+      };
+    }
+  }
+  let highConfidence = normalized.filter((entry) => (entry.confidence || 0) >= 4);
+  let selected = highConfidence.length >= 2 ? highConfidence : normalized;
+  let chapters = buildChapterRangesFromStarts(selected, totalPages);
+  if (chapters.length < 2 && !usedOcr) {
+    const ocrPass = await collectFrontTocEntries(file, pdf, totalPages, Math.min(maxScanPages, 10), {
+      useOcrFallback: true,
+    });
+    mergedEntries = [...mergedEntries, ...ocrPass.entries];
+    usedOcr = usedOcr || ocrPass.usedOcr;
+    normalizedEntries = await normalizeFrontTocEntriesToActualPages(file, pdf, mergedEntries, totalPages);
+    normalized = normalizedEntries.entries
+      .map((entry) => ({
+        ...entry,
+        pageStart: Math.min(entry.pageStart, totalPages),
+      }))
+      .filter((entry) => entry.pageStart > 0);
+    highConfidence = normalized.filter((entry) => (entry.confidence || 0) >= 4);
+    selected = highConfidence.length >= 2 ? highConfidence : normalized;
+    chapters = buildChapterRangesFromStarts(selected, totalPages);
+  }
 
-  const highConfidence = normalized.filter((entry) => (entry.confidence || 0) >= 4);
-  const selected = highConfidence.length >= 2 ? highConfidence : normalized;
-  return buildChapterRangesFromStarts(selected, totalPages);
+  return {
+    chapters,
+    usedOcr,
+    warning: normalizedEntries.warning || "",
+  };
 }
 
 export async function extractChapterRangesFromToc(
@@ -1287,12 +1648,13 @@ export async function extractChapterRangesFromToc(
     };
   }
 
-  const fromTocPages = await extractChapterRangesFromFrontTocPages(pdf, totalPages, maxScanPages);
-  if (fromTocPages.length >= 2) {
+  const fromTocPages = await extractChapterRangesFromFrontTocPages(file, pdf, totalPages, maxScanPages);
+  if (Array.isArray(fromTocPages?.chapters) && fromTocPages.chapters.length >= 2) {
     return {
-      chapters: fromTocPages,
+      chapters: fromTocPages.chapters,
       totalPages,
-      source: "toc_pages",
+      source: fromTocPages.usedOcr ? "toc_pages_ocr" : "toc_pages",
+      warning: fromTocPages.warning || "",
       error: "",
     };
   }
@@ -1301,6 +1663,7 @@ export async function extractChapterRangesFromToc(
     chapters: [],
     totalPages,
     source: null,
+    warning: "",
     error:
       "\uBAA9\uCC28\uC5D0\uC11C \uCC55\uD130 \uBC94\uC704\uB97C \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uC9C1\uC811 \uC785\uB825 \uD615\uC2DD(\uC608: 1:1-12)\uC744 \uC0AC\uC6A9\uD574\uC8FC\uC138\uC694.",
   };
