@@ -191,7 +191,9 @@ export default function DetailPage({
   chapterRangeInput,
   setChapterRangeInput,
   chapterRangeError,
+  chapterRangeNotice,
   setChapterRangeError,
+  setChapterRangeNotice,
   handleAutoDetectChapterRanges,
   isDetectingChapterRanges,
   handleConfirmChapterRanges,
@@ -786,6 +788,7 @@ export default function DetailPage({
                       onChange={(event) => {
                         setChapterRangeInput(event.target.value);
                         setChapterRangeError("");
+                        setChapterRangeNotice("");
                       }}
                       placeholder={`1:1-12\n2:13-24\n3:25-38`}
                       rows={4}
@@ -820,6 +823,11 @@ export default function DetailPage({
                   {chapterRangeError && (
                     <p className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-200 ring-1 ring-red-400/30">
                       {chapterRangeError}
+                    </p>
+                  )}
+                  {!chapterRangeError && chapterRangeNotice && (
+                    <p className="mt-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-100 ring-1 ring-amber-300/20">
+                      {chapterRangeNotice}
                     </p>
                   )}
                 </div>
