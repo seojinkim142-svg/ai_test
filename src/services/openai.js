@@ -915,7 +915,7 @@ async function generateProblemPageSummary(extractedText, { scope, outputLanguage
       ],
       temperature: 1,
     },
-    { retries: 0 }
+    { retries: 1 }
   );
   const content = data.choices?.[0]?.message?.content?.trim() || "";
   return sanitizeMarkdown(content);
@@ -2035,7 +2035,7 @@ ${JSON.stringify(payload)}
       temperature: 1,
       response_format: { type: "json_object" },
     },
-    { retries: 0 }
+    { retries: 1 }
   );
 
   const content = data.choices?.[0]?.message?.content?.trim() || "";
@@ -2242,9 +2242,39 @@ function resolveClientApiKey(target) {
   return "";
 }
 
-async function postChatRequest(body, { retries = 1, provider = "deepseek" } = {}) {
+function getProviderLabel(provider) {
+  return String(provider || "").trim().toLowerCase() === "openai" ? "OpenAI" : "DeepSeek";
+}
+
+function isRetryableStatus(status) {
+  const normalized = Number(status);
+  return normalized === 408 || normalized === 409 || normalized === 425 || normalized === 429 || (normalized >= 500 && normalized <= 599);
+}
+
+function getFallbackProvider(provider, attemptedProviders = []) {
+  const normalizedProvider = String(provider || "").trim().toLowerCase();
+  const attempted = new Set(
+    (Array.isArray(attemptedProviders) ? attemptedProviders : []).map((entry) =>
+      String(entry || "").trim().toLowerCase()
+    )
+  );
+
+  if (normalizedProvider !== "deepseek" || attempted.has("openai")) return null;
+
+  const openAiTarget = resolveChatTarget("openai");
+  if (openAiTarget.usesAppProxy) return "openai";
+  if (resolveClientApiKey(openAiTarget)) return "openai";
+  return null;
+}
+
+async function postChatRequest(
+  body,
+  { retries = 1, provider = "deepseek", attemptedProviders = [] } = {}
+) {
   const target = resolveChatTarget(provider);
   const apiKey = resolveClientApiKey(target);
+  const providerLabel = getProviderLabel(target.provider);
+  const nextAttemptedProviders = [...attemptedProviders, target.provider];
 
   if (IS_NATIVE_PLATFORM && target.usesRelativeBase) {
     throw new Error(
@@ -2280,7 +2310,25 @@ async function postChatRequest(body, { retries = 1, provider = "deepseek" } = {}
       body: JSON.stringify(requestBody),
     });
   } catch (err) {
-    throw new Error(`${target.provider === "openai" ? "OpenAI" : "DeepSeek"} request failed: ${err.message || err}`);
+    if (retries > 0) {
+      await sleep(1200);
+      return postChatRequest(body, {
+        retries: retries - 1,
+        provider: target.provider,
+        attemptedProviders: nextAttemptedProviders,
+      });
+    }
+
+    const fallbackProvider = getFallbackProvider(target.provider, nextAttemptedProviders);
+    if (fallbackProvider) {
+      return postChatRequest(body, {
+        retries: 0,
+        provider: fallbackProvider,
+        attemptedProviders: nextAttemptedProviders,
+      });
+    }
+
+    throw new Error(`${providerLabel} request failed: ${err.message || err}`);
   }
 
   if (response.status === 429) {
@@ -2297,7 +2345,11 @@ async function postChatRequest(body, { retries = 1, provider = "deepseek" } = {}
     if (retries > 0) {
       const delay = (waitSeconds ?? 10) * 1000;
       await sleep(delay);
-      return postChatRequest(body, { retries: retries - 1, provider: target.provider });
+      return postChatRequest(body, {
+        retries: retries - 1,
+        provider: target.provider,
+        attemptedProviders: nextAttemptedProviders,
+      });
     }
 
     throw new Error(waitSeconds ? `${hint} (retry in ${waitSeconds}s)` : hint);
@@ -2314,7 +2366,28 @@ async function postChatRequest(body, { retries = 1, provider = "deepseek" } = {}
       // Body was not JSON; keep raw text
     }
 
-    throw new Error(`${target.provider === "openai" ? "OpenAI" : "DeepSeek"} API error: ${response.status} ${message}`);
+    if (isRetryableStatus(response.status) && retries > 0) {
+      const delay = Math.min(3000, 1200 * (2 - Math.min(retries, 1)));
+      await sleep(delay);
+      return postChatRequest(body, {
+        retries: retries - 1,
+        provider: target.provider,
+        attemptedProviders: nextAttemptedProviders,
+      });
+    }
+
+    if (response.status >= 500) {
+      const fallbackProvider = getFallbackProvider(target.provider, nextAttemptedProviders);
+      if (fallbackProvider) {
+        return postChatRequest(body, {
+          retries: 0,
+          provider: fallbackProvider,
+          attemptedProviders: nextAttemptedProviders,
+        });
+      }
+    }
+
+    throw new Error(`${providerLabel} API error: ${response.status} ${message}`);
   }
 
   return response.json();
@@ -2661,7 +2734,7 @@ export async function generateSummary(
       ],
       temperature: 1,
     },
-    { retries: 0 }
+    { retries: 1 }
   );
 
   const content = data.choices?.[0]?.message?.content?.trim() || "";

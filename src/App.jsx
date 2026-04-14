@@ -5353,24 +5353,35 @@ function App() {
             .filter(Boolean)
             .join("\n\n")
         : summarySourceText;
-      const [summarized, generatedQuestionStyleProfile] = await Promise.all([
-        customChapterSections
-          ? generateSummary(questionStyleSourceText, {
-              scope: "사용자 지정 챕터 범위",
-              chapterized: true,
-              chapterSections: customChapterSections,
-              instructorEmphasis: instructorEmphasisText,
-              outputLanguage,
-            })
-          : generateSummary(summarySourceText, {
-              instructorEmphasis: instructorEmphasisText,
-              outputLanguage,
-            }),
-        generateQuestionStyleProfile(questionStyleSourceText, {
-          scopeLabel: questionStyleScopeLabel,
-        }),
+      const summaryPromise = customChapterSections
+        ? generateSummary(questionStyleSourceText, {
+            scope: "사용자 지정 챕터 범위",
+            chapterized: true,
+            chapterSections: customChapterSections,
+            instructorEmphasis: instructorEmphasisText,
+            outputLanguage,
+          })
+        : generateSummary(summarySourceText, {
+            instructorEmphasis: instructorEmphasisText,
+            outputLanguage,
+          });
+      const questionStyleProfilePromise = generateQuestionStyleProfile(questionStyleSourceText, {
+        scopeLabel: questionStyleScopeLabel,
+      });
+      const [summaryResult, questionStyleProfileResult] = await Promise.allSettled([
+        summaryPromise,
+        questionStyleProfilePromise,
       ]);
-      const nextQuestionStyleProfile = String(generatedQuestionStyleProfile || "").trim();
+
+      if (summaryResult.status !== "fulfilled") {
+        throw summaryResult.reason;
+      }
+
+      const summarized = summaryResult.value;
+      const nextQuestionStyleProfile =
+        questionStyleProfileResult.status === "fulfilled"
+          ? String(questionStyleProfileResult.value || "").trim()
+          : "";
       const nextHighlights = writeQuestionStyleProfileToHighlights(artifacts?.highlights, {
         content: nextQuestionStyleProfile,
         scopeLabel: questionStyleScopeLabel,
