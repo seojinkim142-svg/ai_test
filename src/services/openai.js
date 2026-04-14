@@ -2242,10 +2242,6 @@ function resolveClientApiKey(target) {
   return "";
 }
 
-function getProviderLabel(provider) {
-  return String(provider || "").trim().toLowerCase() === "openai" ? "OpenAI" : "DeepSeek";
-}
-
 function isRetryableStatus(status) {
   const normalized = Number(status);
   return normalized === 408 || normalized === 409 || normalized === 425 || normalized === 429 || (normalized >= 500 && normalized <= 599);
@@ -2273,7 +2269,6 @@ async function postChatRequest(
 ) {
   const target = resolveChatTarget(provider);
   const apiKey = resolveClientApiKey(target);
-  const providerLabel = getProviderLabel(target.provider);
   const nextAttemptedProviders = [...attemptedProviders, target.provider];
 
   if (IS_NATIVE_PLATFORM && target.usesRelativeBase) {
@@ -2285,15 +2280,11 @@ async function postChatRequest(
   }
 
   if ((target.isDirectDeepSeekBase || target.usesDevProxy) && target.provider === "deepseek" && !apiKey) {
-    throw new Error(
-      "DeepSeek API key is missing. Add `VITE_DEEPSEEK_API_KEY` to your `.env` and restart the dev server."
-    );
+    throw new Error("AI service is temporarily unavailable. Please try again later.");
   }
 
   if ((target.isDirectOpenAiBase || target.usesDevProxy) && target.provider === "openai" && !apiKey) {
-    throw new Error(
-      "OpenAI API key is missing. Add `VITE_OPENAI_API_KEY` to your `.env` and restart the dev server."
-    );
+    throw new Error("AI service is temporarily unavailable. Please try again later.");
   }
 
   const headers = {
@@ -2328,7 +2319,7 @@ async function postChatRequest(
       });
     }
 
-    throw new Error(`${providerLabel} request failed: ${err.message || err}`);
+    throw new Error("AI service request failed. Please try again.");
   }
 
   if (response.status === 429) {
@@ -2387,7 +2378,21 @@ async function postChatRequest(
       }
     }
 
-    throw new Error(`${providerLabel} API error: ${response.status} ${message}`);
+    const sanitizedMessage = String(message || "").trim();
+    if (response.status >= 500) {
+      throw new Error("AI service is temporarily unavailable. Please try again later.");
+    }
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("AI service is temporarily unavailable. Please try again later.");
+    }
+    if (response.status === 400 || response.status === 404) {
+      throw new Error("AI request could not be completed. Please try again.");
+    }
+    throw new Error(
+      sanitizedMessage
+        ? `AI request could not be completed. ${sanitizedMessage}`
+        : "AI request could not be completed. Please try again."
+    );
   }
 
   return response.json();
