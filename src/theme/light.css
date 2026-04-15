@@ -338,3 +338,102 @@
   color: #065f46 !important;
   box-shadow: 0 10px 22px rgba(16, 185, 129, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.82) !important;
 }
+
+:root.theme-light .review-note-card {
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(241, 245, 249, 0.92));
+  border-color: rgba(148, 163, 184, 0.22) !important;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.76);
+}
+
+:root.theme-light .review-note-pill {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+:root.theme-light .review-note-pill--source {
+  background-color: rgba(16, 185, 129, 0.18) !important;
+  color: #047857 !important;
+  --tw-ring-color: rgba(16, 185, 129, 0.34) !important;
+}
+
+:root.theme-light .review-note-pill--resolved {
+  background-color: rgba(100, 116, 139, 0.16) !important;
+  color: #334155 !important;
+  --tw-ring-color: rgba(100, 116, 139, 0.3) !important;
+}
+
+:root.theme-light .review-note-pill--pending {
+  background-color: rgba(245, 158, 11, 0.2) !important;
+  color: #b45309 !important;
+  --tw-ring-color: rgba(245, 158, 11, 0.34) !important;
+}
+
+:root.theme-light .review-note-pill--count {
+  background-color: rgba(71, 85, 105, 0.08) !important;
+  color: #334155 !important;
+  --tw-ring-color: rgba(100, 116, 139, 0.2) !important;
+}
+
+:root.theme-light .review-note-pill--section {
+  background-color: rgba(6, 182, 212, 0.18) !important;
+  color: #0f766e !important;
+  --tw-ring-color: rgba(6, 182, 212, 0.3) !important;
+}
+
+:root.theme-light .review-note-pill--unknown {
+  background-color: rgba(148, 163, 184, 0.12) !important;
+  color: #475569 !important;
+  --tw-ring-color: rgba(148, 163, 184, 0.22) !important;
+}
+
+:root.theme-light .review-note-action {
+  text-shadow: none !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+:root.theme-light .review-note-action--neutral {
+  background-color: rgba(148, 163, 184, 0.11) !important;
+  color: #334155 !important;
+  border-color: rgba(148, 163, 184, 0.34) !important;
+}
+
+:root.theme-light .review-note-action--success {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+  color: #047857 !important;
+  border-color: rgba(16, 185, 129, 0.34) !important;
+}
+
+:root.theme-light .review-note-action--accent {
+  background-color: rgba(6, 182, 212, 0.12) !important;
+  color: #0e7490 !important;
+  border-color: rgba(6, 182, 212, 0.34) !important;
+}
+
+:root.theme-light .review-note-action--danger {
+  background-color: rgba(248, 113, 113, 0.12) !important;
+  color: #b91c1c !important;
+  border-color: rgba(248, 113, 113, 0.34) !important;
+}
+
+:root.theme-light .review-note-action--neutral:hover:not(:disabled),
+:root.theme-light .review-note-action--neutral:focus-visible:not(:disabled) {
+  background-color: rgba(148, 163, 184, 0.16) !important;
+  box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.84) !important;
+}
+
+:root.theme-light .review-note-action--success:hover:not(:disabled),
+:root.theme-light .review-note-action--success:focus-visible:not(:disabled) {
+  background-color: rgba(16, 185, 129, 0.18) !important;
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.84) !important;
+}
+
+:root.theme-light .review-note-action--accent:hover:not(:disabled),
+:root.theme-light .review-note-action--accent:focus-visible:not(:disabled) {
+  background-color: rgba(6, 182, 212, 0.18) !important;
+  box-shadow: 0 0 0 1px rgba(6, 182, 212, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.84) !important;
+}
+
+:root.theme-light .review-note-action--danger:hover:not(:disabled),
+:root.theme-light .review-note-action--danger:focus-visible:not(:disabled) {
+  background-color: rgba(248, 113, 113, 0.18) !important;
+  box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.84) !important;
+}
