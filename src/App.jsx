@@ -1732,6 +1732,24 @@ function App() {
     [activePremiumProfileId, premiumProfiles, profilePinInputs]
   );
 
+  const handleRenamePremiumProfile = useCallback(
+    (profileId, pin, newName) => {
+      const profile = premiumProfiles.find((p) => p.id === profileId);
+      if (!profile) return { ok: false, message: "프로필을 찾을 수 없습니다." };
+      const inputPin = normalizePremiumProfilePinInput(pin);
+      if (!inputPin) return { ok: false, message: "4자리 PIN을 입력해주세요." };
+      const expectedPin = sanitizePremiumProfilePin(profile.pin);
+      if (inputPin !== expectedPin) return { ok: false, message: "PIN이 올바르지 않습니다." };
+      const trimmedName = sanitizePremiumProfileName(newName, profile.name);
+      setPremiumProfiles((prev) =>
+        prev.map((p) => (p.id === profileId ? { ...p, name: trimmedName } : p))
+      );
+      setStatus(`프로필 이름이 "${trimmedName}"(으)로 변경되었습니다.`);
+      return { ok: true };
+    },
+    [premiumProfiles]
+  );
+
   const handleCreatePremiumProfile = useCallback(
     (requestedName) => {
       if (!isPremiumTier) return;
@@ -7576,6 +7594,7 @@ function App() {
             theme={theme}
             onSelectProfile={handleSelectPremiumProfile}
             onCreateProfile={handleCreatePremiumProfile}
+            onRenameProfile={handleRenamePremiumProfile}
             onClose={handleCloseProfilePicker}
             canClose={Boolean(activePremiumProfileId)}
           />

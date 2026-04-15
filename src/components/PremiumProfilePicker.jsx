@@ -12,6 +12,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
   theme = "light",
   onSelectProfile,
   onCreateProfile,
+  onRenameProfile,
   onClose,
 }) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -20,8 +21,18 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
   const [isPinSubmitting, setIsPinSubmitting] = useState(false);
+
+  // rename dialog state
+  const [renameTargetId, setRenameTargetId] = useState(null);
+  const [renamePinInput, setRenamePinInput] = useState("");
+  const [renameNameDraft, setRenameNameDraft] = useState("");
+  const [renameError, setRenameError] = useState("");
+  const [isRenameSubmitting, setIsRenameSubmitting] = useState(false);
+
   const nameInputRef = useRef(null);
   const pinInputRef = useRef(null);
+  const renameNameInputRef = useRef(null);
+  const renamePinInputRef = useRef(null);
   const isLight = theme === "light";
 
   const targetProfile = useMemo(
@@ -106,6 +117,56 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
     [closePinDialog, isPinSubmitting, onSelectProfile, pinInput, targetProfileId]
   );
 
+  const openRenameDialog = useCallback(
+    (profileId, event) => {
+      event.stopPropagation();
+      const profile = profiles.find((p) => p.id === profileId);
+      if (!profile) return;
+      setRenameTargetId(profileId);
+      setRenamePinInput("");
+      setRenameNameDraft(profile.name);
+      setRenameError("");
+    },
+    [profiles]
+  );
+
+  const closeRenameDialog = useCallback(() => {
+    setRenameTargetId(null);
+    setRenamePinInput("");
+    setRenameNameDraft("");
+    setRenameError("");
+    setIsRenameSubmitting(false);
+  }, []);
+
+  const handleRenameSubmit = useCallback(
+    async (event) => {
+      event.preventDefault();
+      if (!renameTargetId || isRenameSubmitting) return;
+      const trimmedName = renameNameDraft.trim().slice(0, 16);
+      if (!trimmedName) {
+        setRenameError("이름을 입력해주세요.");
+        return;
+      }
+      if (!/^\d{4}$/.test(renamePinInput)) {
+        setRenameError("PIN은 4자리 숫자로 입력해주세요.");
+        return;
+      }
+      setIsRenameSubmitting(true);
+      try {
+        const result = await onRenameProfile?.(renameTargetId, renamePinInput, trimmedName);
+        const isOk = result?.ok ?? result === true;
+        if (!isOk) {
+          setRenameError(result?.message || "PIN이 올바르지 않습니다.");
+          return;
+        }
+        closeRenameDialog();
+      } finally {
+        setIsRenameSubmitting(false);
+      }
+    },
+    [closeRenameDialog, isRenameSubmitting, onRenameProfile, renamePinInput, renameNameDraft, renameTargetId]
+  );
+
   const handleAvatarError = useCallback((event) => {
     const img = event.currentTarget;
     const step = Number(img.dataset.fallbackStep || "0");
@@ -126,10 +187,26 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
     pinInputRef.current?.select();
   }, [isPinDialogOpen]);
 
+  const isRenameDialogOpen = Boolean(renameTargetId);
+  const renameTargetProfile = useMemo(
+    () => profiles.find((p) => p.id === renameTargetId) || null,
+    [profiles, renameTargetId]
+  );
+
   useEffect(() => {
-    if (!isCreateDialogOpen && !isPinDialogOpen) return undefined;
+    if (!isRenameDialogOpen) return;
+    renameNameInputRef.current?.focus();
+    renameNameInputRef.current?.select();
+  }, [isRenameDialogOpen]);
+
+  useEffect(() => {
+    if (!isCreateDialogOpen && !isPinDialogOpen && !isRenameDialogOpen) return undefined;
     const onKeyDown = (event) => {
       if (event.key !== "Escape") return;
+      if (isRenameDialogOpen) {
+        closeRenameDialog();
+        return;
+      }
       if (isPinDialogOpen) {
         closePinDialog();
         return;
@@ -145,7 +222,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
       document.body.style.overflow = prevOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [closeCreateDialog, closePinDialog, isCreateDialogOpen, isPinDialogOpen]);
+  }, [closeCreateDialog, closePinDialog, closeRenameDialog, isCreateDialogOpen, isPinDialogOpen, isRenameDialogOpen]);
 
   const createProfileDialog =
     isCreateDialogOpen && typeof document !== "undefined"
@@ -279,6 +356,93 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
         )
       : null;
 
+  const renameDialog =
+    isRenameDialogOpen && typeof document !== "undefined"
+      ? createPortal(
+          <div className="fixed inset-0 z-[160] flex items-center justify-center px-4">
+            <button
+              type="button"
+              aria-label="이름 변경 닫기"
+              onClick={closeRenameDialog}
+              className={`absolute inset-0 ${
+                isLight ? "bg-slate-900/[0.24] backdrop-blur-[2px]" : "bg-black/[0.74] backdrop-blur-[1px]"
+              }`}
+            />
+            <form
+              onSubmit={handleRenameSubmit}
+              className={`relative z-[161] w-full max-w-md rounded-2xl border p-5 ${
+                isLight
+                  ? "border-slate-200 bg-white shadow-[0_20px_80px_rgba(15,23,42,0.2)]"
+                  : "border-white/10 bg-slate-950/[0.97] shadow-[0_20px_80px_rgba(0,0,0,0.7)]"
+              }`}
+            >
+              <p className={`text-sm font-semibold ${isLight ? "text-slate-900" : "text-slate-100"}`}>
+                프로필 이름 변경
+              </p>
+              <p className={`mt-1 text-xs ${isLight ? "text-slate-500" : "text-slate-400"}`}>
+                "{renameTargetProfile?.name}" 프로필의 PIN을 입력한 후 새 이름을 설정하세요.
+              </p>
+              <div className="mt-4 flex flex-col gap-2">
+                <input
+                  ref={renameNameInputRef}
+                  name="rename-profile-name"
+                  type="text"
+                  value={renameNameDraft}
+                  maxLength={16}
+                  onChange={(event) => {
+                    setRenameNameDraft(event.target.value);
+                    setRenameError("");
+                  }}
+                  placeholder="새 이름 (최대 16자)"
+                  className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
+                    isLight ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
+                  }`}
+                />
+                <input
+                  ref={renamePinInputRef}
+                  name="rename-profile-pin"
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  value={renamePinInput}
+                  onChange={(event) => {
+                    const next = String(event.target.value || "").replace(/\D/g, "").slice(0, 4);
+                    setRenamePinInput(next);
+                    setRenameError("");
+                  }}
+                  placeholder="PIN 4자리"
+                  className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
+                    isLight ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
+                  }`}
+                />
+              </div>
+              {renameError && <p className="mt-2 text-xs text-rose-300">{renameError}</p>}
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeRenameDialog}
+                  className={`ghost-button text-xs ${isLight ? "text-slate-700" : "text-slate-200"}`}
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": "148, 163, 184" }}
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  disabled={isRenameSubmitting}
+                  className="ghost-button text-xs text-emerald-100 disabled:opacity-60"
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": "52, 211, 153" }}
+                >
+                  {isRenameSubmitting ? "변경 중..." : "변경"}
+                </button>
+              </div>
+            </form>
+          </div>,
+          document.body
+        )
+      : null;
+
   return (
     <>
       <section
@@ -319,45 +483,60 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
             {profiles.map((profile) => {
               const isActive = profile.id === activeProfileId;
               return (
-                <button
-                  key={profile.id}
-                  type="button"
-                  onClick={() => handleProfileClick(profile.id)}
-                  className={`group flex flex-col items-center rounded-2xl border px-3 py-4 transition hover:-translate-y-0.5 ${
-                    isLight
-                      ? "border-slate-200 bg-slate-50 hover:border-emerald-400/60 hover:bg-emerald-50"
-                      : "border-white/10 bg-white/[0.02] hover:border-emerald-300/50 hover:bg-emerald-400/5"
-                  }`}
-                >
-                  <span
-                    className={`flex h-16 w-16 items-center justify-center overflow-hidden rounded-md border shadow-lg transition ${
-                      isActive
-                        ? "border-emerald-300 ring-2 ring-emerald-300/60"
-                        : isLight
-                          ? "border-slate-300 group-hover:border-emerald-300/70"
-                          : "border-white/20 group-hover:border-emerald-300/60"
+                <div key={profile.id} className="group relative">
+                  <button
+                    type="button"
+                    onClick={() => handleProfileClick(profile.id)}
+                    className={`flex w-full flex-col items-center rounded-2xl border px-3 py-4 transition hover:-translate-y-0.5 ${
+                      isLight
+                        ? "border-slate-200 bg-slate-50 hover:border-emerald-400/60 hover:bg-emerald-50"
+                        : "border-white/10 bg-white/[0.02] hover:border-emerald-300/50 hover:bg-emerald-400/5"
                     }`}
-                    style={{ background: profile.color }}
-                    aria-hidden="true"
                   >
-                    <img
-                      src={profile.avatar || DEFAULT_PROFILE_AVATAR}
-                      alt=""
-                      className="h-full w-full object-cover"
-                      loading="lazy"
-                      decoding="async"
-                      onError={handleAvatarError}
-                    />
-                  </span>
-                  <span className={`mt-2 text-sm font-semibold ${isLight ? "text-slate-900" : "text-slate-100"}`}>
-                    {profile.name}
-                  </span>
-                  {isActive && (
-                    <span className={`mt-1 text-[11px] ${isLight ? "text-emerald-700" : "text-emerald-200"}`}>
-                      현재 프로필
+                    <span
+                      className={`flex h-16 w-16 items-center justify-center overflow-hidden rounded-md border shadow-lg transition ${
+                        isActive
+                          ? "border-emerald-300 ring-2 ring-emerald-300/60"
+                          : isLight
+                            ? "border-slate-300 group-hover:border-emerald-300/70"
+                            : "border-white/20 group-hover:border-emerald-300/60"
+                      }`}
+                      style={{ background: profile.color }}
+                      aria-hidden="true"
+                    >
+                      <img
+                        src={profile.avatar || DEFAULT_PROFILE_AVATAR}
+                        alt=""
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                        decoding="async"
+                        onError={handleAvatarError}
+                      />
                     </span>
-                  )}
-                </button>
+                    <span className={`mt-2 text-sm font-semibold ${isLight ? "text-slate-900" : "text-slate-100"}`}>
+                      {profile.name}
+                    </span>
+                    {isActive && (
+                      <span className={`mt-1 text-[11px] ${isLight ? "text-emerald-700" : "text-emerald-200"}`}>
+                        현재 프로필
+                      </span>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`${profile.name} 이름 변경`}
+                    onClick={(e) => openRenameDialog(profile.id, e)}
+                    className={`absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border opacity-0 transition group-hover:opacity-100 ${
+                      isLight
+                        ? "border-slate-300 bg-white text-slate-500 hover:border-emerald-400 hover:text-emerald-600"
+                        : "border-white/20 bg-slate-800 text-slate-400 hover:border-emerald-300/60 hover:text-emerald-300"
+                    }`}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
+                      <path d="M13.488 2.513a1.75 1.75 0 0 0-2.475 0L6.75 6.774a2.75 2.75 0 0 0-.596.892l-.79 2.02a.75.75 0 0 0 .966.966l2.02-.79a2.75 2.75 0 0 0 .892-.596l4.262-4.263a1.75 1.75 0 0 0 0-2.475ZM2.75 8.75a.75.75 0 0 0 0 1.5h4a.75.75 0 0 0 0-1.5h-4Zm-1 3.5a.75.75 0 0 0 0 1.5h8.5a.75.75 0 0 0 0-1.5H1.75Z" />
+                    </svg>
+                  </button>
+                </div>
               );
             })}
 
@@ -386,6 +565,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
       </section>
       {createProfileDialog}
       {pinDialog}
+      {renameDialog}
     </>
   );
 });
