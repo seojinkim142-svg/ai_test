@@ -1201,6 +1201,7 @@ function App() {
   const [premiumSpaceMode, setPremiumSpaceMode] = useState(PREMIUM_SPACE_MODE_PROFILE);
   const premiumProfileHydratedRef = useRef(false);
   const premiumProfileSyncSignatureRef = useRef("");
+  const premiumProfileSessionUserIdRef = useRef(null); // tracks which user has authenticated via PIN
   const safeStatus = useMemo(() => sanitizeUiText(status, ""), [status]);
   const safeError = useMemo(() => sanitizeUiText(error, "오류가 발생했습니다."), [error]);
   const safePageSummaryError = useMemo(
@@ -1680,10 +1681,12 @@ function App() {
       setSelectedUploadIds([]);
       setActivePremiumProfileId(selected.id);
       setShowPremiumProfilePicker(false);
+      // Mark this user as authenticated so metadata syncs don't re-trigger the picker.
+      premiumProfileSessionUserIdRef.current = user?.id ?? null;
       setStatus(`${selected.name} ?꾨줈?꾩씠 ?좏깮?섏뿀?듬땲??`);
       return { ok: true };
     },
-    [premiumProfiles, resetActiveDocumentState]
+    [premiumProfiles, resetActiveDocumentState, user?.id]
   );
 
   const handleSubmitProfilePinChange = useCallback(
@@ -1773,11 +1776,18 @@ function App() {
   useEffect(() => {
     premiumProfileHydratedRef.current = false;
     if (!user?.id || !isPremiumTier) {
+      premiumProfileSessionUserIdRef.current = null;
       setPremiumProfiles([]);
       setActivePremiumProfileId(null);
       setShowPremiumProfilePicker(false);
       setPremiumSpaceMode(PREMIUM_SPACE_MODE_PROFILE);
       premiumProfileSyncSignatureRef.current = "";
+      return;
+    }
+    // If the same user is already authenticated in this session (e.g. metadata update
+    // triggered by savePremiumProfileState), skip the profile picker reset.
+    if (premiumProfileSessionUserIdRef.current === user.id) {
+      premiumProfileHydratedRef.current = true;
       return;
     }
     const remoteState = getPremiumProfileStateFromUser(user);
