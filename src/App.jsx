@@ -1945,7 +1945,7 @@ function App() {
       try {
         await savePremiumProfileState({
           profiles: normalizedProfiles,
-          activeProfileId: resolvedActiveProfileId,
+          activeProfileId: null, // Never persist active profile — PIN required on every login.
           spaceMode: normalizedMode,
         });
       } catch (err) {
