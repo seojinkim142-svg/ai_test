@@ -185,7 +185,9 @@ function ReviewRetryBlock({ item, onSubmit, onAttemptStateChange }) {
               key={`${item.id}-${choice}`}
               type="button"
               onClick={() => handleOx(choice)}
-              className="ghost-button w-full text-sm text-slate-100"
+              className={`ghost-button review-note-action w-full text-sm text-slate-100 ${
+                choice === "O" ? "review-note-action--success" : "review-note-action--danger"
+              }`}
               data-ghost-size="sm"
               style={{ "--ghost-color": choice === "O" ? "52, 211, 153" : "248, 113, 113" }}
             >
@@ -224,7 +226,7 @@ function ReviewRetryBlock({ item, onSubmit, onAttemptStateChange }) {
         <button
           type="button"
           onClick={handleShortAnswer}
-          className="ghost-button text-sm text-cyan-100"
+          className="ghost-button review-note-action review-note-action--accent text-sm text-cyan-100"
           data-ghost-size="sm"
           style={{ "--ghost-color": "34, 211, 238" }}
         >
@@ -255,35 +257,35 @@ function ReviewNoteCard({
   const [isAnswerVisible, setIsAnswerVisible] = useState(false);
 
   return (
-    <article className="rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg shadow-black/20">
+    <article className="review-note-card rounded-2xl border border-white/10 bg-white/5 p-4 shadow-lg shadow-black/20">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-emerald-400/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-100 ring-1 ring-emerald-300/30">
+            <span className="review-note-pill review-note-pill--source rounded-full bg-emerald-400/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-100 ring-1 ring-emerald-300/30">
               {item.sourceLabel}
             </span>
             <span
-              className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${
+              className={`review-note-pill rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${
                 item.resolved
-                  ? "bg-slate-500/15 text-slate-200 ring-slate-300/20"
-                  : "bg-amber-500/15 text-amber-100 ring-amber-300/30"
+                  ? "review-note-pill--resolved bg-slate-500/15 text-slate-200 ring-slate-300/20"
+                  : "review-note-pill--pending bg-amber-500/15 text-amber-100 ring-amber-300/30"
               }`}
             >
               {item.resolved ? LABELS.resolved : LABELS.pending}
             </span>
-            <span className="rounded-full bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-slate-300 ring-1 ring-white/10">
+            <span className="review-note-pill review-note-pill--count rounded-full bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-slate-300 ring-1 ring-white/10">
               {`${LABELS.wrongCountPrefix}${item.wrongCount}${LABELS.wrongCountSuffix}`}
             </span>
             {(item.sectionLabels || []).map((sectionLabel) => (
               <span
                 key={`${item.id}-${sectionLabel}`}
-                className="rounded-full bg-cyan-400/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 ring-1 ring-cyan-300/25"
+                className="review-note-pill review-note-pill--section rounded-full bg-cyan-400/10 px-2.5 py-1 text-[11px] font-semibold text-cyan-100 ring-1 ring-cyan-300/25"
               >
                 {sectionLabel}
               </span>
             ))}
             {!item.sectionLabels?.length && (
-              <span className="rounded-full bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-slate-400 ring-1 ring-white/10">
+              <span className="review-note-pill review-note-pill--unknown rounded-full bg-white/5 px-2.5 py-1 text-[11px] font-semibold text-slate-400 ring-1 ring-white/10">
                 {LABELS.sectionUnknown}
               </span>
             )}
@@ -300,7 +302,7 @@ function ReviewNoteCard({
           <button
             type="button"
             onClick={() => setIsAnswerVisible((prev) => !prev)}
-            className="ghost-button text-xs text-slate-100"
+            className="ghost-button review-note-action review-note-action--neutral text-xs text-slate-100"
             data-ghost-size="sm"
             style={{ "--ghost-color": "148, 163, 184" }}
           >
@@ -309,7 +311,7 @@ function ReviewNoteCard({
           <button
             type="button"
             onClick={() => onDelete?.(item.id)}
-            className="ghost-button text-xs text-red-100"
+            className="ghost-button review-note-action review-note-action--danger text-xs text-red-100"
             data-ghost-size="sm"
             style={{ "--ghost-color": "248, 113, 113" }}
           >
@@ -326,7 +328,7 @@ function ReviewNoteCard({
             onClick={() =>
               onJumpToEvidencePage?.(pageNumber, item.evidenceSnippet || "", item.evidenceLabel || "")
             }
-            className="ghost-button text-[11px] text-emerald-100"
+            className="ghost-button review-note-action review-note-action--success text-[11px] text-emerald-100"
             data-ghost-size="sm"
             style={{ "--ghost-color": "52, 211, 153" }}
           >
