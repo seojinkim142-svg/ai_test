@@ -21,8 +21,17 @@ function isAppProxyBaseUrl(value) {
   }
 }
 
+function sanitizeAiBaseUrl(value) {
+  const normalized = trimTrailingSlash(value);
+  if (!normalized) return "";
+  if (DIRECT_DEEPSEEK_BASE_RE.test(normalized) || DIRECT_OPENAI_BASE_RE.test(normalized)) {
+    return "";
+  }
+  return normalized;
+}
+
 function resolveDeepSeekBaseUrl() {
-  const explicitBase = trimTrailingSlash(import.meta.env.VITE_DEEPSEEK_BASE_URL || import.meta.env.VITE_OPENAI_BASE_URL);
+  const explicitBase = sanitizeAiBaseUrl(import.meta.env.VITE_DEEPSEEK_BASE_URL || import.meta.env.VITE_OPENAI_BASE_URL);
   if (explicitBase) return explicitBase;
 
   const publicAppOrigin = trimTrailingSlash(resolvePublicAppOrigin());
@@ -35,12 +44,8 @@ function resolveDeepSeekBaseUrl() {
 }
 
 function resolveOpenAiBaseUrl() {
-  const explicitBase = trimTrailingSlash(import.meta.env.VITE_OPENAI_BASE_URL);
+  const explicitBase = sanitizeAiBaseUrl(import.meta.env.VITE_OPENAI_BASE_URL);
   if (explicitBase) return explicitBase;
-
-  if (import.meta.env.DEV) {
-    return "https://api.openai.com";
-  }
 
   const publicAppOrigin = trimTrailingSlash(resolvePublicAppOrigin());
   if (Capacitor.isNativePlatform() && publicAppOrigin) {
@@ -2223,25 +2228,6 @@ function resolveChatTarget(provider = "deepseek") {
     : DEFAULT_CHAT_TARGET;
 }
 
-function resolveClientApiKey(target) {
-  if (target?.provider === "openai") {
-    if (target.isDirectOpenAiBase || target.usesDevProxy || target.usesAppProxy) {
-      return String(import.meta.env.VITE_OPENAI_API_KEY || "").trim();
-    }
-    return "";
-  }
-
-  if (target?.isDirectDeepSeekBase || target?.usesDevProxy || target?.usesAppProxy) {
-    return String(import.meta.env.VITE_DEEPSEEK_API_KEY || "").trim();
-  }
-
-  if (target?.isDirectOpenAiBase) {
-    return String(import.meta.env.VITE_OPENAI_API_KEY || "").trim();
-  }
-
-  return "";
-}
-
 function isRetryableStatus(status) {
   const normalized = Number(status);
   return normalized === 408 || normalized === 409 || normalized === 425 || normalized === 429 || (normalized >= 500 && normalized <= 599);
@@ -2256,11 +2242,7 @@ function getFallbackProvider(provider, attemptedProviders = []) {
   );
 
   if (normalizedProvider !== "deepseek" || attempted.has("openai")) return null;
-
-  const openAiTarget = resolveChatTarget("openai");
-  if (openAiTarget.usesAppProxy) return "openai";
-  if (resolveClientApiKey(openAiTarget)) return "openai";
-  return null;
+  return "openai";
 }
 
 async function postChatRequest(
@@ -2268,7 +2250,6 @@ async function postChatRequest(
   { retries = 1, provider = "deepseek", attemptedProviders = [] } = {}
 ) {
   const target = resolveChatTarget(provider);
-  const apiKey = resolveClientApiKey(target);
   const nextAttemptedProviders = [...attemptedProviders, target.provider];
 
   if (IS_NATIVE_PLATFORM && target.usesRelativeBase) {
@@ -2279,18 +2260,13 @@ async function postChatRequest(
     );
   }
 
-  if ((target.isDirectDeepSeekBase || target.usesDevProxy) && target.provider === "deepseek" && !apiKey) {
-    throw new Error("AI service is temporarily unavailable. Please try again later.");
-  }
-
-  if ((target.isDirectOpenAiBase || target.usesDevProxy) && target.provider === "openai" && !apiKey) {
+  if (!target.usesAppProxy && !target.baseUrl) {
     throw new Error("AI service is temporarily unavailable. Please try again later.");
   }
 
   const headers = {
     "Content-Type": "application/json",
   };
-  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
   const requestBody = target.usesAppProxy ? { ...(body || {}), provider: target.provider } : body;
 
   let response;
