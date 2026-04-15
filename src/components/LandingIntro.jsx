@@ -259,8 +259,8 @@ const LANDING_COPY = {
         {
           id: "pro",
           name: "프로",
-          originalPrice: "6,900?",
-          price: "0?",
+          originalPrices: ["9,900원", "6,900원"],
+          price: "0원",
           description: "혼자 꾸준히 공부하는 사용자용",
           features: ["업로드 무제한", "요약/퀴즈/OX/카드 전체 제공", "AI 튜터"],
           ctaLabel: "프로 선택",
@@ -281,7 +281,7 @@ const LANDING_COPY = {
       ],
       rows: [
         { label: "이용 방식", values: { free: "무료", pro: "개인 학습", premium: "팀 학습" } },
-        { label: "월 요금", values: { free: "무료", pro: "0?", premium: "18,900원 / 월" } },
+        { label: "월 요금", values: { free: "무료", pro: "0원", premium: "18,900원 / 월" } },
         { label: "PDF 업로드", values: { free: "최대 4개", pro: "무제한 업로드", premium: "무제한 업로드" } },
         { label: "학습 도구", values: { free: "요약 / 퀴즈 / OX 일부", pro: "요약 / 퀴즈 / OX / 카드", premium: "전체 기능 + 팀 학습" } },
         { label: "AI 튜터", values: { free: "기본 답변 제공", pro: "문서 기반 답변", premium: "팀 문맥 포함 답변" } },
@@ -449,8 +449,8 @@ const LANDING_COPY = {
         {
           id: "pro",
           name: "Pro",
-          originalPrice: "?6,900 / ?",
-          price: "?0",
+          originalPrices: ["KRW 9,900 / month", "KRW 6,900 / month"],
+          price: "KRW 0",
           description: "适合稳定的个人学习",
           features: ["无限上传", "完整提供摘要 / 测验 / OX / 卡片", "AI 导师"],
           ctaLabel: "选择 Pro",
@@ -471,7 +471,7 @@ const LANDING_COPY = {
       ],
       rows: [
         { label: "适合对象", values: { free: "起步使用", pro: "个人学习", premium: "共享学习" } },
-        { label: "月费", values: { free: "免费", pro: "?0", premium: "₩18,900 / 月" } },
+        { label: "月费", values: { free: "免费", pro: "KRW 0", premium: "KRW 18,900 / month" } },
         { label: "PDF 上传", values: { free: "最多 4 个", pro: "无限上传", premium: "无限上传" } },
         { label: "学习工具", values: { free: "部分摘要 / 测验 / OX", pro: "摘要 / 测验 / OX / 卡片", premium: "全部功能 + 团队学习" } },
         { label: "AI 导师", values: { free: "基础回答", pro: "文档依据回答", premium: "含团队上下文回答" } },
@@ -639,8 +639,8 @@ const LANDING_COPY = {
         {
           id: "pro",
           name: "Pro",
-          originalPrice: "?6,900 / ?",
-          price: "?0",
+          originalPrices: ["KRW 9,900 / month", "KRW 6,900 / month"],
+          price: "KRW 0",
           description: "一人で継続学習する人向け",
           features: ["アップロード無制限", "要約 / クイズ / OX / カードをフル提供", "AIチューター"],
           ctaLabel: "Proを選ぶ",
@@ -661,7 +661,7 @@ const LANDING_COPY = {
       ],
       rows: [
         { label: "利用スタイル", values: { free: "はじめて使う人", pro: "個人学習", premium: "共有学習" } },
-        { label: "月額", values: { free: "無料", pro: "?0", premium: "₩18,900 / 月" } },
+        { label: "月額", values: { free: "無料", pro: "KRW 0", premium: "KRW 18,900 / month" } },
         { label: "PDFアップロード", values: { free: "最大4件", pro: "無制限", premium: "無制限" } },
         { label: "学習ツール", values: { free: "要約 / クイズ / OXの一部", pro: "要約 / クイズ / OX / カード", premium: "全機能 + チーム学習" } },
         { label: "AIチューター", values: { free: "基本回答", pro: "文書ベース回答", premium: "チーム文脈を含む回答" } },
@@ -829,8 +829,8 @@ const LANDING_COPY = {
         {
           id: "pro",
           name: "Pro",
-          originalPrice: "?6,900 / ???",
-          price: "?0",
+          originalPrices: ["KRW 9,900 / month", "KRW 6,900 / month"],
+          price: "KRW 0",
           description: "लगातार अकेले पढ़ने वालों के लिए",
           features: ["अनलिमिटेड अपलोड", "सारांश / क्विज़ / OX / कार्ड पूरे", "AI ट्यूटर"],
           ctaLabel: "Pro चुनें",
@@ -851,7 +851,7 @@ const LANDING_COPY = {
       ],
       rows: [
         { label: "उपयोग प्रकार", values: { free: "शुरुआत", pro: "व्यक्तिगत अध्ययन", premium: "साझा अध्ययन" } },
-        { label: "मासिक शुल्क", values: { free: "मुफ़्त", pro: "?0", premium: "₩18,900 / माह" } },
+        { label: "मासिक शुल्क", values: { free: "मुफ़्त", pro: "KRW 0", premium: "KRW 18,900 / month" } },
         { label: "PDF अपलोड", values: { free: "अधिकतम 4 फ़ाइलें", pro: "अनलिमिटेड", premium: "अनलिमिटेड" } },
         { label: "मुख्य टूल", values: { free: "सारांश / क्विज़ / OX", pro: "सारांश / क्विज़ / OX / कार्ड", premium: "सभी फीचर + टीम अध्ययन" } },
         { label: "AI ट्यूटर", values: { free: "बेसिक उत्तर", pro: "दस्तावेज़-आधारित उत्तर", premium: "टीम संदर्भ सहित उत्तर" } },
@@ -1019,8 +1019,8 @@ const LANDING_COPY = {
         {
           id: "pro",
           name: "Pro",
-          originalPrice: "?6,900 / month",
-          price: "?0",
+          originalPrices: ["KRW 9,900 / month", "KRW 6,900 / month"],
+          price: "KRW 0",
           description: "Recommended for steady solo study",
           features: ["Unlimited uploads", "Unlimited summary / quiz / OX / cards", "Priority processing"],
           ctaLabel: "Choose Pro",
@@ -1030,8 +1030,8 @@ const LANDING_COPY = {
         {
           id: "premium",
           name: "Family",
-          originalPrice: "?36,000 / month",
-          price: "?18,900 / month",
+          originalPrice: "KRW 36,000 / month",
+          price: "KRW 18,900 / month",
           description: "Shared study for up to 4 people",
           features: ["Collaborative shared space", "Separate flow for each member", "Better study efficiency together"],
           ctaLabel: "Choose Family",
@@ -1041,7 +1041,7 @@ const LANDING_COPY = {
       ],
       rows: [
         { label: "Best for", values: { free: "Getting started", pro: "Solo study", premium: "Shared study" } },
-        { label: "Monthly price", values: { free: "Free", pro: "?0", premium: "?18,900 / month" } },
+        { label: "Monthly price", values: { free: "Free", pro: "KRW 0", premium: "KRW 18,900 / month" } },
         { label: "PDF upload", values: { free: "Up to 4 files", pro: "Unlimited", premium: "Unlimited" } },
         { label: "Core tools", values: { free: "Summary / quiz / OX", pro: "Summary / quiz / OX / cards", premium: "Everything in Pro + shared learning" } },
         { label: "Workspace", values: { free: "Starter storage", pro: "Personal study space", premium: "Shared workspace" } },
@@ -2045,6 +2045,11 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
           <div className="mobile-card-rail mt-16 flex gap-5 md:grid md:grid-cols-2 lg:grid-cols-3">
             {PLAN_ITEMS.map((plan, index) => {
               const isActive = activePlanId === plan.id;
+              const originalPrices = Array.isArray(plan.originalPrices)
+                ? plan.originalPrices.filter(Boolean)
+                : plan.originalPrice
+                  ? [plan.originalPrice]
+                  : [];
               return (
                 <article
                   key={plan.name}
@@ -2083,9 +2088,11 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                   </div>
 
                   <div className="mt-8 flex flex-wrap items-end gap-3">
-                    {plan.originalPrice ? (
-                      <span className="text-base font-semibold text-slate-400 line-through">{plan.originalPrice}</span>
-                    ) : null}
+                    {originalPrices.map((originalPrice) => (
+                      <span key={`${plan.id}-${originalPrice}`} className="text-base font-semibold text-slate-400 line-through">
+                        {originalPrice}
+                      </span>
+                    ))}
                     <p className="text-4xl font-bold text-slate-950">{plan.price}</p>
                   </div>
                   <ul className="mt-7 space-y-3 text-sm text-slate-600">
@@ -2130,6 +2137,11 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                   </div>
                   {PLAN_ITEMS.map((plan) => {
                     const isActive = activePlanId === plan.id;
+                    const originalPrices = Array.isArray(plan.originalPrices)
+                      ? plan.originalPrices.filter(Boolean)
+                      : plan.originalPrice
+                        ? [plan.originalPrice]
+                        : [];
                     return (
                       <button
                         key={`${plan.name}-header`}
@@ -2142,11 +2154,14 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                         <p className="text-xl font-bold md:text-2xl">{plan.name}</p>
                         <p className={`mt-2 text-sm ${isActive ? "text-slate-300" : "text-slate-500"}`}>{plan.description}</p>
                         <div className="mt-4 flex flex-wrap items-end gap-2">
-                          {plan.originalPrice ? (
-                            <span className={`text-sm font-semibold line-through ${isActive ? "text-slate-400" : "text-slate-400"}`}>
-                              {plan.originalPrice}
+                          {originalPrices.map((originalPrice) => (
+                            <span
+                              key={`${plan.id}-comparison-${originalPrice}`}
+                              className={`text-sm font-semibold line-through ${isActive ? "text-slate-400" : "text-slate-400"}`}
+                            >
+                              {originalPrice}
                             </span>
-                          ) : null}
+                          ))}
                           <p className={`text-xl font-bold md:text-2xl ${isActive ? "text-white" : "text-slate-900"}`}>{plan.price}</p>
                         </div>
                       </button>
