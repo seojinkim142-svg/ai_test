@@ -1,274 +1,421 @@
 import {
-  buildClipboardPayload,
   buildClip,
   buildOpenUrl,
   captureTabState,
-  clearStoredClips,
   formatClipTimestamp,
-  loadStoredClips,
+  getDomainLabel,
+  getOutputLanguageLabel,
+  getStoredSummaryForSnapshot,
+  getValidAuthSession,
   persistClip,
+  resolveBrowserOutputLanguage,
+  signInWithExtensionEmail,
+  signOutExtensionSession,
+  summarizeCurrentPage,
 } from "./shared.js";
 
 const refs = {
-  captureSelection: document.getElementById("capture-selection"),
-  capturePage: document.getElementById("capture-page"),
-  copyCurrent: document.getElementById("copy-current"),
   openZeusian: document.getElementById("open-zeusian"),
-  clearHistory: document.getElementById("clear-history"),
+  openSignup: document.getElementById("open-signup"),
+  signIn: document.getElementById("sign-in"),
+  signOut: document.getElementById("sign-out"),
+  refreshPage: document.getElementById("refresh-page"),
+  summarizePage: document.getElementById("summarize-page"),
+  copySummary: document.getElementById("copy-summary"),
+  email: document.getElementById("email"),
+  password: document.getElementById("password"),
+  signedOutView: document.getElementById("signed-out-view"),
+  signedInView: document.getElementById("signed-in-view"),
+  sessionEmail: document.getElementById("session-email"),
   status: document.getElementById("status"),
-  currentClip: document.getElementById("current-clip"),
-  historyList: document.getElementById("history-list"),
+  pagePanel: document.getElementById("page-panel"),
+  summaryPanel: document.getElementById("summary-panel"),
 };
 
-let currentClip = null;
-let historyItems = [];
+const state = {
+  session: null,
+  activeTab: null,
+  snapshot: null,
+  summary: null,
+  outputLanguage: resolveBrowserOutputLanguage(),
+  loadingPage: false,
+  loadingSummary: false,
+  signingIn: false,
+};
 
 function setStatus(message, isError = false) {
   refs.status.textContent = String(message || "").trim();
   refs.status.classList.toggle("error", Boolean(isError));
 }
 
-function truncate(value, maxLength = 240) {
-  const normalized = String(value || "").trim();
-  if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, maxLength - 1)}…`;
+function setButtonLabel(button, defaultLabel, busyLabel, busy) {
+  if (!button) return;
+  button.textContent = busy ? busyLabel : defaultLabel;
 }
 
-function renderCurrentClip() {
-  if (!currentClip?.text) {
-    refs.currentClip.className = "clip-empty";
-    refs.currentClip.textContent = "선택 텍스트를 가져오면 여기에 미리보기가 표시됩니다.";
+function syncButtonState() {
+  const hasSession = Boolean(state.session?.access_token);
+  const hasSnapshotText = Boolean(String(state.snapshot?.fallbackText || state.snapshot?.selection || "").trim());
+  const hasSummary = Boolean(String(state.summary?.summary || "").trim());
+
+  refs.signIn.disabled = state.signingIn;
+  refs.refreshPage.disabled = state.loadingPage;
+  refs.summarizePage.disabled = !hasSession || !hasSnapshotText || state.loadingSummary || state.loadingPage;
+  refs.copySummary.disabled = !hasSummary;
+  refs.signOut.disabled = !hasSession || state.loadingSummary || state.signingIn;
+
+  setButtonLabel(refs.signIn, "Sign in", "Signing in...", state.signingIn);
+  setButtonLabel(refs.refreshPage, "Read again", "Reading...", state.loadingPage);
+  setButtonLabel(refs.summarizePage, "Summarize again", "Summarizing...", state.loadingSummary);
+}
+
+function renderAuth() {
+  const hasSession = Boolean(state.session?.access_token);
+  refs.signedOutView.hidden = hasSession;
+  refs.signedInView.hidden = !hasSession;
+  refs.signOut.hidden = !hasSession;
+  refs.sessionEmail.textContent = hasSession
+    ? state.session?.user?.email || "Signed in"
+    : "";
+  syncButtonState();
+}
+
+function renderPagePanel() {
+  const snapshot = state.snapshot;
+  if (!snapshot) {
+    refs.pagePanel.className = "panel-empty";
+    refs.pagePanel.textContent =
+      "Open any article, notes page, blog post, or study document tab and Zeusian will read it here.";
     return;
   }
 
-  const article = document.createElement("article");
-  article.className = "clip-card";
+  const wrapper = document.createElement("article");
+  wrapper.className = "page-card";
 
   const meta = document.createElement("div");
-  meta.className = "clip-meta";
+  meta.className = "page-meta";
 
   const domain = document.createElement("span");
-  domain.className = "clip-domain";
-  domain.textContent = currentClip.domain || "Captured page";
+  domain.className = "meta-pill";
+  domain.textContent = snapshot.domain || getDomainLabel(snapshot.url) || "Page";
 
-  const timestamp = document.createElement("span");
-  timestamp.textContent = formatClipTimestamp(currentClip.createdAt);
+  const language = document.createElement("span");
+  language.className = "meta-pill";
+  language.textContent = `Summary in ${getOutputLanguageLabel(state.outputLanguage)}`;
 
-  const kind = document.createElement("span");
-  kind.textContent = currentClip.kind === "page" ? "page snapshot" : "selection";
+  const source = document.createElement("span");
+  source.className = "meta-pill";
+  source.textContent = snapshot.selection ? "Selection first" : "Page body";
 
-  meta.append(domain, timestamp, kind);
+  meta.append(domain, language, source);
 
   const title = document.createElement("h3");
-  title.className = "clip-title";
-  title.textContent = currentClip.title || "Untitled page";
+  title.className = "page-title";
+  title.textContent = snapshot.title || "Untitled page";
 
-  const text = document.createElement("p");
-  text.className = "clip-text";
-  text.textContent = truncate(currentClip.text, 560);
+  const excerpt = document.createElement("p");
+  excerpt.className = "page-excerpt";
+  excerpt.textContent =
+    snapshot.excerpt || snapshot.metaDescription || "The active tab was read, but there is not much visible text.";
 
-  article.append(meta, title, text);
+  wrapper.append(meta, title, excerpt);
 
-  if (currentClip.url) {
+  if (snapshot.url) {
     const link = document.createElement("a");
-    link.className = "clip-link";
-    link.href = currentClip.url;
+    link.className = "page-url";
+    link.href = snapshot.url;
     link.target = "_blank";
     link.rel = "noreferrer";
-    link.textContent = currentClip.url;
-    article.append(link);
+    link.textContent = snapshot.url;
+    wrapper.append(link);
   }
 
-  refs.currentClip.className = "";
-  refs.currentClip.replaceChildren(article);
+  refs.pagePanel.className = "";
+  refs.pagePanel.replaceChildren(wrapper);
 }
 
-function renderHistory() {
-  if (!historyItems.length) {
-    refs.historyList.className = "history-empty";
-    refs.historyList.textContent = "아직 저장된 클립이 없습니다.";
+function renderSummaryPanel() {
+  if (!state.session?.access_token) {
+    refs.summaryPanel.className = "panel-empty";
+    refs.summaryPanel.textContent = "Sign in to let Zeusian summarize the current page automatically.";
+    syncButtonState();
     return;
   }
 
-  const wrapper = document.createElement("div");
-  wrapper.className = "history-list";
+  if (!state.snapshot) {
+    refs.summaryPanel.className = "panel-empty";
+    refs.summaryPanel.textContent = "The current page has not been read yet.";
+    syncButtonState();
+    return;
+  }
 
-  historyItems.forEach((clip) => {
-    const item = document.createElement("article");
-    item.className = "history-item";
+  if (!state.summary?.summary) {
+    refs.summaryPanel.className = "panel-empty";
+    refs.summaryPanel.textContent = state.loadingSummary
+      ? "Generating the summary for the current page..."
+      : "Zeusian is ready. Read the page again or run the summary now.";
+    syncButtonState();
+    return;
+  }
 
-    const title = document.createElement("h3");
-    title.textContent = clip.title || "Untitled page";
+  const wrapper = document.createElement("article");
+  wrapper.className = "summary-card";
 
-    const meta = document.createElement("p");
-    meta.textContent = `${formatClipTimestamp(clip.createdAt)} · ${clip.domain || "captured page"}`;
+  const meta = document.createElement("div");
+  meta.className = "summary-meta";
 
-    const excerpt = document.createElement("p");
-    excerpt.textContent = truncate(clip.text, 180);
+  const language = document.createElement("span");
+  language.className = "meta-pill";
+  language.textContent = getOutputLanguageLabel(state.summary.outputLanguage || state.outputLanguage);
 
-    const actions = document.createElement("div");
-    actions.className = "history-actions";
+  const timestamp = document.createElement("span");
+  timestamp.className = "meta-pill";
+  timestamp.textContent = formatClipTimestamp(state.summary.createdAt);
 
-    const previewButton = document.createElement("button");
-    previewButton.type = "button";
-    previewButton.textContent = "미리보기";
-    previewButton.dataset.action = "preview";
-    previewButton.dataset.id = clip.id;
+  meta.append(language, timestamp);
 
-    const copyButton = document.createElement("button");
-    copyButton.type = "button";
-    copyButton.textContent = "복사";
-    copyButton.dataset.action = "copy";
-    copyButton.dataset.id = clip.id;
+  const title = document.createElement("h3");
+  title.className = "summary-title";
+  title.textContent = state.snapshot.title || "Current page summary";
 
-    actions.append(previewButton, copyButton);
-    item.append(title, meta, excerpt, actions);
-    wrapper.append(item);
-  });
+  const body = document.createElement("div");
+  body.className = "summary-body";
+  body.textContent = state.summary.summary;
 
-  refs.historyList.className = "";
-  refs.historyList.replaceChildren(wrapper);
+  wrapper.append(meta, title, body);
+
+  refs.summaryPanel.className = "";
+  refs.summaryPanel.replaceChildren(wrapper);
+  syncButtonState();
 }
 
-async function refreshStoredState() {
-  const { history, lastClip } = await loadStoredClips();
-  historyItems = history;
-  currentClip = lastClip || history[0] || null;
-  renderCurrentClip();
-  renderHistory();
+function buildSnapshotClip(snapshot) {
+  const clipText = snapshot?.selection || snapshot?.fallbackText || "";
+  if (!String(clipText).trim()) return null;
+
+  return buildClip({
+    title: snapshot?.title || state.activeTab?.title || snapshot?.url || "",
+    url: snapshot?.url || state.activeTab?.url || "",
+    text: clipText,
+    kind: snapshot?.selection ? "selection" : "page",
+  });
+}
+
+async function persistSnapshotClip() {
+  const clip = buildSnapshotClip(state.snapshot);
+  if (!clip) return null;
+  await persistClip(clip);
+  return clip;
 }
 
 async function getActiveTab() {
   const tabs = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
   const tab = tabs?.[0] || null;
   if (!tab?.id) {
-    throw new Error("활성 탭을 찾을 수 없습니다.");
+    throw new Error("No active tab is available.");
   }
   return tab;
 }
 
+function isBlockedTabUrl(url) {
+  return /^(chrome|edge|about|chrome-extension|chrome-search|view-source):/i.test(String(url || "").trim());
+}
+
 async function inspectActiveTab() {
   const tab = await getActiveTab();
+  if (isBlockedTabUrl(tab.url)) {
+    throw new Error("Chrome internal pages cannot be read by the extension.");
+  }
+
   const results = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: captureTabState,
   });
 
+  const snapshot = results?.[0]?.result || null;
+  if (!snapshot) {
+    throw new Error("The extension could not read the current tab.");
+  }
+
   return {
     tab,
-    snapshot: results?.[0]?.result || null,
+    snapshot: {
+      ...snapshot,
+      title: snapshot.title || tab.title || tab.url || "Untitled page",
+      url: snapshot.url || tab.url || "",
+      domain: snapshot.domain || getDomainLabel(snapshot.url || tab.url || ""),
+    },
   };
 }
 
-async function captureSelection() {
-  setStatus("선택 텍스트를 읽는 중입니다.");
-
-  const { tab, snapshot } = await inspectActiveTab();
-  const selectedText = String(snapshot?.selection || "").trim();
-  if (!selectedText) {
-    throw new Error("먼저 웹페이지에서 텍스트를 선택한 뒤 다시 시도하세요.");
-  }
-
-  await persistClip(
-    buildClip({
-      title: snapshot?.title || tab?.title || tab?.url || "",
-      url: snapshot?.url || tab?.url || "",
-      text: selectedText,
-      kind: "selection",
-    })
-  );
-
-  await refreshStoredState();
-  setStatus("선택 텍스트를 저장했습니다.");
-}
-
-async function capturePage() {
-  setStatus("현재 페이지 내용을 정리하는 중입니다.");
-
-  const { tab, snapshot } = await inspectActiveTab();
-  const pageText = String(snapshot?.fallbackText || snapshot?.selection || "").trim();
-  if (!pageText) {
-    throw new Error("이 페이지에서는 읽을 수 있는 텍스트를 찾지 못했습니다.");
-  }
-
-  await persistClip(
-    buildClip({
-      title: snapshot?.title || tab?.title || tab?.url || "",
-      url: snapshot?.url || tab?.url || "",
-      text: pageText,
-      kind: snapshot?.selection ? "selection" : "page",
-    })
-  );
-
-  await refreshStoredState();
-  setStatus("현재 페이지를 저장했습니다.");
-}
-
-async function copyClip(clip = currentClip) {
-  if (!clip?.text) {
-    throw new Error("복사할 클립이 없습니다.");
-  }
-
-  await navigator.clipboard.writeText(buildClipboardPayload(clip));
-  currentClip = clip;
-  renderCurrentClip();
-  setStatus("클립을 클립보드에 복사했습니다.");
-}
-
-async function openZeusian() {
-  await chrome.tabs.create({ url: buildOpenUrl(Boolean(currentClip?.text)) });
-  setStatus("Zeusian.ai 탭을 열었습니다.");
-}
-
-async function handleHistoryClick(event) {
-  const button = event.target.closest("button[data-action][data-id]");
-  if (!button) return;
-
-  const clip = historyItems.find((item) => item.id === button.dataset.id);
-  if (!clip) return;
-
-  if (button.dataset.action === "preview") {
-    currentClip = clip;
-    renderCurrentClip();
-    setStatus("히스토리 클립을 불러왔습니다.");
+async function ensureSummary({ force = false, initialLoad = false } = {}) {
+  if (!state.session?.access_token) {
+    renderSummaryPanel();
     return;
   }
 
-  if (button.dataset.action === "copy") {
-    await copyClip(clip);
+  if (!state.snapshot) {
+    throw new Error("Read the current page before generating a summary.");
+  }
+
+  if (!force) {
+    const cachedSummary =
+      state.summary ||
+      (await getStoredSummaryForSnapshot(state.snapshot, state.outputLanguage));
+
+    if (cachedSummary) {
+      state.summary = cachedSummary;
+      renderSummaryPanel();
+      if (initialLoad) {
+        setStatus("Loaded the saved summary for this page.");
+      }
+      return;
+    }
+  }
+
+  state.loadingSummary = true;
+  renderSummaryPanel();
+  setStatus("Generating an AI summary for the current page...");
+
+  try {
+    const summary = await summarizeCurrentPage(state.snapshot, {
+      session: state.session,
+      outputLanguage: state.outputLanguage,
+    });
+    state.summary = summary;
+    await persistSnapshotClip();
+    renderSummaryPanel();
+    setStatus("AI summary is ready.");
+  } finally {
+    state.loadingSummary = false;
+    renderSummaryPanel();
   }
 }
 
-async function clearHistory() {
-  await clearStoredClips();
-  historyItems = [];
-  currentClip = null;
-  renderCurrentClip();
-  renderHistory();
-  setStatus("저장된 클립을 모두 비웠습니다.");
+async function refreshPageSnapshot({ forceSummary = false, silent = false } = {}) {
+  state.loadingPage = true;
+  syncButtonState();
+  if (!silent) {
+    setStatus("Reading the current page...");
+  }
+
+  try {
+    const { tab, snapshot } = await inspectActiveTab();
+    state.activeTab = tab;
+    state.snapshot = snapshot;
+
+    const cachedSummary = state.session?.access_token
+      ? await getStoredSummaryForSnapshot(snapshot, state.outputLanguage)
+      : null;
+    state.summary = cachedSummary;
+
+    renderPagePanel();
+    renderSummaryPanel();
+
+    if (state.session?.access_token) {
+      await ensureSummary({ force: forceSummary, initialLoad: !forceSummary });
+    } else if (!silent) {
+      setStatus("Sign in to let Zeusian summarize the current page automatically.");
+    }
+  } finally {
+    state.loadingPage = false;
+    syncButtonState();
+  }
+}
+
+async function handleSignIn() {
+  const email = refs.email.value;
+  const password = refs.password.value;
+
+  state.signingIn = true;
+  syncButtonState();
+  setStatus("Signing in...");
+
+  try {
+    state.session = await signInWithExtensionEmail(email, password);
+    refs.password.value = "";
+    renderAuth();
+    setStatus("Signed in. Preparing the current page summary...");
+    if (state.snapshot) {
+      await ensureSummary({ force: false, initialLoad: true });
+    } else {
+      await refreshPageSnapshot({ forceSummary: false, silent: true });
+    }
+  } finally {
+    state.signingIn = false;
+    syncButtonState();
+  }
+}
+
+async function handleSignOut() {
+  await signOutExtensionSession();
+  state.session = null;
+  state.summary = null;
+  renderAuth();
+  renderSummaryPanel();
+  setStatus("Signed out.");
+}
+
+async function handleCopySummary() {
+  const summary = String(state.summary?.summary || "").trim();
+  if (!summary) {
+    throw new Error("There is no summary to copy yet.");
+  }
+
+  await navigator.clipboard.writeText(summary);
+  setStatus("Summary copied to the clipboard.");
+}
+
+async function handleOpenZeusian() {
+  const clip = await persistSnapshotClip().catch(() => null);
+  await chrome.tabs.create({ url: buildOpenUrl(Boolean(clip?.text)) });
+  setStatus("Opened Zeusian.ai.");
+}
+
+async function handleOpenSignup() {
+  await chrome.tabs.create({ url: buildOpenUrl(false) });
+  setStatus("Opened the Zeusian sign-in page.");
 }
 
 async function run(action) {
   try {
     await action();
   } catch (error) {
-    console.error("Zeusian Clip popup action failed", error);
-    setStatus(error?.message || "작업에 실패했습니다.", true);
+    console.error("Zeusian extension popup action failed", error);
+    setStatus(error?.message || "The extension action failed.", true);
+  } finally {
+    syncButtonState();
   }
 }
 
-refs.captureSelection.addEventListener("click", () => run(captureSelection));
-refs.capturePage.addEventListener("click", () => run(capturePage));
-refs.copyCurrent.addEventListener("click", () => run(() => copyClip(currentClip)));
-refs.openZeusian.addEventListener("click", () => run(openZeusian));
-refs.clearHistory.addEventListener("click", () => run(clearHistory));
-refs.historyList.addEventListener("click", (event) => run(() => handleHistoryClick(event)));
+refs.signIn.addEventListener("click", () => run(handleSignIn));
+refs.signOut.addEventListener("click", () => run(handleSignOut));
+refs.openZeusian.addEventListener("click", () => run(handleOpenZeusian));
+refs.openSignup.addEventListener("click", () => run(handleOpenSignup));
+refs.refreshPage.addEventListener("click", () => run(() => refreshPageSnapshot({ forceSummary: false, silent: false })));
+refs.summarizePage.addEventListener("click", () => run(() => ensureSummary({ force: true, initialLoad: false })));
+refs.copySummary.addEventListener("click", () => run(handleCopySummary));
+refs.password.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    run(handleSignIn);
+  }
+});
 
-refreshStoredState()
-  .then(() => {
-    setStatus("현재 탭에서 텍스트를 가져오거나 Zeusian.ai를 열 수 있습니다.");
-  })
-  .catch((error) => {
-    console.error("Zeusian Clip initial load failed", error);
-    setStatus("확장 프로그램 상태를 불러오지 못했습니다.", true);
-  });
+(async () => {
+  renderAuth();
+  renderPagePanel();
+  renderSummaryPanel();
+  setStatus("Loading the active tab...");
+
+  state.session = await getValidAuthSession();
+  renderAuth();
+  await refreshPageSnapshot({ forceSummary: false, silent: true });
+
+  if (!state.session?.access_token) {
+    setStatus("Sign in to let Zeusian summarize the current page automatically.");
+  }
+})().catch((error) => {
+  console.error("Zeusian extension popup failed to initialize", error);
+  setStatus(error?.message || "Failed to initialize the extension popup.", true);
+});

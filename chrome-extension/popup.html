@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ko">
+<html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -8,66 +8,78 @@
   </head>
   <body>
     <main class="shell">
-      <div class="ambient ambient-a" aria-hidden="true"></div>
-      <div class="ambient ambient-b" aria-hidden="true"></div>
-      <div class="grid-mask" aria-hidden="true"></div>
-
-      <section class="hero">
-        <div class="hero-body">
-          <div class="hero-copy">
-            <h1>읽는 순간, 바로 학습 재료로.</h1>
-            <p class="lede">
-              웹에서 찾은 문장과 페이지를 모아두고 Zeusian.ai 공부 흐름으로 바로 넘깁니다.
-            </p>
-            <div class="hero-pills" aria-hidden="true">
-              <span>Capture</span>
-              <span>Organize</span>
-              <span>Review</span>
-            </div>
-          </div>
-          <div class="hero-mark" aria-hidden="true">
-            <div class="hero-mark-ring"></div>
-            <img src="./assets/icon.png" alt="" class="hero-logo" />
+      <header class="hero">
+        <div class="brand">
+          <img src="./assets/icon.png" alt="" class="brand-icon" />
+          <div>
+            <p class="eyebrow">Zeusian Chrome Extension</p>
+            <h1>Read the current page and turn it into an AI summary.</h1>
           </div>
         </div>
-      </section>
+        <button id="open-zeusian" class="button ghost compact" type="button">Open Zeusian.ai</button>
+      </header>
 
-      <section class="actions">
-        <button id="capture-selection" class="button primary" type="button">
-          <span class="button-label">선택 텍스트 가져오기</span>
-        </button>
-        <button id="capture-page" class="button secondary" type="button">
-          <span class="button-label">현재 페이지 저장</span>
-        </button>
-        <button id="copy-current" class="button ghost" type="button">
-          <span class="button-label">현재 클립 복사</span>
-        </button>
-        <button id="open-zeusian" class="button ghost" type="button">
-          <span class="button-label">Zeusian.ai 열기</span>
-        </button>
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">Account</p>
+            <h2>Sign in once, summarize every page.</h2>
+          </div>
+          <button id="sign-out" class="button ghost compact" type="button" hidden>Sign out</button>
+        </div>
+
+        <div id="signed-out-view" class="stack">
+          <label class="field">
+            <span>Email</span>
+            <input id="email" type="email" autocomplete="username" placeholder="you@example.com" />
+          </label>
+          <label class="field">
+            <span>Password</span>
+            <input id="password" type="password" autocomplete="current-password" placeholder="Password" />
+          </label>
+          <div class="inline-actions">
+            <button id="sign-in" class="button primary" type="button">Sign in</button>
+            <button id="open-signup" class="button secondary" type="button">Create account</button>
+          </div>
+        </div>
+
+        <div id="signed-in-view" class="account-summary" hidden>
+          <p id="session-email" class="account-email"></p>
+          <p class="account-copy">
+            Zeusian will read the active tab, extract the main content, and prepare an AI summary automatically.
+          </p>
+        </div>
       </section>
 
       <p id="status" class="status" role="status" aria-live="polite"></p>
 
-      <section class="panel">
-        <div class="panel-head">
+      <section class="card">
+        <div class="section-head">
           <div>
-            <h2>방금 저장한 내용</h2>
+            <p class="section-kicker">Current page</p>
+            <h2>Live page snapshot</h2>
           </div>
+          <button id="refresh-page" class="button ghost compact" type="button">Read again</button>
         </div>
-        <article id="current-clip" class="clip-empty">
-          선택 텍스트를 가져오면 여기에 미리보기가 표시됩니다.
+        <article id="page-panel" class="panel-empty">
+          Open any article, notes page, blog post, or study document tab and Zeusian will read it here.
         </article>
       </section>
 
-      <section class="panel">
-        <div class="panel-head">
+      <section class="card">
+        <div class="section-head summary-head">
           <div>
-            <h2>최근 저장 목록</h2>
+            <p class="section-kicker">AI summary</p>
+            <h2>Automatic study notes</h2>
           </div>
-          <button id="clear-history" class="text-button" type="button">모두 비우기</button>
+          <div class="inline-actions">
+            <button id="summarize-page" class="button primary compact" type="button">Summarize again</button>
+            <button id="copy-summary" class="button ghost compact" type="button">Copy</button>
+          </div>
         </div>
-        <div id="history-list" class="history-empty">아직 저장된 클립이 없습니다.</div>
+        <article id="summary-panel" class="panel-empty">
+          Sign in to let Zeusian summarize the current page automatically.
+        </article>
       </section>
     </main>
 

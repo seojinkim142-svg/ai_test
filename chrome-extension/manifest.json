@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Zeusian Clip",
-  "description": "Capture selected text or the current page and keep it ready for Zeusian.ai study sessions.",
-  "version": "0.1.0",
+  "description": "Sign in, read the current page, and generate a study-ready AI summary for Zeusian.ai.",
+  "version": "0.2.0",
   "permissions": ["activeTab", "contextMenus", "scripting", "storage", "tabs"],
+  "host_permissions": ["https://zeusian.ai.kr/*", "https://abafcnpyewguywopbszu.supabase.co/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
