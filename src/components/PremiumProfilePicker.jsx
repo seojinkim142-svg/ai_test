@@ -9,7 +9,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
   activeProfileId = null,
   maxProfiles = 4,
   canClose = false,
-  theme = "dark",
+  theme = "light",
   onSelectProfile,
   onCreateProfile,
   onClose,

@@ -65,8 +65,10 @@ const PLAN_OPTIONS = [
   {
     name: "Pro",
     label: "Pro",
-    originalPrice: "9,900원",
+    originalPrices: ["9,900원"],
+    trialOriginalPrices: ["9,900원", "6,900원"],
     price: "6,900원 / 월",
+    trialPrice: "0원",
     desc: "개인 학습",
     features: ["업로드 무제한", "요약 / 퀴즈 / OX / 플래시카드", "우선 처리"],
     cta: "Pro 업그레이드",
@@ -245,7 +247,7 @@ function PaymentPage({
   currentTier = "free",
   currentTierExpiresAt = null,
   currentTierRemainingDays = null,
-  theme = "dark",
+  theme = "light",
   user,
   authReady = false,
   onTierUpdated,
@@ -933,14 +935,22 @@ function PaymentPage({
             const isProPlan = plan.name === "Pro";
             const showProTrialBadge = isProPlan && isFreeCurrentTier;
             const showProTrialPrice = isProPlan && hasProTrialAccess;
-            const displayedOriginalPrice = showProTrialPrice ? "6,900원" : plan.originalPrice;
-            const displayedPrice = showProTrialPrice ? `0원 / ${PRO_TRIAL_DAYS}일` : plan.price;
+            const displayedOriginalPrices = (
+              showProTrialPrice
+                ? plan.trialOriginalPrices
+                : Array.isArray(plan.originalPrices)
+                  ? plan.originalPrices
+                  : plan.originalPrice
+                    ? [plan.originalPrice]
+                    : []
+            )?.filter(Boolean) || [];
+            const displayedPrice = showProTrialPrice ? plan.trialPrice || plan.price : plan.price;
             const proTrialCardText = isLoadingProTrial
               ? "무료체험 확인 중"
               : proTrialStatus?.statusError
                 ? "상태 확인 실패"
               : hasProTrialAccess
-                ? `신규 계정 첫 ${PRO_TRIAL_DAYS}일 무료체험`
+                ? `결제수단 등록 시 ${PRO_TRIAL_DAYS}일 무료체험 후 월 6,900원`
                 : proTrialStatus?.claimedAt
                   ? "무료체험 사용 완료"
                   : "무료체험 대상 아님";
@@ -989,11 +999,14 @@ function PaymentPage({
                   </span>
                 </div>
                 <div className="mt-2 flex flex-wrap items-end gap-2">
-                  {displayedOriginalPrice ? (
-                    <span className={`text-sm font-semibold line-through ${isLight ? "text-slate-400" : "text-slate-500"}`}>
-                      {displayedOriginalPrice}
+                  {displayedOriginalPrices.map((originalPrice) => (
+                    <span
+                      key={`${plan.name}-${originalPrice}`}
+                      className={`text-sm font-semibold line-through ${isLight ? "text-slate-400" : "text-slate-500"}`}
+                    >
+                      {originalPrice}
                     </span>
-                  ) : null}
+                  ))}
                   <p className="text-2xl font-bold">{displayedPrice}</p>
                 </div>
                 {showProTrialBadge ? (

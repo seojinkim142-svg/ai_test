@@ -1,5 +1,6 @@
 ﻿import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Capacitor } from "@capacitor/core";
+import { useLayoutEffect } from "react";
 import StartPage from "./pages/StartPage";
 import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
 import { useAdMobBanner } from "./hooks/useAdMobBanner";
@@ -1062,7 +1063,7 @@ function App() {
   const [isLoadingQuiz, setIsLoadingQuiz] = useState(false);
   const [isLoadingSummary, setIsLoadingSummary] = useState(false);
   const [isExportingSummary, setIsExportingSummary] = useState(false);
-  const [theme, setTheme] = useState("dark");
+  const [theme, setTheme] = useState("light");
   const [outputLanguage, setOutputLanguage] = useState(() => {
     if (typeof window === "undefined") return DEFAULT_OUTPUT_LANGUAGE;
     const stored = String(window.localStorage.getItem(OUTPUT_LANGUAGE_STORAGE_KEY) || "")
@@ -2276,7 +2277,7 @@ function App() {
     return "";
   }, [extractedText, file, isLoadingText, selectedFileId, tutorCopy]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const root = document.documentElement;
     if (theme === "light") {
       root.classList.add("theme-light");

@@ -138,7 +138,7 @@ function DetailRows({ rows, isLight }) {
 
 function SettingsDialog({
   onClose,
-  theme = "dark",
+  theme = "light",
   onThemeChange,
   outputLanguage = "ko",
   onOutputLanguageChange,
@@ -900,7 +900,7 @@ function SettingsDialog({
             {activeSection === "theme" && (
               <div className={`mt-4 rounded-2xl border p-4 ${cardClass}`}>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  {["dark", "light"].map((option) => {
+                  {["light", "dark"].map((option) => {
                     const isActive = theme === option;
                     return (
                       <button
