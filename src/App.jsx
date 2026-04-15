@@ -1397,7 +1397,7 @@ function App() {
       const thumbnail = await generatePdfThumbnail(previewPdfFile);
       if (!thumbnail) return item;
 
-      await updateUploadThumbnail({ id: item.id, thumbnail });
+      await updateUploadThumbnail({ id: item.id, userId: user?.id, thumbnail });
       const updatedItem = { ...item, thumbnail, previewPdfUrl };
       setUploadedFiles((prev) =>
         prev.map((entry) =>
@@ -1408,7 +1408,7 @@ function App() {
       );
       return updatedItem;
     },
-    [resolvePreviewPdfUrlForItem]
+    [resolvePreviewPdfUrlForItem, user?.id]
   );
 
   const limits = useMemo(() => {
@@ -2681,7 +2681,7 @@ function App() {
             const ensured = await ensureFileForItemRef.current(item);
             const thumb = ensured.thumbnail || (await generateDocumentThumbnail(ensured.file));
             if (!thumb) continue;
-            await updateUploadThumbnail({ id: item.id, thumbnail: thumb });
+            await updateUploadThumbnail({ id: item.id, userId: user?.id, thumbnail: thumb });
             setUploadedFiles((prev) =>
               prev.map((p) => (p.id === item.id ? { ...p, thumbnail: thumb } : p))
             );
@@ -2694,7 +2694,7 @@ function App() {
         backfillInProgressRef.current = false;
       }
     },
-    []
+    [user?.id]
   );
   const handleSignOut = useCallback(async () => {
     if (!supabase) return;

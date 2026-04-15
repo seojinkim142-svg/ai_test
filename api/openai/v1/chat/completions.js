@@ -115,13 +115,6 @@ const sendRaw = (res, statusCode, body, allowOrigin, contentType = "text/plain; 
   res.end(body);
 };
 
-const extractBearerToken = (authHeader) => {
-  const raw = text(authHeader);
-  if (!raw) return "";
-  const match = raw.match(/^Bearer\s+(.+)$/i);
-  return match ? text(match[1]) : "";
-};
-
 const normalizeRequestedProvider = (value) => {
   const normalized = text(value).toLowerCase();
   if (normalized === "openai") return "OpenAI";
@@ -151,20 +144,28 @@ const detectProviderName = (url) => {
 
 const resolveServerApiKey = (providerName) => {
   if (providerName === "DeepSeek") {
-    return text(process.env.DEEPSEEK_API_KEY || process.env.VITE_DEEPSEEK_API_KEY);
+    return text(process.env.DEEPSEEK_API_KEY);
   }
 
   if (providerName === "OpenAI") {
-    return text(process.env.OPENAI_API_KEY || process.env.OPENAI_PROXY_API_KEY || process.env.VITE_OPENAI_API_KEY);
+    return text(process.env.OPENAI_API_KEY || process.env.OPENAI_PROXY_API_KEY);
   }
 
-  return text(
-    process.env.DEEPSEEK_API_KEY ||
-      process.env.OPENAI_API_KEY ||
-      process.env.OPENAI_PROXY_API_KEY ||
-      process.env.VITE_DEEPSEEK_API_KEY ||
-      process.env.VITE_OPENAI_API_KEY
-  );
+  return text(process.env.DEEPSEEK_API_KEY || process.env.OPENAI_API_KEY || process.env.OPENAI_PROXY_API_KEY);
+};
+
+const buildPublicErrorMessage = (statusCode, fallback = "AI service is temporarily unavailable. Please try again later.") => {
+  const status = Number(statusCode);
+  if (status === 400 || status === 404) {
+    return "AI request could not be completed. Please try again.";
+  }
+  if (status === 401 || status === 403) {
+    return "AI service is temporarily unavailable. Please try again later.";
+  }
+  if (status === 429) {
+    return "AI service is busy right now. Please try again shortly.";
+  }
+  return fallback;
 };
 
 export default async function handler(req, res) {
@@ -194,19 +195,10 @@ export default async function handler(req, res) {
   );
   const upstreamUrl = resolveUpstreamUrl(requestedProvider);
   const providerName = detectProviderName(upstreamUrl);
-  const incomingApiKey = extractBearerToken(req.headers.authorization);
   const serverApiKey = resolveServerApiKey(providerName);
-  const apiKey = serverApiKey || incomingApiKey;
+  const apiKey = serverApiKey;
   if (!apiKey) {
-    sendJson(
-      res,
-      500,
-      {
-        message:
-          `${providerName} API key is missing on server. Set ${providerName === "DeepSeek" ? "DEEPSEEK_API_KEY" : "OPENAI_API_KEY"}${providerName === "OpenAI" ? " (or OPENAI_PROXY_API_KEY)" : ""}.`,
-      },
-      allowOrigin
-    );
+    sendJson(res, 500, { message: buildPublicErrorMessage(500) }, allowOrigin);
     return;
   }
 
@@ -235,6 +227,11 @@ export default async function handler(req, res) {
       parsed = null;
     }
 
+    if (!upstream.ok) {
+      sendJson(res, upstream.status, { message: buildPublicErrorMessage(upstream.status) }, allowOrigin);
+      return;
+    }
+
     if (parsed && typeof parsed === "object") {
       sendJson(res, upstream.status, parsed, allowOrigin);
       return;
@@ -242,6 +239,7 @@ export default async function handler(req, res) {
 
     sendRaw(res, upstream.status, rawBody || "", allowOrigin);
   } catch (error) {
-    sendJson(res, 502, { message: `${providerName} proxy request failed: ${error.message}` }, allowOrigin);
+    console.error(`${providerName} proxy request failed`, error);
+    sendJson(res, 502, { message: buildPublicErrorMessage(502) }, allowOrigin);
   }
 }

@@ -15,7 +15,6 @@ const ALLOWED_TIERS = ["free", "pro", "premium"];
 export const DEFAULT_TIER = "free";
 const PAID_TIERS = new Set(["pro", "premium"]);
 const TIER_EXPIRY_COLUMN = "tier_expires_at";
-const PAID_TIER_TERM_MONTHS = { pro: 1, premium: 1 };
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 const PREMIUM_PROFILES_META_KEY = "premium_profiles_v1";
 const PREMIUM_ACTIVE_PROFILE_META_KEY = "premium_active_profile_id_v1";
@@ -438,13 +437,14 @@ export async function getSignedStorageUrl({ bucket, path, expiresIn = 60 * 60 * 
   return data?.signedUrl;
 }
 
-export async function updateUploadThumbnail({ id, thumbnail }) {
+export async function updateUploadThumbnail({ id, userId, thumbnail }) {
   const client = requireSupabase();
-  if (!id) throw new Error("Upload ID is required.");
+  if (!id || !userId) throw new Error("Upload ID and userId are required.");
   const { error } = await client
     .from(UPLOADS_TABLE)
     .update({ thumbnail })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", userId);
   if (error) throw error;
   return null;
 }
@@ -609,16 +609,6 @@ function toIsoStringOrNull(value) {
   return date.toISOString();
 }
 
-function addMonthsUtc(dateInput, monthsInput = 1) {
-  const baseDate = dateInput instanceof Date ? new Date(dateInput) : new Date(dateInput);
-  const parsedMonths = Number(monthsInput);
-  const safeMonths = Number.isFinite(parsedMonths) && parsedMonths > 0 ? Math.floor(parsedMonths) : 1;
-  if (Number.isNaN(baseDate.getTime())) return new Date();
-  const next = new Date(baseDate);
-  next.setUTCMonth(next.getUTCMonth() + safeMonths);
-  return next;
-}
-
 function buildTierStatus(tier, tierExpiresAtRaw) {
   const normalizedTier = ALLOWED_TIERS.includes(tier) ? tier : DEFAULT_TIER;
   const expiresIso = toIsoStringOrNull(tierExpiresAtRaw);
@@ -694,92 +684,14 @@ async function fetchUserTierRow(client, userId) {
   };
 }
 
-async function upsertUserTierRow({
-  client,
-  userId,
-  tier,
-  tierExpiresAt = null,
-  hasExpiryColumn = true,
-}) {
-  const payload = { user_id: userId, tier };
-  if (hasExpiryColumn) payload[TIER_EXPIRY_COLUMN] = tierExpiresAt;
-
-  const selectClause = hasExpiryColumn ? `tier, ${TIER_EXPIRY_COLUMN}` : "tier";
-  const { data, error } = await client
-    .from(USER_TIER_TABLE)
-    .upsert(payload, { onConflict: "user_id" })
-    .select(selectClause)
-    .single();
-
-  if (error && hasExpiryColumn && isTierExpiryColumnError(error)) {
-    const { data: fallbackData, error: fallbackError } = await client
-      .from(USER_TIER_TABLE)
-      .upsert({ user_id: userId, tier }, { onConflict: "user_id" })
-      .select("tier")
-      .single();
-    if (fallbackError) throw fallbackError;
-    return {
-      row: fallbackData ? { ...fallbackData, [TIER_EXPIRY_COLUMN]: null } : null,
-      hasExpiryColumn: false,
-    };
-  }
-
-  if (error) throw error;
-  return {
-    row: data || null,
-    hasExpiryColumn,
-  };
-}
-
-function getBaseDateForTierExtension({ tier, existingRow }) {
-  const now = new Date();
-  if (!existingRow) return now;
-  const existingTier = existingRow?.tier;
-  const existingExpiryIso = toIsoStringOrNull(existingRow?.[TIER_EXPIRY_COLUMN]);
-  if (existingTier !== tier || !existingExpiryIso) return now;
-  const existingExpiryMs = Date.parse(existingExpiryIso);
-  if (!Number.isFinite(existingExpiryMs) || existingExpiryMs <= now.getTime()) return now;
-  return new Date(existingExpiryIso);
-}
-
-function resolveTierExpiryAt({
-  tier,
-  requestedExpiresAt = null,
-  existingRow = null,
-  extendMonths = null,
-}) {
-  if (!isPaidTier(tier)) return null;
-  const normalizedRequested = toIsoStringOrNull(requestedExpiresAt);
-  if (normalizedRequested) return normalizedRequested;
-
-  const defaultMonths = PAID_TIER_TERM_MONTHS[tier] || 1;
-  const months =
-    Number.isFinite(Number(extendMonths)) && Number(extendMonths) > 0
-      ? Number(extendMonths)
-      : defaultMonths;
-  const baseDate = getBaseDateForTierExtension({ tier, existingRow });
-  return addMonthsUtc(baseDate, months).toISOString();
-}
-
 export async function getUserTierStatus({ userId }) {
   const client = requireSupabase();
   if (!userId) throw new Error("userId is required.");
 
-  const { row, hasExpiryColumn } = await fetchUserTierRow(client, userId);
+  const { row } = await fetchUserTierRow(client, userId);
   const tier = row?.tier;
 
   if (!ALLOWED_TIERS.includes(tier)) {
-    try {
-      await upsertUserTierRow({
-        client,
-        userId,
-        tier: DEFAULT_TIER,
-        tierExpiresAt: null,
-        hasExpiryColumn,
-      });
-    } catch (upsertErr) {
-      console.warn("Failed to ensure user tier row", upsertErr);
-    }
     return {
       tier: DEFAULT_TIER,
       tierExpiresAt: null,
@@ -790,19 +702,6 @@ export async function getUserTierStatus({ userId }) {
 
   const status = buildTierStatus(tier, row?.[TIER_EXPIRY_COLUMN]);
   if (!status.isExpired) return status;
-
-  // Expired paid plan -> downgrade to free immediately.
-  try {
-    await upsertUserTierRow({
-      client,
-      userId,
-      tier: DEFAULT_TIER,
-      tierExpiresAt: null,
-      hasExpiryColumn,
-    });
-  } catch (downgradeErr) {
-    console.warn("Failed to downgrade expired tier", downgradeErr);
-  }
 
   return {
     tier: DEFAULT_TIER,
@@ -815,31 +714,6 @@ export async function getUserTierStatus({ userId }) {
 export async function getUserTier({ userId }) {
   const status = await getUserTierStatus({ userId });
   return status.tier;
-}
-
-export async function setUserTier({ userId, tier, expiresAt = null, extendMonths = null }) {
-  const client = requireSupabase();
-  if (!userId) throw new Error("userId is required.");
-  if (!ALLOWED_TIERS.includes(tier)) {
-    throw new Error(`tier must be one of: ${ALLOWED_TIERS.join(", ")}`);
-  }
-
-  const { row: currentRow, hasExpiryColumn } = await fetchUserTierRow(client, userId);
-  const tierExpiresAt = resolveTierExpiryAt({
-    tier,
-    requestedExpiresAt: expiresAt,
-    existingRow: currentRow,
-    extendMonths,
-  });
-
-  const { row: updatedRow } = await upsertUserTierRow({
-    client,
-    userId,
-    tier,
-    tierExpiresAt,
-    hasExpiryColumn,
-  });
-  return updatedRow?.tier || tier;
 }
 export async function saveUserFeedback({
   userId,

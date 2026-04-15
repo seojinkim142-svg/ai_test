@@ -10,7 +10,7 @@ import {
   validateKakaoSubscriptionConfig,
   validateKakaoReadyUrls,
 } from "../../lib/payments/kakaopay.js";
-import { authenticateSupabaseUserFromRequest } from "../../lib/billing/tier-sync.js";
+import { authenticateSupabaseUserFromRequest, resolvePaidTierPricing } from "../../lib/billing/tier-sync.js";
 import { getProTrialStatus, PRO_TRIAL_DAYS, PRO_TRIAL_TIER } from "../../lib/billing/pro-trial.js";
 
 const normalizePositiveInteger = (value, fallback = 0) => {
@@ -23,6 +23,14 @@ const normalizeNonNegativeInteger = (value, fallback = 0) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) return fallback;
   return Math.floor(parsed);
+};
+
+const buildPublicPaymentMessage = (statusCode, fallback = "결제를 준비하지 못했습니다. 잠시 후 다시 시도해주세요.") => {
+  const status = Number(statusCode);
+  if (status === 401) return "로그인이 필요합니다.";
+  if (status === 403) return "요청을 처리할 수 없습니다.";
+  if (status === 400 || status === 404 || status === 409) return fallback;
+  return "결제를 준비하지 못했습니다. 잠시 후 다시 시도해주세요.";
 };
 
 export default async function handler(req, res) {
@@ -49,7 +57,7 @@ export default async function handler(req, res) {
   }
 
   if (!secretKey) {
-    sendJson(res, 500, { message: "KAKAOPAY_SECRET_KEY (or KAKAOPAY_ADMIN_KEY) is not set." }, allowOrigin);
+    sendJson(res, 500, { message: buildPublicPaymentMessage(500) }, allowOrigin);
     return;
   }
 
@@ -62,18 +70,25 @@ export default async function handler(req, res) {
   }
 
   const requestedTier = String(body?.tier || body?.planTier || "").trim().toLowerCase();
+  const requestedMonths = normalizePositiveInteger(body?.billingMonths ?? body?.months, 1) || 1;
   const orderId = String(body?.orderId || "").trim();
   const itemName = String(body?.itemName || body?.plan || "KakaoPay Plan").trim() || "KakaoPay Plan";
-  const amount = normalizeNonNegativeInteger(body?.amount);
-  const quantity = normalizePositiveInteger(body?.quantity, 1) || 1;
-  const vatAmount = normalizePositiveInteger(body?.vatAmount, Math.floor(amount / 11));
-  const taxFreeAmount = normalizePositiveInteger(body?.taxFreeAmount, 0);
   const registerSubscription =
     body?.registerSubscription === true || String(body?.paymentMode || "").trim().toLowerCase() === "subscription";
   const isProTrialRegistration =
     registerSubscription &&
     body?.proTrial === true &&
     requestedTier === PRO_TRIAL_TIER;
+  const pricing = isProTrialRegistration
+    ? { ok: true, tier: requestedTier, months: 1, amount: 0 }
+    : resolvePaidTierPricing({
+        requestedTier,
+        requestedMonths,
+      });
+  const amount = isProTrialRegistration ? 0 : normalizeNonNegativeInteger(pricing.amount);
+  const quantity = 1;
+  const vatAmount = Math.floor(amount / 11);
+  const taxFreeAmount = 0;
   const approvalUrl = String(body?.approvalUrl || `${clientOrigin}/?kakaoPay=approve`).trim();
   const cancelUrl = String(body?.cancelUrl || `${clientOrigin}/?kakaoPay=cancel`).trim();
   const failUrl = String(body?.failUrl || `${clientOrigin}/?kakaoPay=fail`).trim();
@@ -90,12 +105,17 @@ export default async function handler(req, res) {
     requireCid: !registerSubscription,
   });
   if (configError) {
-    sendJson(res, 500, { message: configError }, allowOrigin);
+    sendJson(res, 500, { message: buildPublicPaymentMessage(500) }, allowOrigin);
     return;
   }
 
-  if ((!orderId || (!isProTrialRegistration && amount <= 0) || (isProTrialRegistration && amount < 0))) {
-    sendJson(res, 400, { message: "amount and orderId are required." }, allowOrigin);
+  if (!pricing.ok) {
+    sendJson(res, pricing.status, { message: pricing.message }, allowOrigin);
+    return;
+  }
+
+  if (!orderId || !requestedTier || (!isProTrialRegistration && amount <= 0) || (isProTrialRegistration && amount < 0)) {
+    sendJson(res, 400, { message: "tier and orderId are required." }, allowOrigin);
     return;
   }
 
@@ -107,7 +127,7 @@ export default async function handler(req, res) {
     failUrl,
   });
   if (readyUrlError) {
-    sendJson(res, 400, { message: readyUrlError }, allowOrigin);
+    sendJson(res, 400, { message: buildPublicPaymentMessage(400) }, allowOrigin);
     return;
   }
 
@@ -117,13 +137,13 @@ export default async function handler(req, res) {
     apiBase,
   });
   if (subscriptionConfigError) {
-    sendJson(res, 500, { message: subscriptionConfigError }, allowOrigin);
+    sendJson(res, 500, { message: buildPublicPaymentMessage(500) }, allowOrigin);
     return;
   }
 
   const authResult = await authenticateSupabaseUserFromRequest(req);
   if (!authResult.ok) {
-    sendJson(res, authResult.status, { message: authResult.message }, allowOrigin);
+    sendJson(res, authResult.status, { message: buildPublicPaymentMessage(authResult.status) }, allowOrigin);
     return;
   }
   const authenticatedUserId = authResult.userId;
@@ -139,7 +159,7 @@ export default async function handler(req, res) {
         return;
       }
     } catch (error) {
-      sendJson(res, 500, { message: error?.message || "Pro trial status lookup failed." }, allowOrigin);
+      sendJson(res, 500, { message: buildPublicPaymentMessage(500) }, allowOrigin);
       return;
     }
   }
@@ -173,11 +193,7 @@ export default async function handler(req, res) {
 
     const data = await parseApiResponse(response);
     if (!response.ok) {
-      const rawDetail = String(data?.raw || "").trim();
-      const detail =
-        data?.msg || data?.message || data?.error || data?.code || (rawDetail ? rawDetail.slice(0, 300) : "");
-      const message = detail ? `KakaoPay ready failed: ${detail}` : "KakaoPay ready failed.";
-      sendJson(res, response.status, { ...data, message }, allowOrigin);
+      sendJson(res, response.status, { message: buildPublicPaymentMessage(response.status) }, allowOrigin);
       return;
     }
 
@@ -192,6 +208,7 @@ export default async function handler(req, res) {
       allowOrigin
     );
   } catch (error) {
-    sendJson(res, 500, { message: `KakaoPay ready failed: ${error.message}` }, allowOrigin);
+    console.error("KakaoPay ready failed", error);
+    sendJson(res, 500, { message: buildPublicPaymentMessage(500) }, allowOrigin);
   }
 }

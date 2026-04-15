@@ -12,6 +12,7 @@ import {
 import {
   addDaysUtc,
   authenticateSupabaseUserFromRequest,
+  resolvePaidTierPricing,
   syncPaidTierFromAmount,
 } from "../../lib/billing/tier-sync.js";
 import {
@@ -57,6 +58,14 @@ const requestSubscriptionInactive = async ({
   return { ok: response.ok, status: response.status, data };
 };
 
+const buildPublicPaymentMessage = (statusCode, fallback = "결제를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.") => {
+  const status = Number(statusCode);
+  if (status === 401) return "로그인이 필요합니다.";
+  if (status === 403) return "요청을 처리할 수 없습니다.";
+  if (status === 400 || status === 404 || status === 409) return fallback;
+  return "결제를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.";
+};
+
 export default async function handler(req, res) {
   const {
     secretKey,
@@ -81,7 +90,7 @@ export default async function handler(req, res) {
   }
 
   if (!secretKey) {
-    sendJson(res, 500, { message: "KAKAOPAY_SECRET_KEY (or KAKAOPAY_ADMIN_KEY) is not set." }, allowOrigin);
+    sendJson(res, 500, { message: buildPublicPaymentMessage(500) }, allowOrigin);
     return;
   }
 
@@ -105,6 +114,14 @@ export default async function handler(req, res) {
     registerSubscription &&
     body?.proTrial === true &&
     requestedTier === PRO_TRIAL_TIER;
+  const pricing = isProTrialRegistration
+    ? { ok: true, tier: requestedTier, months: 1, amount: PRO_TRIAL_RECURRING_AMOUNT }
+    : resolvePaidTierPricing({
+        requestedTier,
+        requestedMonths,
+      });
+  const normalizedTier = pricing.ok ? pricing.tier : requestedTier;
+  const normalizedMonths = pricing.ok ? pricing.months : 1;
 
   if (!registerSubscription) {
     sendJson(res, 400, { message: "One-time KakaoPay payments are disabled. Use subscription billing only." }, allowOrigin);
@@ -118,7 +135,7 @@ export default async function handler(req, res) {
     requireCid: !registerSubscription,
   });
   if (configError) {
-    sendJson(res, 500, { message: configError }, allowOrigin);
+    sendJson(res, 500, { message: buildPublicPaymentMessage(500) }, allowOrigin);
     return;
   }
 
@@ -133,13 +150,18 @@ export default async function handler(req, res) {
     apiBase,
   });
   if (subscriptionConfigError) {
-    sendJson(res, 500, { message: subscriptionConfigError }, allowOrigin);
+    sendJson(res, 500, { message: buildPublicPaymentMessage(500) }, allowOrigin);
+    return;
+  }
+
+  if (!pricing.ok) {
+    sendJson(res, pricing.status, { message: pricing.message }, allowOrigin);
     return;
   }
 
   const authResult = await authenticateSupabaseUserFromRequest(req);
   if (!authResult.ok) {
-    sendJson(res, authResult.status, { message: authResult.message }, allowOrigin);
+    sendJson(res, authResult.status, { message: buildPublicPaymentMessage(authResult.status) }, allowOrigin);
     return;
   }
   const userId = authResult.userId;
@@ -156,7 +178,7 @@ export default async function handler(req, res) {
         return;
       }
     } catch (error) {
-      sendJson(res, 500, { message: error?.message || "Pro trial status lookup failed." }, allowOrigin);
+      sendJson(res, 500, { message: buildPublicPaymentMessage(500) }, allowOrigin);
       return;
     }
   }
@@ -184,11 +206,15 @@ export default async function handler(req, res) {
 
     const data = await parseApiResponse(response);
     if (!response.ok) {
-      const rawDetail = String(data?.raw || "").trim();
-      const detail =
-        data?.msg || data?.message || data?.error || data?.code || (rawDetail ? rawDetail.slice(0, 300) : "");
-      const message = detail ? `KakaoPay approve failed: ${detail}` : "KakaoPay approve failed.";
-      sendJson(res, response.status, { ...data, message }, allowOrigin);
+      sendJson(res, response.status, { message: buildPublicPaymentMessage(response.status) }, allowOrigin);
+      return;
+    }
+
+    const approvedAmount = isProTrialRegistration
+      ? PRO_TRIAL_RECURRING_AMOUNT
+      : Number(data?.amount?.total ?? data?.amount?.total_amount ?? data?.total_amount ?? 0);
+    if (!isProTrialRegistration && approvedAmount !== pricing.amount) {
+      sendJson(res, 409, { message: buildPublicPaymentMessage(409, "결제 검증에 실패했습니다. 고객센터에 문의해주세요.") }, allowOrigin);
       return;
     }
 
@@ -224,10 +250,7 @@ export default async function handler(req, res) {
               rawInactive: inactiveResult.data,
             });
           } else {
-            subscriptionWarning =
-              inactiveResult?.data?.message ||
-              inactiveResult?.data?.msg ||
-              "Previous subscription could not be inactivated automatically.";
+            subscriptionWarning = "이전 구독 정리에 시간이 조금 더 필요할 수 있습니다.";
           }
         }
 
@@ -235,11 +258,9 @@ export default async function handler(req, res) {
           userId,
           sid: data.sid,
           cid: requestPayload.cid,
-          tier: requestedTier,
-          billingMonths: requestedMonths,
-          amount: isProTrialRegistration
-            ? PRO_TRIAL_RECURRING_AMOUNT
-            : Number(data?.amount?.total ?? data?.amount?.total_amount ?? body?.amount),
+          tier: normalizedTier,
+          billingMonths: normalizedMonths,
+          amount: approvedAmount,
           itemName: itemName || String(data?.item_name || body?.itemName || "").trim(),
           orderId,
           tid,
@@ -254,7 +275,7 @@ export default async function handler(req, res) {
         });
         subscriptionSaved = true;
       } catch (subscriptionError) {
-        subscriptionWarning = `Subscription registration save failed: ${subscriptionError.message}`;
+        subscriptionWarning = "구독 상태 반영이 잠시 지연될 수 있습니다.";
       }
     }
 
@@ -276,18 +297,16 @@ export default async function handler(req, res) {
           };
         } catch (claimError) {
           subscriptionWarning = subscriptionWarning
-            ? `${subscriptionWarning} Pro trial claim save failed: ${claimError.message}`
-            : `Pro trial claim save failed: ${claimError.message}`;
+            ? `${subscriptionWarning} 무료체험 상태 반영이 잠시 지연될 수 있습니다.`
+            : "무료체험 상태 반영이 잠시 지연될 수 있습니다.";
         }
       }
     } else {
-      const approvedAmount =
-        Number(data?.amount?.total ?? data?.amount?.total_amount ?? data?.total_amount ?? body?.amount);
       tierSyncResult = await syncPaidTierFromAmount({
         req,
         amount: approvedAmount,
-        requestedTier,
-        requestedMonths,
+        requestedTier: normalizedTier,
+        requestedMonths: normalizedMonths,
       });
     }
 
@@ -312,8 +331,8 @@ export default async function handler(req, res) {
           }
         } catch (inactiveError) {
           subscriptionWarning = subscriptionWarning
-            ? `${subscriptionWarning} Trial subscription cleanup failed: ${inactiveError.message}`
-            : `Trial subscription cleanup failed: ${inactiveError.message}`;
+            ? `${subscriptionWarning} 구독 정리 상태 확인이 필요합니다.`
+            : "구독 정리 상태 확인이 필요합니다.";
         }
       }
 
@@ -321,8 +340,10 @@ export default async function handler(req, res) {
         res,
         tierSyncResult.status,
         {
-          ...data,
-          message: tierSyncResult.message,
+          message: buildPublicPaymentMessage(
+            tierSyncResult.status,
+            "결제 검증에 실패했습니다. 고객센터에 문의해주세요."
+          ),
           tierUpdated: false,
           subscriptionWarning,
         },
@@ -349,6 +370,7 @@ export default async function handler(req, res) {
       allowOrigin
     );
   } catch (error) {
-    sendJson(res, 500, { message: `KakaoPay approve failed: ${error.message}` }, allowOrigin);
+    console.error("KakaoPay approve failed", error);
+    sendJson(res, 500, { message: buildPublicPaymentMessage(500) }, allowOrigin);
   }
 }

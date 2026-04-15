@@ -8,6 +8,12 @@ import { authenticateSupabaseUserFromRequest } from "../../lib/billing/tier-sync
 import { getProTrialStatus } from "../../lib/billing/pro-trial.js";
 
 const text = (value) => String(value ?? "").trim();
+const buildPublicTrialMessage = (statusCode) => {
+  const status = Number(statusCode);
+  if (status === 401) return "로그인이 필요합니다.";
+  if (status === 403) return "요청을 처리할 수 없습니다.";
+  return "무료체험 상태를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.";
+};
 
 export default async function handler(req, res) {
   const { allowOrigin } = getRuntimeConfig(req);
@@ -39,7 +45,7 @@ export default async function handler(req, res) {
 
   const authResult = await authenticateSupabaseUserFromRequest(req);
   if (!authResult.ok) {
-    sendJson(res, authResult.status, { message: authResult.message }, allowOrigin);
+    sendJson(res, authResult.status, { message: buildPublicTrialMessage(authResult.status) }, allowOrigin);
     return;
   }
 
@@ -78,6 +84,7 @@ export default async function handler(req, res) {
       allowOrigin
     );
   } catch (error) {
-    sendJson(res, 500, { message: error?.message || "Pro trial request failed." }, allowOrigin);
+    console.error("NicePayments pro trial request failed", error);
+    sendJson(res, 500, { message: buildPublicTrialMessage(500) }, allowOrigin);
   }
 }
