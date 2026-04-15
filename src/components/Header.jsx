@@ -6,7 +6,7 @@ const BACKUP_PROFILE_AVATAR = "/profile-default-character.svg";
 
 const Header = memo(function Header({
   user,
-  theme = "dark",
+  theme = "light",
   onGoHome,
   onOpenBilling,
   onOpenSettings,

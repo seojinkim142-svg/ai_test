@@ -207,7 +207,7 @@ function EmailIcon() {
   );
 }
 
-function AuthPanel({ user, onAuth, theme = "dark", outputLanguage = "ko" }) {
+function AuthPanel({ user, onAuth, theme = "light", outputLanguage = "ko" }) {
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
