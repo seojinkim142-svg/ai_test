@@ -1855,13 +1855,9 @@ function App() {
 
     setPremiumProfiles(loadedProfiles);
     setPremiumSpaceMode(normalizedSpaceMode);
-    if (resolvedActiveProfileId) {
-      setActivePremiumProfileId(resolvedActiveProfileId);
-      setShowPremiumProfilePicker(false);
-    } else {
-      setActivePremiumProfileId(null);
-      setShowPremiumProfilePicker(true);
-    }
+    // Always require profile PIN selection on every login.
+    setActivePremiumProfileId(null);
+    setShowPremiumProfilePicker(true);
 
     if (typeof window !== "undefined") {
       const profilesKey = getPremiumProfilesStorageKey(user.id);
@@ -1869,11 +1865,8 @@ function App() {
       const spaceModeKey = getPremiumSpaceModeStorageKey(user.id);
       try {
         window.localStorage.setItem(profilesKey, JSON.stringify(loadedProfiles));
-        if (resolvedActiveProfileId) {
-          window.localStorage.setItem(activeProfileKey, resolvedActiveProfileId);
-        } else {
-          window.localStorage.removeItem(activeProfileKey);
-        }
+        // Never persist active profile — force PIN on every login.
+        window.localStorage.removeItem(activeProfileKey);
         window.localStorage.setItem(spaceModeKey, normalizedSpaceMode);
       } catch {
         // Ignore local cache write errors.
@@ -1882,7 +1875,7 @@ function App() {
 
     const syncSignature = JSON.stringify({
       profiles: loadedProfiles,
-      activeProfileId: resolvedActiveProfileId || null,
+      activeProfileId: null,
       spaceMode: normalizedSpaceMode,
     });
     const remoteResolvedActiveProfileId = remoteProfiles.some(
