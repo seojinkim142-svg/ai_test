@@ -36,10 +36,29 @@
   color: #115e59 !important;
 }
 
+:root.theme-light .text-red-100,
+:root.theme-light .text-red-200,
+:root.theme-light .text-rose-100,
+:root.theme-light .text-rose-300 {
+  color: #b91c1c !important;
+}
+
 :root.theme-light .bg-slate-950,
 :root.theme-light .bg-slate-950\/40 {
   background-color: #f8fafc !important;
   color: #0f172a !important;
+}
+
+:root.theme-light .bg-slate-950\/20 {
+  background-color: rgba(248, 250, 252, 0.74) !important;
+  color: #0f172a !important;
+  backdrop-filter: blur(8px);
+}
+
+:root.theme-light .bg-slate-950\/35 {
+  background-color: rgba(248, 250, 252, 0.84) !important;
+  color: #0f172a !important;
+  backdrop-filter: blur(10px);
 }
 
 :root.theme-light .bg-slate-950\/45 {
@@ -51,6 +70,31 @@
 :root.theme-light .bg-slate-950\/60 {
   background-color: #f8fafc !important;
   color: #0f172a !important;
+}
+
+:root.theme-light .bg-slate-950\/70 {
+  background:
+    radial-gradient(circle at 18% 18%, rgba(20, 184, 166, 0.1), transparent 28%),
+    radial-gradient(circle at 82% 10%, rgba(59, 130, 246, 0.08), transparent 26%),
+    linear-gradient(155deg, rgba(255, 255, 255, 0.96), rgba(241, 245, 249, 0.93)) !important;
+  color: #0f172a !important;
+  backdrop-filter: blur(14px);
+}
+
+:root.theme-light .bg-slate-950\/88 {
+  background:
+    radial-gradient(circle at 50% 0%, rgba(125, 211, 252, 0.08), transparent 30%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.98)) !important;
+  color: #0f172a !important;
+  backdrop-filter: blur(14px);
+}
+
+:root.theme-light .bg-red-900\/20,
+:root.theme-light .bg-red-900\/30,
+:root.theme-light .bg-rose-950\/20,
+:root.theme-light .bg-rose-950\/70 {
+  background-color: rgba(254, 226, 226, 0.88) !important;
+  color: #991b1b !important;
 }
 
 :root.theme-light .bg-slate-900\/70 {
@@ -143,11 +187,12 @@
 }
 
 :root.theme-light .bg-red-500\/10 {
-  background-color: rgba(239, 68, 68, 0.12) !important;
+  background-color: rgba(254, 226, 226, 0.88) !important;
 }
 
 :root.theme-light .shadow-black\/30,
-:root.theme-light .shadow-black\/20 {
+:root.theme-light .shadow-black\/20,
+:root.theme-light .shadow-black\/40 {
   --tw-shadow-color: rgba(15, 23, 42, 0.12);
 }
 
@@ -165,8 +210,25 @@
 
 :root.theme-light .bg-slate-900\/70 .text-slate-100,
 :root.theme-light .bg-slate-900\/70 .text-slate-200,
-:root.theme-light .bg-slate-900\/70 .text-white {
+:root.theme-light .bg-slate-900\/70 .text-white,
+:root.theme-light .bg-slate-950\/70 .text-slate-100,
+:root.theme-light .bg-slate-950\/70 .text-slate-200,
+:root.theme-light .bg-slate-950\/70 .text-white,
+:root.theme-light .bg-slate-950\/88 .text-slate-100,
+:root.theme-light .bg-slate-950\/88 .text-slate-200,
+:root.theme-light .bg-slate-950\/88 .text-white {
   color: #0f172a !important;
+}
+
+:root.theme-light .border-red-400\/20,
+:root.theme-light .border-rose-300\/40,
+:root.theme-light .border-rose-500\/30 {
+  border-color: rgba(248, 113, 113, 0.32) !important;
+}
+
+:root.theme-light .ring-red-400\/30,
+:root.theme-light .ring-red-500\/40 {
+  --tw-ring-color: rgba(248, 113, 113, 0.28) !important;
 }
 
 :root.theme-light .bg-neutral-500\/60 {
