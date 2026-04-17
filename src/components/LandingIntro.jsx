@@ -2260,13 +2260,13 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
         </div>
       </section>
 
-      <footer className="relative overflow-hidden border-t border-white/6 bg-[#171a21] px-5 py-10 text-slate-300 sm:px-6 lg:px-8 lg:py-12">
+      <footer className="landing-footer relative overflow-hidden border-t border-white/6 bg-[#171a21] px-5 py-10 text-slate-300 sm:px-6 lg:px-8 lg:py-12">
         <div className="pointer-events-none absolute inset-0 opacity-[0.07]" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.82) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.82) 1px, transparent 1px)", backgroundSize: "44px 44px" }} />
         <div className="pointer-events-none absolute -left-24 top-0 h-56 w-56 rounded-full bg-emerald-400/10 blur-[120px]" />
         <div className="pointer-events-none absolute right-0 top-10 h-64 w-64 rounded-full bg-blue-400/8 blur-[140px]" />
 
         <div className="relative mx-auto max-w-7xl">
-          <div className="rounded-[2rem] border border-white/8 bg-white/[0.03] p-6 shadow-[0_28px_80px_-48px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-7 lg:p-8">
+          <div className="landing-footer-shell rounded-[2rem] border border-white/8 bg-white/[0.03] p-6 shadow-[0_28px_80px_-48px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-7 lg:p-8">
             <div className="flex flex-col gap-5 border-b border-white/8 pb-6 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex items-center gap-3">
                 <ZeusianLogo className="h-12 w-12 rounded-2xl object-cover shadow-[0_20px_36px_-24px_rgba(16,185,129,0.4)]" />
