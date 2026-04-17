@@ -6,7 +6,7 @@ import { getAccessToken } from "../services/supabase";
 import { useNiceSubscription } from "../hooks/useNiceSubscription";
 import { COMPANY_INFO, LEGAL_LINKS } from "../legal/companyInfo";
 import { resolvePublicAppOrigin } from "../utils/appOrigin";
-import { clearPaymentReturnPending, markPaymentReturnPending } from "../utils/paymentReturn";
+import { clearPaymentReturnPending, markPaymentReturnPending, readPaymentReturnPending } from "../utils/paymentReturn";
 
 const tierMeta = {
   free: "Free",
@@ -124,6 +124,11 @@ function getKakaoReturnKey(params) {
   const parts = KAKAO_RETURN_QUERY_KEYS.map((key) => `${key}:${String(params.get(key) || "").trim()}`);
   const hasValue = parts.some((entry) => !entry.endsWith(":"));
   return hasValue ? parts.join("|") : "";
+}
+
+function hasKakaoReturnParams(search) {
+  const params = new URLSearchParams(search);
+  return Boolean(params.get("pg_token") || params.get("kakaoPay"));
 }
 
 function shouldUseMobileKakaoRedirect() {
@@ -423,6 +428,51 @@ function PaymentPage({
       : proTrialStatus?.claimedAt
         ? "이미 Pro 무료체험을 사용했습니다."
         : "현재 조건에서는 Pro 무료체험을 시작할 수 없습니다.";
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof document === "undefined") return undefined;
+
+    const resetStaleKakaoPaymentState = () => {
+      if (hasKakaoReturnParams(window.location.search)) return;
+
+      let hasStoredSession = false;
+      try {
+        hasStoredSession = Boolean(String(window.localStorage.getItem(KAKAOPAY_STORAGE_KEY) || "").trim());
+      } catch {
+        hasStoredSession = false;
+      }
+
+      if (!readPaymentReturnPending() && !hasStoredSession) return;
+
+      setPaying(false);
+      try {
+        window.localStorage.removeItem(KAKAOPAY_STORAGE_KEY);
+      } catch {
+        // Ignore storage delete failures.
+      }
+      clearPaymentReturnPending();
+    };
+
+    const handlePageShow = () => {
+      resetStaleKakaoPaymentState();
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) return;
+      resetStaleKakaoPaymentState();
+    };
+
+    resetStaleKakaoPaymentState();
+    window.addEventListener("pageshow", handlePageShow);
+    window.addEventListener("focus", handlePageShow);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("pageshow", handlePageShow);
+      window.removeEventListener("focus", handlePageShow);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
 
   const loadKakaoSubscriptionStatus = useCallback(
     async ({ showLoading = false } = {}) => {
