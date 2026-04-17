@@ -2209,7 +2209,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
           <div
             ref={(node) => registerRevealNode("cta", node)}
             data-reveal-key="cta"
-            className="relative overflow-hidden rounded-[2.4rem] border border-slate-900/10 bg-slate-950 px-6 py-8 text-white shadow-[0_36px_90px_-52px_rgba(15,23,42,0.45)] sm:px-8 sm:py-10 lg:px-12 lg:py-12"
+            className="landing-cta relative overflow-hidden rounded-[2.4rem] border border-slate-900/10 bg-slate-950 px-6 py-8 text-white shadow-[0_36px_90px_-52px_rgba(15,23,42,0.45)] sm:px-8 sm:py-10 lg:px-12 lg:py-12"
             style={getRevealStyle(isVisible("cta"), { y: 32 })}
           >
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(96,165,250,0.28),transparent_28%),radial-gradient(circle_at_bottom_left,rgba(167,139,250,0.24),transparent_34%),linear-gradient(180deg,#020617_0%,#0f172a_100%)]" />
@@ -2241,8 +2241,8 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                 </div>
               </div>
 
-              <div className="rounded-[2rem] border border-white/10 bg-white/[0.08] p-5 backdrop-blur-xl sm:p-6">
-                <div className="rounded-[1.7rem] border border-white/10 bg-white/5 p-5">
+              <div className="landing-cta-card rounded-[2rem] border border-white/10 bg-white/[0.08] p-5 backdrop-blur-xl sm:p-6">
+                <div className="landing-cta-card-inner rounded-[1.7rem] border border-white/10 bg-white/5 p-5">
                   <div className="space-y-4">
                     {copy.cta.bullets.map((item, index) => (
                       <div key={item} className="flex items-start gap-3">
