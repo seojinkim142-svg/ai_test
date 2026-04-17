@@ -499,3 +499,44 @@
   background-color: rgba(248, 113, 113, 0.18) !important;
   box-shadow: 0 0 0 1px rgba(248, 113, 113, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.84) !important;
 }
+
+:root.theme-light .landing-cta {
+  border-color: rgba(15, 23, 42, 0.08) !important;
+  background-color: #020617 !important;
+  box-shadow: 0 36px 90px -52px rgba(15, 23, 42, 0.3) !important;
+}
+
+:root.theme-light .landing-cta .text-white {
+  color: #f8fbff !important;
+}
+
+:root.theme-light .landing-cta .text-white\/90,
+:root.theme-light .landing-cta .text-slate-200 {
+  color: rgba(226, 232, 240, 0.92) !important;
+}
+
+:root.theme-light .landing-cta .text-slate-300 {
+  color: rgba(203, 213, 225, 0.88) !important;
+}
+
+:root.theme-light .landing-cta .border-white\/10,
+:root.theme-light .landing-cta .border-white\/15 {
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+
+:root.theme-light .landing-cta .bg-white\/5 {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+:root.theme-light .landing-cta .bg-white\/10 {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+:root.theme-light .landing-cta-card {
+  background-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+:root.theme-light .landing-cta-card-inner {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+}
