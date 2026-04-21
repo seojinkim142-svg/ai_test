@@ -251,7 +251,7 @@ const LANDING_COPY = {
           name: "무료",
           price: "무료",
           description: "가볍게 시작하는 기본 플랜",
-          features: ["PDF 업로드 4개 제한", "요약/퀴즈/OX 일부 제공", "기본 학습 흐름 체험"],
+          features: ["PDF 업로드 4개 제한", "파일별 요약/퀴즈/OX/카드 1회", "기본 학습 흐름 체험"],
           ctaLabel: "무료 시작",
           accent: "linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%)",
           glow: "rgba(148, 163, 184, 0.22)",
@@ -283,7 +283,7 @@ const LANDING_COPY = {
         { label: "이용 방식", values: { free: "무료", pro: "개인 학습", premium: "팀 학습" } },
         { label: "월 요금", values: { free: "무료", pro: "0원", premium: "18,900원 / 월" } },
         { label: "PDF 업로드", values: { free: "최대 4개", pro: "무제한 업로드", premium: "무제한 업로드" } },
-        { label: "학습 도구", values: { free: "요약 / 퀴즈 / OX 일부", pro: "요약 / 퀴즈 / OX / 카드", premium: "전체 기능 + 팀 학습" } },
+        { label: "학습 도구", values: { free: "요약 / 퀴즈 / OX / 카드 (파일별 1회)", pro: "요약 / 퀴즈 / OX / 카드", premium: "전체 기능 + 팀 학습" } },
         { label: "AI 튜터", values: { free: "기본 답변 제공", pro: "문서 기반 답변", premium: "팀 문맥 포함 답변" } },
         { label: "공간 인원", values: { free: "1명", pro: "1명", premium: "최대 4명" } },
         { label: "자료 내보내기", values: { free: "불가", pro: "PDF 저장", premium: "PDF 저장" } },
@@ -1011,7 +1011,7 @@ const LANDING_COPY = {
           name: "Free",
           price: "Free",
           description: "Light personal study",
-          features: ["Upload up to 4 PDFs", "Basic summary / quiz / OX tools", "Starter storage included"],
+          features: ["Upload up to 4 PDFs", "1 summary / quiz / OX / flashcard generation per file", "Starter storage included"],
           ctaLabel: "Choose Free",
           accent: "linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%)",
           glow: "rgba(148, 163, 184, 0.22)",
@@ -1043,7 +1043,7 @@ const LANDING_COPY = {
         { label: "Best for", values: { free: "Getting started", pro: "Solo study", premium: "Shared study" } },
         { label: "Monthly price", values: { free: "Free", pro: "KRW 0", premium: "KRW 18,900 / month" } },
         { label: "PDF upload", values: { free: "Up to 4 files", pro: "Unlimited", premium: "Unlimited" } },
-        { label: "Core tools", values: { free: "Summary / quiz / OX", pro: "Summary / quiz / OX / cards", premium: "Everything in Pro + shared learning" } },
+        { label: "Core tools", values: { free: "Summary / quiz / OX / cards (1x per file)", pro: "Summary / quiz / OX / cards", premium: "Everything in Pro + shared learning" } },
         { label: "Workspace", values: { free: "Starter storage", pro: "Personal study space", premium: "Shared workspace" } },
         { label: "Users", values: { free: "1 user", pro: "1 user", premium: "Up to 4 users" } },
         { label: "Priority", values: { free: "Standard", pro: "Priority", premium: "Priority" } },
@@ -1161,6 +1161,8 @@ const getNavItems = (copy) => [
 ];
 
 const DEFAULT_ACTIVE_PLAN = "pro";
+const DEFAULT_LANDING_NAV_HEIGHT = 104;
+const LANDING_SECTION_GAP = 20;
 
 function getRevealStyle(isVisible, { y = 36, x = 0, scale = 0.97, delay = 0 } = {}) {
   return {
@@ -1387,11 +1389,16 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
   const [activeFeatureId, setActiveFeatureId] = useState(FEATURE_ITEMS[0]?.id || "summary");
   const [activePlanId, setActivePlanId] = useState(DEFAULT_ACTIVE_PLAN);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [navHeight, setNavHeight] = useState(DEFAULT_LANDING_NAV_HEIGHT);
   const [visibleSections, setVisibleSections] = useState({});
   const scrollRafRef = useRef(null);
+  const navRef = useRef(null);
   const revealNodesRef = useRef(new Map());
   const featureNodesRef = useRef(new Map());
   const featureRatiosRef = useRef(new Map());
+
+  const sectionScrollOffset = navHeight + LANDING_SECTION_GAP;
+  const mobileMenuTop = navHeight + 12;
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;
@@ -1412,6 +1419,38 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
       if (scrollRafRef.current != null) {
         window.cancelAnimationFrame(scrollRafRef.current);
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const nav = navRef.current;
+    if (!nav) return undefined;
+
+    const syncNavHeight = () => {
+      const nextHeight = Math.ceil(nav.getBoundingClientRect().height || 0);
+      if (nextHeight > 0) {
+        setNavHeight((previous) => (previous === nextHeight ? previous : nextHeight));
+      }
+    };
+
+    syncNavHeight();
+
+    let resizeObserver;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(() => {
+        syncNavHeight();
+      });
+      resizeObserver.observe(nav);
+    }
+
+    window.addEventListener("resize", syncNavHeight, { passive: true });
+    window.visualViewport?.addEventListener("resize", syncNavHeight, { passive: true });
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", syncNavHeight);
+      window.visualViewport?.removeEventListener("resize", syncNavHeight);
     };
   }, []);
 
@@ -1518,6 +1557,22 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const hash = window.location.hash;
+    if (!hash) return undefined;
+
+    const section = document.getElementById(hash.slice(1));
+    if (!section) return undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      const top = section.getBoundingClientRect().top + window.scrollY - sectionScrollOffset;
+      window.scrollTo({ top: Math.max(0, top) });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [sectionScrollOffset]);
+
   const registerRevealNode = useCallback((key, node) => {
     if (node) {
       revealNodesRef.current.set(key, node);
@@ -1553,9 +1608,9 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
     const section = document.getElementById(id);
     setMenuOpen(false);
     if (!section) return;
-    const top = section.getBoundingClientRect().top + window.scrollY - 88;
+    const top = section.getBoundingClientRect().top + window.scrollY - sectionScrollOffset;
     window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
-  }, []);
+  }, [sectionScrollOffset]);
 
   const handlePlanInteract = useCallback((planId) => {
     setActivePlanId(planId);
@@ -1651,6 +1706,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
       </div>
 
       <nav
+        ref={navRef}
         className={`fixed inset-x-0 top-0 z-50 border-b transition-all duration-300 ${
           navSolid
             ? "border-slate-200/80 bg-white/[0.84] shadow-[0_20px_40px_-34px_rgba(15,23,42,0.34)] backdrop-blur-2xl"
@@ -1727,7 +1783,10 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
       </nav>
 
       {menuOpen ? (
-        <div className="fixed inset-x-5 top-[5.35rem] z-40 rounded-[1.8rem] border border-white/80 bg-white/90 p-5 shadow-[0_32px_80px_-46px_rgba(15,23,42,0.32)] backdrop-blur-2xl lg:hidden">
+        <div
+          className="fixed inset-x-5 z-40 rounded-[1.8rem] border border-white/80 bg-white/90 p-5 shadow-[0_32px_80px_-46px_rgba(15,23,42,0.32)] backdrop-blur-2xl lg:hidden"
+          style={{ top: `${mobileMenuTop}px` }}
+        >
           <label className="mb-4 block">
             <span className="mb-2 block text-xs font-semibold tracking-[0.16em] text-slate-500">{copy.languageLabel}</span>
             <div className="relative">
@@ -1773,7 +1832,11 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
         </div>
       ) : null}
 
-      <section id="hero" className="relative px-5 pb-24 pt-28 sm:px-6 lg:px-8 lg:pb-32 lg:pt-32">
+      <section
+        id="hero"
+        className="relative px-5 pb-24 pt-28 sm:px-6 lg:px-8 lg:pb-32 lg:pt-32"
+        style={{ scrollMarginTop: `${sectionScrollOffset}px` }}
+      >
         <div className="mx-auto max-w-7xl">
           <div
             className="zeus-hero-enter mx-auto flex max-w-5xl flex-col items-center text-center"
@@ -1815,7 +1878,11 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
 
         </div>
       </section>
-      <section id="features" className="relative px-5 py-24 sm:px-6 lg:px-8 lg:py-32">
+      <section
+        id="features"
+        className="relative px-5 py-24 sm:px-6 lg:px-8 lg:py-32"
+        style={{ scrollMarginTop: `${sectionScrollOffset}px` }}
+      >
         <div className="mx-auto max-w-7xl">
           <div
             ref={(node) => registerRevealNode("features-heading", node)}
@@ -1962,7 +2029,11 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
         </div>
       </section>
 
-      <section id="workflow" className="relative px-5 py-24 sm:px-6 lg:px-8 lg:py-32">
+      <section
+        id="workflow"
+        className="relative px-5 py-24 sm:px-6 lg:px-8 lg:py-32"
+        style={{ scrollMarginTop: `${sectionScrollOffset}px` }}
+      >
         <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:gap-16">
           <div
             ref={(node) => registerRevealNode("workflow-copy", node)}
@@ -2024,7 +2095,11 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
         </div>
       </section>
 
-      <section id="pricing" className="relative scroll-mt-28 px-5 py-24 sm:px-6 lg:px-8 lg:py-32">
+      <section
+        id="pricing"
+        className="relative px-5 py-24 sm:px-6 lg:px-8 lg:py-32"
+        style={{ scrollMarginTop: `${sectionScrollOffset}px` }}
+      >
         <div
           ref={(node) => registerRevealNode("pricing-stage", node)}
           data-reveal-key="pricing-stage"
