@@ -652,11 +652,12 @@ ${difficultyBlock}
 - Avoid pure memorization prompts (raw URLs, names, single numbers).
 - Each question must have exactly one unambiguously correct answer.
 - If the document contains page tags like [p.12], first choose 1-2 tagged evidence passages and then write the question from that evidence only.
-- evidencePages must use only page numbers that actually appear in the provided page tags.
+- evidencePages must use only page numbers that actually appear in the provided page tags. If no page tags exist, use an empty array for evidencePages and an empty string for evidenceSnippet — do not guess or invent page numbers.
 - If the tagged evidence does not support the question, omit that item instead of using outside knowledge or other pages.
 - Never guess missing page numbers, and never assign a broad page range when the exact supporting page is unclear.
 - evidenceSnippet should be a short source phrase copied or lightly normalized from the document so it can be highlighted later.
 - Short-answer items must have one exact, short answer only: a number, formula, term, concept name, or short phrase.
+- Short-answer difficulty guideline: 하 = direct term or definition lookup; 중 = applying a concept to a given condition or deriving a value; 상 = multi-step derivation, identifying an exception, or synthesizing two concepts.
 - Do not generate essay-style prompts such as "설명하라", "서술하라", "논하라", "기술하라", or questions that require long prose.
 - The short-answer answer field must be concise and directly gradable, not a sentence.
 - If an additional user request is provided, follow it only when it stays grounded in the document and still satisfies every rule above.
@@ -746,9 +747,9 @@ Items that can be answered by a student who read only one sentence are not accep
 - If a document question style profile is provided, keep the native tone and trap design while raising only the difficulty.
 - Never copy sample stems verbatim; use the style profile only as a template.
 - If the document contains page tags like [p.12], select supporting evidence from those tags first and write the question only from that evidence.
-- evidencePages: only page numbers that actually appear in the document's page tags.
+- evidencePages: only page numbers that actually appear in the document's page tags. If no page tags exist, use an empty array — do not guess or invent page numbers.
 - If tagged evidence does not support the question, omit the item — do not guess pages.
-- evidenceSnippet: a short phrase copied or lightly normalized from the document.
+- evidenceSnippet: a short phrase copied or lightly normalized from the document. If no page tags exist, use an empty string.
 - Never ask textbook/preface metadata: target audience, supplement availability, author/publisher info, TOC/chapter structure.
 - If an additional user request is provided, follow it only when it stays grounded in the document and does not break these rules.
 
@@ -756,7 +757,8 @@ Items that can be answered by a student who read only one sentence are not accep
 - ${count} multiple-choice questions, 4 options each.
 - Include answerIndex, explanation, and choiceExplanations on every item.
 - choiceExplanations: one sentence per choice explaining why it is correct or incorrect.
-- Include evidencePages, evidenceSnippet, and evidenceLabel.
+- Set difficulty to "상" on every item.
+- Include evidencePages, evidenceSnippet, and evidenceLabel. If no page tags exist in the document, use an empty array for evidencePages and an empty string for evidenceSnippet.
 - Return JSON only.
 
 [JSON schema]
@@ -766,6 +768,7 @@ Items that can be answered by a student who read only one sentence are not accep
       "question": "...",
       "choices": ["...", "...", "...", "..."],
       "answerIndex": 1,
+      "difficulty": "상",
       "explanation": "...",
       "choiceExplanations": [
         "Why option A is wrong",
@@ -878,8 +881,11 @@ You are a senior teaching assistant writing a study-grade ${outputLanguageLabel}
 ## 핵심 공식  ← include only when the source contains formulas
 List every important formula with variable definitions immediately after.
 
-## 주요 용어
+## 주요 용어  ← include only when the document introduces 3 or more distinct technical terms
 Term — definition (original English term in parentheses if helpful).
+
+[Language of headings]
+- Render all section headings (## 개요, ## 핵심 공식, ## 주요 용어, and any topic headings) in the output language.
 
 [Length guideline]
 - Short source (< ~500 words): concise, 1-2 paragraphs per section.
@@ -2517,7 +2523,7 @@ export async function generateQuiz(
 
   // 캐싱 키 생성
   const cacheKey = getCacheKey(extractedText, {
-    version: "quiz-style-v5",
+    version: "quiz-style-v6",
     type: "quiz",
     mcCount,
     saCount,
