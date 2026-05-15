@@ -1111,9 +1111,14 @@ export default function DetailPage({
                   <p className="text-sm text-slate-300">총 모의고사</p>
                   <h3 className="text-lg font-semibold text-white">모의고사</h3>
                 </div>
-                <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200 ring-1 ring-white/15">
-                  {mockExams.length}개
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-red-500/20 px-2 py-1 text-xs font-semibold text-red-100">
+                    어려움 (상)
+                  </span>
+                  <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200 ring-1 ring-white/15">
+                    {mockExams.length}개
+                  </span>
+                </div>
               </div>
 
               <div className="mt-4 space-y-3">
