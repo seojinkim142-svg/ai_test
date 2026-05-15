@@ -550,7 +550,7 @@ You analyze document-native question style from example questions only.
 - If the blocks do not clearly look like real document questions, return "detected": false.
 - Do not copy long examples into the summary.
 - Keep every list item short and reusable as generation guidance.
-- All field values must be written in Korean.
+- Write all field values in the same language as the example question blocks (detect automatically).
 
 [Output JSON]
 {
@@ -937,36 +937,32 @@ function looksLikeProblemPageContent(text) {
 function buildProblemPageSummaryPrompt(extractedText, outputLanguage = "ko") {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   return `
-You are a teaching assistant who writes a ${outputLanguageLabel} markdown study summary for problem-heavy pages.
+You are a senior teaching assistant writing a ${outputLanguageLabel} markdown study summary for a problem-heavy page.
 
 [Goal]
-- The source may be mostly exercises, mock-test items, answer choices, or short explanations.
-- Do not refuse the summary.
-- Infer what concepts the learner must know to solve these problems well.
+The source is mostly exercises, mock-test items, answer choices, or short explanations.
+Do not refuse — infer what concepts the learner must know to solve these problems well, and teach those concepts.
+
+[Required sections — render all headings in ${outputLanguageLabel}]
+## Page type  (2-3 sentences: what kind of problem page this is and what it tests)
+## Core concepts  (bullet points: every concept the problems require, explained clearly)
+## Common solving criteria  (bullets: calculations, comparisons, condition checks, and interpretations that recur)
+## Frequent traps  (bullets: distractor patterns, concept confusions, unit/condition mistakes)
+## Last-minute checklist  (brief: formulas, terms, and checkpoints to verify before the exam)
+
+[Length guideline]
+- 3-5 bullet points per section minimum.
+- If a concept requires a formula, include it with variable definitions.
+
+[Writing rules]
+- Teach each concept — do not just list it. Add a one-line explanation for every bullet.
+- Use **bold** for key terms.
+- Use LaTeX for math: inline $...$, block $$...$$ on its own line.
+- Do not say "no learning content" unless the text is truly only cover/TOC/publisher metadata.
 
 [Output]
-- Markdown only.
+- Markdown only. No preamble.
 - Language: ${outputLanguageLabel}.
-
-[Required sections]
-1. ## 페이지 성격
-   - 이 페이지가 어떤 유형의 문제 페이지인지 2-3문장으로 설명
-2. ## 핵심 개념 정리
-   - 문제들이 공통으로 요구하는 개념을 항목별로 설명
-3. ## 자주 요구하는 판단
-   - 계산, 비교, 해석, 조건 판별 등 자주 필요한 사고를 정리
-4. ## 자주 틀리는 함정
-   - 선지 함정, 개념 혼동, 단위/조건 실수 등을 정리
-5. ## 빠르게 점검할 것
-   - 시험 전에 확인할 공식, 용어, 체크포인트를 간단히 정리
-
-[Rules]
-- Render the section headings in the requested output language.
-- Preferred heading meanings: Page type, Core concepts, Common solving criteria, Frequent traps, Last-minute checklist.
-- Provided text only.
-- If the page includes answer choices or short answer blanks, use them as evidence for what is being tested.
-- Avoid saying there is "no learning content" unless the text is truly only cover/TOC/publisher metadata.
-- Keep the summary useful for studying, not just page classification.
 
 [Document]
 ${extractedText}
@@ -1124,11 +1120,11 @@ You create a last-minute ${outputLanguageLabel} exam cram sheet from study artif
 - If formulas or symbols matter, preserve them with LaTeX-friendly markdown.
 - End with a very short final checklist.
 
-[Preferred structure]
-## 시험 직전 이것만
-## 꼭 구분할 개념
-## 헷갈리기 쉬운 함정
-## 마지막 1분 체크리스트
+[Preferred structure — render all headings in ${outputLanguageLabel}]
+## Must-know before the exam  (key facts, rules, formulas — highest yield)
+## Concepts to distinguish  (pairs or groups that are commonly confused)
+## Frequent traps  (misconceptions revealed by quiz/O/X wrong answers)
+## Final 1-minute checklist  (3-5 items to verify in the last minute)
 
 [Study artifacts]
 ${sections.join("\n\n")}
@@ -3362,14 +3358,15 @@ export async function generateHighlights(extractedText) {
         {
           role: "system",
           content:
-            "Select up to 5 verbatim Korean sentences from the user's text that best support the summary. Respond with JSON only.",
+            "Select up to 5 verbatim sentences from the user's text that are most likely to appear in exam questions or that best capture key testable facts. Respond with JSON only.",
         },
         {
           role: "user",
           content: `
-Extract up to 5 key evidence sentences from the document text that best support the summary.
-- Include a short reason for each sentence.
-- Format: { "highlights": [ { "sentence": "...", "reason": "..." } ] }
+Extract up to 5 key evidence sentences from the document text.
+- Choose sentences that contain a testable fact, definition, condition, or formula.
+- Include a short reason explaining why each sentence is high-yield.
+- Return JSON only: { "highlights": [ { "sentence": "...", "reason": "..." } ] }
 
 Document text:
 ${extractedText}
