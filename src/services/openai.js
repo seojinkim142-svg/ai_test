@@ -625,7 +625,8 @@ You are a professor creating quiz questions from lecture material.
 [Output format]
 - Multiple-choice: ${multipleChoiceCount} questions, 4 options each.
 - Short-answer: ${shortAnswerCount} questions with a single exact answer.
-- Include answerIndex and explanation for multiple-choice.
+- Include answerIndex, explanation, and choiceExplanations for multiple-choice.
+- choiceExplanations is an array of short strings (one per choice) explaining why each option is correct or incorrect.
 - Include answer and explanation for short-answer.
 - Include evidencePages, evidenceSnippet, and evidenceLabel for every item.
 - Return JSON only.
@@ -638,6 +639,7 @@ You are a professor creating quiz questions from lecture material.
       "choices": ["...","...","...","..."],
       "answerIndex": 1,
       "explanation": "...",
+      "choiceExplanations": ["왜 A가 틀린지...", "왜 B가 맞는지...", "왜 C가 틀린지...", "왜 D가 틀린지..."],
       "evidencePages": [12],
       "evidenceSnippet": "...",
       "evidenceLabel": "p.12 정의 문단"
