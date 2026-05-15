@@ -1148,17 +1148,25 @@ function buildFlashcardsContext(extractedText, count) {
 function buildFlashcardsPrompt(contextText, count, outputLanguage = "ko") {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   return `
-You generate study flashcards from a PDF.
+You are a study coach creating high-quality flashcards that help students actively recall key ideas from lecture material.
 
-[Flashcard rules]
-- Create ${count} cards in ${outputLanguageLabel}.
-- Focus on key concepts/definitions/principles/terms.
-- Remove duplicates or near-duplicates.
-- front: question/term, back: concise answer/explanation, hint: only if needed (optional).
-- Do not repeat identical meaning.
-- If the source is written in another language, translate it to ${outputLanguageLabel}.
+[What makes a good flashcard]
+- front: a focused question or cue — not just a term label. Ask "What is X?", "Why does X happen?", "What condition causes X?", or "What is the difference between X and Y?".
+- back: a complete, self-contained answer that a student can verify without looking at the front again. 1-3 sentences max.
+- hint: include only when the concept has a common misconception or a memorable trick worth flagging. Leave empty string otherwise.
 
-[Output format (JSON)]
+[Card selection rules]
+- Create exactly ${count} cards.
+- Focus on: key concepts, definitions, mechanisms, conditions, formulas, and distinctions that are likely to appear in exams.
+- Exclude: author/publisher info, TOC entries, page numbers, and any content that is purely administrative or structural.
+- Do not generate two cards that test the same underlying fact, even if phrased differently.
+- If the source contains formulas, include at least one card per important formula with the formula on the front and its meaning/variables on the back.
+- Translate all text to ${outputLanguageLabel} regardless of the source language.
+
+[Output format]
+- Return JSON only.
+
+[JSON schema]
 {
   "cards": [
     { "front": "...", "back": "...", "hint": "" }
@@ -2865,7 +2873,7 @@ export async function generateFlashcards(extractedText, { count = 8, outputLangu
         {
           role: "system",
           content:
-            `Create ${outputLanguageLabel} flashcards strictly from the user's text. Return JSON only with an array of {front, back, hint}. Keep front/back concise, avoid duplicates, and translate to ${outputLanguageLabel} if needed.`,
+            `Create ${outputLanguageLabel} study flashcards from the user's text only. Front must be a focused question or cue (not just a term label). Back must be a complete self-contained answer (1-3 sentences). Include hint only for common misconceptions or memorable tricks — empty string otherwise. Exclude metadata (author, publisher, TOC, page numbers). No near-duplicate cards. Translate all text to ${outputLanguageLabel}. Return JSON only with the provided schema.`,
         },
         { role: "user", content: prompt },
       ],
