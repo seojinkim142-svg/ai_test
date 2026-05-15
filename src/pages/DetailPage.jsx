@@ -434,6 +434,7 @@ export default function DetailPage({
         answer,
         explanation: String(persisted?.explanation || item?.explanation || "").trim(),
         evidence: String(persisted?.evidence || item?.evidence || "").trim(),
+        choiceExplanations: Array.isArray(item?.choiceExplanations) ? item.choiceExplanations : [],
       };
     });
   }, [activeMockExam?.payload?.answerSheet, mockExamOrderedItems]);
@@ -1337,6 +1338,19 @@ export default function DetailPage({
                                   <div className="mt-1">
                                     <p className="font-semibold text-slate-100">해설</p>
                                     {renderMockRichText(item.explanation, "text-xs text-slate-200")}
+                                  </div>
+                                )}
+                                {item.choiceExplanations?.length > 0 && (
+                                  <div className="mt-2">
+                                    <p className="font-semibold text-slate-100">선지 해설</p>
+                                    <ul className="mt-1 space-y-0.5">
+                                      {item.choiceExplanations.map((exp, cIdx) => (
+                                        <li key={cIdx} className="flex gap-1.5 text-xs">
+                                          <span className="shrink-0 font-semibold text-slate-400">{LETTERS[cIdx]}.</span>
+                                          <span className="text-slate-300">{exp}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
                                   </div>
                                 )}
                                 {item.evidence && (
