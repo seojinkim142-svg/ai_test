@@ -1215,7 +1215,19 @@ function App() {
   const [examCramError, setExamCramError] = useState("");
   const [quizChapterSelectionInput, setQuizChapterSelectionInput] = useState("");
   const [quizPromptAddonInput, setQuizPromptAddonInput] = useState("");
-  const [quizDifficulty, setQuizDifficulty] = useState(null);
+  const [quizDifficulty, setQuizDifficultyRaw] = useState(() => {
+    const saved = localStorage.getItem("quizDifficulty");
+    return ["하", "중", "상"].includes(saved) ? saved : null;
+  });
+  const setQuizDifficulty = (value) => {
+    const normalized = ["하", "중", "상"].includes(value) ? value : null;
+    setQuizDifficultyRaw(normalized);
+    if (normalized) {
+      localStorage.setItem("quizDifficulty", normalized);
+    } else {
+      localStorage.removeItem("quizDifficulty");
+    }
+  };
   const [oxChapterSelectionInput, setOxChapterSelectionInput] = useState("");
   const [flashcardChapterSelectionInput, setFlashcardChapterSelectionInput] = useState("");
   const [mockExamChapterSelectionInput, setMockExamChapterSelectionInput] = useState("");
