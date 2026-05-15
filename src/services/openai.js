@@ -602,8 +602,7 @@ function buildQuizPrompt(
     title: "Additional quiz request",
   });
 
-  const difficultyBlock = difficulty
-    ? `
+  const difficultyDefinitions = `
 [Difficulty definitions]
 하 (Basic)
 - Tests recognition of key terms, definitions, or simple facts stated in the document.
@@ -621,12 +620,23 @@ function buildQuizPrompt(
 - Tests synthesis, multi-step reasoning, edge cases, or application to a combined/modified scenario.
 - Stem pattern: compound conditions, negation, exception-finding, synthesis across sections.
 - At least two distractors must be genuinely tempting to someone who partially understands the concept.
-- Distractors: real concepts combined in a way that fails under one specific condition; reversal of cause/effect; valid-seeming exceptions that collapse under scrutiny.
+- Distractors: real concepts combined in a way that fails under one specific condition; reversal of cause/effect; valid-seeming exceptions that collapse under scrutiny.`;
+
+  const difficultyBlock = difficulty
+    ? `${difficultyDefinitions}
 
 [Active difficulty]
 ${difficulty}
-Generate ALL questions at this difficulty level only. Set the difficulty field to "${difficulty}" on every item.`
-    : "";
+Generate ALL questions at this difficulty level only. Set the difficulty field to "${difficulty}" on every item.
+
+`
+    : `${difficultyDefinitions}
+
+[Difficulty distribution — no active difficulty set]
+Distribute questions across all three levels. Aim for roughly 25% 하, 50% 중, 25% 상.
+Assign the appropriate difficulty field to each item based on how it fits the definitions above.
+
+`;
 
   return `
 You are a professor creating quiz questions from lecture material.
@@ -2487,7 +2497,7 @@ export async function generateQuiz(
 
   // 캐싱 키 생성
   const cacheKey = getCacheKey(extractedText, {
-    version: "quiz-style-v4",
+    version: "quiz-style-v5",
     type: "quiz",
     mcCount,
     saCount,
@@ -2525,7 +2535,7 @@ export async function generateQuiz(
       messages: [
         {
           role: "system",
-          content: `Generate ${mcCount} ${outputLanguageLabel} multiple-choice items (4 options each) plus ${saCount} ${outputLanguageLabel} short-answer items from the user's text only. Each question must assess understanding/apply/disambiguate/misconception check, not verbatim recall. If a document question style profile is provided, the output must feel like that document's own problem style rather than a generic AI quiz style. Match the original stem tone, distractor logic, and reasoning grain without copying sample stems. Avoid asking for raw facts/URLs/names/numbers. Short-answer items must have one exact, short answer only, such as a number, formula, term, concept name, or short phrase. Do not generate essay-style prompts like 설명하라, 서술하라, 논하라, or 기술하라. The shortAnswer answer field must be directly gradable and must not be a sentence. Exclude textbook/preface metadata questions (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure). Before returning, reject any item whose tone or structure feels mismatched with the detected document question style. Respond with JSON only using the provided schema. shortAnswer must be an array with ${saCount} items (empty if 0).`,
+          content: `Generate ${mcCount} ${outputLanguageLabel} multiple-choice items (4 options each) plus ${saCount} ${outputLanguageLabel} short-answer items from the user's text only.${normalizedDifficulty ? ` ALL items must be at difficulty level "${normalizedDifficulty}" as defined in the user message — do not mix difficulty levels.` : " Distribute difficulty across 하/중/상 levels (roughly 25%/50%/25%) and set the difficulty field on every item."} Each question must assess understanding/apply/disambiguate/misconception check, not verbatim recall. If a document question style profile is provided, the output must feel like that document's own problem style rather than a generic AI quiz style. Match the original stem tone, distractor logic, and reasoning grain without copying sample stems. Avoid asking for raw facts/URLs/names/numbers. Short-answer items must have one exact, short answer only, such as a number, formula, term, concept name, or short phrase. Do not generate essay-style prompts like 설명하라, 서술하라, 논하라, or 기술하라. The shortAnswer answer field must be directly gradable and must not be a sentence. Exclude textbook/preface metadata questions (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure). Before returning, reject any item whose tone or structure feels mismatched with the detected document question style. Respond with JSON only using the provided schema. shortAnswer must be an array with ${saCount} items (empty if 0).`,
         },
         { role: "user", content: prompt },
       ],
