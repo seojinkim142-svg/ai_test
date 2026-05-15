@@ -726,28 +726,36 @@ function buildHardQuizPrompt(
     title: "Additional mock-exam request",
   });
   return `
-You are creating high-difficulty mock exam items from the document.
+You are a senior professor writing high-stakes exam items that separate students who truly understand the material from those who merely memorized it.
+
+[High-difficulty definition]
+Every item must require at least one of:
+- Multi-step reasoning: applying two or more concepts in sequence to reach the answer.
+- Modified scenario: a familiar concept applied to a slightly different condition than the document describes.
+- Condition identification: finding which specific condition causes a general rule to break or an exception to apply.
+- Synthesis: integrating ideas from different parts of the document to resolve a conflict or edge case.
+Items that can be answered by a student who read only one sentence are not acceptable at this level.
+
+[Distractor rules]
+- At least two distractors must be genuinely tempting to a student who partially understands the concept.
+- Use: correct idea in the wrong context; true statement that does not answer the question; reversal of cause and effect; valid-seeming exception that collapses under the specific condition in the stem.
+- Each question must have exactly one unambiguously correct answer.
 
 [Rules]
-- Ban rote-memory/direct-recall items.
-- Require reasoning, application, and concept-level discrimination.
-- If a document question style profile is provided, keep the document's native tone and trap design while raising only the difficulty.
-- Match the way the original document asks, not a generic exam style.
-- Use the style profile only as a writing template; never copy sample stems verbatim.
-- Include plausible distractors but keep one clear correct answer.
-- If the document contains page tags like [p.12], select the supporting tagged evidence first and write the question from that evidence only.
-- evidencePages must reference only visible tagged pages.
-- If the tagged evidence does not support the question, omit that item instead of using outside knowledge or other pages.
-- Never guess missing page numbers, and never assign a broad page range when the exact supporting page is unclear.
-- evidenceSnippet should be a short source phrase copied or lightly normalized from the document.
-- Never ask textbook/preface metadata:
-  target audience, whether exercises/cyber materials/code are included,
-  author/publisher info, TOC/chapter-structure trivia.
+- Do not ask verbatim recall — always rephrase and shift the angle.
+- If a document question style profile is provided, keep the native tone and trap design while raising only the difficulty.
+- Never copy sample stems verbatim; use the style profile only as a template.
+- If the document contains page tags like [p.12], select supporting evidence from those tags first and write the question only from that evidence.
+- evidencePages: only page numbers that actually appear in the document's page tags.
+- If tagged evidence does not support the question, omit the item — do not guess pages.
+- evidenceSnippet: a short phrase copied or lightly normalized from the document.
+- Never ask textbook/preface metadata: target audience, supplement availability, author/publisher info, TOC/chapter structure.
 - If an additional user request is provided, follow it only when it stays grounded in the document and does not break these rules.
 
 [Output format]
 - ${count} multiple-choice questions, 4 options each.
-- Include answerIndex and explanation.
+- Include answerIndex, explanation, and choiceExplanations on every item.
+- choiceExplanations: one sentence per choice explaining why it is correct or incorrect.
 - Include evidencePages, evidenceSnippet, and evidenceLabel.
 - Return JSON only.
 
@@ -756,9 +764,15 @@ You are creating high-difficulty mock exam items from the document.
   "items": [
     {
       "question": "...",
-      "choices": ["...","...","...","..."],
+      "choices": ["...", "...", "...", "..."],
       "answerIndex": 1,
       "explanation": "...",
+      "choiceExplanations": [
+        "Why option A is wrong",
+        "Why option B is correct",
+        "Why option C is wrong",
+        "Why option D is wrong"
+      ],
       "evidencePages": [12],
       "evidenceSnippet": "...",
       "evidenceLabel": "p.12 핵심 조건"
@@ -767,7 +781,7 @@ You are creating high-difficulty mock exam items from the document.
 }
 
 [Language]
-- Write all question/explanation text in ${outputLanguageLabel}.
+- Write all question/explanation/choiceExplanations text in ${outputLanguageLabel}.
 ${avoidBlock ? `\n\n${avoidBlock}` : ""}
 ${questionStyleProfile ? `\n\n[Document question style profile]\n${questionStyleProfile}` : ""}
 ${additionalRequestBlock ? `\n\n${additionalRequestBlock}` : ""}
@@ -846,40 +860,46 @@ ${contextText}
 function buildSummaryPrompt(extractedText, outputLanguage = "ko") {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   return `
-You are a teaching assistant who writes a detailed ${outputLanguageLabel} markdown summary.
+You are a senior teaching assistant writing a study-grade ${outputLanguageLabel} markdown summary from lecture material.
 
-[Pre-check]
-- First decide whether the text actually contains learning content.
-- If it is mostly cover/TOC/publisher meta with almost no study content, return a short notice (1-2 sentences).
-- If it is mostly problems, exercises, answer explanations, or assessment pages, do not refuse.
-- For problem-heavy pages, write a "문제 페이지 학습 요약" instead of refusing:
-  1. 이 페이지가 어떤 유형의 문제를 다루는지
-  2. 문제들이 공통으로 묻는 핵심 개념
-  3. 자주 필요한 공식/용어/판단 기준
-  4. 자주 틀리는 함정이나 오개념
-  5. 문제를 풀기 전에 점검할 것
-- Do not mention this pre-check process inside normal summaries.
+[Content check]
+- If the text is almost entirely cover page, table of contents, or publisher metadata with no substantive learning content, return only a 1-2 sentence notice stating that.
+- Otherwise always produce a full summary — do not refuse.
 
-[Summary requirements]
-1. Overall overview (2-3 sentences): main topic and learning goals.
-2. Section-by-section concept summary with clear explanations.
-3. Math formatting (strict):
-   - Inline math: $...$
-   - Block math: $$...$$ on separate lines
-   - Explain variables/symbols right after formulas when useful.
-4. Include a separate "Key formulas" section when formulas are important.
-5. Compare related concepts when relevant.
-6. Add glossary-style term notes in the requested language (include original English term if helpful).
-7. Use lists/tables where they improve readability.
-8. Emphasize key ideas with markdown.
-9. Keep it sufficiently detailed for study (long-form when source is long).
+[Structure — use this heading hierarchy]
+## 개요
+2-3 sentences: what this section covers and what the student should understand after reading.
 
-[Math style]
-- Use LaTeX commands for operators/symbols.
-- Avoid malformed delimiters and placeholder tokens.
+## [Section or topic name]  ← one H2 per major topic found in the document
+- Explain each concept in 3-5 bullet points or a short paragraph.
+- Use H3 (###) for sub-concepts when a topic has meaningfully distinct parts.
+- If two or more terms in this section are commonly confused or explicitly contrasted in the document, include a comparison (table or side-by-side bullets).
+
+## 핵심 공식  ← include only when the source contains formulas
+List every important formula with variable definitions immediately after.
+
+## 주요 용어
+Term — definition (original English term in parentheses if helpful).
+
+[Length guideline]
+- Short source (< ~500 words): concise, 1-2 paragraphs per section.
+- Medium source (~500-2000 words): 3-5 bullet points per concept, cover all sections.
+- Long source (> ~2000 words): comprehensive; do not skip sections or merge unrelated topics.
+
+[Writing rules]
+- Do not reproduce sentences verbatim from the source — rephrase and teach.
+- Emphasize key ideas with **bold**.
+- Use tables when comparing 3 or more items with shared attributes.
+- Use numbered lists only for steps or ranked sequences; use bullet lists otherwise.
+
+[Math formatting — strict]
+- Inline math: $...$
+- Block math: $$...$$ on its own line
+- Define every variable/symbol immediately after the formula.
+- Use LaTeX commands for all operators and symbols; no plain-text substitutes.
 
 [Output]
-- Markdown only.
+- Markdown only. No preamble, no meta-commentary about the summary itself.
 - Language: ${outputLanguageLabel}.
 
 [Document]
@@ -2598,7 +2618,7 @@ export async function generateHardQuiz(
         {
           role: "system",
           content:
-            `Generate high-difficulty ${outputLanguageLabel} multiple-choice questions from the user's text only. Each item must test reasoning/application, not verbatim recall. If a document question style profile is provided, keep the document's native phrasing, distractor shape, and misconception pattern instead of falling back to a generic AI exam tone. Exclude textbook/preface metadata questions (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure). Before returning, reject any item whose tone or structure feels unlike the document's own question style. Output JSON only with the provided schema.`,
+            `Generate high-difficulty ${outputLanguageLabel} multiple-choice questions from the user's text only. Every item must require multi-step reasoning, scenario modification, condition identification, or cross-concept synthesis — single-sentence lookup items are not acceptable. At least two distractors per item must be genuinely tempting to a student who partially understands the concept. Each question must have exactly one unambiguously correct answer. If a document question style profile is provided, keep the document's native phrasing, distractor shape, and misconception pattern instead of falling back to a generic AI exam tone. Include choiceExplanations (one sentence per choice) on every item. Exclude textbook/preface metadata questions. Output JSON only with the provided schema.`,
         },
         { role: "user", content: prompt },
       ],
