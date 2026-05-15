@@ -589,6 +589,7 @@ function buildQuizPrompt(
     questionStyleProfile = "",
     additionalRequest = "",
     outputLanguage = "ko",
+    difficulty = null,
   }
 ) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
@@ -600,18 +601,46 @@ function buildQuizPrompt(
   const additionalRequestBlock = buildAdditionalRequestBlock(additionalRequest, {
     title: "Additional quiz request",
   });
+
+  const difficultyBlock = difficulty
+    ? `
+[Difficulty definitions]
+하 (Basic)
+- Tests recognition of key terms, definitions, or simple facts stated in the document.
+- Stem pattern: "what is", "which of these is", "which term describes".
+- Distractors: definitions from the wrong concept, or a true fact that does not answer the question.
+- A student who read the section once should answer correctly.
+
+중 (Intermediate)
+- Tests understanding of relationships between concepts, or application to a standard scenario.
+- Stem pattern: "why", "how", "which condition", "what would happen if".
+- Requires understanding "why", not just "what".
+- Distractors: partially correct statements missing one key condition, or correct ideas in the wrong context.
+
+상 (Advanced)
+- Tests synthesis, multi-step reasoning, edge cases, or application to a combined/modified scenario.
+- Stem pattern: compound conditions, negation, exception-finding, synthesis across sections.
+- At least two distractors must be genuinely tempting to someone who partially understands the concept.
+- Distractors: real concepts combined in a way that fails under one specific condition; reversal of cause/effect; valid-seeming exceptions that collapse under scrutiny.
+
+[Active difficulty]
+${difficulty}
+Generate ALL questions at this difficulty level only. Set the difficulty field to "${difficulty}" on every item.`
+    : "";
+
   return `
 You are a professor creating quiz questions from lecture material.
-
+${difficultyBlock}
 [Rules]
 - Use only the selected chapter range shown below. Do not create questions from outside that range.
 - If a candidate question depends on content not explicitly present in the selected range, do not generate it.
-- Use document facts only as context; do not ask verbatim recall questions.
+- Do not ask verbatim recall — always rephrase and shift the angle of asking.
 - Questions must test understanding, comparison, application, misconception checks, or interpretation.
 - If a document question style profile is provided, match that style closely: stem shape, distractor style, reasoning grain, and trap pattern.
 - Use the style profile only for "how to ask"; use the selected document text for "what to ask".
 - Do not copy any sample stem verbatim, and reject any item that feels unlike the document's native question style.
 - Avoid pure memorization prompts (raw URLs, names, single numbers).
+- Each question must have exactly one unambiguously correct answer.
 - If the document contains page tags like [p.12], first choose 1-2 tagged evidence passages and then write the question from that evidence only.
 - evidencePages must use only page numbers that actually appear in the provided page tags.
 - If the tagged evidence does not support the question, omit that item instead of using outside knowledge or other pages.
@@ -627,6 +656,7 @@ You are a professor creating quiz questions from lecture material.
 - Short-answer: ${shortAnswerCount} questions with a single exact answer.
 - Include answerIndex, explanation, and choiceExplanations for multiple-choice.
 - choiceExplanations is an array of short strings (one per choice) explaining why each option is correct or incorrect.
+- Include a difficulty field on every item ("하", "중", or "상").
 - Include answer and explanation for short-answer.
 - Include evidencePages, evidenceSnippet, and evidenceLabel for every item.
 - Return JSON only.
@@ -636,10 +666,16 @@ You are a professor creating quiz questions from lecture material.
   "multipleChoice": [
     {
       "question": "...",
-      "choices": ["...","...","...","..."],
+      "choices": ["...", "...", "...", "..."],
       "answerIndex": 1,
+      "difficulty": "중",
       "explanation": "...",
-      "choiceExplanations": ["왜 A가 틀린지...", "왜 B가 맞는지...", "왜 C가 틀린지...", "왜 D가 틀린지..."],
+      "choiceExplanations": [
+        "Why option A is wrong",
+        "Why option B is correct",
+        "Why option C is wrong",
+        "Why option D is wrong"
+      ],
       "evidencePages": [12],
       "evidenceSnippet": "...",
       "evidenceLabel": "p.12 정의 문단"
@@ -649,6 +685,7 @@ You are a professor creating quiz questions from lecture material.
     {
       "question": "...",
       "answer": "...",
+      "difficulty": "중",
       "explanation": "...",
       "evidencePages": [12],
       "evidenceSnippet": "...",
@@ -658,7 +695,7 @@ You are a professor creating quiz questions from lecture material.
 }
 
 [Language]
-- Write all question/explanation text in ${outputLanguageLabel}.
+- Write all question/explanation/choiceExplanations text in ${outputLanguageLabel}.
 ${avoidBlock ? `\n\n${avoidBlock}` : ""}
 ${questionStyleProfile ? `\n\n[Document question style profile]\n${questionStyleProfile}` : ""}
 ${additionalRequestBlock ? `\n\n${additionalRequestBlock}` : ""}
@@ -2439,16 +2476,18 @@ export async function generateQuiz(
     questionStyleProfile = "",
     additionalRequest = "",
     outputLanguage = "ko",
+    difficulty = null,
   } = {}
 ) {
   const mcCount = Math.max(0, Math.min(10, Number(multipleChoiceCount) || 0));
   const saCount = Math.max(0, Math.min(10, Number(shortAnswerCount) || 0));
+  const normalizedDifficulty = ["하", "중", "상"].includes(difficulty) ? difficulty : null;
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const normalizedAdditionalRequest = normalizeAdditionalRequest(additionalRequest);
-  
+
   // 캐싱 키 생성
   const cacheKey = getCacheKey(extractedText, {
-    version: "quiz-style-v3",
+    version: "quiz-style-v4",
     type: "quiz",
     mcCount,
     saCount,
@@ -2456,8 +2495,9 @@ export async function generateQuiz(
     scopeLabel,
     additionalRequest: normalizedAdditionalRequest,
     outputLanguage,
+    difficulty: normalizedDifficulty,
   });
-  
+
   // 캐시 확인
   const cached = getCachedResult(cacheKey);
   if (cached) {
@@ -2476,6 +2516,7 @@ export async function generateQuiz(
     questionStyleProfile: resolvedQuestionStyleProfile,
     additionalRequest: normalizedAdditionalRequest,
     outputLanguage,
+    difficulty: normalizedDifficulty,
   });
 
   const data = await postChatRequest(

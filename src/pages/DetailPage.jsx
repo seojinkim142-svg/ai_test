@@ -161,6 +161,10 @@ export default function DetailPage({
   isLoadingText,
   previewText,
   isFreeTier,
+  hasReachedSummaryLimit = false,
+  hasReachedQuizLimit = false,
+  hasReachedOxLimit = false,
+  hasReachedFlashcardLimit = false,
   summary,
   instructorEmphasisInput,
   setInstructorEmphasisInput,
@@ -235,6 +239,8 @@ export default function DetailPage({
   setQuizChapterSelectionInput,
   quizPromptAddonInput,
   setQuizPromptAddonInput,
+  quizDifficulty,
+  setQuizDifficulty,
   quizMixInput,
   setQuizMixInput,
   quizMix,
@@ -469,6 +475,18 @@ export default function DetailPage({
     () => requestSummary({ force: true, replaceExisting: true }),
     [requestSummary]
   );
+  const summaryLimitTitle = hasReachedSummaryLimit
+    ? "무료 플랜에서는 파일당 요약을 1회만 생성할 수 있습니다."
+    : undefined;
+  const quizLimitTitle = hasReachedQuizLimit
+    ? "무료 플랜에서는 파일당 퀴즈를 1회만 생성할 수 있습니다."
+    : undefined;
+  const oxLimitTitle = hasReachedOxLimit
+    ? "무료 플랜에서는 파일당 O/X를 1회만 생성할 수 있습니다."
+    : undefined;
+  const flashcardLimitTitle = hasReachedFlashcardLimit
+    ? "무료 플랜에서는 파일당 AI 플래시카드를 1회만 생성할 수 있습니다."
+    : undefined;
 
   useEffect(() => {
     if (panelTab === "ox") {
@@ -670,7 +688,8 @@ export default function DetailPage({
                   <button
                     type="button"
                     onClick={handleRequestSummary}
-                    disabled={isLoadingSummary || isLoadingText}
+                    disabled={isLoadingSummary || isLoadingText || hasReachedSummaryLimit}
+                    title={summaryLimitTitle}
                     className="ghost-button text-xs text-emerald-100"
                     style={{ "--ghost-color": "16, 185, 129" }}
                   >
@@ -1386,6 +1405,31 @@ export default function DetailPage({
                     </p>
                   </div>
                   <div className="md:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-300">난이도</label>
+                    <div className="mt-2 flex gap-2">
+                      {[
+                        { value: null, label: "자동" },
+                        { value: "하", label: "쉬움 (하)" },
+                        { value: "중", label: "보통 (중)" },
+                        { value: "상", label: "어려움 (상)" },
+                      ].map(({ value, label }) => (
+                        <button
+                          key={String(value)}
+                          type="button"
+                          disabled={isLoadingQuiz || isLoadingText}
+                          onClick={() => setQuizDifficulty(value)}
+                          className={`rounded-xl px-3 py-1.5 text-xs font-semibold ring-1 transition ${
+                            quizDifficulty === value
+                              ? "bg-emerald-500/25 text-emerald-100 ring-emerald-400/60"
+                              : "bg-white/5 text-slate-300 ring-white/10 hover:ring-emerald-300/40"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="md:col-span-2">
                     <label className="block text-xs font-semibold text-slate-300">추가 요청</label>
                     <textarea
                       value={quizPromptAddonInput}
@@ -1474,11 +1518,11 @@ export default function DetailPage({
                     ((Number(quizMix?.multipleChoice) || 0) +
                       (Number(quizMix?.shortAnswer) || 0) <=
                       0) ||
-                    (isFreeTier && quizSets.length > 0)
+                    hasReachedQuizLimit
                   }
                   title={
-                    isFreeTier && quizSets.length > 0
-                      ? "무료 티어에서는 퀴즈 세트를 1개만 생성할 수 없습니다."
+                    hasReachedQuizLimit
+                      ? quizLimitTitle
                       : quizMixError || undefined
                   }
                   className="ghost-button w-full text-sm text-emerald-100"
@@ -1493,7 +1537,8 @@ export default function DetailPage({
                 <button
                   type="button"
                   onClick={() => requestOxQuiz({ auto: false })}
-                  disabled={isLoadingOx || isLoadingText}
+                  disabled={isLoadingOx || isLoadingText || hasReachedOxLimit}
+                  title={oxLimitTitle}
                   className="ghost-button w-full text-sm text-emerald-100"
                   data-ghost-size="xl"
                   style={{ "--ghost-color": "16, 185, 129" }}
@@ -1772,7 +1817,14 @@ export default function DetailPage({
                   <button
                     type="button"
                     onClick={handleGenerateFlashcards}
-                    disabled={isGeneratingFlashcards || isLoadingText || !file || !selectedFileId}
+                    disabled={
+                      isGeneratingFlashcards ||
+                      isLoadingText ||
+                      !file ||
+                      !selectedFileId ||
+                      hasReachedFlashcardLimit
+                    }
+                    title={flashcardLimitTitle}
                     className="ghost-button text-xs text-emerald-100"
                     data-ghost-size="sm"
                     style={{ "--ghost-color": "52, 211, 153" }}
@@ -1788,7 +1840,8 @@ export default function DetailPage({
                 onDelete={handleDeleteFlashcard}
                 onGenerate={handleGenerateFlashcards}
                 isGenerating={isGeneratingFlashcards}
-                canGenerate={Boolean(file && selectedFileId && !isLoadingText)}
+                canGenerate={Boolean(file && selectedFileId && !isLoadingText) && !hasReachedFlashcardLimit}
+                generateButtonTitle={flashcardLimitTitle}
                 status={flashcardStatus}
                 error={flashcardError}
               />

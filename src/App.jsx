@@ -247,6 +247,7 @@ function isSafeStoragePathForReuse(rawPath) {
 const CHAPTER_RANGE_STORAGE_PREFIX = "zeusian:chapter-ranges:v1";
 const PARTIAL_SUMMARY_ARTIFACT_KEY = "__partial_summary_state_v1";
 const PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY = "__partial_summary_library_v1";
+const FREE_USAGE_ARTIFACT_KEY = "__free_usage_v1";
 const INSTRUCTOR_EMPHASIS_ARTIFACT_KEY = "__instructor_emphasis_v1";
 const INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY = "__instructor_emphasis_library_v1";
 const INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY = "__instructor_emphasis_active_id_v1";
@@ -808,6 +809,78 @@ function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function normalizeUsageCountValue(value) {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+function normalizeFreeUsageCounts(value, fallback = null) {
+  const base = isPlainObject(value) ? value : {};
+  const fallbackBase = isPlainObject(fallback) ? fallback : {};
+  return {
+    summary: normalizeUsageCountValue(base.summary ?? fallbackBase.summary),
+    quiz: normalizeUsageCountValue(base.quiz ?? fallbackBase.quiz),
+    ox: normalizeUsageCountValue(base.ox ?? fallbackBase.ox),
+    flashcards: normalizeUsageCountValue(base.flashcards ?? fallbackBase.flashcards),
+  };
+}
+
+function buildFreeUsageFallback({ summary = null, quiz = null, ox = null } = {}) {
+  return normalizeFreeUsageCounts({
+    summary: String(summary || "").trim() ? 1 : 0,
+    quiz: quiz ? 1 : 0,
+    ox: Array.isArray(ox?.items) && ox.items.length > 0 ? 1 : 0,
+    flashcards: 0,
+  });
+}
+
+function readFreeUsageCountsFromHighlights(highlightsValue, fallback = null) {
+  const fallbackCounts = normalizeFreeUsageCounts(null, fallback);
+  const base = isPlainObject(highlightsValue) ? highlightsValue : null;
+  const raw = isPlainObject(base?.[FREE_USAGE_ARTIFACT_KEY]) ? base[FREE_USAGE_ARTIFACT_KEY] : null;
+  const counts = normalizeFreeUsageCounts(raw, fallbackCounts);
+  return {
+    summary: Math.max(counts.summary, fallbackCounts.summary),
+    quiz: Math.max(counts.quiz, fallbackCounts.quiz),
+    ox: Math.max(counts.ox, fallbackCounts.ox),
+    flashcards: Math.max(counts.flashcards, fallbackCounts.flashcards),
+  };
+}
+
+function writeFreeUsageCountsToHighlights(highlightsValue, counts) {
+  const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
+  if (!isPlainObject(highlightsValue) && highlightsValue != null) {
+    base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
+  }
+
+  const normalizedCounts = normalizeFreeUsageCounts(counts);
+  if (Object.values(normalizedCounts).some((count) => count > 0)) {
+    base[FREE_USAGE_ARTIFACT_KEY] = normalizedCounts;
+  } else {
+    delete base[FREE_USAGE_ARTIFACT_KEY];
+  }
+
+  return Object.keys(base).length > 0 ? base : null;
+}
+
+function bumpFreeUsageCount(counts, feature) {
+  const normalizedCounts = normalizeFreeUsageCounts(counts);
+  if (!Object.prototype.hasOwnProperty.call(normalizedCounts, feature)) {
+    return normalizedCounts;
+  }
+  return {
+    ...normalizedCounts,
+    [feature]: normalizedCounts[feature] + 1,
+  };
+}
+
+const LIMIT_USAGE_KEY_MAP = Object.freeze({
+  maxSummary: "summary",
+  maxQuiz: "quiz",
+  maxOx: "ox",
+  maxFlashcards: "flashcards",
+});
+
 function readPartialSummaryBundleFromHighlights(highlightsValue) {
   const base = isPlainObject(highlightsValue) ? highlightsValue : null;
   const rawState = isPlainObject(base?.[PARTIAL_SUMMARY_ARTIFACT_KEY])
@@ -1142,6 +1215,7 @@ function App() {
   const [examCramError, setExamCramError] = useState("");
   const [quizChapterSelectionInput, setQuizChapterSelectionInput] = useState("");
   const [quizPromptAddonInput, setQuizPromptAddonInput] = useState("");
+  const [quizDifficulty, setQuizDifficulty] = useState(null);
   const [oxChapterSelectionInput, setOxChapterSelectionInput] = useState("");
   const [flashcardChapterSelectionInput, setFlashcardChapterSelectionInput] = useState("");
   const [mockExamChapterSelectionInput, setMockExamChapterSelectionInput] = useState("");
@@ -1184,7 +1258,8 @@ function App() {
   const isFreeTier = tier === "free";
   const isPremiumTier = tier === "premium";
   const isFolderFeatureEnabled = !isFreeTier;
-  const [usageCounts, setUsageCounts] = useState({ summary: 0, quiz: 0, ox: 0 });
+  const [usageCounts, setUsageCounts] = useState({ summary: 0, quiz: 0, ox: 0, flashcards: 0 });
+  const usageCountsByDocRef = useRef(new Map());
   const [folders, setFolders] = useState([]);
   const [selectedFolderId, setSelectedFolderId] = useState("all");
   const [selectedUploadIds, setSelectedUploadIds] = useState([]);
@@ -1420,6 +1495,7 @@ function App() {
         maxSummary: 1,
         maxQuiz: 1,
         maxOx: 1,
+        maxFlashcards: 1,
         maxPdfSizeBytes: PDF_MAX_SIZE_BY_TIER.free,
       };
     }
@@ -1429,6 +1505,7 @@ function App() {
         maxSummary: Infinity,
         maxQuiz: Infinity,
         maxOx: Infinity,
+        maxFlashcards: Infinity,
         maxPdfSizeBytes: PDF_MAX_SIZE_BY_TIER.pro,
       };
     }
@@ -1437,17 +1514,43 @@ function App() {
       maxSummary: Infinity,
       maxQuiz: Infinity,
       maxOx: Infinity,
+      maxFlashcards: Infinity,
       maxPdfSizeBytes: PDF_MAX_SIZE_BY_TIER.premium,
     };
   }, [tier]);
 
   const hasReached = useCallback(
     (type) => {
-      if (!limits) return false;
+      const usageKey = LIMIT_USAGE_KEY_MAP[type];
+      if (!limits || !usageKey) return false;
       if (limits[type] === Infinity) return false;
-      return usageCounts[type] >= limits[type];
+      return Number(usageCounts?.[usageKey] || 0) >= limits[type];
     },
     [limits, usageCounts]
+  );
+  const applyUsageCountsForDoc = useCallback((docId, counts) => {
+    const docKey = String(docId || "").trim();
+    const normalizedCounts = normalizeFreeUsageCounts(counts);
+    if (docKey) {
+      usageCountsByDocRef.current.set(docKey, normalizedCounts);
+    }
+    setUsageCounts(normalizedCounts);
+    return normalizedCounts;
+  }, []);
+  const bumpUsageCountForActiveDoc = useCallback(
+    (feature) => {
+      const docKey = String(selectedFileId || file?.name || "").trim();
+      const currentCounts = docKey
+        ? usageCountsByDocRef.current.get(docKey) || usageCounts
+        : usageCounts;
+      const nextCounts = bumpFreeUsageCount(currentCounts, feature);
+      if (docKey) {
+        usageCountsByDocRef.current.set(docKey, nextCounts);
+      }
+      setUsageCounts(nextCounts);
+      return nextCounts;
+    },
+    [selectedFileId, file?.name, usageCounts]
   );
 
   const openAuth = useCallback(() => {
@@ -2604,6 +2707,10 @@ function App() {
           ox: data?.ox_json || null,
           highlights: data?.highlights_json || null,
         };
+        const freeUsageCounts = readFreeUsageCountsFromHighlights(
+          mapped.highlights,
+          buildFreeUsageFallback(mapped)
+        );
         const partialBundle = readPartialSummaryBundleFromHighlights(mapped.highlights);
         const reviewNoteEntries = readReviewNotesFromHighlights(mapped.highlights);
         const examCramBundle = readExamCramFromHighlights(mapped.highlights);
@@ -2682,7 +2789,10 @@ function App() {
           setOxItems(mapped.ox?.items || []);
           oxAutoRequestedRef.current = true;
         }
-        return mapped;
+        return {
+          ...mapped,
+          freeUsageCounts,
+        };
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn("Failed to load artifacts", err);
@@ -3069,6 +3179,7 @@ function App() {
       setAutoChapterRangeInput("");
       setChapterRangeError("");
       oxAutoRequestedRef.current = false;
+      applyUsageCountsForDoc(nextDocId, usageCountsByDocRef.current.get(String(nextDocId || "").trim()));
       const artifactsPromise = loadArtifacts(nextDocId);
 
       try {
@@ -3103,6 +3214,9 @@ function App() {
         setError("");
         await Promise.all([loadMockExams(nextDocId), loadFlashcards(nextDocId)]);
         if (fileOpenRequestSeqRef.current !== requestSeq) return;
+        if (loaded?.freeUsageCounts) {
+          applyUsageCountsForDoc(nextDocId, loaded.freeUsageCounts);
+        }
         if (loaded?.summary) {
           setStatus("Loaded saved summary.");
         }
@@ -3124,6 +3238,7 @@ function App() {
       ensureFileForItem,
       loadSavedChapterRangeInput,
       loadArtifacts,
+      applyUsageCountsForDoc,
       loadFlashcards,
       loadMockExams,
       loadPageProgressSnapshot,
@@ -4315,12 +4430,8 @@ function App() {
       setError(quizMixError || "문항 비율을 다시 확인해주세요.");
       return;
     }
-    if (isFreeTier && quizSets.length > 0) {
-      setError("무료 플랜에서는 퀴즈 세트를 1개만 생성할 수 있습니다.");
-      return;
-    }
-    if (!force && hasReached("maxQuiz")) {
-      setError("현재 요금제의 퀴즈 생성 한도에 도달했습니다.");
+    if (hasReached("maxQuiz")) {
+      setError("무료 플랜에서는 파일당 퀴즈를 1회만 생성할 수 있습니다.");
       return;
     }
     const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
@@ -4394,6 +4505,7 @@ function App() {
           questionStyleProfile: questionStyleProfileContent,
           additionalRequest,
           outputLanguage,
+          difficulty: quizDifficulty,
         });
         if (!questionStyleProfile) {
           questionStyleProfile = String(rawQuizResult?.questionStyleProfile || "").trim();
@@ -4451,6 +4563,7 @@ function App() {
             questionStyleProfile: questionStyleProfile || questionStyleProfileContent,
             additionalRequest,
             outputLanguage,
+            difficulty: quizDifficulty,
           });
           if (!questionStyleProfile) {
             questionStyleProfile = String(rawQuizResult?.questionStyleProfile || "").trim();
@@ -4510,9 +4623,10 @@ function App() {
         : scopeLabel
           ? `퀴즈 세트가 생성되었습니다. (${scopeLabel})`
           : "퀴즈 세트가 생성되었습니다.";
+      const nextUsageCounts = bumpUsageCountForActiveDoc("quiz");
+      const nextHighlights = writeFreeUsageCountsToHighlights(artifacts?.highlights, nextUsageCounts);
       setStatus(quizStatusLabel);
-      setUsageCounts((prev) => ({ ...prev, quiz: prev.quiz + 1 }));
-      persistArtifacts({ quiz: trimmedQuiz });
+      persistArtifacts({ quiz: trimmedQuiz, highlights: nextHighlights });
     } catch (err) {
       setError(`퀴즈 세트 생성에 실패했습니다: ${err.message}`);
     } finally {
@@ -4591,12 +4705,8 @@ function App() {
       setError("먼저 PDF를 열어주세요.");
       return;
     }
-    if (isFreeTier) {
-      setError("무료 플랜에서는 퀴즈 세트를 다시 생성할 수 없습니다.");
-      return;
-    }
     if (hasReached("maxQuiz")) {
-      setError("현재 요금제의 퀴즈 생성 한도에 도달했습니다.");
+      setError("무료 플랜에서는 파일당 퀴즈를 1회만 생성할 수 있습니다.");
       return;
     }
     const chapterSelectionRaw = String(quizChapterSelectionInput || "").trim();
@@ -5309,8 +5419,8 @@ function App() {
       setError("먼저 PDF를 열어주세요.");
       return;
     }
-    if (!force && hasReached("maxSummary") && !shouldReplaceExisting) {
-      setError("현재 요금제의 요약 생성 한도에 도달했습니다.");
+    if (hasReached("maxSummary")) {
+      setError("무료 플랜에서는 파일당 요약을 1회만 생성할 수 있습니다.");
       return;
     }
 
@@ -5447,12 +5557,13 @@ function App() {
         scopeLabel: questionStyleScopeLabel,
         updatedAt: new Date().toISOString(),
       });
+      const nextUsageCounts = bumpUsageCountForActiveDoc("summary");
+      const nextHighlightsWithUsage = writeFreeUsageCountsToHighlights(nextHighlights, nextUsageCounts);
       setSummary(summarized);
       setQuestionStyleProfileContent(nextQuestionStyleProfile);
       setQuestionStyleProfileScopeLabel(nextQuestionStyleProfile ? questionStyleScopeLabel : "");
-      setUsageCounts((prev) => ({ ...prev, summary: prev.summary + 1 }));
       setStatus("요약이 생성되었습니다.");
-      persistArtifacts({ summary: summarized, highlights: nextHighlights });
+      persistArtifacts({ summary: summarized, highlights: nextHighlightsWithUsage });
     } catch (err) {
       setError(`요약 생성에 실패했습니다: ${err.message}`);
       setStatus("");
@@ -5884,8 +5995,8 @@ function App() {
       setError("먼저 PDF를 열어주세요.");
       return;
     }
-    if (!force && hasReached("maxOx")) {
-      setError("현재 요금제의 O/X 생성 한도에 도달했습니다.");
+    if (hasReached("maxOx")) {
+      setError("무료 플랜에서는 파일당 O/X를 1회만 생성할 수 있습니다.");
       return;
     }
     const chapterSelectionRaw = String(oxChapterSelectionInput || quizChapterSelectionInput || "").trim();
@@ -5946,9 +6057,10 @@ function App() {
       setOxItems(items);
       setOxSelections({});
       setOxExplanationOpen({});
+      const nextUsageCounts = bumpUsageCountForActiveDoc("ox");
+      const nextHighlights = writeFreeUsageCountsToHighlights(artifacts?.highlights, nextUsageCounts);
       setStatus(scopeLabel ? `O/X 문제가 생성되었습니다. (${scopeLabel})` : "O/X 문제가 생성되었습니다.");
-      setUsageCounts((prev) => ({ ...prev, ox: prev.ox + 1 }));
-      persistArtifacts({ ox });
+      persistArtifacts({ ox, highlights: nextHighlights });
     } catch (err) {
       setError(`O/X 문제 생성에 실패했습니다: ${err.message}`);
     } finally {
@@ -5963,7 +6075,7 @@ function App() {
       return;
     }
     if (hasReached("maxOx")) {
-      setError("현재 요금제의 O/X 생성 한도에 도달했습니다.");
+      setError("무료 플랜에서는 파일당 O/X를 1회만 생성할 수 있습니다.");
       return;
     }
     const chapterSelectionRaw = String(oxChapterSelectionInput || quizChapterSelectionInput || "").trim();
@@ -6056,6 +6168,10 @@ function App() {
       setFlashcardError("먼저 PDF를 열어 주세요.");
       return;
     }
+    if (hasReached("maxFlashcards")) {
+      setFlashcardError("무료 플랜에서는 파일당 AI 플래시카드를 1회만 생성할 수 있습니다.");
+      return;
+    }
     if (isLoadingText) {
       setFlashcardError("PDF 텍스트 추출이 아직 진행 중입니다. 잠시만 기다려 주세요.");
       return;
@@ -6115,12 +6231,15 @@ function App() {
       if (!saved.length) {
         throw new Error("생성된 플래시카드 저장에 실패했습니다.");
       }
+      const nextUsageCounts = bumpUsageCountForActiveDoc("flashcards");
+      const nextHighlights = writeFreeUsageCountsToHighlights(artifacts?.highlights, nextUsageCounts);
       setFlashcards((prev) => [...saved, ...prev]);
       setFlashcardStatus(
         scopeLabel
           ? `${saved.length}개의 AI 플래시카드를 생성했습니다 (${scopeLabel}).`
           : `${saved.length}개의 AI 플래시카드를 생성했습니다.`
       );
+      persistArtifacts({ highlights: nextHighlights });
     } catch (err) {
       setFlashcardError(`AI 플래시카드 생성에 실패했습니다: ${err.message}`);
       setFlashcardStatus("");
@@ -6132,12 +6251,16 @@ function App() {
     user,
     file,
     selectedFileId,
+    hasReached,
     isLoadingText,
     extractedText,
     flashcardChapterSelectionInput,
     getOpenAiService,
     outputLanguage,
     resolveQuestionSourceText,
+    artifacts?.highlights,
+    bumpUsageCountForActiveDoc,
+    persistArtifacts,
   ]);
 
   const handleResetTutor = useCallback(() => {
@@ -7357,6 +7480,10 @@ function App() {
     isLoadingText,
     previewText,
     isFreeTier,
+    hasReachedSummaryLimit: hasReached("maxSummary"),
+    hasReachedQuizLimit: hasReached("maxQuiz"),
+    hasReachedOxLimit: hasReached("maxOx"),
+    hasReachedFlashcardLimit: hasReached("maxFlashcards"),
     summary,
     instructorEmphasisInput,
     setInstructorEmphasisInput,
@@ -7433,6 +7560,8 @@ function App() {
     setQuizChapterSelectionInput,
     quizPromptAddonInput,
     setQuizPromptAddonInput,
+    quizDifficulty,
+    setQuizDifficulty,
     quizMixInput,
     setQuizMixInput,
     quizMix,
