@@ -36,12 +36,14 @@ function MultipleChoiceItem({ question, idx, questionNumber, selectedChoice, rev
           const showState = revealed && isSelected;
           const isCorrectSelection = showState && isAnswer;
           const isWrongSelection = showState && !isAnswer;
+          const showChoiceHint = revealed;
+          const choiceExplanation = question.choiceExplanations?.[cIdx];
 
           return (
             <li
               key={`${idx}-${cIdx}-${choice}`}
-              className={`flex cursor-pointer items-start gap-2 rounded-xl px-3 py-2 text-sm ring-1 transition ${
-                isCorrectSelection
+              className={`flex cursor-pointer flex-col rounded-xl px-3 py-2 text-sm ring-1 transition ${
+                revealed && isAnswer
                   ? "bg-emerald-500/20 text-emerald-50 ring-emerald-400/60"
                   : isWrongSelection
                     ? "bg-red-500/10 text-red-100 ring-red-400/40"
@@ -49,11 +51,18 @@ function MultipleChoiceItem({ question, idx, questionNumber, selectedChoice, rev
               }`}
               onClick={() => onSelect(idx, cIdx)}
             >
-              <span className="choice-label font-semibold text-white/80">{LETTERS[cIdx] || "-"}</span>
-              <MathMarkdown
-                content={choice}
-                className="summary-prose min-w-0 flex-1 max-w-none break-words text-sm text-slate-100 [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto"
-              />
+              <div className="flex items-start gap-2">
+                <span className="choice-label font-semibold text-white/80">{LETTERS[cIdx] || "-"}</span>
+                <MathMarkdown
+                  content={choice}
+                  className="summary-prose min-w-0 flex-1 max-w-none break-words text-sm text-slate-100 [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto"
+                />
+              </div>
+              {showChoiceHint && choiceExplanation && (
+                <p className={`mt-1.5 pl-5 text-xs ${isAnswer ? "text-emerald-200/90" : isSelected ? "text-red-200/80" : "text-slate-400"}`}>
+                  {isAnswer ? "✓ " : "✗ "}{choiceExplanation}
+                </p>
+              )}
             </li>
           );
         })}
