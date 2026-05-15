@@ -13,6 +13,17 @@ function MultipleChoiceItem({ question, idx, questionNumber, selectedChoice, rev
           />
         </div>
         <div className="flex items-center gap-2">
+          {question.difficulty && (
+            <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
+              question.difficulty === "상"
+                ? "bg-red-500/20 text-red-100"
+                : question.difficulty === "중"
+                  ? "bg-amber-500/20 text-amber-100"
+                  : "bg-sky-500/20 text-sky-100"
+            }`}>
+              {question.difficulty === "상" ? "어려움" : question.difficulty === "중" ? "보통" : "쉬움"}
+            </span>
+          )}
           <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-xs font-semibold text-emerald-100">
             객관식
           </span>
@@ -116,6 +127,17 @@ function ShortAnswer({
           />
         </div>
         <div className="flex items-center gap-2">
+          {question.difficulty && (
+            <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
+              question.difficulty === "상"
+                ? "bg-red-500/20 text-red-100"
+                : question.difficulty === "중"
+                  ? "bg-amber-500/20 text-amber-100"
+                  : "bg-sky-500/20 text-sky-100"
+            }`}>
+              {question.difficulty === "상" ? "어려움" : question.difficulty === "중" ? "보통" : "쉬움"}
+            </span>
+          )}
           <span className="rounded-full bg-cyan-500/20 px-2 py-1 text-xs font-semibold text-cyan-100">
             주관식
           </span>
