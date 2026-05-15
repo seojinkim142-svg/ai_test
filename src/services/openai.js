@@ -805,38 +805,35 @@ function buildOxPrompt(
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const avoidBlock = buildAvoidReuseBlock(avoidStatements, { title: "Do not reuse these previously asked statements" });
   const additionalRequestBlock = buildAdditionalRequestBlock(additionalRequest, {
-    title: "Additional mock-exam request",
+    title: "Additional O/X request",
   });
   return `
-You create O/X (true/false) quiz items from PDF content.
-Follow all rules and return JSON only.
+You are a professor writing O/X (true/false) quiz items to test whether students can distinguish correct from plausible-but-wrong claims about the document.
 
-[Input]
-- Selected chapter range: ${scopeLabel || "current document scope only"}
-- PDF summary/body excerpt
-${highlightText ? `- Highlight sentences:\n${highlightText}` : ""}
-${avoidBlock ? `- ${avoidBlock.replace(/\n/g, "\n  ")}` : ""}
+[What makes a good O/X item]
+- The statement must be checkable against a specific sentence or passage in the document.
+- True items: state a fact precisely as the document describes it, including any conditions or qualifiers.
+- False items: introduce a specific, targeted error — wrong number, reversed relationship, swapped term, or missing condition. Do NOT use obviously absurd false statements.
+- Each item must have exactly one clearly correct answer.
+- Prefer concrete details (numbers, conditions, named concepts) over vague generalizations.
+- Keep each statement under 80 characters when possible.
 
 [Rules]
-0. Use only the selected chapter range above. Do not use content outside that range.
-0-1. If a statement cannot be supported by an explicit sentence inside the selected range, do not generate it.
-1. Maximum 10 items.
-2. Format: true/false.
-3. Base every item on explicit or strongly implied document content.
-4. Keep each statement under 80 chars when possible.
-5. Include at least 4 false items when feasible.
-6. Use concrete details (numbers/conditions/directions) to improve discrimination.
-7. Avoid duplicates.
-8. If the document contains page tags like [p.12], choose the evidence first and cite only those visible pages.
-9. evidence should briefly cite source clue/location when available.
-10. Include evidencePages and evidenceSnippet for every item.
-11. evidenceSnippet should be a short source phrase copied or lightly normalized from the document.
-12. If the tagged evidence does not support the statement, omit that item instead of using outside knowledge or other pages.
-12-1. Never guess missing page numbers, and never assign a broad page range when the exact supporting page is unclear.
-13. Exclude low-value metadata/trivia items:
-   textbook target audience, supplement/material availability,
-   author/publisher/contact, TOC/chapter structure.
-14. If an additional user request is provided, follow it only when it stays grounded in the document and does not break the O/X format.
+- Use only the selected chapter range. Do not use content outside that range.
+- If a statement cannot be directly supported by the document, omit it.
+- Generate up to 10 items; include at least 4 false items when the source supports it.
+- Avoid near-duplicate statements that test the same fact.
+- Exclude low-value metadata: author/publisher info, textbook target audience, TOC/chapter structure, supplement availability.
+- If the document contains page tags like [p.12], select the supporting passage first and cite only those visible page numbers.
+- If no page tags exist, use an empty array for evidencePages and an empty string for evidenceSnippet — do not guess page numbers.
+- If tagged evidence does not support the statement, omit the item.
+- If an additional user request is provided, follow it only when it stays grounded in the document and does not break the O/X format.
+${highlightText ? `- Prioritize generating items from the following highlighted sentences:\n${highlightText}` : ""}
+
+[Output format]
+- Return JSON only.
+- Include explanation on every item: for false items, state what the correct version is.
+- Include evidencePages, evidenceSnippet, and evidenceLabel on every item.
 
 [JSON schema]
 {
@@ -845,16 +842,18 @@ ${avoidBlock ? `- ${avoidBlock.replace(/\n/g, "\n  ")}` : ""}
       "statement": "...",
       "answer": true,
       "explanation": "...",
-      "evidence": "p.12 정의 문단",
       "evidencePages": [12],
-      "evidenceSnippet": "..."
+      "evidenceSnippet": "...",
+      "evidenceLabel": "p.12 정의 문단"
     }
   ]
 }
 
 [Language]
-- Write statement/explanation/evidence in ${outputLanguageLabel}.
+- Write all statement/explanation text in ${outputLanguageLabel}.
+${avoidBlock ? `\n\n${avoidBlock}` : ""}
 ${additionalRequestBlock ? `\n\n${additionalRequestBlock}` : ""}
+${scopeLabel ? `\n\n[Selected chapter range]\n${scopeLabel}` : ""}
 
 [Document]
 ${contextText}
@@ -2712,7 +2711,7 @@ export async function generateOxQuiz(
         {
           role: "system",
           content:
-            `Generate ${oxCount} ${outputLanguageLabel} true/false (O/X) quiz statements strictly from the user's text. All statements, explanations, and evidence must be in ${outputLanguageLabel} (translate/rephrase even if the source is another language). Ensure at least ${minFalseCount} are false; if not possible, generate as many as possible but prefer false items. Each statement <=80 chars, explanation/evidence <=150 chars, no duplication, and every explanation cites the PDF as evidence where possible (e.g., p.3 definition paragraph, section 2.1 second sentence; if unavailable, evidence may be empty). Exclude low-value textbook metadata/trivia (target audience, whether exercises/cyber materials/code are included, author/publisher/contact, TOC/chapter structure).`,
+            `Generate ${oxCount} ${outputLanguageLabel} true/false (O/X) quiz items from the user's text only. At least ${minFalseCount} items must be false; false items must introduce a specific targeted error (wrong number, reversed relationship, swapped term, or missing condition) — not an obviously absurd claim. True items must state facts precisely as the document describes them, including any conditions or qualifiers. Each statement ≤80 characters. Include explanation on every item; for false items the explanation must state the correct version. Include evidencePages (empty array if no page tags exist) and evidenceSnippet on every item. Exclude author/publisher info, TOC structure, and textbook metadata. Output JSON only using the provided schema.`,
         },
         { role: "user", content: prompt },
       ],
