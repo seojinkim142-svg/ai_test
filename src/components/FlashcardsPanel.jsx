@@ -22,6 +22,7 @@ function FlashcardsPanel({
   onGenerate,
   isGenerating = false,
   canGenerate = true,
+  generateButtonTitle,
   status,
   error,
 }) {
@@ -218,6 +219,7 @@ function FlashcardsPanel({
           type="button"
           onClick={onGenerate}
           disabled={!canGenerate || isGenerating || isLoading || isExamMode}
+          title={generateButtonTitle}
           className="ghost-button text-sm text-emerald-100"
           data-ghost-size="sm"
           style={{ "--ghost-color": "52, 211, 153" }}
