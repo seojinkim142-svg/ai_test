@@ -15,6 +15,18 @@ def resolveBuildValue = { String key ->
 }
 
 def admobAppId = resolveBuildValue('ADMOB_APP_ID') ?: 'ca-app-pub-3940256099942544~3347511713'
+def releaseKeystorePath = resolveBuildValue('ANDROID_KEYSTORE_PATH') ?: '../examstudyai-release.jks'
+def releaseKeyAlias = resolveBuildValue('ANDROID_KEY_ALIAS') ?: 'examstudyai'
+def releaseStorePassword = resolveBuildValue('ANDROID_KEYSTORE_PASSWORD')
+def releaseKeyPassword = resolveBuildValue('ANDROID_KEY_PASSWORD') ?: releaseStorePassword
+def releaseKeystoreFile = file(releaseKeystorePath)
+def hasReleaseSigning = releaseKeystoreFile.exists() && releaseKeyAlias && releaseStorePassword && releaseKeyPassword
+def hasInjectedReleaseSigning = [
+    project.findProperty('android.injected.signing.store.file'),
+    project.findProperty('android.injected.signing.store.password'),
+    project.findProperty('android.injected.signing.key.alias'),
+    project.findProperty('android.injected.signing.key.password')
+].every { it != null && it.toString().trim() }
 def sourceMainAssetsDir = file('src/main/assets')
 def stagedAssetRoot = new File(System.getProperty('java.io.tmpdir'), "examstudyai-android-assets/${project.name}")
 def stagedMainAssetsDir = new File(stagedAssetRoot, 'main')
@@ -32,6 +44,16 @@ tasks.register('stageMainAssets', Copy) {
 android {
     namespace "com.tjwls.examstudyai"
     compileSdk rootProject.ext.compileSdkVersion
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile releaseKeystoreFile
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
     sourceSets {
         main {
             assets.srcDirs = [stagedMainAssetsDir.absolutePath]
@@ -41,8 +63,8 @@ android {
         applicationId "com.tjwls.examstudyai"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2
-        versionName "1.0"
+        versionCode 3
+        versionName "1.0.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -53,6 +75,9 @@ android {
     }
     buildTypes {
         release {
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
@@ -81,6 +106,14 @@ apply from: 'capacitor.build.gradle'
 
 tasks.named('preBuild').configure {
     dependsOn('stageMainAssets')
+}
+
+def isReleaseBuildRequested = gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
+if (isReleaseBuildRequested && !hasReleaseSigning && !hasInjectedReleaseSigning) {
+    throw new GradleException(
+        "Release signing is not configured. Set ANDROID_KEYSTORE_PASSWORD and ANDROID_KEY_PASSWORD " +
+        "(and optionally ANDROID_KEYSTORE_PATH / ANDROID_KEY_ALIAS) before building a release bundle."
+    )
 }
 
 try {
