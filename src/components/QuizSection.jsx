@@ -59,7 +59,7 @@ function MultipleChoiceItem({ question, idx, questionNumber, selectedChoice, rev
                 />
               </div>
               {showChoiceHint && choiceExplanation && (
-                <p className={`mt-1.5 pl-5 text-xs ${isAnswer ? "text-emerald-200/90" : isSelected ? "text-red-200/80" : "text-slate-400"}`}>
+                <p className={`mt-1.5 ml-5 rounded px-2 py-1 text-xs font-medium ${isAnswer ? "bg-emerald-600/20 text-emerald-900" : isSelected ? "bg-red-600/10 text-red-900" : "text-slate-500"}`}>
                   {isAnswer ? "✓ " : "✗ "}{choiceExplanation}
                 </p>
               )}
