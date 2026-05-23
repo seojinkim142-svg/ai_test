@@ -1163,6 +1163,15 @@ const getNavItems = (copy) => [
 const DEFAULT_ACTIVE_PLAN = "pro";
 const DEFAULT_LANDING_NAV_HEIGHT = 104;
 const LANDING_SECTION_GAP = 20;
+const FEATURE_SCROLL_MORPH_CONFIG = {
+  start: 0.9,
+  end: 0.64,
+  translateY: 68,
+  scaleFrom: 0.93,
+  rotateXFrom: 10,
+  blurFrom: 8,
+  opacityFrom: 0.48,
+};
 
 function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -1632,7 +1641,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
   const navSolid = scrollY > 24;
   const heroOpacity = Math.max(0.52, 1 - scrollY / 1100);
   const heroTranslate = Math.min(scrollY * 0.145, 168);
-  const pricingSectionVisible = isVisible("pricing-stage") && !isVisible("pricing-fade-end");
+  const pricingSectionVisible = isVisible("pricing-stage");
   const heroScale = Math.max(0.88, 1 - scrollY / 2100);
   const heroGlowShift = Math.min(scrollY * 0.18, 180);
   const heroGlowSpread = Math.min(scrollY * 0.065, 56);
@@ -1944,15 +1953,9 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                   <div className={index % 2 === 0 ? "lg:order-2" : ""}>
                     <ScrollMorphStage
                       config={{
-                        start: 0.95,
-                        end: 0.2,
-                        translateY: 96,
-                        translateX: index % 2 === 0 ? 26 : -26,
-                        scaleFrom: 0.88,
-                        rotateXFrom: 17,
-                        rotateYFrom: index % 2 === 0 ? -12 : 12,
-                        blurFrom: 18,
-                        opacityFrom: 0.22,
+                        ...FEATURE_SCROLL_MORPH_CONFIG,
+                        translateX: index % 2 === 0 ? 18 : -18,
+                        rotateYFrom: index % 2 === 0 ? -8 : 8,
                         origin: index % 2 === 0 ? "right center" : "left center",
                       }}
                     >
@@ -2301,12 +2304,6 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
             </div>
           </div>
 
-          <div
-            ref={(node) => registerRevealNode("pricing-fade-end", node)}
-            data-reveal-key="pricing-fade-end"
-            className="mt-14 h-px w-full"
-            aria-hidden="true"
-          />
         </div>
       </section>
 
