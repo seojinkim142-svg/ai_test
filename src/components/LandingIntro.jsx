@@ -1164,13 +1164,158 @@ const DEFAULT_ACTIVE_PLAN = "pro";
 const DEFAULT_LANDING_NAV_HEIGHT = 104;
 const LANDING_SECTION_GAP = 20;
 
-function getRevealStyle(isVisible, { y = 36, x = 0, scale = 0.97, delay = 0 } = {}) {
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getScrollMorphStyle(
+  progress,
+  {
+    translateY = 72,
+    translateX = 0,
+    scaleFrom = 0.92,
+    rotateXFrom = 14,
+    rotateYFrom = 0,
+    blurFrom = 14,
+    perspective = 1800,
+    opacityFrom = 0.34,
+  } = {}
+) {
+  const settled = clampNumber(progress, 0, 1);
+  const remaining = 1 - settled;
+  const currentScale = 1 - (1 - scaleFrom) * remaining;
+
+  return {
+    opacity: opacityFrom + (1 - opacityFrom) * settled,
+    transform: `perspective(${perspective}px) translate3d(${(translateX * remaining).toFixed(2)}px, ${(translateY * remaining).toFixed(2)}px, 0) rotateX(${(rotateXFrom * remaining).toFixed(2)}deg) rotateY(${(rotateYFrom * remaining).toFixed(2)}deg) scale(${currentScale.toFixed(4)})`,
+    filter: `blur(${(blurFrom * remaining).toFixed(2)}px) saturate(${(0.88 + settled * 0.12).toFixed(3)})`,
+  };
+}
+
+function getRevealStyle(
+  isVisible,
+  {
+    y = 36,
+    x = 0,
+    scale = 0.97,
+    rotateX = 12,
+    rotateY = x === 0 ? 0 : x > 0 ? 8 : -8,
+    blur = 10,
+    delay = 0,
+  } = {}
+) {
+  const hiddenStyle = getScrollMorphStyle(0, {
+    translateY: y,
+    translateX: x,
+    scaleFrom: scale,
+    rotateXFrom: rotateX,
+    rotateYFrom: rotateY,
+    blurFrom: blur,
+    opacityFrom: 0,
+  });
+
   return {
     opacity: isVisible ? 1 : 0,
-    transform: isVisible ? "translate3d(0, 0, 0) scale(1)" : `translate3d(${x}px, ${y}px, 0) scale(${scale})`,
-    filter: isVisible ? "blur(0px)" : "blur(10px)",
+    transform: isVisible ? "perspective(1800px) translate3d(0, 0, 0) rotateX(0deg) rotateY(0deg) scale(1)" : hiddenStyle.transform,
+    filter: isVisible ? "blur(0px) saturate(1)" : hiddenStyle.filter,
     transition: `opacity 760ms cubic-bezier(0.22, 1, 0.36, 1) ${delay}ms, transform 920ms cubic-bezier(0.22, 1, 0.36, 1) ${delay}ms, filter 920ms cubic-bezier(0.22, 1, 0.36, 1) ${delay}ms`,
+    willChange: "transform, opacity, filter",
   };
+}
+
+function ScrollMorphStage({
+  children,
+  className = "",
+  style,
+  config = {},
+}) {
+  const {
+    start = 0.94,
+    end = 0.24,
+    translateY = 84,
+    translateX = 0,
+    scaleFrom = 0.9,
+    rotateXFrom = 16,
+    rotateYFrom = 0,
+    blurFrom = 16,
+    perspective = 1800,
+    opacityFrom = 0.4,
+    origin = "center center",
+  } = config;
+  const stageRef = useRef(null);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      setProgress(1);
+      return undefined;
+    }
+
+    let frame = null;
+
+    const updateProgress = () => {
+      const node = stageRef.current;
+      if (!node) return;
+
+      const rect = node.getBoundingClientRect();
+      const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 1;
+      const startPoint = viewportHeight * start;
+      const endPoint = viewportHeight * end;
+      const nextProgress = clampNumber((startPoint - rect.top) / Math.max(1, startPoint - endPoint), 0, 1);
+
+      setProgress((previous) => (Math.abs(previous - nextProgress) < 0.01 ? previous : nextProgress));
+    };
+
+    const queueUpdate = () => {
+      if (frame != null) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        updateProgress();
+      });
+    };
+
+    updateProgress();
+    window.addEventListener("scroll", queueUpdate, { passive: true });
+    window.addEventListener("resize", queueUpdate, { passive: true });
+    window.visualViewport?.addEventListener("resize", queueUpdate, { passive: true });
+
+    return () => {
+      window.removeEventListener("scroll", queueUpdate);
+      window.removeEventListener("resize", queueUpdate);
+      window.visualViewport?.removeEventListener("resize", queueUpdate);
+      if (frame != null) {
+        window.cancelAnimationFrame(frame);
+      }
+    };
+  }, [end, start]);
+
+  const morphStyle = getScrollMorphStyle(progress, {
+    translateY,
+    translateX,
+    scaleFrom,
+    rotateXFrom,
+    rotateYFrom,
+    blurFrom,
+    perspective,
+    opacityFrom,
+  });
+
+  return (
+    <div
+      ref={stageRef}
+      className={className}
+      style={{
+        ...style,
+        ...morphStyle,
+        transformOrigin: origin,
+        transformStyle: "preserve-3d",
+        willChange: "transform, opacity, filter",
+      }}
+    >
+      {children}
+    </div>
+  );
 }
 
 function FeatureVisual({ feature, isActive }) {
@@ -1236,138 +1381,6 @@ function FeatureVisual({ feature, isActive }) {
                   ))}
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function HeroDashboard({ scrollY = 0 }) {
-  const floatingOffset = Math.min(scrollY * 0.12, 54);
-  const floatingTilt = Math.min(scrollY * 0.01, 5);
-  const floatingScale = Math.max(0.945, 1 - scrollY / 3600);
-
-  return (
-    <div className="relative mx-auto max-w-6xl" style={{ perspective: "1800px" }}>
-      <div className="pointer-events-none absolute -left-10 top-24 hidden h-28 w-28 rounded-full bg-sky-300/30 blur-3xl lg:block" />
-      <div className="pointer-events-none absolute -right-8 top-10 hidden h-32 w-32 rounded-full bg-violet-300/30 blur-3xl lg:block" />
-
-      <div className="grid gap-5">
-        <div
-          className="relative overflow-hidden rounded-[2rem] border border-white/70 bg-white/[0.72] p-4 shadow-[0_34px_90px_-54px_rgba(15,23,42,0.3)] backdrop-blur-xl sm:p-6"
-          style={{
-            transform: `translate3d(0, ${floatingOffset}px, 0) rotateX(${floatingTilt}deg) scale(${floatingScale})`,
-            transformOrigin: "top center",
-            transition: "transform 140ms linear",
-            willChange: "transform",
-          }}
-        >
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,0.14),transparent_28%),radial-gradient(circle_at_top_right,rgba(139,92,246,0.16),transparent_30%),linear-gradient(180deg,rgba(255,255,255,0.94),rgba(246,248,252,0.9))]" />
-          <div className="relative">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-1">
-                <span className="h-2.5 w-2.5 rounded-full bg-rose-400" />
-                <span className="h-2.5 w-2.5 rounded-full bg-amber-400" />
-                <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-              </div>
-              <span className="rounded-full border border-slate-200 bg-white/85 px-3 py-1 text-xs font-semibold text-slate-600">
-                PDF to Study Loop
-              </span>
-            </div>
-
-            <div className="mt-6 grid gap-4 xl:grid-cols-[minmax(0,1.18fr)_minmax(220px,0.82fr)]">
-              <div className="rounded-[1.8rem] border border-white/75 bg-slate-950 p-5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] sm:p-6">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.26em] text-slate-400">Uploaded PDF</p>
-                    <h3 className="mt-2 text-2xl font-bold sm:text-3xl">시험 범위 PDF가 바로 학습 보드로 변환됩니다</h3>
-                  </div>
-                  <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-slate-200">AI Ready</span>
-                </div>
-
-                <div className="mt-6 grid gap-3 sm:grid-cols-3">
-                  <div className="rounded-[1.35rem] border border-white/10 bg-white/[0.05] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Summary</p>
-                    <p className="mt-3 text-lg font-semibold">핵심 개념 정리</p>
-                    <p className="mt-2 text-sm text-slate-300">핵심만 남기고 빠르게 훑습니다.</p>
-                  </div>
-                  <div className="rounded-[1.35rem] border border-white/10 bg-white/[0.05] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Quiz</p>
-                    <p className="mt-3 text-lg font-semibold">실전형 문제 생성</p>
-                    <p className="mt-2 text-sm text-slate-300">객관식과 OX를 바로 연습합니다.</p>
-                  </div>
-                  <div className="rounded-[1.35rem] border border-white/10 bg-white/[0.05] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Tutor</p>
-                    <p className="mt-3 text-lg font-semibold">AI 튜터 연결</p>
-                    <p className="mt-2 text-sm text-slate-300">궁금한 내용을 문서 기준으로 묻습니다.</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid gap-4">
-                <div className="rounded-[1.8rem] border border-slate-200/85 bg-white/90 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.72)]">
-                  <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Current Flow</p>
-                  <div className="mt-4 space-y-3">
-                    {["PDF 업로드", "요약 생성", "퀴즈 생성", "카드 생성", "AI 튜터 연결"].map((item, index) => (
-                      <div key={item} className="flex items-center gap-3">
-                        <div
-                          className="flex h-9 w-9 items-center justify-center rounded-2xl text-sm font-bold text-white"
-                          style={{
-                            background: index < 3
-                              ? "linear-gradient(135deg, #2563eb 0%, #8b5cf6 100%)"
-                              : "linear-gradient(135deg, #cbd5e1 0%, #94a3b8 100%)",
-                          }}
-                        >
-                          {index + 1}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold text-slate-800">{item}</p>
-                          <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
-                            <div
-                              className="h-full rounded-full bg-gradient-to-r from-blue-600 to-violet-500"
-                              style={{ width: `${92 - index * 14}%` }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="rounded-[1.7rem] border border-slate-200/85 bg-white/90 p-5">
-                    <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Study Assets</p>
-                    <p className="mt-3 text-3xl font-bold text-slate-900">요약 + 퀴즈</p>
-                    <p className="mt-2 text-sm text-slate-500">한 화면에서 이어지는 복습 흐름</p>
-                  </div>
-                  <div className="rounded-[1.7rem] border border-slate-200/85 bg-white/90 p-5">
-                    <p className="text-xs font-semibold tracking-[0.24em] text-slate-400">패밀리 스페이스</p>
-                    <p className="mt-3 text-3xl font-bold text-slate-900">최대 4명</p>
-                    <p className="mt-2 text-sm text-slate-500">공유 스페이스로 함께 학습</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="hidden">
-          <div className="rounded-[1.9rem] border border-white/70 bg-white/[0.82] p-5 shadow-[0_30px_80px_-52px_rgba(15,23,42,0.24)] backdrop-blur-xl">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-semibold text-slate-500">시험 직전 복습 보드</p>
-              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">Ready</span>
-            </div>
-            <div className="mt-4 space-y-3">
-              {["핵심 요약 PDF 저장", "10문항 모의고사 실행", "오답 카드 다시 보기"].map((item) => (
-                <div key={item} className="flex items-center gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-500 to-blue-600 text-white">
-                    <CheckIcon className="h-4 w-4" />
-                  </div>
-                  <p className="text-sm font-semibold text-slate-700">{item}</p>
-                </div>
-              ))}
             </div>
           </div>
         </div>
@@ -1873,7 +1886,6 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                 <ArrowRightIcon className="h-4 w-4" />
               </button>
             </div>
-
           </div>
 
         </div>
@@ -1922,81 +1934,100 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                   style={getRevealStyle(sectionVisible, {
                     y: 44,
                     x: index % 2 === 0 ? -14 : 14,
+                    scale: 0.955,
+                    rotateX: 14,
+                    rotateY: index % 2 === 0 ? -8 : 8,
+                    blur: 12,
                     delay: Math.min(index * 60, 220),
                   })}
                 >
                   <div className={index % 2 === 0 ? "lg:order-2" : ""}>
-                    <div className="relative">
-                      <div
-                        className="pointer-events-none absolute inset-[-9%] rounded-[3rem] blur-3xl transition duration-500"
-                        style={{
-                          background: feature.theme.halo,
-                          opacity: isActive ? 1 : 0.5,
-                        }}
-                      />
-                      <div
-                        className="relative aspect-[1.18/0.82] overflow-hidden rounded-[2.2rem] border border-white/80 bg-white/80 shadow-[0_30px_80px_-42px_rgba(15,23,42,0.22)] backdrop-blur-xl"
-                        style={{
-                          boxShadow: isActive
-                            ? `0 38px 90px -46px ${feature.theme.glow}, inset 0 1px 0 rgba(255,255,255,0.72)`
-                            : "0 28px 70px -54px rgba(15,23,42,0.22), inset 0 1px 0 rgba(255,255,255,0.72)",
-                        }}
-                      >
-                        {feature.id === "summary" ||
-                        feature.id === "quiz" ||
-                        feature.id === "flashcards" ||
-                        feature.id === "tutor" ||
-                        feature.id === "mockExam" ? (
-                          <>
-                            <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.55),rgba(255,255,255,0.12))]" />
-                            <div className="absolute inset-[3.5%] overflow-hidden rounded-[1.9rem] border border-white/70 bg-slate-950 shadow-[0_32px_70px_-40px_rgba(15,23,42,0.42)]">
-                              <video
-                                className="h-full w-full object-cover object-center"
-                                src={
-                                  feature.id === "summary"
-                                    ? SUMMARY_DEMO_VIDEO_SRC
-                                    : feature.id === "quiz"
-                                      ? QUIZ_DEMO_VIDEO_SRC
-                                      : feature.id === "flashcards"
-                                        ? FLASHCARD_DEMO_VIDEO_SRC
-                                        : feature.id === "tutor"
-                                          ? TUTOR_DEMO_VIDEO_SRC
-                                          : MOCK_EXAM_DEMO_VIDEO_SRC
-                                }
-                                autoPlay
-                                muted
-                                loop
-                                playsInline
-                                preload="metadata"
-                              />
-                            </div>
-                            <div className="pointer-events-none absolute inset-[3.5%] rounded-[1.9rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.12),transparent_20%,transparent_80%,rgba(15,23,42,0.08))]" />
-                          </>
-                        ) : (
-                          <>
-                            <div className="absolute inset-0 opacity-90" style={{ background: feature.theme.tint }} />
-                            <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(255,255,255,0.82),rgba(255,255,255,0.16))]" />
-                            <div
-                              className="absolute inset-0 opacity-[0.2]"
-                              style={{
-                                backgroundImage: "linear-gradient(rgba(15,23,42,0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.18) 1px, transparent 1px)",
-                                backgroundSize: "34px 34px",
-                              }}
-                            />
-                            <div className="absolute -left-8 top-10 h-28 w-28 rounded-full blur-3xl" style={{ background: feature.theme.accent, opacity: 0.3 }} />
-                            <div className="absolute -right-12 bottom-0 h-40 w-40 rounded-full blur-3xl" style={{ background: feature.theme.accent, opacity: 0.22 }} />
-                            <div className="absolute left-[14%] top-[22%] h-px w-[44%] bg-slate-900/16" />
-                            <div className="absolute left-[26%] top-[46%] h-px w-[50%] bg-slate-900/12" />
-                            <div className="absolute left-[18%] top-[68%] h-px w-[36%] bg-slate-900/14" />
-                            <div className="relative flex h-full items-center justify-center p-8 sm:p-10">
-                              <div className="flex h-28 w-28 items-center justify-center rounded-[2rem] border border-white/70 bg-white/85 text-slate-950 shadow-[0_28px_60px_-28px_rgba(15,23,42,0.35)] sm:h-32 sm:w-32">
-                                <Icon className="h-14 w-14 sm:h-16 sm:w-16" />
+                    <ScrollMorphStage
+                      config={{
+                        start: 0.95,
+                        end: 0.2,
+                        translateY: 96,
+                        translateX: index % 2 === 0 ? 26 : -26,
+                        scaleFrom: 0.88,
+                        rotateXFrom: 17,
+                        rotateYFrom: index % 2 === 0 ? -12 : 12,
+                        blurFrom: 18,
+                        opacityFrom: 0.22,
+                        origin: index % 2 === 0 ? "right center" : "left center",
+                      }}
+                    >
+                      <div className="relative">
+                        <div
+                          className="pointer-events-none absolute inset-[-9%] rounded-[3rem] blur-3xl transition duration-500"
+                          style={{
+                            background: feature.theme.halo,
+                            opacity: isActive ? 1 : 0.5,
+                          }}
+                        />
+                        <div
+                          className="relative aspect-[1.18/0.82] overflow-hidden rounded-[2.2rem] border border-white/80 bg-white/80 shadow-[0_30px_80px_-42px_rgba(15,23,42,0.22)] backdrop-blur-xl"
+                          style={{
+                            boxShadow: isActive
+                              ? `0 38px 90px -46px ${feature.theme.glow}, inset 0 1px 0 rgba(255,255,255,0.72)`
+                              : "0 28px 70px -54px rgba(15,23,42,0.22), inset 0 1px 0 rgba(255,255,255,0.72)",
+                          }}
+                        >
+                          {feature.id === "summary" ||
+                          feature.id === "quiz" ||
+                          feature.id === "flashcards" ||
+                          feature.id === "tutor" ||
+                          feature.id === "mockExam" ? (
+                            <>
+                              <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.55),rgba(255,255,255,0.12))]" />
+                              <div className="absolute inset-[3.5%] overflow-hidden rounded-[1.9rem] border border-white/70 bg-slate-950 shadow-[0_32px_70px_-40px_rgba(15,23,42,0.42)]">
+                                <video
+                                  className="h-full w-full object-cover object-center"
+                                  src={
+                                    feature.id === "summary"
+                                      ? SUMMARY_DEMO_VIDEO_SRC
+                                      : feature.id === "quiz"
+                                        ? QUIZ_DEMO_VIDEO_SRC
+                                        : feature.id === "flashcards"
+                                          ? FLASHCARD_DEMO_VIDEO_SRC
+                                          : feature.id === "tutor"
+                                            ? TUTOR_DEMO_VIDEO_SRC
+                                            : MOCK_EXAM_DEMO_VIDEO_SRC
+                                  }
+                                  autoPlay
+                                  muted
+                                  loop
+                                  playsInline
+                                  preload="metadata"
+                                />
                               </div>
-                            </div>
-                          </>
-                        )}
+                              <div className="pointer-events-none absolute inset-[3.5%] rounded-[1.9rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.12),transparent_20%,transparent_80%,rgba(15,23,42,0.08))]" />
+                            </>
+                          ) : (
+                            <>
+                              <div className="absolute inset-0 opacity-90" style={{ background: feature.theme.tint }} />
+                              <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(255,255,255,0.82),rgba(255,255,255,0.16))]" />
+                              <div
+                                className="absolute inset-0 opacity-[0.2]"
+                                style={{
+                                  backgroundImage: "linear-gradient(rgba(15,23,42,0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.18) 1px, transparent 1px)",
+                                  backgroundSize: "34px 34px",
+                                }}
+                              />
+                              <div className="absolute -left-8 top-10 h-28 w-28 rounded-full blur-3xl" style={{ background: feature.theme.accent, opacity: 0.3 }} />
+                              <div className="absolute -right-12 bottom-0 h-40 w-40 rounded-full blur-3xl" style={{ background: feature.theme.accent, opacity: 0.22 }} />
+                              <div className="absolute left-[14%] top-[22%] h-px w-[44%] bg-slate-900/16" />
+                              <div className="absolute left-[26%] top-[46%] h-px w-[50%] bg-slate-900/12" />
+                              <div className="absolute left-[18%] top-[68%] h-px w-[36%] bg-slate-900/14" />
+                              <div className="relative flex h-full items-center justify-center p-8 sm:p-10">
+                                <div className="flex h-28 w-28 items-center justify-center rounded-[2rem] border border-white/70 bg-white/85 text-slate-950 shadow-[0_28px_60px_-28px_rgba(15,23,42,0.35)] sm:h-32 sm:w-32">
+                                  <Icon className="h-14 w-14 sm:h-16 sm:w-16" />
+                                </div>
+                              </div>
+                            </>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    </ScrollMorphStage>
                   </div>
 
                   <div className={index % 2 === 0 ? "lg:order-1" : ""}>
