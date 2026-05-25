@@ -289,7 +289,7 @@ function FlashcardsPanel({
                     <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">
                       {isFlipped ? "뒷면" : "앞면"}
                     </p>
-                    <p className="mt-3 text-2xl font-semibold text-white">
+                    <p className="mt-3 font-semibold text-white" style={{ fontSize: "1.05rem" }}>
                       {isFlipped ? currentCard.back : currentCard.front}
                     </p>
                     {isFlipped && currentCard.hint && (
