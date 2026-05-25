@@ -1734,6 +1734,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
             ? "border-slate-200/80 bg-white/[0.84] shadow-[0_20px_40px_-34px_rgba(15,23,42,0.34)] backdrop-blur-2xl"
             : "border-white/70 bg-white/55 backdrop-blur-xl"
         }`}
+        style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
       >
         <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-6 lg:px-8">
           <button type="button" onClick={() => handleJump("hero")} className="flex items-center gap-3 text-left">
