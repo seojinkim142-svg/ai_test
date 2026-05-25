@@ -1280,33 +1280,30 @@ export default function DetailPage({
                             return (
                               <section
                                 key={`mock-exam-page-${pageIndex}`}
-                                className="mock-exam-page relative mx-auto bg-white text-black shadow-sm"
+                                className="mock-exam-page relative mx-auto bg-white text-black shadow-sm p-5 sm:px-[52px] sm:py-[44px] sm:pb-[48px]"
                                 style={{
-                                  width: isNativePlatform ? "min(100%, 794px)" : "794px",
-                                  minHeight: "1123px",
-                                  padding: isNativePlatform ? "32px 24px 36px" : "44px 52px 48px",
+                                  width: "min(100%, 794px)",
                                 }}
                               >
                                 <div className="relative flex items-start justify-center">
-                                  <h4 className="text-[18px] font-semibold">{activeMockExamTitle}</h4>
-                                  <span className="absolute right-0 top-0 text-[18px] font-semibold">
+                                  <h4 className="text-[15px] font-semibold sm:text-[18px]">{activeMockExamTitle}</h4>
+                                  <span className="absolute right-0 top-0 text-[15px] font-semibold sm:text-[18px]">
                                     {pageIndex + 1}
                                   </span>
                                 </div>
                                 <div className="mt-3 border-t border-black" />
                                 <div
-                                  className={`relative mt-6 grid gap-8 ${
-                                    isFourGrid ? "grid-cols-2 grid-rows-2" : "grid-cols-2"
+                                  className={`relative mt-6 grid gap-6 sm:gap-8 ${
+                                    isFourGrid ? "grid-cols-1 sm:grid-cols-2 sm:grid-rows-2" : "grid-cols-1 sm:grid-cols-2"
                                   }`}
                                   style={{
-                                    minHeight: "900px",
                                     gridAutoFlow: isFourGrid ? "column" : "row",
                                   }}
                                 >
-                                  <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-black/80" />
+                                  <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-black/80 hidden sm:block" />
                                   {pageItems.map((item, idx) => {
                                     const columnIndex = isFourGrid ? Math.floor(idx / 2) : idx % 2;
-                                    const paddingClass = columnIndex === 0 ? "pr-6" : "pl-6";
+                                    const paddingClass = columnIndex === 0 ? "sm:pr-6" : "sm:pl-6";
                                     return (
                                       <div key={`mock-exam-cell-${pageIndex}-${idx}`} className={paddingClass}>
                                         {renderMockExamItem(item, pageStart + idx)}

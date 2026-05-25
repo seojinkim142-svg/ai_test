@@ -207,11 +207,11 @@ function QuizSection({
   const totalCount = multipleChoice.length + shortAnswers.length;
 
   return (
-    <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-6 shadow-2xl shadow-black/30 backdrop-blur">
+    <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-2xl shadow-black/30 backdrop-blur sm:p-6">
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm text-slate-300">결과 미리보기</p>
-          <h2 className="text-2xl font-bold text-white">{title}</h2>
+          <h2 className="text-xl font-bold text-white sm:text-2xl">{title}</h2>
         </div>
         <div className="rounded-full bg-emerald-400/10 px-3 py-1 text-xs font-semibold uppercase text-emerald-100 ring-1 ring-emerald-300/30">
           {totalCount || 0}문항

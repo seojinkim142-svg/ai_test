@@ -134,6 +134,7 @@ function PdfPreview({
   const [isTabletDevice, setIsTabletDevice] = useState(() => detectTabletDevice());
   const [isMobilePhoneViewport, setIsMobilePhoneViewport] = useState(() => detectMobilePhoneViewport());
   const [mobileFrameHeight, setMobileFrameHeight] = useState(null);
+  const [userZoom, setUserZoom] = useState(1.0);
   const [highlightRects, setHighlightRects] = useState([]);
   const [pageJumpInput, setPageJumpInput] = useState(() =>
     String(normalizePageNumber(currentPage))
@@ -152,6 +153,8 @@ function PdfPreview({
   const resizeRafRef = useRef(null);
   const wheelLockRef = useRef(0);
   const touchStartRef = useRef(null);
+  const userZoomRef = useRef(1.0);
+  const pinchRef = useRef(null);
   const iframeRetrySrcRef = useRef("");
   const iframeResetTimerRef = useRef(null);
   const sourceKey = useMemo(() => {
@@ -315,6 +318,11 @@ function PdfPreview({
   }, [sourceKey]);
 
   useEffect(() => {
+    userZoomRef.current = 1.0;
+    setUserZoom(1.0);
+  }, [sourceKey]);
+
+  useEffect(() => {
     if (!isOfficeDocument) {
       setOfficeViewMode("original");
       setLoadedOfficeSrc("");
@@ -400,6 +408,29 @@ function PdfPreview({
   }, [goToNextPage, goToPreviousPage, useCanvasPdfPreview]);
 
   useEffect(() => {
+    if (!useCanvasPdfPreview) return undefined;
+    const container = nativeScrollRef.current;
+    if (!container) return undefined;
+    const handlePinchMove = (event) => {
+      if (!pinchRef.current || event.touches.length < 2) return;
+      event.preventDefault();
+      const t1 = event.touches[0];
+      const t2 = event.touches[1];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      const ratio = dist / pinchRef.current.startDist;
+      const newZoom = Math.min(Math.max(0.5, pinchRef.current.startZoom * ratio), 3.0);
+      if (canvasShellRef.current) {
+        const scaleRatio = newZoom / pinchRef.current.startZoom;
+        canvasShellRef.current.style.transform = `scale(${scaleRatio})`;
+        canvasShellRef.current.style.transformOrigin = 'top center';
+      }
+      pinchRef.current.liveZoom = newZoom;
+    };
+    container.addEventListener('touchmove', handlePinchMove, { passive: false });
+    return () => container.removeEventListener('touchmove', handlePinchMove);
+  }, [useCanvasPdfPreview, docVersion]);
+
+  useEffect(() => {
     const syncViewportFrame = () => {
       setIsTabletDevice(detectTabletDevice());
       setIsMobilePhoneViewport(detectMobilePhoneViewport());
@@ -472,6 +503,15 @@ function PdfPreview({
   );
 
   const handleNativeTouchStart = useCallback((event) => {
+    if (event.touches.length >= 2) {
+      const t1 = event.touches[0];
+      const t2 = event.touches[1];
+      const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+      pinchRef.current = { startDist: dist, startZoom: userZoomRef.current };
+      touchStartRef.current = null;
+      return;
+    }
+    pinchRef.current = null;
     const touch = event.touches?.[0];
     if (!touch) return;
     touchStartRef.current = {
@@ -483,6 +523,19 @@ function PdfPreview({
 
   const handleNativeTouchEnd = useCallback(
     (event) => {
+      if (pinchRef.current) {
+        const finalZoom = pinchRef.current.liveZoom ?? pinchRef.current.startZoom;
+        pinchRef.current = null;
+        touchStartRef.current = null;
+        if (canvasShellRef.current) {
+          canvasShellRef.current.style.transform = '';
+          canvasShellRef.current.style.transformOrigin = '';
+        }
+        const clamped = Math.min(Math.max(0.5, finalZoom), 3.0);
+        userZoomRef.current = clamped;
+        setUserZoom(clamped);
+        return;
+      }
       const start = touchStartRef.current;
       touchStartRef.current = null;
       if (!start) return;
@@ -719,6 +772,44 @@ function PdfPreview({
           className="rounded-full border border-emerald-300/40 px-3 py-1 text-emerald-100"
         >
           이동
+        </button>
+        <span className="h-4 w-px shrink-0 bg-white/20" />
+        <button
+          type="button"
+          onClick={() => {
+            const next = Math.max(0.5, userZoom - 0.25);
+            userZoomRef.current = next;
+            setUserZoom(next);
+          }}
+          disabled={userZoom <= 0.5}
+          className="rounded-full border border-white/20 px-2 py-1 disabled:opacity-40"
+          title="축소"
+        >
+          −
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            userZoomRef.current = 1.0;
+            setUserZoom(1.0);
+          }}
+          className="min-w-[2.4rem] rounded bg-black/20 px-1 py-0.5 text-center tabular-nums hover:bg-black/30"
+          title="크기 초기화"
+        >
+          {Math.round(userZoom * 100)}%
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            const next = Math.min(3.0, userZoom + 0.25);
+            userZoomRef.current = next;
+            setUserZoom(next);
+          }}
+          disabled={userZoom >= 3.0}
+          className="rounded-full border border-white/20 px-2 py-1 disabled:opacity-40"
+          title="확대"
+        >
+          +
         </button>
       </div>
     </div>
@@ -957,7 +1048,7 @@ function PdfPreview({
           920;
         const maxCssWidth = Math.max(320, Math.min(scrollViewportWidth - 24, 1400));
         const baseViewport = currentPageObj.getViewport({ scale: 1 });
-        const cssScale = maxCssWidth / baseViewport.width;
+        const cssScale = (maxCssWidth / baseViewport.width) * userZoom;
         const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
         const viewport = currentPageObj.getViewport({ scale: cssScale * pixelRatio });
 
@@ -1105,7 +1196,7 @@ function PdfPreview({
         }
       }
     };
-  }, [currentPage, docVersion, onPageChange, useCanvasPdfPreview]);
+  }, [currentPage, docVersion, onPageChange, useCanvasPdfPreview, userZoom]);
 
   const isOfficeOriginalMode =
     isOfficeDocument && officeViewMode === "original" && Boolean(officeViewerSrc);
@@ -1293,7 +1384,7 @@ function PdfPreview({
         )}
         <div
           ref={nativeScrollRef}
-          className={`h-full w-full overflow-y-auto overflow-x-hidden ${
+          className={`h-full w-full overflow-y-auto ${userZoom > 1 ? "overflow-x-auto" : "overflow-x-hidden"} ${
             isMobileFullScreenPreview ? "p-0" : "p-1.5 sm:p-3"
           }`}
           onWheel={handleNativeWheel}
