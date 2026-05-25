@@ -416,54 +416,31 @@ export async function exportMockAnswerSheetToPdf(
     throw new Error("답지 데이터가 없습니다.");
   }
 
-  const { jsPDF } = await loadExportRuntime();
-  const pdf = new jsPDF("p", "mm", "a4");
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  const pageHeight = pdf.internal.pageSize.getHeight();
-  const margin = 14;
-  const maxWidth = pageWidth - margin * 2;
-  const lineHeight = 5;
-  const bottomLimit = pageHeight - margin;
-  let y = margin;
-
-  const ensureSpace = (lineCount = 1) => {
-    if (y + Math.max(1, lineCount) * lineHeight <= bottomLimit) return;
-    pdf.addPage();
-    y = margin;
-  };
-
-  const drawTextBlock = (text, { bold = false, size = 10, gapAfter = 1 } = {}) => {
-    const normalized = String(text || "")
-      .replace(/\r\n/g, "\n")
-      .replace(/\s+/g, " ")
-      .trim();
-    if (!normalized) return;
-    pdf.setFont("helvetica", bold ? "bold" : "normal");
-    pdf.setFontSize(size);
-    const lines = pdf.splitTextToSize(normalized, maxWidth);
-    ensureSpace(lines.length + gapAfter);
-    pdf.text(lines, margin, y);
-    y += lines.length * lineHeight + gapAfter;
-  };
-
-  drawTextBlock(title, { bold: true, size: 15, gapAfter: 2 });
-  drawTextBlock(`생성 시각: ${new Date().toLocaleString("ko-KR")}`, { size: 9, gapAfter: 3 });
+  const lines = [
+    title,
+    `생성 시각: ${new Date().toLocaleString("ko-KR")}`,
+    "",
+  ];
 
   list.forEach((entry, idx) => {
     const number = Number.isFinite(entry?.number) ? entry.number : idx + 1;
     const answerText = String(entry?.answer || "-").trim() || "-";
-    drawTextBlock(`${number}번 정답: ${answerText}`, { bold: true, size: 11, gapAfter: 1 });
+    lines.push(`${number}번 정답: ${answerText}`);
     if (entry?.explanation) {
-      drawTextBlock(`해설: ${entry.explanation}`, { size: 10, gapAfter: 1 });
+      lines.push(`해설: ${String(entry.explanation).replace(/\n/g, " ").trim()}`);
     }
     if (entry?.evidence) {
-      drawTextBlock(`근거: ${entry.evidence}`, { size: 9, gapAfter: 2 });
-    } else {
-      y += 1;
+      lines.push(`근거: ${String(entry.evidence).replace(/\n/g, " ").trim()}`);
     }
+    lines.push("");
   });
 
-  await savePdfDocument(pdf, filename);
+  const { file } = await createTextPdfFile(lines.join("\n"), {
+    filename,
+    title,
+  });
+
+  await saveBlobAsFile(file, ensurePdfFilename(filename));
 }
 
 export function exportTextFile(content, { filename = "summary.txt" } = {}) {

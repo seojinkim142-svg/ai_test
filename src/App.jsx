@@ -245,6 +245,8 @@ function isSafeStoragePathForReuse(rawPath) {
 }
 
 const CHAPTER_RANGE_STORAGE_PREFIX = "zeusian:chapter-ranges:v1";
+const TUTOR_HISTORY_STORAGE_PREFIX = "zeusian:tutor-history:v1";
+const TUTOR_HISTORY_MAX_MESSAGES = 60;
 const PARTIAL_SUMMARY_ARTIFACT_KEY = "__partial_summary_state_v1";
 const PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY = "__partial_summary_library_v1";
 const FREE_USAGE_ARTIFACT_KEY = "__free_usage_v1";
@@ -347,6 +349,13 @@ function buildDetectedChapterRangeNotice(detected) {
 
 const AUTO_CHAPTER_FALLBACK_NOTICE =
   "목차를 찾지 못해 페이지 수 기준 임시 범위를 사용 중입니다. 필요하면 '목차 자동 추출'을 다시 누르거나 직접 범위를 수정해주세요.";
+
+function buildTutorHistoryStorageKey({ userId, docId }) {
+  const normalizedDocId = String(docId || "").trim();
+  if (!normalizedDocId) return "";
+  const normalizedUserId = String(userId || "guest").trim() || "guest";
+  return `${TUTOR_HISTORY_STORAGE_PREFIX}:${normalizedUserId}:${normalizedDocId}`;
+}
 
 function buildChapterRangeStorageKey({ userId, scopeId, docId }) {
   const normalizedDocId = String(docId || "").trim();
@@ -1673,6 +1682,47 @@ function App() {
     },
     [getChapterRangeStorageKey]
   );
+
+  const loadTutorHistory = useCallback(
+    (docId) => {
+      if (typeof window === "undefined") return [];
+      const key = buildTutorHistoryStorageKey({ userId: user?.id, docId });
+      if (!key) return [];
+      try {
+        const raw = window.localStorage.getItem(key);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    },
+    [user?.id]
+  );
+
+  const persistTutorHistory = useCallback(
+    (docId, messages) => {
+      if (typeof window === "undefined") return;
+      const key = buildTutorHistoryStorageKey({ userId: user?.id, docId });
+      if (!key) return;
+      try {
+        if (!messages || messages.length === 0) {
+          window.localStorage.removeItem(key);
+        } else {
+          const trimmed = messages.slice(-TUTOR_HISTORY_MAX_MESSAGES);
+          window.localStorage.setItem(key, JSON.stringify(trimmed));
+        }
+      } catch {
+        // Ignore storage write errors.
+      }
+    },
+    [user?.id]
+  );
+
+  useEffect(() => {
+    if (!selectedFileId) return;
+    persistTutorHistory(selectedFileId, tutorMessages);
+  }, [tutorMessages, selectedFileId, persistTutorHistory]);
 
   const resetActiveDocumentState = useCallback(() => {
     fileOpenRequestSeqRef.current += 1;
@@ -3179,7 +3229,7 @@ function App() {
       setFlashcardStatus("");
       setFlashcardError("");
       setIsGeneratingFlashcards(false);
-      setTutorMessages([]);
+      setTutorMessages(loadTutorHistory(nextDocId));
       setTutorError("");
       setIsTutorLoading(false);
       setIsPageSummaryOpen(false);
@@ -6277,10 +6327,11 @@ function App() {
 
   const handleResetTutor = useCallback(() => {
     setTutorMessages([]);
+    persistTutorHistory(selectedFileId, []);
     setTutorError("");
     setIsTutorLoading(false);
     tutorRequestInFlightRef.current = false;
-  }, []);
+  }, [persistTutorHistory, selectedFileId]);
 
   const handleSendTutorMessage = useCallback(
     (requestPayload) => {
