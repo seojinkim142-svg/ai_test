@@ -1144,11 +1144,11 @@ function buildFlashcardsContext(extractedText, count) {
 function buildFlashcardsPrompt(contextText, count, outputLanguage = "ko") {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   return `
-You are a study coach creating high-quality flashcards that help students actively recall key ideas from lecture material.
+You are a study coach creating high-quality flashcards that help students memorize key facts with exact, word-for-word recall.
 
 [What makes a good flashcard]
-- front: a focused question or cue — not just a term label. Ask "What is X?", "Why does X happen?", "What condition causes X?", or "What is the difference between X and Y?".
-- back: a complete, self-contained answer that a student can verify without looking at the front again. 1-3 sentences max.
+- front: a focused question or cue that can be long or short — include enough context so the question is unambiguous. Ask "What is X?", "Why does X happen?", "What condition causes X?", "What is the formula for X?", or "What is the difference between X and Y?".
+- back: a SHORT, exact answer the student can memorize verbatim. Must be one of: a single term or word, a formula or equation, a number or value, a brief definition (one phrase, not a sentence), or a short enumeration (e.g. "A, B, C"). NEVER write a full sentence or paragraph on the back.
 - hint: include only when the concept has a common misconception or a memorable trick worth flagging. Leave empty string otherwise.
 
 [Card selection rules]
@@ -1156,8 +1156,12 @@ You are a study coach creating high-quality flashcards that help students active
 - Focus on: key concepts, definitions, mechanisms, conditions, formulas, and distinctions that are likely to appear in exams.
 - Exclude: author/publisher info, TOC entries, page numbers, and any content that is purely administrative or structural.
 - Do not generate two cards that test the same underlying fact, even if phrased differently.
-- If the source contains formulas, include at least one card per important formula with the formula on the front and its meaning/variables on the back.
+- If the source contains formulas, include at least one card per important formula with the formula/equation as the back.
 - Translate all text to ${outputLanguageLabel} regardless of the source language.
+
+[Back field examples — good vs bad]
+Good backs: "H₂O", "광합성", "F = ma", "1865년", "산화·환원", "포도당 + 산소 → 이산화탄소 + 물"
+Bad backs: "물은 수소 2개와 산소 1개로 이루어진 화합물이다.", "이 공식은 힘이 질량과 가속도의 곱과 같다는 것을 나타낸다."
 
 [Output format]
 - Return JSON only.
@@ -2865,7 +2869,7 @@ export async function generateFlashcards(extractedText, { count = 8, outputLangu
         {
           role: "system",
           content:
-            `Create ${outputLanguageLabel} study flashcards from the user's text only. Front must be a focused question or cue (not just a term label). Back must be a complete self-contained answer (1-3 sentences). Include hint only for common misconceptions or memorable tricks — empty string otherwise. Exclude metadata (author, publisher, TOC, page numbers). No near-duplicate cards. Translate all text to ${outputLanguageLabel}. Return JSON only with the provided schema.`,
+            `Create ${outputLanguageLabel} study flashcards from the user's text only. Front must be a focused question or cue (not just a term label) — any length is fine. Back must be a SHORT exact answer the student can memorize verbatim: a single term, formula, number, brief definition phrase, or short enumeration. NEVER write a full sentence on the back. Include hint only for common misconceptions or memorable tricks — empty string otherwise. Exclude metadata (author, publisher, TOC, page numbers). No near-duplicate cards. Translate all text to ${outputLanguageLabel}. Return JSON only with the provided schema.`,
         },
         { role: "user", content: prompt },
       ],
