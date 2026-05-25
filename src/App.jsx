@@ -49,7 +49,7 @@ import {
   isSupportedUploadFile,
   normalizeSupportedDocumentFile,
 } from "./utils/document";
-import { exportMockAnswerSheetToPdf, exportPagedElementToPdf } from "./utils/pdfExport";
+import { exportMockAnswerSheetToPdf, exportMockExamCombinedPdf, exportPagedElementToPdf } from "./utils/pdfExport";
 import {
   PDF_MAX_SIZE_BY_TIER,
   DEFAULT_PREMIUM_PROFILE_PIN,
@@ -7331,17 +7331,13 @@ function App() {
           exam?.payload?.answerSheet
         );
 
-        await exportPagedElementToPdf(mockExamPrintRef.current, {
+        await exportMockExamCombinedPdf(mockExamPrintRef.current, {
+          title: displayTitle,
+          answerEntries: answerSheet,
           filename: `${safeTitle}.pdf`,
-          margin: 0,
           pageSelector: ".mock-exam-page",
         });
-        await exportMockAnswerSheetToPdf({
-          title: `${displayTitle} 답지`,
-          entries: answerSheet,
-          filename: `${safeTitle}-answers.pdf`,
-        });
-        setMockExamStatus("모의고사 문제지와 답지 PDF를 함께 저장했습니다.");
+        setMockExamStatus("모의고사 문제지+답지 PDF를 저장했습니다.");
       } catch (err) {
         setMockExamError(`PDF 내보내기에 실패했습니다: ${err.message}`);
       }

@@ -102,6 +102,12 @@ function detectTabletDevice() {
   return isIpad || isAndroidTablet || isLargeTouchDevice;
 }
 
+function detectIosBrowser() {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  const ua = String(navigator.userAgent || "");
+  return /iPhone|iPad|iPod/.test(ua) || (/Macintosh/i.test(ua) && (navigator.maxTouchPoints || 0) > 1);
+}
+
 function detectMobilePhoneViewport() {
   if (typeof window === "undefined" || typeof navigator === "undefined") return false;
   const ua = String(navigator.userAgent || "");
@@ -123,6 +129,7 @@ function PdfPreview({
   isLoadingText = false,
 }) {
   const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
+  const isIosBrowser = useMemo(() => !isNativePlatform && detectIosBrowser(), [isNativePlatform]);
   const [loadedSrc, setLoadedSrc] = useState("");
   const [failedSrc, setFailedSrc] = useState("");
   const [iframeSrc, setIframeSrc] = useState("");
@@ -235,7 +242,7 @@ function PdfPreview({
     return buildViewerSrc(preferredPdfSourceUrl, currentPage);
   }, [currentPage, preferredPdfSourceUrl]);
   const viewerBaseSrc = useMemo(() => stripUrlHash(viewerSrc), [viewerSrc]);
-  const useCanvasPdfPreview = canPreviewPdf && isNativePlatform;
+  const useCanvasPdfPreview = canPreviewPdf && (isNativePlatform || isIosBrowser);
   const isMobileFullScreenPreview = isMobilePhoneViewport && !isTabletDevice;
   const canDownloadFile = file instanceof File || Boolean(pdfUrl) || Boolean(documentUrl);
 

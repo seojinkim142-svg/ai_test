@@ -1294,11 +1294,10 @@ export default function DetailPage({
                                 <div className="mt-3 border-t border-black" />
                                 <div
                                   className={`relative mt-6 grid gap-6 sm:gap-8 ${
-                                    isFourGrid ? "grid-cols-1 sm:grid-cols-2 sm:grid-rows-2" : "grid-cols-1 sm:grid-cols-2"
+                                    isFourGrid
+                                      ? "grid-cols-1 grid-flow-row sm:grid-cols-2 sm:grid-rows-2 sm:grid-flow-col"
+                                      : "grid-cols-1 grid-flow-row sm:grid-cols-2"
                                   }`}
-                                  style={{
-                                    gridAutoFlow: isFourGrid ? "column" : "row",
-                                  }}
                                 >
                                   <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-black/80 hidden sm:block" />
                                   {pageItems.map((item, idx) => {

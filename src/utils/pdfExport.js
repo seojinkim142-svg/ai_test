@@ -443,6 +443,130 @@ export async function exportMockAnswerSheetToPdf(
   await saveBlobAsFile(file, ensurePdfFilename(filename));
 }
 
+export async function exportMockExamCombinedPdf(
+  container,
+  {
+    title = "모의고사",
+    answerEntries = [],
+    filename = "mock-exam.pdf",
+    pageSelector = ".mock-exam-page",
+  } = {}
+) {
+  if (!container) throw new Error("Element not found.");
+  const { html2canvas, jsPDF } = await loadExportRuntime();
+
+  const pdf = new jsPDF("p", "mm", "a4");
+  const pdfW = pdf.internal.pageSize.getWidth();
+  const pdfH = pdf.internal.pageSize.getHeight();
+
+  // 1. 문제지 페이지 (html2canvas)
+  const questionEls = Array.from(container.querySelectorAll(pageSelector));
+  const srcPages = questionEls.length > 0 ? questionEls : [container];
+  for (let i = 0; i < srcPages.length; i++) {
+    const c = await html2canvas(srcPages[i], {
+      scale: 2,
+      backgroundColor: "#ffffff",
+      useCORS: true,
+    });
+    const imgData = c.toDataURL("image/png");
+    const scale = Math.min(pdfW / c.width, pdfH / c.height);
+    const iw = c.width * scale;
+    const ih = c.height * scale;
+    if (i > 0) pdf.addPage();
+    pdf.addImage(imgData, "PNG", (pdfW - iw) / 2, (pdfH - ih) / 2, iw, ih);
+  }
+
+  // 2. 답지 페이지 (캔버스 텍스트 렌더링 — 한글 지원)
+  const entries = Array.isArray(answerEntries) ? answerEntries : [];
+  if (entries.length > 0) {
+    const canvasW = 1240;
+    const canvasH = 1754;
+    const fontStack = '"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif';
+    const mX = 88;
+    const mTop = 96;
+    const mBot = 96;
+    const lineH = 40;
+    const maxW = canvasW - mX * 2;
+    const answerCanvases = [];
+
+    let cv;
+    let ctx2;
+    let curY;
+
+    const makeNewPage = () => {
+      cv = document.createElement("canvas");
+      cv.width = canvasW;
+      cv.height = canvasH;
+      ctx2 = cv.getContext("2d");
+      ctx2.fillStyle = "#fff";
+      ctx2.fillRect(0, 0, canvasW, canvasH);
+      ctx2.fillStyle = "#0f172a";
+      ctx2.textBaseline = "top";
+      ctx2.font = `24px ${fontStack}`;
+      curY = mTop;
+    };
+
+    const nextPage = () => {
+      answerCanvases.push(cv);
+      makeNewPage();
+    };
+
+    const ensureY = (h) => {
+      if (curY + h > canvasH - mBot) nextPage();
+    };
+
+    makeNewPage();
+
+    // 제목
+    ctx2.font = `700 32px ${fontStack}`;
+    for (const tl of wrapCanvasText(ctx2, `${title} 답지`, maxW)) {
+      ensureY(42);
+      ctx2.fillText(tl, mX, curY);
+      curY += 42;
+    }
+    curY += 12;
+
+    // 생성 시각
+    ctx2.font = `20px ${fontStack}`;
+    ensureY(28);
+    ctx2.fillText(`생성: ${new Date().toLocaleString("ko-KR")}`, mX, curY);
+    curY += 44;
+    ctx2.font = `24px ${fontStack}`;
+
+    // 정답 목록
+    for (let idx = 0; idx < entries.length; idx++) {
+      const entry = entries[idx];
+      const num = Number.isFinite(entry?.number) ? entry.number : idx + 1;
+      const answer = String(entry?.answer || "-").trim() || "-";
+      const answerLine = `${num}번 정답: ${answer}`;
+      for (const wl of wrapCanvasText(ctx2, answerLine, maxW)) {
+        ensureY(lineH);
+        ctx2.fillText(wl, mX, curY);
+        curY += lineH;
+      }
+      if (entry?.explanation) {
+        ctx2.font = `20px ${fontStack}`;
+        const expLine = `  해설: ${String(entry.explanation).replace(/\n/g, " ").trim()}`;
+        for (const wl of wrapCanvasText(ctx2, expLine, maxW)) {
+          ensureY(32);
+          ctx2.fillText(wl, mX, curY);
+          curY += 32;
+        }
+        ctx2.font = `24px ${fontStack}`;
+      }
+      curY += 16;
+    }
+    answerCanvases.push(cv);
+
+    for (const ac of answerCanvases) {
+      pdf.addPage();
+      pdf.addImage(ac.toDataURL("image/png"), "PNG", 0, 0, pdfW, pdfH);
+    }
+  }
+
+  await savePdfDocument(pdf, filename);
+}
+
 export function exportTextFile(content, { filename = "summary.txt" } = {}) {
   const normalized = String(content || "").replace(/\r\n/g, "\n").trim();
   if (!normalized) {
