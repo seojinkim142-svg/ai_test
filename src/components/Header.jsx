@@ -39,12 +39,13 @@ const Header = memo(function Header({
     <header className="app-safe-top sticky top-0 z-40 flex w-full items-center border-b border-white/10 bg-slate-950/72 px-3 pb-3 backdrop-blur-xl sm:px-6 lg:px-10">
       <div className="flex w-full items-start justify-between gap-3">
         <div className="min-w-0">
-          {onGoHome ? (
+          {(onGoHome || onRefresh) ? (
             <button
               type="button"
-              onClick={onGoHome}
+              onClick={() => { onGoHome?.(); onRefresh?.(); }}
+              disabled={isRefreshing}
               aria-label={copy.header.homeAria}
-              className="group rounded-xl px-1 py-0.5 text-left transition hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/55"
+              className="group rounded-xl px-1 py-0.5 text-left transition hover:bg-white/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/55 disabled:opacity-60"
             >
               <div className="flex items-end gap-2 sm:gap-3">
                 <h1 className="text-2xl font-bold leading-none text-white transition group-hover:text-emerald-50 sm:text-3xl">
@@ -73,19 +74,6 @@ const Header = memo(function Header({
 
         <div className="flex min-w-0 max-w-[55%] flex-col items-end gap-2 sm:w-auto sm:max-w-none">
           <div className="flex flex-wrap justify-end gap-1.5 sm:w-auto sm:gap-2 sm:justify-end">
-            {user && onRefresh && (
-              <button
-                type="button"
-                onClick={onRefresh}
-                disabled={isRefreshing}
-                className="ghost-button text-xs text-emerald-100 sm:hidden"
-                data-ghost-size="sm"
-                style={{ "--ghost-color": "52, 211, 153" }}
-              >
-                {isRefreshing ? copy.header.refreshing : copy.header.refresh}
-              </button>
-            )}
-
             {showBilling && (
               <button
                 type="button"
