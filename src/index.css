@@ -45,6 +45,13 @@ textarea,
   caret-color: auto;
 }
 
+/* iOS Safari: font-size < 16px인 input 포커스 시 자동 zoom 방지 */
+input,
+textarea,
+select {
+  font-size: max(16px, 1em);
+}
+
 *:not(input):not(textarea):not([contenteditable="true"]):not([role="textbox"]) {
   caret-color: transparent !important;
 }
