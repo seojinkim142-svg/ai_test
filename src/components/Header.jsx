@@ -37,7 +37,7 @@ const Header = memo(function Header({
   const brandTierLabel = !loadingTier && isPremiumTier ? copy.planNames.premium : null;
   return (
     <header className="app-safe-top sticky top-0 z-40 flex w-full items-center border-b border-white/10 bg-slate-950/72 px-3 pb-3 backdrop-blur-xl sm:px-6 lg:px-10">
-      <div className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-start gap-3 sm:flex sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex w-full items-start justify-between gap-3">
         <div className="min-w-0">
           {onGoHome ? (
             <button
