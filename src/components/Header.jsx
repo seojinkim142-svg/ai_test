@@ -72,7 +72,7 @@ const Header = memo(function Header({
         </div>
 
         <div className="flex min-w-0 flex-col items-end gap-2 sm:w-auto">
-          <div className="flex w-[14.75rem] max-w-full flex-wrap justify-end gap-2 sm:w-auto sm:max-w-none sm:justify-end">
+          <div className="flex max-w-full flex-wrap justify-end gap-1.5 sm:w-auto sm:gap-2 sm:justify-end">
             {user && onRefresh && (
               <button
                 type="button"
