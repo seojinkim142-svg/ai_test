@@ -49,7 +49,7 @@ textarea,
 input,
 textarea,
 select {
-  font-size: max(16px, 1em);
+  font-size: max(16px, 1em) !important;
 }
 
 *:not(input):not(textarea):not([contenteditable="true"]):not([role="textbox"]) {
