@@ -978,6 +978,9 @@ function PdfPreview({
     let cancelled = false;
     let abortController = new AbortController();
 
+    // 페이지가 바뀌면 스크롤을 맨 위로 초기화
+    if (nativeScrollRef.current) nativeScrollRef.current.scrollTop = 0;
+
     const renderCurrentPage = async () => {
       const cycleId = renderCycleRef.current + 1;
       renderCycleRef.current = cycleId;
