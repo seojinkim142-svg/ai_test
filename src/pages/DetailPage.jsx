@@ -1010,8 +1010,8 @@ export default function DetailPage({
                     onJumpToEvidencePage={typeof onJumpToSummaryPage === "function"
                       ? (pageNumber, ...rest) => {
                           onJumpToSummaryPage(pageNumber, ...rest);
-                          // 모바일: 페이지 이동 후 PDF 패널이 보이도록 스크롤 올리기
-                          detailContainerRef?.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                          // 모바일: PDF 패널이 화면 위에 있으므로 스크롤 맨 위로 이동
+                          window.scrollTo({ top: 0, behavior: "smooth" });
                         }
                       : undefined}
                   />

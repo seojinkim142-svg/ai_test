@@ -7749,10 +7749,7 @@ function App() {
     setPanelTab,
     outputLanguage,
     requestSummary,
-    onJumpToSummaryPage: (pageNumber) => {
-      const bounded = Math.max(1, Math.min(pageInfo.total || pageNumber, pageNumber));
-      setCurrentPage(bounded);
-    },
+    onJumpToSummaryPage: handlePageChange,
     isLoadingSummary,
     isLoadingText,
     previewText,
