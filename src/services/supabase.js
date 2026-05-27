@@ -368,7 +368,7 @@ export async function listFolders({ userId }) {
     .from("folders")
     .select("*")
     .eq("user_id", userId)
-    .order("created_at", { ascending: false });
+    .order("name", { ascending: true });
   if (error) throw error;
   return data || [];
 }

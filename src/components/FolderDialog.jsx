@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import PropTypes from "prop-types";
 
 function FolderDialog({
@@ -11,12 +12,70 @@ function FolderDialog({
   placeholder = "예: 1주차 강의, 중간고사 요약",
   cancelLabel = "취소",
 }) {
+  const dialogRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // Escape로 닫기
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose?.();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open, onClose]);
+
+  // 포커스 트랩
+  useEffect(() => {
+    if (!open || !dialogRef.current) return;
+    const focusable = dialogRef.current.querySelectorAll(
+      'button, input, textarea, select, a[href], [tabindex]:not([tabindex="-1"])'
+    );
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    const handleTab = (e) => {
+      if (e.key !== "Tab") return;
+      if (focusable.length === 0) { e.preventDefault(); return; }
+      if (e.shiftKey) {
+        if (document.activeElement === first) {
+          e.preventDefault();
+          last?.focus();
+        }
+      } else {
+        if (document.activeElement === last) {
+          e.preventDefault();
+          first?.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", handleTab);
+    // 열릴 때 input에 포커스
+    inputRef.current?.focus();
+    return () => document.removeEventListener("keydown", handleTab);
+  }, [open]);
+
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 px-4 py-6 backdrop-blur-sm">
-      <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900/90 p-5 text-slate-100 shadow-2xl ring-1 ring-white/15">
-        <h3 className="text-lg font-semibold text-white">{title}</h3>
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 px-4 py-6 backdrop-blur-sm"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose?.();
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="folder-dialog-title"
+        className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900/90 p-5 text-slate-100 shadow-2xl ring-1 ring-white/15"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 id="folder-dialog-title" className="text-lg font-semibold text-white">{title}</h3>
         <p className="mt-1 text-sm text-slate-300">{description}</p>
         <form
           className="mt-4 space-y-3"
@@ -29,6 +88,7 @@ function FolderDialog({
           }}
         >
           <input
+            ref={inputRef}
             name="folderName"
             type="text"
             autoFocus
