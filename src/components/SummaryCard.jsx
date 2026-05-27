@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import {
   MARKDOWN_MATH_REHYPE_PLUGINS,
@@ -632,9 +633,12 @@ function SummaryCard({
   const handleContextMenu = useCallback(
     (e) => {
       if (typeof onAskTutor !== "function") return;
-      const text = window.getSelection?.()?.toString().trim();
-      if (!text) return;
       e.preventDefault();
+      e.stopPropagation();
+      const text = (
+        e.target?.ownerDocument ?? document
+      ).getSelection?.()?.toString().trim() ?? "";
+      if (!text) return;
       // Keep menu inside viewport
       const menuW = 190;
       const menuH = 44;
@@ -891,9 +895,9 @@ function SummaryCard({
         </div>
       )}
 
-      {ctxMenu && (
+      {ctxMenu && createPortal(
         <div
-          className="fixed z-[300] min-w-[180px] overflow-hidden rounded-xl bg-slate-800 py-1 shadow-2xl ring-1 ring-white/15"
+          className="fixed z-[9999] min-w-[180px] overflow-hidden rounded-xl bg-slate-800 py-1 shadow-2xl ring-1 ring-white/15"
           style={{ left: ctxMenu.x, top: ctxMenu.y }}
           onPointerDown={(e) => e.stopPropagation()}
         >
@@ -908,7 +912,8 @@ function SummaryCard({
             <span className="text-violet-300">✦</span>
             AI 튜터에게 질문
           </button>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
