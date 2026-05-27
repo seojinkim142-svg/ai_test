@@ -98,6 +98,10 @@ function AiTutorPanel({
   notice,
   fileName,
   outputLanguage = "ko",
+  folderMode = false,
+  folderName = "",
+  canUseFolderMode = false,
+  onToggleFolderMode,
 }) {
   const [input, setInput] = useState("");
   const [attachmentFile, setAttachmentFile] = useState(null);
@@ -205,20 +209,37 @@ function AiTutorPanel({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-2xl font-semibold text-white">{copy.title}</h3>
-          {fileName && (
+          {folderMode && folderName ? (
+            <p className="mt-2 text-xs text-indigo-300">📂 {folderName} 전체 문서 기반</p>
+          ) : fileName ? (
             <p className="mt-2 text-xs text-slate-400">{copy.currentDocument(fileName)}</p>
-          )}
+          ) : null}
         </div>
-        <button
-          type="button"
-          onClick={handleReset}
-          disabled={!canReset || isLoading}
-          className="ghost-button text-xs text-slate-200"
-          data-ghost-size="sm"
-          style={{ "--ghost-color": "148, 163, 184" }}
-        >
-          {copy.resetChat}
-        </button>
+        <div className="flex items-center gap-2">
+          {canUseFolderMode && onToggleFolderMode && (
+            <button
+              type="button"
+              onClick={onToggleFolderMode}
+              className={`rounded-xl px-3 py-1.5 text-xs font-medium transition ${
+                folderMode
+                  ? "bg-indigo-500/30 text-indigo-200 ring-1 ring-indigo-400/40"
+                  : "bg-white/5 text-white/50 hover:bg-white/10 hover:text-white/70"
+              }`}
+            >
+              폴더 전체
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleReset}
+            disabled={!canReset || isLoading}
+            className="ghost-button text-xs text-slate-200"
+            data-ghost-size="sm"
+            style={{ "--ghost-color": "148, 163, 184" }}
+          >
+            {copy.resetChat}
+          </button>
+        </div>
       </div>
 
       {notice && (

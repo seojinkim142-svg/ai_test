@@ -43,6 +43,8 @@ const StartPage = memo(function StartPage({
   compareResult,
   isComparing,
   compareError,
+  // 학습 현황
+  allArtifacts,
 }) {
   const uploadRef = useRef(null);
   const showPromo = isGuest || showIntro;
@@ -103,6 +105,7 @@ const StartPage = memo(function StartPage({
               compareResult={compareResult}
               isComparing={isComparing}
               compareError={compareError}
+              allArtifacts={allArtifacts}
             />
           </div>
         </Suspense>
