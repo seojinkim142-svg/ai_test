@@ -777,7 +777,7 @@ function parseChapterNumberSelectionInput(rawInput, chapters) {
     .filter((num) => Number.isFinite(num) && num > 0);
   const chapterNumberSet = new Set(chapterNumbers);
   if (!chapterNumbers.length) {
-    return { chapterNumbers: [], error: "?ㅼ젙??踰붿쐞?먯꽌 ?ъ슜?????덈뒗 梨뺥꽣媛 ?놁뒿?덈떎." };
+    return { chapterNumbers: [], error: "설정에서 사용 가능한 챕터가 없습니다." };
   }
 
   const cleaned = String(rawInput || "").replace(/\s+/g, "");
@@ -1844,8 +1844,8 @@ function App() {
     setPremiumSpaceMode(nextMode);
       setStatus(
         nextMode === PREMIUM_SPACE_MODE_SHARED
-          ? "怨듭쑀 ?숈뒿 紐⑤뱶媛 耳쒖죱?듬땲?? ?숈뒿 ?곗씠?곌? ?꾨━誘몄뾼 硫ㅻ쾭? 怨듭쑀?⑸땲??"
-          : "媛쒖씤 ?숈뒿 紐⑤뱶媛 耳쒖죱?듬땲?? ?숈뒿 ?곗씠?곌? ?꾩옱 ?꾨줈?꾩뿉留???λ맗?덈떎."
+          ? "공유 모드가 활성화됐습니다. 앱 데이터가 프리미엄 공유 공간에 연결됩니다."
+          : "개인 모드가 활성화됐습니다. 앱 데이터가 현재 프로필에 연결됩니다."
       );
   }, [activePremiumProfileId, isPremiumTier, premiumSpaceMode, resetActiveDocumentState, user]);
 
@@ -1853,15 +1853,15 @@ function App() {
     (profileId, pinInput) => {
       const selected = premiumProfiles.find((profile) => profile.id === profileId);
       if (!selected) {
-        return { ok: false, message: "?좏깮???꾨줈?꾩쓣 李얠쓣 ???놁뒿?덈떎." };
+        return { ok: false, message: "선택한 프로필을 열 수 없습니다." };
       }
       const inputPin = normalizePremiumProfilePinInput(pinInput);
       if (!inputPin) {
-        return { ok: false, message: "4?먮━ PIN???낅젰?댁＜?몄슂." };
+        return { ok: false, message: "4자리 PIN을 입력해주세요." };
       }
       const expectedPin = sanitizePremiumProfilePin(selected.pin);
       if (inputPin !== expectedPin) {
-        return { ok: false, message: "PIN???щ컮瑜댁? ?딆뒿?덈떎." };
+        return { ok: false, message: "PIN이 PIN이 올바르지 않습니다." };
       }
       resetActiveDocumentState();
       setSelectedFolderId("all");
@@ -1880,12 +1880,12 @@ function App() {
     (event) => {
       event.preventDefault();
       if (!activePremiumProfileId) {
-        setProfilePinError("?좏깮???꾨줈?꾩씠 ?놁뒿?덈떎.");
+        setProfilePinError("선택한 프로필이 없습니다.");
         return;
       }
       const currentProfile = premiumProfiles.find((profile) => profile.id === activePremiumProfileId);
       if (!currentProfile) {
-        setProfilePinError("?좏깮???꾨줈?꾩쓣 李얠쓣 ???놁뒿?덈떎.");
+        setProfilePinError("선택한 프로필을 열 수 없습니다.");
         return;
       }
       const currentPin = normalizePremiumProfilePinInput(profilePinInputs.currentPin);
@@ -1897,11 +1897,11 @@ function App() {
         return;
       }
       if (currentPin !== sanitizePremiumProfilePin(currentProfile.pin)) {
-        setProfilePinError("?꾩옱 PIN???쇱튂?섏? ?딆뒿?덈떎.");
+        setProfilePinError("현재 PIN이 올바르지 않습니다.");
         return;
       }
       if (nextPin !== confirmPin) {
-        setProfilePinError("??PIN怨??뺤씤 PIN???쇱튂?섏? ?딆뒿?덈떎.");
+        setProfilePinError("새 PIN과 확인 PIN이 올바르지 않습니다.");
         return;
       }
       if (nextPin === currentPin) {
@@ -1916,8 +1916,8 @@ function App() {
       );
       setShowProfilePinDialog(false);
       setProfilePinInputs({ currentPin: "", nextPin: "", confirmPin: "" });
-      setProfilePinError("");
-      setStatus("?꾨줈??PIN??蹂寃쎈릺?덉뒿?덈떎.");
+      setStatus("프로필 PIN이 변경됐습니다.");
+      setStatus("프로필 PIN이 변경됐습니다.");
     },
     [activePremiumProfileId, premiumProfiles, profilePinInputs]
   );
@@ -2233,8 +2233,7 @@ function App() {
           return hasFolder ? prev : "all";
         });
       } catch (err) {
-        if (!isLatestRequest()) return;
-        setError(`?대뜑瑜?遺덈윭?ㅼ? 紐삵뻽?듬땲?? ${err.message}`);
+        setError(`폴더를 불러오지 못했습니다: ${err.message}`);
       }
     },
     [user, supabase, loadingTier, isPremiumTier, premiumOwnerProfileId, premiumScopeProfileId]
@@ -2243,21 +2242,21 @@ function App() {
   const handleCreateFolder = useCallback(
     async (name) => {
       if (!isFolderFeatureEnabled) {
-        setError("?대뜑 湲곕뒫? Pro ?먮뒗 Premium ?붽툑?쒖뿉?쒕쭔 ?ъ슜?????덉뒿?덈떎.");
+        setError("폴더 기능은 Pro 또는 Premium 구독에서만 사용됩니다.");
         return;
       }
       if (!user) {
-        setError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
+        setError("먼저 로그인해주세요.");
         return;
       }
       const trimmed = (name || "").trim();
       if (!trimmed) return;
       if (isPremiumTier && !premiumScopeProfileId) {
-        setError("?대뜑瑜?留뚮뱾湲??꾩뿉 ?꾨━誘몄뾼 ?꾨줈?꾩쓣 ?좏깮?댁＜?몄슂.");
+        setError("폴더를 만들기 전에 프리미엄 프로필을 선택해주세요.");
         return;
       }
       if (folders.some((f) => f.name.toLowerCase() === trimmed.toLowerCase())) {
-        setStatus("媛숈? ?대쫫???대뜑媛 ?대? ?덉뒿?덈떎.");
+        setStatus("같은 이름의 폴더가 이미 있습니다.");
         return;
       }
       try {
@@ -2282,9 +2281,9 @@ function App() {
         }
         setSelectedFolderId("all");
         setSelectedUploadIds([]);
-        setStatus("?대뜑瑜??앹꽦?덉뒿?덈떎.");
+        setStatus("폴더를 생성했습니다.");
       } catch (err) {
-        setError(`?대뜑 ?앹꽦???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+        setError(`폴더 생성에 실패했습니다: ${err.message}`);
       }
     },
     [isFolderFeatureEnabled, user, folders, isPremiumTier, premiumScopeProfileId, premiumOwnerProfileId]
@@ -2327,12 +2326,12 @@ function App() {
       if (!isFolderFeatureEnabled) return;
       if (!folderId || folderId === "all") return;
       if (!user) {
-        setError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
+        setError("먼저 로그인해주세요.");
         return;
       }
       const hasFiles = uploadedFiles.some((u) => u.folderId === folderId);
       if (hasFiles) {
-        setError("???대뜑瑜???젣?섍린 ?꾩뿉 ?뚯씪???대룞?섍굅????젣?댁＜?몄슂.");
+        setError("폴더 안의 파일을 먼저 이동하거나 삭제해주세요.");
         return;
       }
       try {
@@ -2342,7 +2341,7 @@ function App() {
           setSelectedFolderId("all");
         }
       } catch (err) {
-        setError(`?대뜑 ??젣???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+        setError(`폴더 삭제에 실패했습니다: ${err.message}`);
       }
     },
     [isFolderFeatureEnabled, uploadedFiles, selectedFolderId, user]
@@ -2379,13 +2378,13 @@ function App() {
           setStatus("Local upload removed.");
           return;
         }
-        setError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
+        setError("먼저 로그인해주세요.");
         return;
       }
       const uploadId = upload?.id || null;
       const storagePath = upload?.path || upload?.remotePath || null;
       if (!uploadId && !storagePath) {
-        setError("?낅줈???앸퀎?먭? ?놁뒿?덈떎.");
+        setError("파일을 찾을 수 없습니다.");
         return;
       }
       const before = uploadedFiles;
@@ -2402,11 +2401,11 @@ function App() {
         if (uploadId) {
           persistChapterRangeInput(uploadId, "");
         }
-        setStatus("?낅줈?쒕? ??젣?덉뒿?덈떎.");
+        setStatus("파일을 삭제했습니다.");
         await loadUploadsRef.current?.();
       } catch (err) {
         setUploadedFiles(before);
-        setError(`?낅줈????젣???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+        setError(`파일 삭제에 실패했습니다: ${err.message}`);
       }
     },
     [persistChapterRangeInput, uploadedFiles, user]
@@ -2417,13 +2416,13 @@ function App() {
       if (!isFolderFeatureEnabled) return;
       if (!uploadIds || uploadIds.length === 0) return;
       if (!user) {
-        setError("癒쇱? 濡쒓렇?명빐二쇱꽭??");
+        setError("먼저 로그인해주세요.");
         return;
       }
       const normalizedIds = uploadIds.map((id) => id?.toString()).filter(Boolean);
       const target = targetFolderId && targetFolderId !== "all" ? targetFolderId.toString() : null;
       if (isPremiumTier && target && !folders.some((folder) => folder.id?.toString() === target)) {
-        setError("?꾩옱 ?꾨━誘몄뾼 ?꾨줈??踰붿쐞??????대뜑媛 ?놁뒿?덈떎.");
+        setError("현재 프리미엄 프로필에 해당 폴더가 없습니다.");
         return;
       }
       const before = uploadedFilesRef.current;
@@ -2466,12 +2465,12 @@ function App() {
           );
         }
         setSelectedUploadIds([]);
-        setStatus("?좏깮???낅줈?쒕? ?대룞?덉뒿?덈떎.");
+        setStatus("선택한 파일을 이동했습니다.");
         // Sync with server to keep list and folder counts in sync with DB.
         await loadUploadsRef.current?.();
       } catch (err) {
         setUploadedFiles(before);
-        setError(`?낅줈???대룞???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+        setError(`파일 이동에 실패했습니다: ${err.message}`);
       }
     },
     [isFolderFeatureEnabled, user, uploadedFilesRef, isPremiumTier, folders]
@@ -2686,8 +2685,8 @@ function App() {
       try {
         const list = await listFlashcards({ userId: user.id, deckId });
         setFlashcards(list);
-      } catch (err) {
-        setError(`?뚮옒?쒖뭅?쒕? 遺덈윭?ㅼ? 紐삵뻽?듬땲?? ${err.message}`);
+        setError(`플래시카드를 불러오지 못했습니다: ${err.message}`);
+        setError(`플래시카드를 불러오지 못했습니다: ${err.message}`);
       } finally {
         setIsLoadingFlashcards(false);
       }
@@ -2750,8 +2749,8 @@ function App() {
           prev.filter((id) => scoped.some((item) => item.id?.toString() === id?.toString()))
         );
       } catch (err) {
-        if (!isLatestRequest()) return;
-        setError(`?낅줈??紐⑸줉??遺덈윭?ㅼ? 紐삵뻽?듬땲?? ${err.message}`);
+        setError(`파일 목록을 불러오지 못했습니다: ${err.message}`);
+        setError(`파일 목록을 불러오지 못했습니다: ${err.message}`);
       }
     },
     [user, supabase, loadingTier, isPremiumTier, premiumOwnerProfileId, premiumScopeProfileId]
@@ -2763,26 +2762,26 @@ function App() {
   const handleManualSync = useCallback(async () => {
     if (isManualSyncing) return;
     if (!user) {
-      setStatus("濡쒓렇?????덈줈怨좎묠???ъ슜?????덉뒿?덈떎.");
+      setStatus("로그인 후 새로고침을 사용할 수 있습니다.");
       openAuth();
       return;
     }
     if (loadingTier) {
-      setStatus("怨꾩젙 ?뺣낫瑜?遺덈윭?ㅻ뒗 以묒엯?덈떎. ?좎떆 ???ㅼ떆 ?쒕룄?댁＜?몄슂.");
+      setStatus("구독 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.");
       return;
     }
 
     setIsManualSyncing(true);
     setError("");
-    setStatus("?쒕쾭? ?숆린??以?..");
+    setStatus("동기화 중입니다...");
     try {
       await Promise.all([loadFolders(), loadUploads()]);
       if (selectedFileId) {
         await Promise.all([loadMockExams(selectedFileId), loadFlashcards(selectedFileId)]);
       }
-      setStatus("?덈줈怨좎묠 ?꾨즺. 理쒖떊 ?곹깭濡??숆린?뷀뻽?듬땲??");
+      setStatus("새로고침 완료. 최신 상태로 업데이트됐습니다.");
     } catch (err) {
-      setError(`?덈줈怨좎묠???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+      setError(`새로고침에 실패했습니다: ${err.message}`);
       setStatus("");
     } finally {
       setIsManualSyncing(false);
@@ -2979,7 +2978,7 @@ function App() {
       await refreshSession();
       setStatus("濡쒓렇?꾩썐?섏뿀?듬땲??");
     } catch (err) {
-      setError(`濡쒓렇?꾩썐???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+      setError(`로그아웃에 실패했습니다: ${err.message}`);
       setStatus("");
     } finally {
       setIsSigningOut(false);
@@ -3381,7 +3380,7 @@ function App() {
       const activeFolderId = targetFolderId && targetFolderId !== "all" ? targetFolderId.toString() : null;
       const activeProfileScopeId = isPremiumTier ? premiumScopeProfileId : null;
       if (isPremiumTier && !activeProfileScopeId) {
-        setError("?뚯씪 ?낅줈???꾩뿉 ?꾨━誘몄뾼 ?꾨줈?꾩쓣 ?좏깮?댁＜?몄슂.");
+        setError("파일 업로드 전에 프리미엄 프로필을 선택해주세요.");
         fileInput.value = "";
         return;
       }
@@ -3403,7 +3402,7 @@ function App() {
       }
       const nextCount = uploadedFiles.length + files.length;
       if (limits.maxUploads !== Infinity && nextCount > limits.maxUploads) {
-        setError(`?낅줈???쒕룄瑜?珥덇낵?덉뒿?덈떎. ?낅줈??媛??理쒕? 媛쒖닔: ${limits.maxUploads}.`);
+        setError(`파일 업로드 한도를 초과했습니다. 최대 업로드 수: ${limits.maxUploads}.`);
         fileInput.value = "";
         return;
       }
@@ -3442,7 +3441,7 @@ function App() {
             if (!AUTH_ENABLED) {
               return { ...item, remote: false };
             }
-            return { ...item, uploadError: "?대씪?곕뱶 ?낅줈?쒕? ?ъ슜?????놁뒿?덈떎. ?ㅼ떆 濡쒓렇?명빐二쇱꽭??" };
+            return { ...item, uploadError: "유효하지 않은 파일을 사용할 수 없습니다. 다시 로그인해주세요." };
           }
           if (!supabase) {
             return { ...item, uploadError: "Supabase client is not available." };
@@ -3524,7 +3523,7 @@ function App() {
                 // Ignore rollback failures.
               }
             }
-            return { ...item, uploadError: err?.message || "?낅줈?쒖뿉 ?ㅽ뙣?덉뒿?덈떎." };
+            return { ...item, uploadError: err?.message || "업로드에 실패했습니다." };
           }
         })
       );
@@ -3563,8 +3562,8 @@ function App() {
         if (AUTH_ENABLED && user) {
           await loadUploadsRef.current?.();
         }
-      } else {
-        setStatus("??λ맂 ?뚯씪???놁뒿?덈떎. ?낅줈???ㅻ쪟 硫붿떆吏瑜??뺤씤?댁＜?몄슂.");
+        setStatus("업로드된 파일이 없습니다. 업로드 오류 메시지를 확인해주세요.");
+        setStatus("업로드된 파일이 없습니다. 업로드 오류 메시지를 확인해주세요.");
       }
     },
     [
@@ -3676,7 +3675,7 @@ function App() {
     setArtifacts(null);
     setIsLoadingText(false);
     resetQuizState();
-    setStatus("?낅줈??紐⑸줉?쇰줈 ?뚯븘?붿뒿?덈떎.");
+    setStatus("파일 목록으로 돌아갑니다.");
     setSelectedUploadIds([]);
     updateHistoryState("replace", { view: "list" });
   }, [currentPage, pdfUrl, savePageProgressSnapshot, selectedFileId, updateHistoryState, visitedPages]);
@@ -3751,7 +3750,7 @@ function App() {
       try {
         await processSelectedFileRef.current(item);
       } catch (err) {
-        setError(`?좏깮???뚯씪???щ뒗 ???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
+        setError(`선택한 파일을 여는 데 실패했습니다: ${err.message}`);
       }
     },
     [processSelectedFileRef]
@@ -6077,7 +6076,7 @@ function App() {
     const docId = selectedFileId;
     const summaryText = String(partialSummary || "").trim();
     if (!docId) {
-      setError("癒쇱? PDF瑜??댁뼱二쇱꽭??");
+      setError("먼저 PDF를 선택해주세요.");
       return;
     }
     if (!summaryText) {
@@ -6117,7 +6116,7 @@ function App() {
     (itemId) => {
       const found = (savedPartialSummaries || []).find((item) => item.id === itemId);
       if (!found) {
-        setError("??λ맂 遺遺꾩슂?쎌쓣 李얠쓣 ???놁뒿?덈떎.");
+        setError("저장된 요약본을 찾을 수 없습니다.");
         return;
       }
       setPartialSummary(String(found.summary || "").trim());
@@ -6187,7 +6186,7 @@ function App() {
         range: partialSummaryRange,
         library: next,
       });
-      setStatus("??λ맂 遺遺꾩슂?쎌쓣 ??젣?덉뒿?덈떎.");
+      setStatus("저장된 요약본을 삭제했습니다.");
     },
     [partialSummary, partialSummaryRange, persistPartialSummaryBundle, savedPartialSummaries]
   );
@@ -6195,11 +6194,11 @@ function App() {
   const handleExportSummaryPdf = useCallback(async () => {
     if (isExportingSummary) return;
     if (!summary) {
-      setError("?대낫???붿빟???놁뒿?덈떎. 癒쇱? ?붿빟???앹꽦?댁＜?몄슂.");
+      setError("먼저 요약을 생성해주세요.");
       return;
     }
     if (!summaryRef.current) {
-      setError("?붿빟 ?곸뿭??李얠쓣 ???놁뼱 PDF濡??대낫?????놁뒿?덈떎.");
+      setError("뷰어 영역을 찾을 수 없어 PDF로 내보낼 수 없습니다.");
       return;
     }
     setIsExportingSummary(true);
