@@ -3727,13 +3727,16 @@ function App() {
       };
       setArtifacts(merged);
       try {
+        // Only persist the fields explicitly included in partial.
+        // Passing merged.* would overwrite DB fields with stale state when
+        // called from a background task that captured an old artifacts closure.
         await saveDocArtifacts({
           userId: user.id,
           docId: selectedFileId,
-          summary: merged.summary,
-          quiz: merged.quiz,
-          ox: merged.ox,
-          highlights: merged.highlights,
+          ...("summary" in partial && { summary: partial.summary }),
+          ...("quiz" in partial && { quiz: partial.quiz }),
+          ...("ox" in partial && { ox: partial.ox }),
+          ...("highlights" in partial && { highlights: partial.highlights }),
         });
       } catch (err) {
         // eslint-disable-next-line no-console
