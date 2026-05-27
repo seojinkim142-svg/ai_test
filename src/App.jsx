@@ -27,11 +27,13 @@ import {
   getSignedStorageUrl,
   updateUploadThumbnail,
   fetchDocArtifacts,
+  fetchMultipleDocArtifacts,
   saveDocArtifacts,
   updateUploadFolder,
   saveUserFeedback,
   getPremiumProfileStateFromUser,
   savePremiumProfileState,
+  fetchExtractedText,
 } from "./services/supabase";
 import { ensureUploadPreviewPdf as ensureUploadPreviewPdfRequest } from "./services/document";
 import {
@@ -110,6 +112,8 @@ import {
   readQuestionStyleProfileFromHighlights,
   readReviewNotesFromHighlights,
   writeQuestionStyleProfileToHighlights,
+  writeConceptTagsToHighlights,
+  readConceptTagsFromHighlights,
 } from "./utils/studyArtifacts";
 import { clearPaymentReturnPending, readPaymentReturnPending } from "./utils/paymentReturn";
 import { getTutorCopy } from "./utils/tutorCopy";
@@ -1284,6 +1288,14 @@ function App() {
   const [folders, setFolders] = useState([]);
   const [selectedFolderId, setSelectedFolderId] = useState("all");
   const [selectedUploadIds, setSelectedUploadIds] = useState([]);
+  // ─── Ponder-style features ───────────────────────────────────────────────
+  const [allArtifacts, setAllArtifacts] = useState([]);
+  const [semanticSearchResults, setSemanticSearchResults] = useState(null);
+  const [isSemanticSearching, setIsSemanticSearching] = useState(false);
+  const [compareResult, setCompareResult] = useState("");
+  const [isComparing, setIsComparing] = useState(false);
+  const [compareError, setCompareError] = useState("");
+  const [folderTutorMode, setFolderTutorMode] = useState(false);
   const [premiumProfiles, setPremiumProfiles] = useState([]);
   const [activePremiumProfileId, setActivePremiumProfileId] = useState(null);
   const [showPremiumProfilePicker, setShowPremiumProfilePicker] = useState(false);
@@ -3729,6 +3741,115 @@ function App() {
     [artifacts, selectedFileId, user]
   );
 
+  // ─── 학습 현황: 모든 파일의 artifact 일괄 로드 ───────────────────────────
+  const loadAllArtifacts = useCallback(
+    async (files) => {
+      if (!user || !files?.length) return;
+      try {
+        const docIds = files.map((f) => f.id).filter(Boolean);
+        if (!docIds.length) return;
+        const data = await fetchMultipleDocArtifacts({ userId: user.id, docIds });
+        setAllArtifacts(data || []);
+      } catch {
+        // 실패해도 무시
+      }
+    },
+    [user]
+  );
+
+  // ─── 의미론적 검색 ─────────────────────────────────────────────────────────
+  const handleSemanticSearch = useCallback(
+    async (query, files) => {
+      if (!query) {
+        setSemanticSearchResults(null);
+        return;
+      }
+      setIsSemanticSearching(true);
+      try {
+        const { generateSemanticSearch } = await getOpenAiService();
+        const docsInfo = (files || uploadedFiles).map((f) => {
+          const art = allArtifacts.find((a) => String(a.doc_id) === String(f.id));
+          const tags = readConceptTagsFromHighlights(art?.highlights_json);
+          return { id: f.id, name: f.name, summary: art?.summary || "", tags };
+        });
+        const results = await generateSemanticSearch(query, docsInfo, { outputLanguage });
+        setSemanticSearchResults(results);
+      } catch {
+        setSemanticSearchResults([]);
+      } finally {
+        setIsSemanticSearching(false);
+      }
+    },
+    [allArtifacts, getOpenAiService, outputLanguage, uploadedFiles]
+  );
+
+  // ─── 문서 간 비교 분석 ─────────────────────────────────────────────────────
+  const handleCompareDocuments = useCallback(
+    async (selectedFiles) => {
+      if (!selectedFiles?.length || selectedFiles.length < 2) return;
+      setIsComparing(true);
+      setCompareError("");
+      setCompareResult("");
+      try {
+        const { generateDocComparison } = await getOpenAiService();
+        // 각 문서의 extractedText 가져오기
+        const docsWithText = await Promise.all(
+          selectedFiles.map(async (f) => {
+            const art = allArtifacts.find((a) => String(a.doc_id) === String(f.id));
+            let text = art?.extracted_text || art?.summary || "";
+            if (!text && user) {
+              try {
+                const fetched = await fetchExtractedText({ userId: user.id, docId: f.id });
+                text = fetched?.extracted_text || "";
+              } catch {
+                // 무시
+              }
+            }
+            return { name: f.name, text: text || `(${f.name} 내용 없음)` };
+          })
+        );
+        const result = await generateDocComparison(docsWithText, { outputLanguage });
+        setCompareResult(result);
+      } catch (err) {
+        setCompareError(`비교 분석 실패: ${err.message}`);
+      } finally {
+        setIsComparing(false);
+      }
+    },
+    [allArtifacts, getOpenAiService, outputLanguage, user]
+  );
+
+  // ─── 폴더 모드 튜터: 폴더 내 모든 문서 텍스트 합치기 ────────────────────────
+  const buildFolderTutorContext = useCallback(
+    async (folderId) => {
+      if (!user || !folderId || folderId === "all") return null;
+      const folderFiles = uploadedFiles.filter(
+        (f) => String(f.folderId || "") === String(folderId)
+      );
+      if (!folderFiles.length) return null;
+      const docIds = folderFiles.map((f) => f.id);
+      let arts = allArtifacts.filter((a) => docIds.includes(String(a.doc_id)));
+      if (!arts.length) {
+        try {
+          arts = await fetchMultipleDocArtifacts({ userId: user.id, docIds });
+        } catch {
+          return null;
+        }
+      }
+      const blocks = arts
+        .map((a) => {
+          const file = folderFiles.find((f) => String(f.id) === String(a.doc_id));
+          const text = a.extracted_text || a.summary || "";
+          if (!text) return null;
+          return `### ${file?.name || a.doc_id}\n${text.slice(0, 20000)}`;
+        })
+        .filter(Boolean);
+      if (!blocks.length) return null;
+      return blocks.join("\n\n---\n\n");
+    },
+    [allArtifacts, uploadedFiles, user]
+  );
+
   const persistPartialSummaryBundle = useCallback(
     ({ summary = "", range = "", library = savedPartialSummaries } = {}) => {
       const nextHighlights = writePartialSummaryBundleToHighlights(artifacts?.highlights, {
@@ -3875,6 +3996,12 @@ function App() {
   useEffect(() => {
     uploadedFilesRef.current = uploadedFiles;
   }, [uploadedFiles]);
+
+  useEffect(() => {
+    if (user && uploadedFiles.length > 0) {
+      void loadAllArtifacts(uploadedFiles);
+    }
+  }, [uploadedFiles, user, loadAllArtifacts]);
 
   useEffect(() => {
     goBackToListRef.current = goBackToList;
@@ -5626,6 +5753,32 @@ function App() {
       setQuestionStyleProfileScopeLabel(nextQuestionStyleProfile ? questionStyleScopeLabel : "");
       setStatus("요약이 생성되었습니다.");
       persistArtifacts({ summary: summarized, highlights: nextHighlightsWithUsage });
+      // 핵심 개념 자동 태그 추출 (백그라운드)
+      void (async () => {
+        try {
+          const { generateConceptTags } = await getOpenAiService();
+          const sourceForTags = summarySourceText || summarized || "";
+          if (sourceForTags.length < 50) return;
+          const tags = await generateConceptTags(sourceForTags, { outputLanguage });
+          if (tags?.length) {
+            const currentHighlights = nextHighlightsWithUsage;
+            const tagsHighlights = writeConceptTagsToHighlights(currentHighlights, tags);
+            persistArtifacts({ highlights: tagsHighlights });
+            // allArtifacts 업데이트
+            setAllArtifacts((prev) => {
+              const idx = prev.findIndex((a) => String(a.doc_id) === String(selectedFileId));
+              if (idx >= 0) {
+                const next = [...prev];
+                next[idx] = { ...next[idx], highlights_json: tagsHighlights };
+                return next;
+              }
+              return prev;
+            });
+          }
+        } catch {
+          // 태그 추출 실패는 무시
+        }
+      })();
     } catch (err) {
       setError(`요약 생성에 실패했습니다: ${err.message}`);
       setStatus("");
@@ -6343,6 +6496,34 @@ function App() {
       const effectiveDisplayPrompt = String(displayPrompt || effectivePrompt).trim();
       if ((!effectivePrompt && !hasAttachment) || isTutorLoading || tutorRequestInFlightRef.current) {
         return false;
+      }
+
+      // 폴더 모드: 폴더 전체 문서 컨텍스트로 튜터 실행
+      if (folderTutorMode && selectedFolderId && selectedFolderId !== "all" && !hasAttachment) {
+        tutorRequestInFlightRef.current = true;
+        setTutorError("");
+        setStatus("");
+        setTutorMessages((prev) => [...prev, { role: "user", content: effectiveDisplayPrompt }]);
+        setIsTutorLoading(true);
+        void (async () => {
+          try {
+            const folderContext = await buildFolderTutorContext(selectedFolderId);
+            if (!folderContext) {
+              setTutorError("폴더 내 문서 텍스트를 가져오지 못했습니다. 각 문서를 먼저 열어 텍스트를 로드해주세요.");
+              return;
+            }
+            const { generateTutorReply } = await getOpenAiService();
+            const history = tutorMessages.slice(-8).map((msg) => ({ role: msg?.role, content: String(msg?.content || "").slice(0, 1200) })).filter((m) => m.role && m.content.trim());
+            const reply = await generateTutorReply({ question: effectivePrompt, extractedText: folderContext, messages: history, outputLanguage });
+            setTutorMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+          } catch (err) {
+            setTutorError(`폴더 튜터 오류: ${err.message}`);
+          } finally {
+            setIsTutorLoading(false);
+            tutorRequestInFlightRef.current = false;
+          }
+        })();
+        return true;
       }
 
       const selectedKind = detectSupportedDocumentKind(file);
@@ -7519,6 +7700,14 @@ function App() {
     maxPdfSizeBytes: limits.maxPdfSizeBytes,
     outputLanguage,
     setOutputLanguage,
+    // Ponder-style features
+    onSemanticSearch: handleSemanticSearch,
+    semanticSearchResults,
+    isSemanticSearching,
+    onCompare: handleCompareDocuments,
+    compareResult,
+    isComparing,
+    compareError,
   };
   const detailPageProps = {
     detailContainerRef,
@@ -7687,6 +7876,11 @@ function App() {
     tutorNotice,
     handleSendTutorMessage,
     handleResetTutor,
+    // 폴더 튜터 모드
+    folderTutorMode,
+    onToggleFolderTutorMode: () => setFolderTutorMode((v) => !v),
+    canUseFolderTutorMode: Boolean(selectedFolderId && selectedFolderId !== "all" && uploadedFiles.some((f) => String(f.folderId || "") === String(selectedFolderId))),
+    folderName: folders.find((f) => String(f.id) === String(selectedFolderId))?.name || "",
   };
 
   if (AUTH_ENABLED && isNativePlatform && !authReady) {

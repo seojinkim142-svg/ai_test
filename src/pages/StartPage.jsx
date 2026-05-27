@@ -34,6 +34,15 @@ const StartPage = memo(function StartPage({
   maxPdfSizeBytes = 0,
   outputLanguage = "ko",
   setOutputLanguage,
+  // 의미론적 검색
+  onSemanticSearch,
+  semanticSearchResults,
+  isSemanticSearching,
+  // 문서 비교
+  onCompare,
+  compareResult,
+  isComparing,
+  compareError,
 }) {
   const uploadRef = useRef(null);
   const showPromo = isGuest || showIntro;
@@ -87,6 +96,13 @@ const StartPage = memo(function StartPage({
               currentTier={currentTier}
               maxPdfSizeBytes={maxPdfSizeBytes}
               outputLanguage={outputLanguage}
+              onSemanticSearch={onSemanticSearch}
+              semanticSearchResults={semanticSearchResults}
+              isSemanticSearching={isSemanticSearching}
+              onCompare={onCompare}
+              compareResult={compareResult}
+              isComparing={isComparing}
+              compareError={compareError}
             />
           </div>
         </Suspense>
