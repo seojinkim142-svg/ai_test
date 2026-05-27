@@ -686,6 +686,14 @@ function SummaryCard({
         ? "summary-prose prose max-w-none space-y-2 text-slate-900 prose-p:leading-relaxed prose-headings:text-slate-900 prose-strong:text-slate-900 prose-a:text-slate-900 caret-transparent"
         : "summary-prose prose prose-invert max-w-none space-y-2 text-slate-100 prose-p:leading-relaxed prose-headings:text-slate-50 prose-strong:text-slate-50 prose-a:text-slate-50 caret-transparent";
 
+    // remark parses [p.N] as an unresolved link reference and splits it into
+    // three separate text nodes ("[", "p.N", "]"), breaking citation detection.
+    // Escape the brackets so remark treats them as literal text "[p.N]" instead.
+    const escapedContent = String(pageContent || "").replace(
+      /\[p\.(\d+)\]/g,
+      (_, n) => `\\[p.${n}\\]`
+    );
+
     return (
       <div className={proseClass}>
         <ReactMarkdown
@@ -693,7 +701,7 @@ function SummaryCard({
           rehypePlugins={MARKDOWN_MATH_REHYPE_PLUGINS}
           components={components}
         >
-          {pageContent}
+          {escapedContent}
         </ReactMarkdown>
       </div>
     );
