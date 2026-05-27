@@ -7,6 +7,7 @@ import { getUiCopy } from "../utils/uiCopy";
 import UploadTile from "./UploadTile";
 import PdfTile from "./PdfTile";
 import FolderTile from "./FolderTile";
+import DocComparePanel from "./DocComparePanel";
 
 const MB = 1024 * 1024;
 const TIER_LABEL = {
@@ -49,12 +50,23 @@ const FileUpload = memo(function FileUpload({
   currentTier = "free",
   maxPdfSizeBytes = 0,
   outputLanguage = "ko",
+  // 의미론적 검색
+  onSemanticSearch,
+  semanticSearchResults = null,
+  isSemanticSearching = false,
+  // 문서 비교
+  onCompare,
+  compareResult = "",
+  isComparing = false,
+  compareError = "",
 }) {
   const copy = getUiCopy(outputLanguage);
   const [showAddMenu, setShowAddMenu] = useState(false);
   const addMenuRef = useRef(null);
   const fileInputRef = useRef(null);
   const folderFileInputRef = useRef(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showCompare, setShowCompare] = useState(false);
   const [showFolderDialog, setShowFolderDialog] = useState(false);
   const [folderDialogMode, setFolderDialogMode] = useState("create");
   const [folderModalId, setFolderModalId] = useState(null);
@@ -248,6 +260,25 @@ const FileUpload = memo(function FileUpload({
     return Boolean(fid);
   };
 
+  // 의미론적 검색 결과로 필터된 파일 IDs
+  const semanticFilteredIds = useMemo(() => {
+    if (!semanticSearchResults?.length) return null;
+    return new Set(semanticSearchResults.map((r) => String(r.id)));
+  }, [semanticSearchResults]);
+
+  // 선택된 파일 객체 목록 (비교용)
+  const selectedFilesForCompare = useMemo(
+    () => uploadedFiles.filter((f) => selectedUploadIds.includes(f.id)),
+    [uploadedFiles, selectedUploadIds]
+  );
+
+  const handleSearchSubmit = (e) => {
+    e.preventDefault();
+    const q = searchQuery.trim();
+    if (!q || !onSemanticSearch) return;
+    onSemanticSearch(q, uploadedFiles);
+  };
+
   return (
     <div className="col-span-2 flex flex-col gap-4">
       <div className="px-1 text-sm text-slate-100">
@@ -258,6 +289,76 @@ const FileUpload = memo(function FileUpload({
           )}
         </div>
       </div>
+
+      {/* 의미론적 검색 */}
+      {!isGuest && uploadedFiles.length > 0 && onSemanticSearch && (
+        <form onSubmit={handleSearchSubmit} className="flex items-center gap-2">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="내용으로 파일 검색... (예: 삼투압, 미적분)"
+            className="flex-1 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500 focus:border-indigo-400/40 focus:bg-white/8"
+          />
+          <button
+            type="submit"
+            disabled={isSemanticSearching || !searchQuery.trim()}
+            className="rounded-xl bg-indigo-500/70 px-3 py-2 text-xs font-medium text-white disabled:opacity-50 hover:bg-indigo-500"
+          >
+            {isSemanticSearching ? "..." : "검색"}
+          </button>
+          {semanticSearchResults !== null && (
+            <button
+              type="button"
+              onClick={() => { setSearchQuery(""); onSemanticSearch?.(null, null); }}
+              className="rounded-xl bg-white/10 px-3 py-2 text-xs text-white/60 hover:text-white/80"
+            >
+              ✕
+            </button>
+          )}
+        </form>
+      )}
+
+      {/* 의미론적 검색 결과 요약 */}
+      {semanticSearchResults?.length > 0 && (
+        <div className="rounded-xl border border-indigo-500/20 bg-indigo-950/30 px-3 py-2 text-xs text-indigo-200">
+          {semanticSearchResults.slice(0, 3).map((r) => {
+            const f = uploadedFiles.find((u) => String(u.id) === String(r.id));
+            return f ? (
+              <div key={r.id} className="flex items-start gap-1.5 py-0.5">
+                <span className="text-indigo-400">▸</span>
+                <span className="font-medium text-white/80">{f.name}</span>
+                {r.reason && <span className="text-white/40"> — {r.reason}</span>}
+              </div>
+            ) : null;
+          })}
+        </div>
+      )}
+
+      {/* 문서 비교 버튼 및 패널 */}
+      {!isGuest && selectedUploadIds.length >= 2 && onCompare && (
+        <div>
+          {!showCompare ? (
+            <button
+              type="button"
+              onClick={() => setShowCompare(true)}
+              className="rounded-xl border border-indigo-500/30 bg-indigo-950/40 px-4 py-2 text-xs font-medium text-indigo-200 hover:bg-indigo-950/60"
+            >
+              📊 {selectedUploadIds.length}개 문서 비교 분석
+            </button>
+          ) : (
+            <DocComparePanel
+              selectedFiles={selectedFilesForCompare}
+              result={compareResult}
+              isLoading={isComparing}
+              error={compareError}
+              outputLanguage={outputLanguage}
+              onCompare={() => onCompare(selectedFilesForCompare)}
+              onClose={() => setShowCompare(false)}
+            />
+          )}
+        </div>
+      )}
 
       <div className={uploadGridClassName}>
         <div className="relative h-full" ref={addMenuRef}>
