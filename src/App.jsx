@@ -7736,6 +7736,7 @@ function App() {
     isComparing,
     compareError,
     allArtifacts,
+    sidebarOpen,
   };
   const detailPageProps = {
     detailContainerRef,

@@ -62,6 +62,7 @@ const FileUpload = memo(function FileUpload({
   compareError = "",
   // 학습 현황
   allArtifacts = [],
+  sidebarOpen = false,
 }) {
   const copy = getUiCopy(outputLanguage);
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -172,7 +173,7 @@ const FileUpload = memo(function FileUpload({
     [currentTier, maxPdfSizeBytes, copy]
   );
   const uploadGridClassName = isNativePlatform
-    ? "relative mt-1 grid grid-cols-2 gap-3 sm:mt-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
+    ? `relative mt-1 grid gap-3 sm:mt-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 ${sidebarOpen ? "grid-cols-1" : "grid-cols-2"}`
     : "relative mt-1 grid grid-cols-2 gap-3 sm:mt-2 sm:flex sm:flex-wrap";
   const emptyStateClassName = isNativePlatform
     ? "col-span-full flex min-h-[170px] w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 text-center text-sm text-slate-300 ring-1 ring-white/5"
@@ -285,6 +286,7 @@ const FileUpload = memo(function FileUpload({
             onOpenMenu={handleOpenAddMenu}
             inputRef={fileInputRef}
             compactGrid={isNativePlatform}
+            rowLayout={isNativePlatform && sidebarOpen}
             title={copy.upload.addDocument}
             description={copy.upload.uploadPrompt}
             caption={copy.upload.previewPdfOnly}
@@ -347,7 +349,6 @@ const FileUpload = memo(function FileUpload({
           </div>
         )}
         {visibleUploads.map((item) => {
-          const isSelected = selectedUploadIds.includes(item.id);
           const isActive = selectedFileId === item.id;
           const isCurrent = selectedFileId === item.id;
           return (
@@ -365,6 +366,7 @@ const FileUpload = memo(function FileUpload({
               onDragStart={undefined}
               onDragEnd={undefined}
               compactGrid={isNativePlatform}
+              rowLayout={isNativePlatform && sidebarOpen}
               onProceed={() => onSelectFile?.(item)}
               onContextMenu={(e) => handleContextMenuUpload(e, item)}
               onDelete={() => onDeleteUpload?.(item)}
