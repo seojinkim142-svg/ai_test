@@ -1292,7 +1292,14 @@ function App() {
   // ─── Ponder-style features ───────────────────────────────────────────────
   const [allArtifacts, setAllArtifacts] = useState([]);
   const [semanticSearchResults, setSemanticSearchResults] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    try {
+      const saved = localStorage.getItem("sidebarOpen");
+      return saved === null ? true : saved === "true";
+    } catch {
+      return true;
+    }
+  });
   const [isSemanticSearching, setIsSemanticSearching] = useState(false);
   const [compareResult, setCompareResult] = useState("");
   const [isComparing, setIsComparing] = useState(false);
@@ -8226,7 +8233,11 @@ function App() {
             <Suspense fallback={null}>
               <LeftSidebar
                 isOpen={sidebarOpen}
-                onToggle={() => setSidebarOpen((v) => !v)}
+                onToggle={() => setSidebarOpen((v) => {
+                  const next = !v;
+                  try { localStorage.setItem("sidebarOpen", String(next)); } catch {}
+                  return next;
+                })}
                 uploadedFiles={uploadedFiles}
                 allArtifacts={allArtifacts}
                 onSemanticSearch={handleSemanticSearch}
