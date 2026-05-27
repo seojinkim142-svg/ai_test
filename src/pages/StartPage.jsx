@@ -45,6 +45,7 @@ const StartPage = memo(function StartPage({
   compareError,
   // 학습 현황
   allArtifacts,
+  sidebarOpen = false,
 }) {
   const uploadRef = useRef(null);
   const showPromo = isGuest || showIntro;
@@ -106,6 +107,7 @@ const StartPage = memo(function StartPage({
               isComparing={isComparing}
               compareError={compareError}
               allArtifacts={allArtifacts}
+              sidebarOpen={sidebarOpen}
             />
           </div>
         </Suspense>
