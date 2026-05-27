@@ -457,6 +457,7 @@ function SummaryCard({
   renderExportPages = false,
   onResolveEvidence,
   onJumpToEvidencePage,
+  onAskTutor,
 }) {
   const normalizedSummary = useMemo(
     () => normalizeMathMarkdown(sanitizeSummaryForMath(summary)).trim(),
@@ -464,6 +465,7 @@ function SummaryCard({
   );
   const hasSummary = normalizedSummary.length > 0;
   const [isExpanded, setIsExpanded] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState(null); // { x, y, text }
   const summaryKey = normalizedSummary;
 
   const pages = useMemo(() => splitSummaryIntoPages(normalizedSummary), [normalizedSummary]);
@@ -627,6 +629,33 @@ function SummaryCard({
     [canGoNext, canGoPrev, goNext, goPrev]
   );
 
+  const handleContextMenu = useCallback(
+    (e) => {
+      if (typeof onAskTutor !== "function") return;
+      const text = window.getSelection?.()?.toString().trim();
+      if (!text) return;
+      e.preventDefault();
+      // Keep menu inside viewport
+      const menuW = 190;
+      const menuH = 44;
+      const x = Math.min(e.clientX, window.innerWidth - menuW - 8);
+      const y = Math.min(e.clientY, window.innerHeight - menuH - 8);
+      setCtxMenu({ x, y, text });
+    },
+    [onAskTutor]
+  );
+
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const close = () => setCtxMenu(null);
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("scroll", close, true);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("scroll", close, true);
+    };
+  }, [ctxMenu]);
+
   const handleCardKeyDown = useCallback(
     (event) => {
       if (isInteractiveElement(event.target)) return;
@@ -757,6 +786,7 @@ function SummaryCard({
             <div
               className="mx-auto aspect-[210/297] w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950/45 p-4 shadow-inner shadow-black/30 md:p-7"
               onClick={handleSummaryPageClick}
+              onContextMenu={handleContextMenu}
             >
               <div className="show-scrollbar h-full overflow-auto pr-1">
                 {renderMarkdownPage(currentPage, markdownComponents)}
@@ -850,11 +880,34 @@ function SummaryCard({
             </div>
 
             <div className="min-h-0 flex-1 p-3 sm:p-5 lg:p-6">
-              <div className="show-scrollbar h-full overflow-auto rounded-[1.75rem] border border-white/10 bg-slate-900/50 p-4 sm:p-6 lg:p-8">
+              <div
+                className="show-scrollbar h-full overflow-auto rounded-[1.75rem] border border-white/10 bg-slate-900/50 p-4 sm:p-6 lg:p-8"
+                onContextMenu={handleContextMenu}
+              >
                 {renderMarkdownPage(currentPage, markdownComponents)}
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {ctxMenu && (
+        <div
+          className="fixed z-[300] min-w-[180px] overflow-hidden rounded-xl bg-slate-800 py-1 shadow-2xl ring-1 ring-white/15"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[13px] font-medium text-slate-100 hover:bg-violet-600/70 active:bg-violet-700/80"
+            onClick={() => {
+              onAskTutor(ctxMenu.text);
+              setCtxMenu(null);
+            }}
+          >
+            <span className="text-violet-300">✦</span>
+            AI 튜터에게 질문
+          </button>
         </div>
       )}
     </>
