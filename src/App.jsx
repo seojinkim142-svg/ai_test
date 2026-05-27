@@ -125,6 +125,7 @@ const PaymentPage = lazy(() => import("./components/PaymentPage"));
 const SettingsDialog = lazy(() => import("./components/SettingsDialog"));
 const DetailPage = lazy(() => import("./pages/DetailPage"));
 const PremiumProfilePicker = lazy(() => import("./components/PremiumProfilePicker"));
+const LeftSidebar = lazy(() => import("./components/LeftSidebar"));
 
 const NativeAppPlugin =
   Capacitor.isNativePlatform() && Capacitor.isPluginAvailable("App")
@@ -1291,6 +1292,7 @@ function App() {
   // ─── Ponder-style features ───────────────────────────────────────────────
   const [allArtifacts, setAllArtifacts] = useState([]);
   const [semanticSearchResults, setSemanticSearchResults] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isSemanticSearching, setIsSemanticSearching] = useState(false);
   const [compareResult, setCompareResult] = useState("");
   const [isComparing, setIsComparing] = useState(false);
@@ -8163,7 +8165,7 @@ function App() {
         </div>
       )}
 
-      <main className="relative z-10 mx-auto flex w-full max-w-none flex-col gap-4 py-4">
+      <div className="relative z-10 flex min-h-screen flex-col">
         {showHeader && (
           <Suspense fallback={null}>
             <Header
@@ -8192,21 +8194,40 @@ function App() {
             />
           </Suspense>
         )}
-        <div className="px-0">
-          {!showDetail && <StartPage {...startPageProps} />}
-          {showDetail && (
-            <Suspense
-              fallback={
-                <div className="flex min-h-[50vh] items-center justify-center text-sm text-slate-300">
-                  Loading...
-                </div>
-              }
-            >
-              <DetailPage {...detailPageProps} />
+        <div className="flex flex-1">
+          {showHeader && (
+            <Suspense fallback={null}>
+              <LeftSidebar
+                isOpen={sidebarOpen}
+                onToggle={() => setSidebarOpen((v) => !v)}
+                uploadedFiles={uploadedFiles}
+                allArtifacts={allArtifacts}
+                onSemanticSearch={handleSemanticSearch}
+                semanticSearchResults={semanticSearchResults}
+                isSemanticSearching={isSemanticSearching}
+                outputLanguage={outputLanguage}
+                onSelectFile={handleSelectFile}
+              />
             </Suspense>
           )}
+          <main className="flex min-w-0 flex-1 flex-col gap-4 py-4">
+            <div className="px-0">
+              {!showDetail && <StartPage {...startPageProps} />}
+              {showDetail && (
+                <Suspense
+                  fallback={
+                    <div className="flex min-h-[50vh] items-center justify-center text-sm text-slate-300">
+                      Loading...
+                    </div>
+                  }
+                >
+                  <DetailPage {...detailPageProps} />
+                </Suspense>
+              )}
+            </div>
+          </main>
         </div>
-      </main>
+      </div>
     </div>
   );
 }
