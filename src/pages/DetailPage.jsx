@@ -157,6 +157,7 @@ export default function DetailPage({
   setPanelTab,
   outputLanguage = "ko",
   requestSummary,
+  onJumpToSummaryPage,
   isLoadingSummary,
   isLoadingText,
   previewText,
@@ -1003,7 +1004,11 @@ export default function DetailPage({
               {isLoadingSummary && <p className="mt-2 text-sm text-slate-300">{"\uC694\uC57D \uC0DD\uC131 \uC911..."}</p>}
               {!isLoadingSummary && summary && (
                 <div ref={summaryRef}>
-                  <SummaryCard summary={summary} renderExportPages={isExportingSummary} />
+                  <SummaryCard
+                    summary={summary}
+                    renderExportPages={isExportingSummary}
+                    onJumpToEvidencePage={onJumpToSummaryPage}
+                  />
                 </div>
               )}
               {!isLoadingSummary && !summary && (

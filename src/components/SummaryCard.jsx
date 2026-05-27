@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
   MARKDOWN_MATH_REHYPE_PLUGINS,
@@ -362,6 +362,96 @@ function isInteractiveElement(target) {
   );
 }
 
+// ── Inline citation helpers ──────────────────────────────────────────────────
+
+const CITATION_RE = /\[p\.(\d+)\]/g;
+
+function parseInlineCitations(text) {
+  const segments = [];
+  let lastIndex = 0;
+  let match;
+  CITATION_RE.lastIndex = 0;
+  while ((match = CITATION_RE.exec(text)) !== null) {
+    if (lastIndex < match.index) {
+      segments.push({ type: "text", content: text.slice(lastIndex, match.index) });
+    }
+    segments.push({ type: "cite", pageNumber: parseInt(match[1], 10) });
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < text.length) {
+    segments.push({ type: "text", content: text.slice(lastIndex) });
+  }
+  return segments;
+}
+
+function CitationBadge({ pageNumber, onJumpToPage }) {
+  const [open, setOpen] = useState(false);
+  const timerRef = useRef(null);
+
+  const show = () => {
+    clearTimeout(timerRef.current);
+    setOpen(true);
+  };
+  const hide = () => {
+    timerRef.current = setTimeout(() => setOpen(false), 120);
+  };
+
+  return (
+    <span className="relative inline-block">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (typeof onJumpToPage === "function") onJumpToPage(pageNumber);
+        }}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+        aria-label={`PDF ${pageNumber}페이지로 이동`}
+        className="mx-[2px] cursor-pointer rounded px-[5px] py-[1px] text-[10px] font-semibold
+                   text-violet-300 ring-1 ring-violet-400/40
+                   transition-colors hover:bg-violet-500/20 hover:text-violet-100
+                   focus:outline-none focus:ring-violet-400"
+      >
+        p.{pageNumber}
+      </button>
+      {open && (
+        <span
+          className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1 -translate-x-1/2
+                     whitespace-nowrap rounded-lg bg-slate-800 px-2 py-1
+                     text-[11px] text-slate-200 shadow-lg ring-1 ring-white/10"
+        >
+          PDF {pageNumber}페이지로 이동
+        </span>
+      )}
+    </span>
+  );
+}
+
+function renderWithCitations(children, onJumpToPage) {
+  if (typeof onJumpToPage !== "function") return children;
+  return Array.isArray(children)
+    ? children.flatMap((child, i) =>
+        typeof child === "string" ? renderStringWithCitations(child, onJumpToPage, i) : [child]
+      )
+    : typeof children === "string"
+    ? renderStringWithCitations(children, onJumpToPage, 0)
+    : children;
+}
+
+function renderStringWithCitations(text, onJumpToPage, keyBase) {
+  const segments = parseInlineCitations(text);
+  if (segments.length === 1 && segments[0].type === "text") return [text];
+  return segments.map((seg, i) =>
+    seg.type === "cite" ? (
+      <CitationBadge key={`${keyBase}-cite-${i}`} pageNumber={seg.pageNumber} onJumpToPage={onJumpToPage} />
+    ) : (
+      <span key={`${keyBase}-text-${i}`}>{seg.content}</span>
+    )
+  );
+}
+
 function SummaryCard({
   summary,
   renderExportPages = false,
@@ -383,11 +473,23 @@ function SummaryCard({
       h1: (props) => <h1 className="mt-4 text-xl font-bold text-white" {...props} />,
       h2: (props) => <h2 className="mt-3 text-lg font-semibold text-white" {...props} />,
       h3: (props) => <h3 className="mt-2 text-base font-semibold text-emerald-100" {...props} />,
-      p: (props) => <p className="text-sm leading-relaxed text-slate-100 md:text-[15px]" {...props} />,
-      strong: (props) => <strong className="font-semibold text-slate-50" {...props} />,
+      p: ({ children, ...props }) => (
+        <p className="text-sm leading-relaxed text-slate-100 md:text-[15px]" {...props}>
+          {renderWithCitations(children, onJumpToEvidencePage)}
+        </p>
+      ),
+      strong: ({ children, ...props }) => (
+        <strong className="font-semibold text-slate-50" {...props}>
+          {renderWithCitations(children, onJumpToEvidencePage)}
+        </strong>
+      ),
       ul: (props) => <ul className="list-disc space-y-1 pl-5 text-sm text-slate-100 md:text-[15px]" {...props} />,
       ol: (props) => <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-100 md:text-[15px]" {...props} />,
-      li: (props) => <li className="leading-relaxed" {...props} />,
+      li: ({ children, ...props }) => (
+        <li className="leading-relaxed" {...props}>
+          {renderWithCitations(children, onJumpToEvidencePage)}
+        </li>
+      ),
       code: ({ inline, className, children, ...props }) =>
         inline ? (
           <code className="rounded bg-slate-800/80 px-1.5 py-0.5 text-[12px] text-emerald-100" {...props}>
@@ -408,7 +510,7 @@ function SummaryCard({
       ),
       td: (props) => <td className="border-b border-white/5 px-3 py-2 text-slate-100" {...props} />,
     }),
-    []
+    [onJumpToEvidencePage]
   );
   const exportMarkdownComponents = useMemo(
     () => ({

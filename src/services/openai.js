@@ -861,6 +861,18 @@ ${contextText}
 }
 function buildSummaryPrompt(extractedText, outputLanguage = "ko") {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
+  const hasPageTags = /\[p\.\d+\]/.test(String(extractedText || ""));
+  const citationSection = hasPageTags
+    ? `
+[Citation rules — the source text contains [p.N] page markers]
+- After each key fact, definition, formula, or important claim in your summary, append the citation marker [p.N] where N is the page number from the nearest preceding [p.N] tag in the source.
+- Place the [p.N] marker at the very end of the sentence or bullet point it applies to, just before the period or line break.
+- Only cite specific, sourced facts — skip citations for headings, overview sentences, and general connective text.
+- Do NOT fabricate page numbers. Only use page numbers that appear in the source [p.N] tags.
+- Example output: "미토콘드리아는 ATP를 생산하는 세포 소기관입니다 [p.4]."
+`
+    : "";
+
   return `
 You are a senior teaching assistant writing a study-grade ${outputLanguageLabel} markdown summary from lecture material.
 
@@ -896,7 +908,7 @@ Term — definition (original English term in parentheses if helpful).
 - Emphasize key ideas with **bold**.
 - Use tables when comparing 3 or more items with shared attributes.
 - Use numbered lists only for steps or ranked sequences; use bullet lists otherwise.
-
+${citationSection}
 [Math formatting — strict]
 - Inline math: $...$
 - Block math: $$...$$ on its own line
@@ -2038,7 +2050,7 @@ function formatChapterSummaryMarkdown(parsed, summaryInput) {
   return markdown.join("\n").trim();
 }
 
-async function generateChapterSummary(extractedText, { scope, chapterSections, outputLanguage = "ko" } = {}) {
+async function generateChapterSummary(extractedText, { scope, chapterSections, outputLanguage = "ko", hasPageTags = false } = {}) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const summaryInput = buildChapterSummaryInput(extractedText, { scope, chapterSections });
   if (!summaryInput.chapters.length) return "";
@@ -2048,6 +2060,10 @@ async function generateChapterSummary(extractedText, { scope, chapterSections, o
     mode: summaryInput.mode,
     chapters: summaryInput.chapters,
   };
+
+  const citationRule = hasPageTags
+    ? `- The chapter text may contain [p.N] page markers. When a summaryPoint explanation is derived from a specific page, append the citation [p.N] at the end of the "explanation" string (e.g., "...이 과정에서 포도당이 분해됩니다 [p.4]."). Only use page numbers visible in the chapter text. Do not fabricate page numbers.`
+    : "";
 
   const data = await postChatRequest(
     {
@@ -2108,6 +2124,7 @@ Rules:
 - Do not mention chapter detection/splitting logic or model processing notes (e.g., missing chapter titles, length-based split, virtual chapters).
 - Keep overview focused on lecture topic and learning goals only.
 - Preserve chapter ids exactly as input.
+${citationRule}
 - Return strict JSON only.
 
 Input:
@@ -2752,18 +2769,22 @@ export async function generateOxQuiz(
 
 export async function generateSummary(
   extractedText,
-  { scope, chapterized = true, chapterSections = null, outputLanguage = "ko" } = {}
+  { scope, chapterized = true, chapterSections = null, outputLanguage = "ko", pageTaggedText = null } = {}
 ) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
+  const normalizedPageTagged = String(pageTaggedText || "").trim();
   const normalized = normalizeSummarySource(extractedText);
   const hasManualChapters = Array.isArray(chapterSections) && chapterSections.length > 0;
   if (!normalized && !hasManualChapters) {
     throw new Error("No text available for summary. Load the PDF and extract text first.");
   }
 
+  // Use page-tagged text for chapter summary when available so AI can emit [p.N] citations
+  const chapterSourceText = normalizedPageTagged || normalized;
+
   if (chapterized) {
     try {
-      const chapterSummary = await generateChapterSummary(normalized, { scope, chapterSections, outputLanguage });
+      const chapterSummary = await generateChapterSummary(chapterSourceText, { scope, chapterSections, outputLanguage, hasPageTags: Boolean(normalizedPageTagged) });
       if (chapterSummary) return chapterSummary;
     } catch {
       // fallback to legacy summary
@@ -2774,7 +2795,9 @@ export async function generateSummary(
     throw new Error("Summary source text is empty.");
   }
 
-  const summaryContext = shrinkWithTail(normalized, MAX_LEGACY_SUMMARY_SOURCE_CHARS);
+  // Prefer page-tagged text for legacy path so AI can cite pages inline
+  const legacySource = normalizedPageTagged || normalized;
+  const summaryContext = shrinkWithTail(legacySource, MAX_LEGACY_SUMMARY_SOURCE_CHARS);
   const prompt = buildSummaryPrompt(summaryContext, outputLanguage);
   const scopeGuard = scope
     ? {
