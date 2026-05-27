@@ -383,6 +383,17 @@ function PdfPreview({
     setLoadedSrc((prev) => (stripUrlHash(prev) === stripUrlHash(viewerSrc) ? viewerSrc : ""));
   }, [sourceKey, viewerSrc]);
 
+  // iframe 모드에서 currentPage 변경 시 강제 재로드 (Chrome PDF 뷰어는 hash 변경을 무시함)
+  const prevIframePageRef = useRef(normalizePageNumber(currentPage));
+  useEffect(() => {
+    if (useCanvasPdfPreview) return;
+    const page = normalizePageNumber(currentPage);
+    if (page === prevIframePageRef.current) return;
+    prevIframePageRef.current = page;
+    if (!viewerSrc) return;
+    retryPdfIframeLoad(viewerSrc);
+  }, [currentPage, useCanvasPdfPreview, viewerSrc, retryPdfIframeLoad]);
+
   const goToNextPage = useCallback(() => {
     if (normalizedCurrentPage >= totalPages) return;
     goToPage(normalizedCurrentPage + 1);
