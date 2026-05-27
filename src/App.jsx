@@ -5714,6 +5714,27 @@ function App() {
             .filter(Boolean)
             .join("\n\n")
         : summarySourceText;
+
+      // Build page-tagged text for PDF sources so AI can emit inline [p.N] citations
+      let pageTaggedText = null;
+      if (isPdfSource && file && !customChapterSections) {
+        try {
+          const totalPages = pageInfo.total || pageInfo.used || 0;
+          if (totalPages > 0) {
+            const allPageNumbers = Array.from({ length: Math.min(totalPages, 80) }, (_, i) => i + 1);
+            const pageResult = await extractPdfPageTexts(file, allPageNumbers, { maxCharsPerPage: 2500 });
+            const pageEntries = Array.isArray(pageResult?.pages) ? pageResult.pages : [];
+            const tagged = pageEntries
+              .filter((p) => String(p?.text || "").trim())
+              .map((p) => `[p.${p.pageNumber}]\n${String(p.text).trim()}`)
+              .join("\n\n");
+            if (tagged) pageTaggedText = tagged.slice(0, 50000);
+          }
+        } catch {
+          // non-critical — summary still works without page tags
+        }
+      }
+
       const summaryPromise = customChapterSections
         ? generateSummary(questionStyleSourceText, {
             scope: "사용자 지정 챕터 범위",
@@ -5725,6 +5746,7 @@ function App() {
         : generateSummary(summarySourceText, {
             instructorEmphasis: instructorEmphasisText,
             outputLanguage,
+            pageTaggedText,
           });
       const questionStyleProfilePromise = generateQuestionStyleProfile(questionStyleSourceText, {
         scopeLabel: questionStyleScopeLabel,
@@ -7727,6 +7749,10 @@ function App() {
     setPanelTab,
     outputLanguage,
     requestSummary,
+    onJumpToSummaryPage: (pageNumber) => {
+      const bounded = Math.max(1, Math.min(pageInfo.total || pageNumber, pageNumber));
+      setCurrentPage(bounded);
+    },
     isLoadingSummary,
     isLoadingText,
     previewText,
