@@ -19,6 +19,7 @@ import {
   listFlashcards,
   deleteFlashcard,
   createFolder,
+  renameFolder,
   listFolders,
   deleteFolder,
   deleteUpload,
@@ -2255,7 +2256,7 @@ function App() {
         setError("?대뜑瑜?留뚮뱾湲??꾩뿉 ?꾨━誘몄뾼 ?꾨줈?꾩쓣 ?좏깮?댁＜?몄슂.");
         return;
       }
-      if (folders.some((f) => f.name === trimmed)) {
+      if (folders.some((f) => f.name.toLowerCase() === trimmed.toLowerCase())) {
         setStatus("媛숈? ?대쫫???대뜑媛 ?대? ?덉뒿?덈떎.");
         return;
       }
@@ -2287,6 +2288,38 @@ function App() {
       }
     },
     [isFolderFeatureEnabled, user, folders, isPremiumTier, premiumScopeProfileId, premiumOwnerProfileId]
+  );
+
+  const handleRenameFolder = useCallback(
+    async (folderId, name) => {
+      if (!isFolderFeatureEnabled) return;
+      if (!folderId || folderId === "all") return;
+      if (!user) {
+        setError("먼저 로그인해주세요.");
+        return;
+      }
+      const trimmed = (name || "").trim();
+      if (!trimmed) return;
+      const lower = trimmed.toLowerCase();
+      if (folders.some((f) => f.id !== folderId && f.name.toLowerCase() === lower)) {
+        setStatus("같은 이름의 폴더가 이미 있습니다.");
+        return;
+      }
+      try {
+        const storedName =
+          isPremiumTier && premiumScopeProfileId
+            ? encodePremiumScopeValue(trimmed, premiumScopeProfileId)
+            : trimmed;
+        await renameFolder({ userId: user.id, folderId, name: storedName });
+        setFolders((prev) =>
+          prev.map((f) => (f.id === folderId ? { ...f, name: trimmed } : f))
+        );
+        setStatus("폴더 이름을 변경했습니다.");
+      } catch (err) {
+        setError(`폴더 이름 변경에 실패했습니다: ${err.message}`);
+      }
+    },
+    [isFolderFeatureEnabled, user, folders, isPremiumTier, premiumScopeProfileId]
   );
 
   const handleDeleteFolder = useCallback(
@@ -2393,7 +2426,7 @@ function App() {
         setError("?꾩옱 ?꾨━誘몄뾼 ?꾨줈??踰붿쐞??????대뜑媛 ?놁뒿?덈떎.");
         return;
       }
-      const before = uploadedFiles;
+      const before = uploadedFilesRef.current;
       const targetEntries = before.filter((item) => normalizedIds.includes(item.id?.toString()));
       const remoteIds = targetEntries.map((item) => item.id).filter(Boolean);
       const remotePaths = targetEntries.map((item) => item.path || item.remotePath).filter(Boolean);
@@ -2441,7 +2474,7 @@ function App() {
         setError(`?낅줈???대룞???ㅽ뙣?덉뒿?덈떎: ${err.message}`);
       }
     },
-    [isFolderFeatureEnabled, user, uploadedFiles, isPremiumTier, folders]
+    [isFolderFeatureEnabled, user, uploadedFilesRef, isPremiumTier, folders]
   );
 
   const toggleTheme = useCallback(() => {
@@ -7718,6 +7751,7 @@ function App() {
     selectedFolderId,
     onSelectFolder: handleSelectFolder,
     onCreateFolder: handleCreateFolder,
+    onRenameFolder: handleRenameFolder,
     onDeleteFolder: handleDeleteFolder,
     selectedUploadIds,
     onToggleUploadSelect: handleToggleUploadSelect,
