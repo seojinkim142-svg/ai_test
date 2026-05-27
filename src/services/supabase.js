@@ -489,6 +489,17 @@ export async function updateUploadFolder({ userId, uploadIds = [], folderId = nu
   return results;
 }
 
+export async function fetchMultipleDocArtifacts({ userId, docIds }) {
+  if (!supabase || !userId || !docIds?.length) return [];
+  const { data, error } = await supabase
+    .from(ARTIFACTS_TABLE)
+    .select("doc_id, summary, quiz_json, ox_json, highlights_json, extracted_text")
+    .eq("user_id", userId)
+    .in("doc_id", docIds);
+  if (error) throw error;
+  return data || [];
+}
+
 export async function fetchDocArtifacts({ userId, docId }) {
   if (!supabase || !userId || !docId) return null;
   const { data, error } = await supabase

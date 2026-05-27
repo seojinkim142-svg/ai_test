@@ -7708,6 +7708,7 @@ function App() {
     compareResult,
     isComparing,
     compareError,
+    allArtifacts,
   };
   const detailPageProps = {
     detailContainerRef,

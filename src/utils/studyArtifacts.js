@@ -405,3 +405,26 @@ export function writeQuestionStyleProfileToHighlights(
 
   return Object.keys(base).length > 0 ? base : null;
 }
+
+const CONCEPT_TAGS_ARTIFACT_KEY = "__concept_tags_v1";
+
+export function writeConceptTagsToHighlights(highlightsValue, tags) {
+  const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
+  if (!isPlainObject(highlightsValue) && highlightsValue != null) {
+    base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
+  }
+  const normalized = Array.isArray(tags) ? tags.map((t) => String(t).trim()).filter(Boolean) : [];
+  if (normalized.length > 0) {
+    base[CONCEPT_TAGS_ARTIFACT_KEY] = normalized;
+  } else {
+    delete base[CONCEPT_TAGS_ARTIFACT_KEY];
+  }
+  return Object.keys(base).length > 0 ? base : null;
+}
+
+export function readConceptTagsFromHighlights(highlightsValue) {
+  if (!isPlainObject(highlightsValue)) return [];
+  const tags = highlightsValue[CONCEPT_TAGS_ARTIFACT_KEY];
+  if (!Array.isArray(tags)) return [];
+  return tags.map((t) => String(t).trim()).filter(Boolean);
+}

@@ -3386,3 +3386,99 @@ ${extractedText}
   const sanitized = sanitizeJson(content);
   return parseJsonSafe(sanitized, "highlights JSON");
 }
+
+// ─── Feature: 핵심 개념 자동 태깅 ───────────────────────────────────────────
+export async function generateConceptTags(extractedText, { outputLanguage = "ko" } = {}) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
+  const data = await postChatRequest(
+    {
+      model: MODEL,
+      messages: [
+        {
+          role: "system",
+          content: `Extract 5-10 core concepts or keywords from the document. Return JSON only: {"tags": ["tag1", "tag2", ...]}`,
+        },
+        {
+          role: "user",
+          content: `Extract the most important study concepts from this document. Tags should be short (1-3 words), in ${outputLanguageLabel}.\n\nDocument:\n${limitText(extractedText, 8000)}`,
+        },
+      ],
+      temperature: 0.3,
+    },
+    { retries: 1 }
+  );
+  const content = data.choices?.[0]?.message?.content?.trim() || "";
+  const sanitized = sanitizeJson(content);
+  try {
+    const parsed = JSON.parse(sanitized);
+    const tags = parsed?.tags;
+    if (Array.isArray(tags)) return tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 10);
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+// ─── Feature: 문서 간 비교 분석 ──────────────────────────────────────────────
+export async function generateDocComparison(docs, { outputLanguage = "ko" } = {}) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
+  const docBlocks = docs
+    .map((doc, i) => `### 문서 ${i + 1}: ${doc.name}\n${limitText(doc.text, 5000)}`)
+    .join("\n\n---\n\n");
+  const data = await postChatRequest(
+    {
+      model: MODEL,
+      messages: [
+        {
+          role: "system",
+          content: `You are a study assistant. Compare documents and identify similarities, differences, and key exam points. Answer in ${outputLanguageLabel}.`,
+        },
+        {
+          role: "user",
+          content: `Compare the following documents and organize in ${outputLanguageLabel}:\n\n${docBlocks}\n\nStructure your response with:\n1. Common core concepts\n2. Differences / unique content per document\n3. Key exam points`,
+        },
+      ],
+      temperature: 0.5,
+    },
+    { retries: 1 }
+  );
+  return data.choices?.[0]?.message?.content?.trim() || "";
+}
+
+// ─── Feature: 의미론적 검색 ───────────────────────────────────────────────────
+export async function generateSemanticSearch(query, docsInfo, { outputLanguage = "ko" } = {}) {
+  if (!query || !docsInfo?.length) return [];
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
+  const docsText = docsInfo
+    .map(
+      (doc) =>
+        `ID:${doc.id} | 이름:${doc.name}${doc.summary ? ` | 요약:${String(doc.summary).slice(0, 200)}` : ""}${doc.tags?.length ? ` | 태그:${doc.tags.join(",")}` : ""}`
+    )
+    .join("\n");
+  const data = await postChatRequest(
+    {
+      model: MODEL,
+      messages: [
+        {
+          role: "system",
+          content: `Find the most relevant documents for a search query. Return JSON only: {"results": [{"id": "...", "score": 0.0, "reason": "..."}]}`,
+        },
+        {
+          role: "user",
+          content: `Query: "${query}"\n\nDocuments:\n${docsText}\n\nReturn up to 5 most relevant documents. Write reason in ${outputLanguageLabel}.`,
+        },
+      ],
+      temperature: 0.3,
+    },
+    { retries: 1 }
+  );
+  const content = data.choices?.[0]?.message?.content?.trim() || "";
+  const sanitized = sanitizeJson(content);
+  try {
+    const parsed = JSON.parse(sanitized);
+    return Array.isArray(parsed?.results) ? parsed.results : [];
+  } catch {
+    // ignore
+  }
+  return [];
+}

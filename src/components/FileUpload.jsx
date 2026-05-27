@@ -8,6 +8,7 @@ import UploadTile from "./UploadTile";
 import PdfTile from "./PdfTile";
 import FolderTile from "./FolderTile";
 import DocComparePanel from "./DocComparePanel";
+import KnowledgeGapPanel from "./KnowledgeGapPanel";
 
 const MB = 1024 * 1024;
 const TIER_LABEL = {
@@ -59,6 +60,8 @@ const FileUpload = memo(function FileUpload({
   compareResult = "",
   isComparing = false,
   compareError = "",
+  // 학습 현황
+  allArtifacts = [],
 }) {
   const copy = getUiCopy(outputLanguage);
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -358,6 +361,15 @@ const FileUpload = memo(function FileUpload({
             />
           )}
         </div>
+      )}
+
+      {/* 학습 현황 */}
+      {!isGuest && uploadedFiles.length > 0 && (
+        <KnowledgeGapPanel
+          uploadedFiles={uploadedFiles}
+          allArtifacts={allArtifacts}
+          outputLanguage={outputLanguage}
+        />
       )}
 
       <div className={uploadGridClassName}>

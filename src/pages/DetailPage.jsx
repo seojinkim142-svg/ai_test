@@ -303,6 +303,10 @@ export default function DetailPage({
   tutorNotice,
   handleSendTutorMessage,
   handleResetTutor,
+  folderTutorMode = false,
+  onToggleFolderTutorMode,
+  canUseFolderTutorMode = false,
+  folderName = "",
 }) {
   const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
   const copy = useMemo(() => getDetailCopy(outputLanguage), [outputLanguage]);
@@ -1873,6 +1877,10 @@ export default function DetailPage({
               outputLanguage={outputLanguage}
               onSend={handleSendTutorMessage}
               onReset={handleResetTutor}
+              folderMode={folderTutorMode}
+              folderName={folderName}
+              canUseFolderMode={canUseFolderTutorMode}
+              onToggleFolderMode={onToggleFolderTutorMode}
             />
           )}
         </div>
