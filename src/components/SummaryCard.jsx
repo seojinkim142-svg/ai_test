@@ -552,6 +552,9 @@ function SummaryCard({
     []
   );
 
+  const scrollContainerRef = useRef(null);
+  const expandedScrollContainerRef = useRef(null);
+
   const pageIndex = pageIndexBySummary[summaryKey] ?? 0;
   const totalPages = Math.max(1, pages.length);
   const safePageIndex = Math.min(pageIndex, totalPages - 1);
@@ -561,6 +564,15 @@ function SummaryCard({
   const canResolveEvidence =
     typeof onResolveEvidence === "function" && typeof onJumpToEvidencePage === "function";
   const evidenceRequestKey = `${summaryKey}:${safePageIndex}`;
+
+  useEffect(() => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 0;
+    }
+    if (expandedScrollContainerRef.current) {
+      expandedScrollContainerRef.current.scrollTop = 0;
+    }
+  }, [safePageIndex]);
 
   useEffect(() => {
     setPageIndexBySummary((prev) => {
@@ -792,7 +804,7 @@ function SummaryCard({
               onClick={handleSummaryPageClick}
               onContextMenu={handleContextMenu}
             >
-              <div className="show-scrollbar h-full overflow-auto pr-1">
+              <div ref={scrollContainerRef} className="show-scrollbar h-full overflow-auto pr-1">
                 {renderMarkdownPage(currentPage, markdownComponents)}
               </div>
             </div>
@@ -885,6 +897,7 @@ function SummaryCard({
 
             <div className="min-h-0 flex-1 p-3 sm:p-5 lg:p-6">
               <div
+                ref={expandedScrollContainerRef}
                 className="show-scrollbar h-full overflow-auto rounded-[1.75rem] border border-white/10 bg-slate-900/50 p-4 sm:p-6 lg:p-8"
                 onContextMenu={handleContextMenu}
               >
