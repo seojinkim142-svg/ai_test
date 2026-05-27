@@ -1007,7 +1007,13 @@ export default function DetailPage({
                   <SummaryCard
                     summary={summary}
                     renderExportPages={isExportingSummary}
-                    onJumpToEvidencePage={onJumpToSummaryPage}
+                    onJumpToEvidencePage={typeof onJumpToSummaryPage === "function"
+                      ? (pageNumber, ...rest) => {
+                          onJumpToSummaryPage(pageNumber, ...rest);
+                          // 모바일: 페이지 이동 후 PDF 패널이 보이도록 스크롤 올리기
+                          detailContainerRef?.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                        }
+                      : undefined}
                   />
                 </div>
               )}
