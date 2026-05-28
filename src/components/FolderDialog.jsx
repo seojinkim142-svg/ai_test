@@ -93,6 +93,7 @@ function FolderDialog({
             type="text"
             autoFocus
             defaultValue={initialValue}
+            maxLength={50}
             className="w-full rounded-xl border border-white/10 bg-slate-800/80 px-3 py-2 text-sm text-slate-100 outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40"
             placeholder={placeholder}
           />

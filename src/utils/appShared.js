@@ -135,7 +135,8 @@ function escapeXml(input) {
 }
 
 export function buildFolderAggregateThumbnail(folderName) {
-  const safeName = String(folderName || "Folder").trim().slice(0, 28) || "Folder";
+  const rawName = String(folderName || "Folder").trim() || "Folder";
+  const safeName = rawName.length > 20 ? rawName.slice(0, 19) + "…" : rawName;
   const svg = [
     '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">',
     '<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">',

@@ -793,7 +793,7 @@ function parseChapterNumberSelectionInput(rawInput, chapters) {
       const start = Number.parseInt(startRaw, 10);
       const end = Number.parseInt(endRaw, 10);
       if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0 || start > end) {
-        return { chapterNumbers: [], error: `?섎せ??梨뺥꽣 踰붿쐞?낅땲?? "${token}"` };
+        return { chapterNumbers: [], error: `올바르지 않은 챕터 범위입니다: "${token}"` };
       }
       for (let chapterNumber = start; chapterNumber <= end; chapterNumber += 1) {
         selected.add(chapterNumber);
@@ -801,7 +801,7 @@ function parseChapterNumberSelectionInput(rawInput, chapters) {
     } else {
       const chapterNumber = Number.parseInt(token, 10);
       if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) {
-        return { chapterNumbers: [], error: `?섎せ??梨뺥꽣 踰덊샇?낅땲?? "${token}"` };
+        return { chapterNumbers: [], error: `올바르지 않은 챕터 번호입니다: "${token}"` };
       }
       selected.add(chapterNumber);
     }
@@ -1290,6 +1290,7 @@ function App() {
   const [folders, setFolders] = useState([]);
   const [selectedFolderId, setSelectedFolderId] = useState("all");
   const [selectedUploadIds, setSelectedUploadIds] = useState([]);
+  const [isFolderLoading, setIsFolderLoading] = useState(false);
   // ─── Ponder-style features ───────────────────────────────────────────────
   const [allArtifacts, setAllArtifacts] = useState([]);
   const [semanticSearchResults, setSemanticSearchResults] = useState(null);
@@ -1870,7 +1871,7 @@ function App() {
       setShowPremiumProfilePicker(false);
       // Mark this user as authenticated so metadata syncs don't re-trigger the picker.
       premiumProfileSessionUserIdRef.current = user?.id ?? null;
-      setStatus(`${selected.name} ?꾨줈?꾩씠 ?좏깮?섏뿀?듬땲??`);
+      setStatus(`${selected.name} 프로필이 선택되었습니다.`);
       return { ok: true };
     },
     [premiumProfiles, resetActiveDocumentState, user?.id]
@@ -1893,7 +1894,7 @@ function App() {
       const confirmPin = normalizePremiumProfilePinInput(profilePinInputs.confirmPin);
 
       if (!currentPin || !nextPin || !confirmPin) {
-        setProfilePinError("紐⑤뱺 PIN? 4?먮━ ?レ옄?ъ빞 ?⑸땲??");
+        setProfilePinError("모든 PIN은 4자리 숫자여야 합니다.");
         return;
       }
       if (currentPin !== sanitizePremiumProfilePin(currentProfile.pin)) {
@@ -1905,7 +1906,7 @@ function App() {
         return;
       }
       if (nextPin === currentPin) {
-        setProfilePinError("??PIN? ?꾩옱 PIN怨??щ씪???⑸땲??");
+        setProfilePinError("새 PIN은 현재 PIN과 달라야 합니다.");
         return;
       }
 
@@ -2256,9 +2257,10 @@ function App() {
         return;
       }
       if (folders.some((f) => f.name.toLowerCase() === trimmed.toLowerCase())) {
-        setStatus("같은 이름의 폴더가 이미 있습니다.");
+        setError("같은 이름의 폴더가 이미 있습니다.");
         return;
       }
+      setIsFolderLoading(true);
       try {
         const storedName =
           isPremiumTier && premiumScopeProfileId
@@ -2284,6 +2286,8 @@ function App() {
         setStatus("폴더를 생성했습니다.");
       } catch (err) {
         setError(`폴더 생성에 실패했습니다: ${err.message}`);
+      } finally {
+        setIsFolderLoading(false);
       }
     },
     [isFolderFeatureEnabled, user, folders, isPremiumTier, premiumScopeProfileId, premiumOwnerProfileId]
@@ -2301,9 +2305,10 @@ function App() {
       if (!trimmed) return;
       const lower = trimmed.toLowerCase();
       if (folders.some((f) => f.id !== folderId && f.name.toLowerCase() === lower)) {
-        setStatus("같은 이름의 폴더가 이미 있습니다.");
+        setError("같은 이름의 폴더가 이미 있습니다.");
         return;
       }
+      setIsFolderLoading(true);
       try {
         const storedName =
           isPremiumTier && premiumScopeProfileId
@@ -2316,6 +2321,8 @@ function App() {
         setStatus("폴더 이름을 변경했습니다.");
       } catch (err) {
         setError(`폴더 이름 변경에 실패했습니다: ${err.message}`);
+      } finally {
+        setIsFolderLoading(false);
       }
     },
     [isFolderFeatureEnabled, user, folders, isPremiumTier, premiumScopeProfileId]
@@ -2329,19 +2336,22 @@ function App() {
         setError("먼저 로그인해주세요.");
         return;
       }
-      const hasFiles = uploadedFiles.some((u) => u.folderId === folderId);
+      const hasFiles = uploadedFiles.some((u) => String(u.folderId || "") === String(folderId || ""));
       if (hasFiles) {
         setError("폴더 안의 파일을 먼저 이동하거나 삭제해주세요.");
         return;
       }
+      setIsFolderLoading(true);
       try {
         await deleteFolder({ userId: user.id, folderId });
         setFolders((prev) => prev.filter((f) => f.id !== folderId));
-        if (selectedFolderId === folderId) {
+        if (String(selectedFolderId || "") === String(folderId || "")) {
           setSelectedFolderId("all");
         }
       } catch (err) {
         setError(`폴더 삭제에 실패했습니다: ${err.message}`);
+      } finally {
+        setIsFolderLoading(false);
       }
     },
     [isFolderFeatureEnabled, uploadedFiles, selectedFolderId, user]
@@ -2350,6 +2360,13 @@ function App() {
   const handleSelectFolder = useCallback((folderId) => {
     setSelectedFolderId(folderId);
     setSelectedUploadIds([]);
+  }, []);
+
+  const handleSelectFolderSummary = useCallback((folderId) => {
+    if (!folderId || folderId === "all") return;
+    setSelectedFolderId(folderId);
+    setSelectedUploadIds([]);
+    setFolderTutorMode(true);
   }, []);
 
   const handleToggleUploadSelect = useCallback(
@@ -2429,6 +2446,7 @@ function App() {
       const targetEntries = before.filter((item) => normalizedIds.includes(item.id?.toString()));
       const remoteIds = targetEntries.map((item) => item.id).filter(Boolean);
       const remotePaths = targetEntries.map((item) => item.path || item.remotePath).filter(Boolean);
+      setIsFolderLoading(true);
       try {
         if (remoteIds.length > 0 || remotePaths.length > 0) {
           const updated = await updateUploadFolder({
@@ -2471,6 +2489,8 @@ function App() {
       } catch (err) {
         setUploadedFiles(before);
         setError(`파일 이동에 실패했습니다: ${err.message}`);
+      } finally {
+        setIsFolderLoading(false);
       }
     },
     [isFolderFeatureEnabled, user, uploadedFilesRef, isPremiumTier, folders]
@@ -2947,7 +2967,7 @@ function App() {
     if (!supabase) return;
     setIsSigningOut(true);
     setError("");
-    setStatus("濡쒓렇?꾩썐 以?..");
+    setStatus("로그아웃 중...");
     try {
       setShowSettings(false);
       setShowAuth(false);
@@ -2976,7 +2996,7 @@ function App() {
       setPanelTab("summary");
       updateHistoryState("replace", { view: "list" });
       await refreshSession();
-      setStatus("濡쒓렇?꾩썐?섏뿀?듬땲??");
+      setStatus("로그아웃되었습니다.");
     } catch (err) {
       setError(`로그아웃에 실패했습니다: ${err.message}`);
       setStatus("");
@@ -3779,7 +3799,7 @@ function App() {
         });
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.warn("??μ뿉 ?ㅽ뙣?덉뒿?덈떎: artifacts", err);
+        console.warn("저장에 실패했습니다: artifacts", err);
       }
     },
     [artifacts, selectedFileId, user]
@@ -7749,7 +7769,9 @@ function App() {
     folders,
     selectedFolderId,
     onSelectFolder: handleSelectFolder,
+    onSelectFolderSummary: handleSelectFolderSummary,
     onCreateFolder: handleCreateFolder,
+    isFolderLoading,
     onRenameFolder: handleRenameFolder,
     onDeleteFolder: handleDeleteFolder,
     selectedUploadIds,
