@@ -73,11 +73,13 @@ function injectExtraCSS() {
 
 function injectAnchorTags(markdown) {
   return String(markdown || "").replace(
-    /\[(?:문서:)?p\.(\d+)\]|\[(T[123])\]/g,
-    (_, page, tier) =>
-      page
+    /\[(?:[^\]:]+:)?p\.(\d+)\]|\[(T[123])\]|\((T[123])\)/g,
+    (_, page, bracketTier, parenTier) => {
+      const tier = bracketTier || parenTier;
+      return page
         ? `<a class="mm-anchor" data-page="${page}" href="#">p.${page}</a>`
-        : `<span class="mm-tier mm-tier--${tier.toLowerCase()}">${tier}</span>`
+        : `<span class="mm-tier mm-tier--${tier.toLowerCase()}">${tier}</span>`;
+    }
   );
 }
 
