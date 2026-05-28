@@ -2707,7 +2707,7 @@ function App() {
       try {
         const list = await listFlashcards({ userId: user.id, deckId });
         setFlashcards(list);
-        setError(`플래시카드를 불러오지 못했습니다: ${err.message}`);
+      } catch (err) {
         setError(`플래시카드를 불러오지 못했습니다: ${err.message}`);
       } finally {
         setIsLoadingFlashcards(false);
@@ -2771,7 +2771,6 @@ function App() {
           prev.filter((id) => scoped.some((item) => item.id?.toString() === id?.toString()))
         );
       } catch (err) {
-        setError(`파일 목록을 불러오지 못했습니다: ${err.message}`);
         setError(`파일 목록을 불러오지 못했습니다: ${err.message}`);
       }
     },
