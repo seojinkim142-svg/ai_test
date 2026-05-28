@@ -1035,7 +1035,7 @@ export default function DetailPage({
                     </div>
                   ) : (
                     <>
-                      <MindMapView summary={mindmapData} />
+                      <MindMapView summary={mindmapData} onJumpToPage={onJumpToSummaryPage} />
                       {mindmapData && (
                         <div className="mt-2 flex justify-end">
                           <button

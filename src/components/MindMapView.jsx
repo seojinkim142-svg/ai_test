@@ -20,6 +20,46 @@ const EXTRA_CSS = `
 .markmap-foreign { line-height: 1.55; }
 .markmap-foreign div { font-size: 13px; }
 .markmap-foreign strong { font-weight: 700; }
+.mm-anchor,
+.mm-tier {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.mm-anchor {
+  background: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  cursor: pointer;
+}
+.mm-anchor:hover {
+  background: rgba(139, 92, 246, 0.3);
+}
+.mm-tier {
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.mm-tier--t1 {
+  background: rgba(34, 197, 94, 0.15);
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.3);
+}
+.mm-tier--t2 {
+  background: rgba(234, 179, 8, 0.16);
+  color: #fde68a;
+  border-color: rgba(234, 179, 8, 0.35);
+}
+.mm-tier--t3 {
+  background: rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.28);
+}
 `;
 
 let extraCSSInjected = false;
@@ -31,9 +71,20 @@ function injectExtraCSS() {
   extraCSSInjected = true;
 }
 
-export default function MindMapView({ summary }) {
+function injectAnchorTags(markdown) {
+  return String(markdown || "").replace(
+    /\[(?:문서:)?p\.(\d+)\]|\[(T[123])\]/g,
+    (_, page, tier) =>
+      page
+        ? `<a class="mm-anchor" data-page="${page}" href="#">p.${page}</a>`
+        : `<span class="mm-tier mm-tier--${tier.toLowerCase()}">${tier}</span>`
+  );
+}
+
+export default function MindMapView({ summary, onJumpToPage }) {
   const svgRef = useRef(null);
   const containerRef = useRef(null);
+  const pointerDownRef = useRef(null);
 
   useEffect(() => {
     injectCSS();
@@ -44,14 +95,41 @@ export default function MindMapView({ summary }) {
     if (!svgRef.current || !summary) return;
 
     svgRef.current.innerHTML = "";
+    pointerDownRef.current = null;
 
     const containerWidth = containerRef.current?.clientWidth || 500;
     const nodeMaxWidth = Math.min(420, Math.max(220, Math.floor(containerWidth * 0.38)));
 
     let mm;
+    const svg = svgRef.current;
+    const handlePointerDown = (event) => {
+      const anchor = event.target instanceof Element ? event.target.closest(".mm-anchor") : null;
+      if (!anchor) {
+        pointerDownRef.current = null;
+        return;
+      }
+      pointerDownRef.current = { x: event.clientX, y: event.clientY };
+    };
+    const handleClick = (event) => {
+      const anchor = event.target instanceof Element ? event.target.closest(".mm-anchor") : null;
+      if (!anchor) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const start = pointerDownRef.current;
+      pointerDownRef.current = null;
+      if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 5) return;
+
+      const page = parseInt(anchor.dataset.page || "", 10);
+      if (!Number.isNaN(page) && typeof onJumpToPage === "function") {
+        onJumpToPage(page);
+      }
+    };
+
     try {
-      const { root } = transformer.transform(summary);
-      mm = Markmap.create(svgRef.current, deriveOptions({
+      const { root } = transformer.transform(injectAnchorTags(summary));
+      mm = Markmap.create(svg, deriveOptions({
         color: ["#34d399", "#60a5fa", "#f472b6", "#fb923c", "#a78bfa", "#facc15", "#38bdf8", "#f87171"],
         duration: 350,
         maxWidth: nodeMaxWidth,
@@ -60,15 +138,19 @@ export default function MindMapView({ summary }) {
         spacingHorizontal: 90,
         spacingVertical: 8,
       }), root);
+      svg.addEventListener("pointerdown", handlePointerDown);
+      svg.addEventListener("click", handleClick);
     } catch (e) {
       console.error("MindMap render error", e);
     }
 
     return () => {
+      svg.removeEventListener("pointerdown", handlePointerDown);
+      svg.removeEventListener("click", handleClick);
       mm?.destroy?.();
-      if (svgRef.current) svgRef.current.innerHTML = "";
+      svg.innerHTML = "";
     };
-  }, [summary]);
+  }, [onJumpToPage, summary]);
 
   if (!summary) {
     return (
