@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Transformer } from "markmap-lib";
-import { Markmap, globalCSS } from "markmap-view";
+import { Markmap, globalCSS, deriveOptions } from "markmap-view";
 
 const transformer = new Transformer();
 
@@ -32,13 +32,13 @@ export default function MindMapView({ summary }) {
     let mm;
     try {
       const { root } = transformer.transform(summary);
-      mm = Markmap.create(svgRef.current, {
+      mm = Markmap.create(svgRef.current, deriveOptions({
         color: ["#34d399", "#60a5fa", "#f472b6", "#fb923c", "#a78bfa", "#facc15"],
         duration: 400,
         maxWidth: nodeMaxWidth,
         initialExpandLevel: 3,
         paddingX: 8,
-      }, root);
+      }), root);
     } catch (e) {
       console.error("MindMap render error", e);
     }
