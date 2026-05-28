@@ -5885,20 +5885,22 @@ function App() {
 
   const requestMindMap = useCallback(async () => {
     const currentSummary = String(summary || "").trim();
-    if (!currentSummary) return;
-    if (isLoadingMindmap) return;
-    // 이미 같은 요약으로 생성된 마인드맵이 있으면 재생성 안 함
-    if (mindmapSummarySourceRef.current === currentSummary && mindmapData) return;
+    console.log("[MindMap] requestMindMap called, summary length:", currentSummary.length);
+    if (!currentSummary) { console.log("[MindMap] abort: no summary"); return; }
+    if (isLoadingMindmap) { console.log("[MindMap] abort: already loading"); return; }
+    if (mindmapSummarySourceRef.current === currentSummary && mindmapData) { console.log("[MindMap] abort: cached"); return; }
 
     setIsLoadingMindmap(true);
     setMindmapData("");
     try {
       const { generateMindMap } = await getOpenAiService();
+      console.log("[MindMap] calling generateMindMap...");
       const result = await generateMindMap(currentSummary, { outputLanguage });
+      console.log("[MindMap] result length:", result?.length, "preview:", result?.slice(0, 100));
       mindmapSummarySourceRef.current = currentSummary;
       setMindmapData(result);
     } catch (e) {
-      console.error("MindMap generation failed", e);
+      console.error("[MindMap] generation failed", e);
     } finally {
       setIsLoadingMindmap(false);
     }
