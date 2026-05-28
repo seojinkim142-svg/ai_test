@@ -13,6 +13,7 @@ import PdfPreview from "../components/PdfPreview";
 import QuizSection from "../components/QuizSection";
 import ReviewNotesPanel from "../components/ReviewNotesPanel";
 import SummaryCard from "../components/SummaryCard";
+import MindMapView from "../components/MindMapView";
 import MindMapTreeView from "../components/MindMapTreeView";
 import { useQuizMixCarousel } from "../hooks/useQuizMixCarousel";
 import { LETTERS } from "../constants";
@@ -316,6 +317,7 @@ export default function DetailPage({
   const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
   const copy = useMemo(() => getDetailCopy(outputLanguage), [outputLanguage]);
   const [summaryViewMode, setSummaryViewMode] = useState("text"); // "text" | "mindmap"
+  const [mmTab, setMmTab] = useState("tree"); // "tree" | "card"
   const detailTabs = useMemo(
     () => [
       { id: "summary", label: copy.tabs.summary },
@@ -1031,17 +1033,27 @@ export default function DetailPage({
                 <div className="mt-3">
                   {isLoadingMindmap ? (
                     <div className="flex h-40 items-center justify-center text-sm text-slate-400">
-                      분석 중...
+                      마인드맵 생성 중...
                     </div>
                   ) : (
                     <>
-                      <MindMapTreeView
-                        mindmapData={mindmapData}
-                        onJumpToPage={typeof onJumpToSummaryPage === "function"
-                          ? (pageNumber, ...rest) => { onJumpToSummaryPage(pageNumber, ...rest); }
-                          : undefined}
-                      />
-                      <div className="mt-2 flex justify-end">
+                      {/* 탭 전환 */}
+                      <div className="mb-3 flex items-center gap-1.5">
+                        {[
+                          { id: "tree", label: "트리뷰" },
+                          { id: "card", label: "카드뷰" },
+                        ].map((t) => (
+                          <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => setMmTab(t.id)}
+                            className="ghost-button text-xs"
+                            style={{ "--ghost-color": mmTab === t.id ? "52, 211, 153" : "148, 163, 184" }}
+                          >
+                            {t.label}
+                          </button>
+                        ))}
+                        <span className="flex-1" />
                         <button
                           type="button"
                           onClick={() => requestMindMap?.({ force: true })}
@@ -1052,6 +1064,24 @@ export default function DetailPage({
                           ↺ 재생성
                         </button>
                       </div>
+
+                      {mmTab === "tree" && (
+                        <MindMapView
+                          mindmapData={mindmapData}
+                          summary={summary}
+                          onJumpToPage={typeof onJumpToSummaryPage === "function"
+                            ? (pageNumber, ...rest) => { onJumpToSummaryPage(pageNumber, ...rest); }
+                            : undefined}
+                        />
+                      )}
+                      {mmTab === "card" && (
+                        <MindMapTreeView
+                          mindmapData={mindmapData}
+                          onJumpToPage={typeof onJumpToSummaryPage === "function"
+                            ? (pageNumber, ...rest) => { onJumpToSummaryPage(pageNumber, ...rest); }
+                            : undefined}
+                        />
+                      )}
                     </>
                   )}
                 </div>

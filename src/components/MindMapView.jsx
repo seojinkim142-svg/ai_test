@@ -74,6 +74,88 @@ function injectExtraCSS() {
   extraCSSInjected = true;
 }
 
+// ── JSON tree → markmap markdown ─────────────────────────────────────────────
+
+function buildTreeFromJson(nodes) {
+  const map = {};
+  nodes.forEach((n) => { map[n.id] = { ...n, children: [] }; });
+  let root = null;
+  nodes.forEach((n) => {
+    if (!n.parentId || !map[n.parentId]) {
+      if (!root) root = map[n.id];
+    } else {
+      map[n.parentId].children.push(map[n.id]);
+    }
+  });
+  return root;
+}
+
+function cleanContentForMarkmap(content) {
+  if (!content) return "";
+  // Remove markdown tables (markmap renders them poorly)
+  const lines = String(content).split("\n").filter((l) => !l.trim().startsWith("|"));
+  return lines.join("\n").trim();
+}
+
+function dfsToMarkmap(node, depth, lines) {
+  if (!node) return;
+  const label = String(node.label || "").trim();
+  const content = cleanContentForMarkmap(node.content);
+  const isQuestion = node.type === "question";
+
+  if (depth === 0) {
+    lines.push(`# ${label}`);
+    if (content) content.split("\n").forEach((l) => l.trim() && lines.push(l));
+  } else if (depth === 1) {
+    lines.push(`## ${isQuestion ? "? " : ""}${label}`);
+    if (content) content.split("\n").forEach((l) => l.trim() && lines.push(l));
+  } else if (depth === 2) {
+    lines.push(`### ${isQuestion ? "? " : ""}${label}`);
+    if (content) content.split("\n").forEach((l) => l.trim() && lines.push(l));
+  } else {
+    // depth 3+ → leaf bullets
+    if (content) {
+      // content has its own bullets — emit them directly
+      content.split("\n").forEach((l) => {
+        const stripped = l.trim();
+        if (!stripped) return;
+        if (stripped.startsWith("-") || stripped.startsWith("*")) {
+          lines.push(stripped);
+        } else {
+          lines.push(`- **${label}**: ${stripped}`);
+        }
+      });
+    } else {
+      lines.push(`- **${label}**`);
+    }
+    // don't recurse deeper for depth 3+ to keep markmap readable
+    return;
+  }
+
+  // sort: put start/source/next first, then branches, then questions last
+  const sorted = [...(node.children || [])].sort((a, b) => {
+    const order = { start: 0, source: 1, next: 2, branch: 3, sub: 4, leaf: 5, question: 6 };
+    return (order[a.type] ?? 5) - (order[b.type] ?? 5);
+  });
+  sorted.forEach((child) => dfsToMarkmap(child, depth + 1, lines));
+}
+
+function jsonToMarkmap(jsonStr) {
+  try {
+    const nodes = JSON.parse(jsonStr);
+    if (!Array.isArray(nodes)) return null;
+    const root = buildTreeFromJson(nodes);
+    if (!root) return null;
+    const lines = [];
+    dfsToMarkmap(root, 0, lines);
+    return lines.join("\n");
+  } catch {
+    return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 const INLINE_BADGE_RE = /\[(?:[^\]:]+:)?p\.(\d+)\]|\[(T[123])\]|\((T[123])\)/gi;
 
 function injectAnchorTags(markdown) {
@@ -151,7 +233,16 @@ function renderInlineBadges(svg) {
   });
 }
 
-export default function MindMapView({ summary, onJumpToPage }) {
+export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
+  // Resolve the markdown to render: JSON mindmapData takes priority, fallback to summary
+  const resolvedMarkdown = (() => {
+    if (mindmapData) {
+      const converted = jsonToMarkmap(mindmapData);
+      if (converted) return converted;
+    }
+    return summary || null;
+  })();
+
   const svgRef = useRef(null);
   const containerRef = useRef(null);
   const onJumpToPageRef = useRef(onJumpToPage);
@@ -167,7 +258,7 @@ export default function MindMapView({ summary, onJumpToPage }) {
   }, [onJumpToPage]);
 
   useEffect(() => {
-    if (!svgRef.current || !summary) return;
+    if (!svgRef.current || !resolvedMarkdown) return;
 
     svgRef.current.innerHTML = "";
     pointerDownRef.current = null;
@@ -177,20 +268,19 @@ export default function MindMapView({ summary, onJumpToPage }) {
     const nodeMaxWidth = Math.min(420, Math.max(220, Math.floor(containerWidth * 0.38)));
 
     let mm;
-    let badgeFrame = 0;
-    let badgeTimer = 0;
     const svg = svgRef.current;
-    const scheduleBadgeRender = () => {
+
+    // DOM 변경이 안정되면(50ms 조용하면) 한 번만 뱃지를 렌더링
+    let debounceTimer = 0;
+    const observer = new MutationObserver(() => {
       if (isDisposed) return;
-      if (badgeFrame) window.cancelAnimationFrame(badgeFrame);
-      if (badgeTimer) window.clearTimeout(badgeTimer);
-      badgeFrame = window.requestAnimationFrame(() => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
         if (!isDisposed) renderInlineBadges(svg);
-        badgeTimer = window.setTimeout(() => {
-          if (!isDisposed) renderInlineBadges(svg);
-        }, 120);
-      });
-    };
+      }, 50);
+    });
+    observer.observe(svg, { childList: true, subtree: true });
+
     const handlePointerDown = (event) => {
       const anchor = event.target instanceof Element ? event.target.closest(".mm-anchor") : null;
       if (!anchor) {
@@ -222,7 +312,7 @@ export default function MindMapView({ summary, onJumpToPage }) {
     };
 
     const renderMindMap = async () => {
-      const { root } = transformer.transform(injectAnchorTags(summary));
+      const { root } = transformer.transform(injectAnchorTags(resolvedMarkdown));
       mm = Markmap.create(svg, deriveOptions({
         color: ["#34d399", "#60a5fa", "#f472b6", "#fb923c", "#a78bfa", "#facc15", "#38bdf8", "#f87171"],
         duration: 350,
@@ -233,20 +323,12 @@ export default function MindMapView({ summary, onJumpToPage }) {
         spacingVertical: 8,
       }));
 
-      const originalRenderData = mm.renderData.bind(mm);
-      mm.renderData = async (...args) => {
-        const result = await originalRenderData(...args);
-        scheduleBadgeRender();
-        return result;
-      };
-
       svg.addEventListener("pointerdown", handlePointerDown, true);
       svg.addEventListener("click", handleClick, true);
 
       await mm.setData(root);
       if (!isDisposed) {
         await mm.fit().catch(() => {});
-        scheduleBadgeRender();
       }
     };
 
@@ -260,16 +342,16 @@ export default function MindMapView({ summary, onJumpToPage }) {
 
     return () => {
       isDisposed = true;
-      if (badgeFrame) window.cancelAnimationFrame(badgeFrame);
-      if (badgeTimer) window.clearTimeout(badgeTimer);
+      clearTimeout(debounceTimer);
+      observer.disconnect();
       svg.removeEventListener("pointerdown", handlePointerDown, true);
       svg.removeEventListener("click", handleClick, true);
       mm?.destroy?.();
       svg.innerHTML = "";
     };
-  }, [summary]);
+  }, [resolvedMarkdown]);
 
-  if (!summary) {
+  if (!resolvedMarkdown) {
     return (
       <div className="flex h-40 items-center justify-center text-sm text-slate-400">
         요약을 먼저 생성해 주세요.
