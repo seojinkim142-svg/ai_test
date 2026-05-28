@@ -9,7 +9,9 @@ import ReactFlow, {
   useEdgesState,
 } from "reactflow";
 import dagre from "@dagrejs/dagre";
+import katex from "katex";
 import "reactflow/dist/style.css";
+import "katex/dist/katex.min.css";
 
 // ── light color palette ───────────────────────────────────────────────────────
 
@@ -46,6 +48,46 @@ function cleanLine(line) {
     .replace(/\*\*([^*]+)\*\*/g, "$1")
     .replace(PAGE_RE, "")
     .trim();
+}
+
+// ── math rendering ────────────────────────────────────────────────────────────
+
+const MATH_RE = /\$([^$\n]+)\$/g;
+
+function MathText({ text, style }) {
+  const parts = useMemo(() => {
+    const result = [];
+    let last = 0;
+    MATH_RE.lastIndex = 0;
+    let m;
+    while ((m = MATH_RE.exec(text)) !== null) {
+      if (m.index > last) result.push({ type: "text", value: text.slice(last, m.index) });
+      result.push({ type: "math", value: m[1] });
+      last = m.index + m[0].length;
+    }
+    if (last < text.length) result.push({ type: "text", value: text.slice(last) });
+    return result;
+  }, [text]);
+
+  return (
+    <span style={style}>
+      {parts.map((p, i) => {
+        if (p.type === "text") return <span key={i}>{p.value}</span>;
+        try {
+          return (
+            <span
+              key={i}
+              dangerouslySetInnerHTML={{
+                __html: katex.renderToString(p.value, { throwOnError: false, displayMode: false, output: "html" }),
+              }}
+            />
+          );
+        } catch {
+          return <span key={i}>{`$${p.value}$`}</span>;
+        }
+      })}
+    </span>
+  );
 }
 
 const TYPE_LABEL = {
@@ -126,7 +168,8 @@ function CardNode({ data }) {
             {typeLabel}
           </span>
         )}
-        <span
+        <MathText
+          text={data.label}
           style={{
             fontSize: isRoot ? 13.5 : 12,
             fontWeight: isRoot ? 800 : 700,
@@ -134,14 +177,7 @@ function CardNode({ data }) {
             lineHeight: 1.4,
             wordBreak: "break-word",
           }}
-        >
-          {!typeLabel && TYPE_ICON[data.nodeType] && (
-            <span style={{ marginRight: 5, color: accentColor, fontSize: 11 }}>
-              {TYPE_ICON[data.nodeType]}
-            </span>
-          )}
-          {data.label}
-        </span>
+        />
       </div>
 
       {/* ── body ── */}
@@ -150,9 +186,10 @@ function CardNode({ data }) {
           {contentLines.map((line, i) => (
             <div key={i} style={{ display: "flex", gap: 7, alignItems: "flex-start" }}>
               <span style={{ color: accentColor, fontSize: 8, flexShrink: 0, marginTop: 4, opacity: 0.7 }}>▸</span>
-              <span style={{ fontSize: 11, color: "#4b5563", lineHeight: 1.55, wordBreak: "break-word" }}>
-                {line}
-              </span>
+              <MathText
+                text={line}
+                style={{ fontSize: 11, color: "#4b5563", lineHeight: 1.55, wordBreak: "break-word" }}
+              />
             </div>
           ))}
         </div>
