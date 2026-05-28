@@ -45,6 +45,7 @@ const FileUpload = memo(function FileUpload({
   onMoveUploads,
   onClearSelection,
   isFolderFeatureEnabled = false,
+  isFolderLoading = false,
   onDeleteUpload,
   isGuest = false,
   onRequireAuth,
@@ -73,6 +74,7 @@ const FileUpload = memo(function FileUpload({
   const [showFolderDialog, setShowFolderDialog] = useState(false);
   const [folderDialogMode, setFolderDialogMode] = useState("create");
   const [folderModalId, setFolderModalId] = useState(null);
+  const [pendingDeleteFolderId, setPendingDeleteFolderId] = useState(null);
   const [uploadTargetFolderId, setUploadTargetFolderId] = useState(null); // 업로드 시 적용할 폴더 ID
   const [contextMenu, setContextMenu] = useState(null); // { x, y, uploadId }
   const contextMenuRef = useRef(null);
@@ -110,6 +112,14 @@ const FileUpload = memo(function FileUpload({
     onSelectFolder?.("all");
     setUploadTargetFolderId(null);
   };
+
+  // 폴더가 외부에서 삭제되면 열린 모달 자동 닫기
+  useEffect(() => {
+    if (folderModalId && !folderItems.some((f) => f.id === folderModalId)) {
+      setFolderModalId(null);
+      setUploadTargetFolderId(null);
+    }
+  }, [folderItems, folderModalId]);
 
   const visibleUploads = useMemo(() => {
     if (!isFolderFeatureEnabled) return uploadedFiles;
@@ -332,11 +342,12 @@ const FileUpload = memo(function FileUpload({
                 active={active}
                 compactGrid={isNativePlatform}
                 canDrop={false}
-                onClick={() => handleOpenFolderModal(folder.id)}
-                onDelete={() => onDeleteFolder?.(folder.id)}
+                onClick={() => !isFolderLoading && handleOpenFolderModal(folder.id)}
+                onDelete={() => !isFolderLoading && setPendingDeleteFolderId(folder.id)}
                 onAdd={() => fileInputRef.current?.click()}
                 addButtonLabel={copy.upload.addNewFileHere}
                 dragHighlight={false}
+                isLoading={isFolderLoading}
               />
             );
           })}
@@ -362,7 +373,7 @@ const FileUpload = memo(function FileUpload({
               selectable={false}
               selected={false}
               onToggleSelect={undefined}
-              draggable={isFolderFeatureEnabled}
+              draggable={false}
               onDragStart={undefined}
               onDragEnd={undefined}
               compactGrid={isNativePlatform}
@@ -450,6 +461,15 @@ const FileUpload = memo(function FileUpload({
                   style={{ "--ghost-color": "52, 211, 153" }}
                 >
                   {copy.upload.addDocumentToFolder}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingDeleteFolderId(folderModalId)}
+                  className="ghost-button text-sm text-red-400"
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": "248, 113, 113" }}
+                >
+                  {copy.upload.deleteFolder}
                 </button>
                 <button
                   type="button"
@@ -574,6 +594,48 @@ const FileUpload = memo(function FileUpload({
               {folder.label}
             </button>
           ))}
+        </div>
+      )}
+
+      {pendingDeleteFolderId && (
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm"
+          onClick={() => setPendingDeleteFolderId(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-white/10 bg-slate-900/90 p-5 text-slate-100 shadow-2xl ring-1 ring-white/15"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-base font-semibold text-white">{copy.upload.deleteFolderConfirmTitle}</p>
+            <p className="mt-1 text-sm text-slate-300">{copy.upload.deleteFolderConfirmDesc}</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingDeleteFolderId(null)}
+                className="ghost-button text-sm text-slate-200"
+                data-ghost-size="sm"
+                style={{ "--ghost-color": "148, 163, 184" }}
+              >
+                {copy.upload.cancel}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (folderModalId === pendingDeleteFolderId) {
+                    setFolderModalId(null);
+                    setUploadTargetFolderId(null);
+                  }
+                  onDeleteFolder?.(pendingDeleteFolderId);
+                  setPendingDeleteFolderId(null);
+                }}
+                className="ghost-button text-sm text-red-400"
+                data-ghost-size="sm"
+                style={{ "--ghost-color": "248, 113, 113" }}
+              >
+                {copy.upload.deleteFolder}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

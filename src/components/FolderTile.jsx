@@ -17,6 +17,7 @@ function FolderTile({
   addButtonLabel = "여기에 새 파일 추가",
   compactGrid = false,
   dragHighlight = false,
+  isLoading = false,
 }) {
   return (
     <div
@@ -58,13 +59,15 @@ function FolderTile({
           {onDelete && (
             <button
               type="button"
+              disabled={isLoading}
+              aria-label="폴더 삭제"
               onClick={(e) => {
                 e.stopPropagation();
                 onDelete?.();
               }}
-              className="flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-white/5 text-[11px] text-slate-200 opacity-80 transition hover:bg-white/10 hover:text-white"
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-white/15 bg-white/5 text-[11px] text-slate-200 opacity-80 transition hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
-                X
+                ×
               </button>
           )}
         </div>
@@ -106,6 +109,7 @@ FolderTile.propTypes = {
   addButtonLabel: PropTypes.string,
   compactGrid: PropTypes.bool,
   dragHighlight: PropTypes.bool,
+  isLoading: PropTypes.bool,
 };
 
 export default FolderTile;

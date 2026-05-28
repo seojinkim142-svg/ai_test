@@ -46,6 +46,9 @@ const UI_COPY = {
       folderSummaryMeta: (count) => `${count}개 파일 요약 기반`,
       moveOutOfFolder: "폴더 밖으로 이동",
       noFolders: "폴더가 없습니다.",
+      deleteFolder: "폴더 삭제",
+      deleteFolderConfirmTitle: "폴더를 삭제하시겠습니까?",
+      deleteFolderConfirmDesc: "이 폴더를 삭제합니다. 이 작업은 되돌릴 수 없습니다.",
     },
   },
   en: {
@@ -95,6 +98,9 @@ const UI_COPY = {
       folderSummaryMeta: (count) => `Based on ${count} file${count === 1 ? "" : "s"}`,
       moveOutOfFolder: "Move out of folder",
       noFolders: "No folders available.",
+      deleteFolder: "Delete Folder",
+      deleteFolderConfirmTitle: "Delete this folder?",
+      deleteFolderConfirmDesc: "This will permanently delete the folder. This action cannot be undone.",
     },
   },
   zh: {
@@ -144,6 +150,9 @@ const UI_COPY = {
       folderSummaryMeta: (count) => `基于 ${count} 个文件摘要`,
       moveOutOfFolder: "移出文件夹",
       noFolders: "没有可用文件夹。",
+      deleteFolder: "删除文件夹",
+      deleteFolderConfirmTitle: "确定要删除此文件夹吗？",
+      deleteFolderConfirmDesc: "此操作将永久删除该文件夹，无法撤销。",
     },
   },
   ja: {
@@ -193,6 +202,9 @@ const UI_COPY = {
       folderSummaryMeta: (count) => `${count}件のファイル要約ベース`,
       moveOutOfFolder: "フォルダの外へ移動",
       noFolders: "フォルダがありません。",
+      deleteFolder: "フォルダ削除",
+      deleteFolderConfirmTitle: "このフォルダを削除しますか？",
+      deleteFolderConfirmDesc: "フォルダを完全に削除します。この操作は元に戻せません。",
     },
   },
   hi: {
@@ -242,6 +254,9 @@ const UI_COPY = {
       folderSummaryMeta: (count) => `${count} फ़ाइलों के सारांश पर आधारित`,
       moveOutOfFolder: "फ़ोल्डर से बाहर ले जाएँ",
       noFolders: "कोई फ़ोल्डर नहीं है।",
+      deleteFolder: "फ़ोल्डर हटाएं",
+      deleteFolderConfirmTitle: "यह फ़ोल्डर हटाएं?",
+      deleteFolderConfirmDesc: "यह फ़ोल्डर स्थायी रूप से हटा दिया जाएगा। यह क्रिया वापस नहीं की जा सकती।",
     },
   },
 };
