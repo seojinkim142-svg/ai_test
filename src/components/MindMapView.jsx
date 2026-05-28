@@ -14,40 +14,46 @@ function injectCSS() {
 }
 
 const EXTRA_CSS = `
-/* ── connecting lines ── */
-.markmap-node > line { stroke-width: 2px; stroke-opacity: 0.4; }
-.markmap-link { stroke-opacity: 0.35; stroke-width: 2px; }
+/* ── connecting curves ── */
+.markmap-node > line { stroke-width: 2px; stroke-opacity: 0.5; }
+.markmap-link { stroke-opacity: 0.4; stroke-width: 2px; }
 
-/* ── hide default circle dot — card takes its place ── */
-.markmap-node-circle { r: 0 !important; stroke: none !important; fill: none !important; }
+/* ── remove the small circle dot completely ── */
+.markmap-node-circle { display: none !important; }
 
-/* ── card container ── */
+/* ── CARD NODE ── */
 .markmap-foreign {
   overflow: visible !important;
-  line-height: 1.5;
 }
 .markmap-foreign > div {
-  display: inline-block;
-  background: rgba(15, 23, 42, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 10px;
-  padding: 5px 13px;
-  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255,255,255,0.06);
-  font-size: 13px;
-  color: #e2e8f0;
-  white-space: nowrap;
-  cursor: default;
-  transition: box-shadow 0.15s, border-color 0.15s;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  display: inline-block !important;
+  background: #1e293b !important;
+  border: 1.5px solid rgba(148, 163, 184, 0.25) !important;
+  border-radius: 12px !important;
+  padding: 8px 16px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: #e2e8f0 !important;
+  line-height: 1.5 !important;
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.55),
+    0 1px 3px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
+  transition: border-color 0.15s, box-shadow 0.15s !important;
+  cursor: default !important;
+  white-space: nowrap !important;
 }
 .markmap-foreign > div:hover {
-  border-color: rgba(255, 255, 255, 0.22);
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255,255,255,0.08);
+  border-color: rgba(148, 163, 184, 0.5) !important;
+  box-shadow:
+    0 6px 24px rgba(0, 0, 0, 0.65),
+    0 2px 6px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
 }
-.markmap-foreign strong { font-weight: 600; color: #f1f5f9; }
+.markmap-foreign strong { font-weight: 700; color: #f8fafc; }
+.markmap-foreign em { color: #94a3b8; }
 
-/* ── page / tier badges ── */
+/* ── page / tier badges inside cards ── */
 .markmap-foreign .mm-anchor,
 .markmap-foreign .mm-tier {
   display: inline-flex;
@@ -58,18 +64,19 @@ const EXTRA_CSS = `
   font-size: 11px;
   font-weight: 500;
   white-space: nowrap;
-  text-decoration: none;
+  vertical-align: middle;
 }
 .markmap-foreign .mm-anchor {
-  background: rgba(139, 92, 246, 0.18);
+  background: rgba(139, 92, 246, 0.2);
   color: #c4b5fd;
-  border: 1px solid rgba(139, 92, 246, 0.35);
+  border: 1px solid rgba(139, 92, 246, 0.4);
   cursor: pointer;
   font-family: inherit;
   line-height: 1.35;
+  text-decoration: none;
 }
 .markmap-foreign .mm-anchor:hover {
-  background: rgba(139, 92, 246, 0.32);
+  background: rgba(139, 92, 246, 0.35);
   color: #ddd6fe;
 }
 .markmap-foreign .mm-tier { font-weight: 600; border: 1px solid transparent; }
@@ -202,6 +209,25 @@ function createTierBadge(doc, tier) {
   return badge;
 }
 
+function applyCardStyles(svg) {
+  svg.querySelectorAll(".markmap-foreign > div").forEach((div) => {
+    div.style.cssText = `
+      display: inline-block !important;
+      background: #1e293b !important;
+      border: 1.5px solid rgba(148,163,184,0.25) !important;
+      border-radius: 12px !important;
+      padding: 8px 16px !important;
+      font-size: 13px !important;
+      font-weight: 500 !important;
+      color: #e2e8f0 !important;
+      line-height: 1.5 !important;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.55), 0 1px 3px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.07) !important;
+      white-space: nowrap !important;
+      cursor: default !important;
+    `;
+  });
+}
+
 function renderInlineBadges(svg) {
   const doc = svg.ownerDocument || document;
   const roots = svg.querySelectorAll(".markmap-foreign div");
@@ -292,7 +318,10 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
       if (isDisposed) return;
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        if (!isDisposed) renderInlineBadges(svg);
+        if (!isDisposed) {
+          applyCardStyles(svg);
+          renderInlineBadges(svg);
+        }
       }, 50);
     });
     observer.observe(svg, { childList: true, subtree: true });
@@ -334,9 +363,9 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
         duration: 350,
         maxWidth: nodeMaxWidth,
         initialExpandLevel: 1,
-        paddingX: 20,
-        spacingHorizontal: 110,
-        spacingVertical: 10,
+        paddingX: 16,
+        spacingHorizontal: 130,
+        spacingVertical: 14,
       }));
 
       svg.addEventListener("pointerdown", handlePointerDown, true);
@@ -345,6 +374,7 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
       await mm.setData(root);
       if (!isDisposed) {
         await mm.fit().catch(() => {});
+        applyCardStyles(svg);
       }
     };
 
