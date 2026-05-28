@@ -280,7 +280,7 @@ function CardNode({ data }) {
             style={{
               display: "flex",
               gap: 4,
-              marginLeft: pages.length > 0 ? "auto" : 0,
+              marginLeft: "auto",
               flexWrap: "wrap",
               paddingTop: pages.length > 0 ? 0 : 0,
               animation: "mmChipFadeIn 0.15s ease",
