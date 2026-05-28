@@ -24,6 +24,7 @@ const StartPage = memo(function StartPage({
   onMoveUploads,
   onClearSelection,
   isFolderFeatureEnabled,
+  isFolderLoading = false,
   onDeleteUpload,
   isGuest = false,
   showIntro = false,
@@ -93,6 +94,7 @@ const StartPage = memo(function StartPage({
               onMoveUploads={onMoveUploads}
               onClearSelection={onClearSelection}
               isFolderFeatureEnabled={isFolderFeatureEnabled}
+              isFolderLoading={isFolderLoading}
               onDeleteUpload={onDeleteUpload}
               isGuest={isGuest}
               onRequireAuth={onRequireAuth}
