@@ -125,6 +125,7 @@ export const normalizePremiumProfiles = (profiles) => {
           : preset.color,
       avatar: sanitizePremiumAvatar(profile?.avatar, preset.avatar),
       pin: sanitizePremiumProfilePin(profile?.pin),
+      pinDisabled: profile?.pinDisabled === true,
     };
   });
 };
