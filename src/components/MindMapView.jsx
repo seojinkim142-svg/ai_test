@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -96,18 +96,54 @@ const TYPE_LABEL = {
 };
 const TYPE_ICON = { start: "▶", next: "→", source: "◈", question: "?" };
 
+// ── chip button (hover action) ────────────────────────────────────────────────
+
+function Chip({ icon, label, onClick, color = "#6366f1", bg = "#eef2ff", border = "#c7d2fe" }) {
+  const [h, setH] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setH(true)}
+      onMouseLeave={() => setH(false)}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        background: h ? color : bg,
+        border: `1px solid ${h ? color : border}`,
+        borderRadius: 9999,
+        color: h ? "#fff" : color,
+        fontSize: 10,
+        fontWeight: 600,
+        padding: "3px 9px",
+        cursor: "pointer",
+        fontFamily: "inherit",
+        lineHeight: 1.3,
+        transition: "background 0.15s, color 0.15s, border-color 0.15s",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {icon && <span style={{ fontSize: 9 }}>{icon}</span>}
+      {label}
+    </button>
+  );
+}
+
 // ── card node ─────────────────────────────────────────────────────────────────
 
 function CardNode({ data }) {
+  const [hovered, setHovered] = useState(false);
+
   const s = getStyle(data.color);
   const isRoot = data.depth === 0;
   const isQuestion = data.nodeType === "question";
 
-  const accentColor = isQuestion ? "#d97706" : s.accent;
-  const titleColor  = isQuestion ? "#92400e" : s.title;
-  const headerBg    = isQuestion ? "#fffbeb" : (isRoot ? "#f0f4ff" : s.headerBg);
-  const headerBorder= isQuestion ? "#fde68a" : (isRoot ? "#c7d7fe" : s.headerBorder);
-  const typeLabel   = TYPE_LABEL[data.nodeType];
+  const accentColor  = isQuestion ? "#d97706" : s.accent;
+  const titleColor   = isQuestion ? "#92400e" : s.title;
+  const headerBg     = isQuestion ? "#fffbeb" : (isRoot ? "#f0f4ff" : s.headerBg);
+  const headerBorder = isQuestion ? "#fde68a" : (isRoot ? "#c7d7fe" : s.headerBorder);
+  const typeLabel    = TYPE_LABEL[data.nodeType];
 
   const contentLines = useMemo(() => {
     if (!data.content) return [];
@@ -125,19 +161,30 @@ function CardNode({ data }) {
     [data.label, data.content]
   );
 
+  const borderColor = hovered
+    ? (isRoot ? "#818cf8" : accentColor)
+    : (isRoot ? "#c7d7fe" : "#e2e8f0");
+
+  const shadow = hovered
+    ? `0 8px 28px rgba(0,0,0,0.13), 0 2px 8px rgba(0,0,0,0.07), 0 0 0 2px ${accentColor}22`
+    : isRoot
+      ? "0 4px 20px rgba(0,0,0,0.09), 0 1px 5px rgba(0,0,0,0.05)"
+      : "0 2px 10px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.03)";
+
   return (
     <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         background: "#ffffff",
-        border: `1px solid ${isRoot ? "#c7d7fe" : "#e2e8f0"}`,
+        border: `1.5px solid ${borderColor}`,
         borderRadius: isRoot ? 16 : 12,
         minWidth: isRoot ? 240 : 196,
         maxWidth: isRoot ? 310 : 284,
         overflow: "hidden",
         fontFamily: "inherit",
-        boxShadow: isRoot
-          ? "0 4px 24px rgba(0,0,0,0.10), 0 1px 6px rgba(0,0,0,0.06)"
-          : "0 2px 12px rgba(0,0,0,0.07), 0 1px 3px rgba(0,0,0,0.04)",
+        boxShadow: shadow,
+        transition: "border-color 0.18s, box-shadow 0.18s",
       }}
     >
       <Handle type="target" position={Position.Left}  style={{ opacity: 0, pointerEvents: "none" }} />
@@ -155,28 +202,14 @@ function CardNode({ data }) {
         }}
       >
         {typeLabel && (
-          <span
-            style={{
-              fontSize: 9,
-              fontWeight: 700,
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              color: accentColor,
-            }}
-          >
+          <span style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: accentColor }}>
             {TYPE_ICON[data.nodeType] ? `${TYPE_ICON[data.nodeType]} ` : ""}
             {typeLabel}
           </span>
         )}
         <MathText
           text={data.label}
-          style={{
-            fontSize: isRoot ? 13.5 : 12,
-            fontWeight: isRoot ? 800 : 700,
-            color: titleColor,
-            lineHeight: 1.4,
-            wordBreak: "break-word",
-          }}
+          style={{ fontSize: isRoot ? 13.5 : 12, fontWeight: isRoot ? 800 : 700, color: titleColor, lineHeight: 1.4, wordBreak: "break-word" }}
         />
       </div>
 
@@ -186,51 +219,88 @@ function CardNode({ data }) {
           {contentLines.map((line, i) => (
             <div key={i} style={{ display: "flex", gap: 7, alignItems: "flex-start" }}>
               <span style={{ color: accentColor, fontSize: 8, flexShrink: 0, marginTop: 4, opacity: 0.7 }}>▸</span>
-              <MathText
-                text={line}
-                style={{ fontSize: 11, color: "#4b5563", lineHeight: 1.55, wordBreak: "break-word" }}
-              />
+              <MathText text={line} style={{ fontSize: 11, color: "#4b5563", lineHeight: 1.55, wordBreak: "break-word" }} />
             </div>
           ))}
         </div>
       )}
 
-      {/* ── footer (citations) ── */}
-      {pages.length > 0 && (
-        <div
-          style={{
-            borderTop: "1px solid #f1f5f9",
-            padding: "5px 13px 7px",
-            background: "#fafafa",
-            display: "flex",
-            gap: 4,
-            flexWrap: "wrap",
-            alignItems: "center",
-          }}
-        >
-          <span style={{ fontSize: 9, color: "#94a3b8", marginRight: 2 }}>출처</span>
-          {pages.map((p) => (
-            <button
-              key={p}
-              type="button"
-              onClick={() => data.onJumpToPage?.(p)}
-              style={{
-                background: "#f5f3ff",
-                border: "1px solid #ddd6fe",
-                borderRadius: 9999,
-                color: "#7c3aed",
-                fontSize: 10,
-                padding: "2px 8px",
-                cursor: "pointer",
-                lineHeight: 1.3,
-                fontFamily: "inherit",
-              }}
-            >
-              p.{p}
-            </button>
-          ))}
-        </div>
-      )}
+      {/* ── footer: citations + hover chips ── */}
+      <div
+        style={{
+          borderTop: (pages.length > 0 || hovered) ? "1px solid #f1f5f9" : "none",
+          padding: (pages.length > 0 || hovered) ? "5px 13px 8px" : "0 13px",
+          background: "#fafafa",
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 4,
+          alignItems: "center",
+          minHeight: hovered ? undefined : (pages.length > 0 ? undefined : 0),
+          overflow: "hidden",
+        }}
+      >
+        {/* citation badges */}
+        {pages.length > 0 && (
+          <>
+            <span style={{ fontSize: 9, color: "#94a3b8", marginRight: 1 }}>출처</span>
+            {pages.map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => data.onJumpToPage?.(p)}
+                style={{
+                  background: "#f5f3ff",
+                  border: "1px solid #ddd6fe",
+                  borderRadius: 9999,
+                  color: "#7c3aed",
+                  fontSize: 10,
+                  padding: "2px 8px",
+                  cursor: "pointer",
+                  lineHeight: 1.3,
+                  fontFamily: "inherit",
+                }}
+              >
+                p.{p}
+              </button>
+            ))}
+          </>
+        )}
+
+        {/* hover action chips */}
+        {hovered && (
+          <div
+            style={{
+              display: "flex",
+              gap: 4,
+              marginLeft: pages.length > 0 ? "auto" : 0,
+              flexWrap: "wrap",
+              paddingTop: pages.length > 0 ? 0 : 0,
+              animation: "mmChipFadeIn 0.15s ease",
+            }}
+          >
+            <Chip
+              icon="✦"
+              label="AI에게 물어보기"
+              onClick={() => data.onAskAI?.(data.label, data.content)}
+              color="#6366f1"
+              bg="#eef2ff"
+              border="#c7d2fe"
+            />
+            {pages.length > 0 && (
+              <Chip
+                icon="→"
+                label="근거 보기"
+                onClick={() => data.onJumpToPage?.(pages[0])}
+                color="#0ea5e9"
+                bg="#f0f9ff"
+                border="#bae6fd"
+              />
+            )}
+          </div>
+        )}
+      </div>
+
+      <style>{`@keyframes mmChipFadeIn { from { opacity:0; transform:translateY(3px) } to { opacity:1; transform:translateY(0) } }`}</style>
     </div>
   );
 }
@@ -269,7 +339,7 @@ function estimateHeight(node, isRoot) {
 
 // ── flow element builder ──────────────────────────────────────────────────────
 
-function jsonToFlowElements(jsonStr, onJumpToPage) {
+function jsonToFlowElements(jsonStr, onJumpToPage, onAskAI) {
   try {
     const parsed = JSON.parse(jsonStr);
     if (!Array.isArray(parsed)) return null;
@@ -290,7 +360,7 @@ function jsonToFlowElements(jsonStr, onJumpToPage) {
       flowNodes.push({
         id: String(node.id),
         type: "card",
-        data: { label: node.label || "", content: node.content || "", color: node.color, nodeType: node.type, depth, onJumpToPage },
+        data: { label: node.label || "", content: node.content || "", color: node.color, nodeType: node.type, depth, onJumpToPage, onAskAI },
         width: w,
         height: h,
         position: { x: 0, y: 0 },
@@ -342,10 +412,10 @@ function jsonToFlowElements(jsonStr, onJumpToPage) {
 
 // ── main component ────────────────────────────────────────────────────────────
 
-export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
+export default function MindMapView({ summary, mindmapData, onJumpToPage, onAskAI }) {
   const result = useMemo(
-    () => (mindmapData ? jsonToFlowElements(mindmapData, onJumpToPage) : null),
-    [mindmapData, onJumpToPage]
+    () => (mindmapData ? jsonToFlowElements(mindmapData, onJumpToPage, onAskAI) : null),
+    [mindmapData, onJumpToPage, onAskAI]
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(result?.nodes ?? []);
