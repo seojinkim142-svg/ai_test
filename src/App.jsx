@@ -6,6 +6,7 @@ import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
 import { useAdMobBanner } from "./hooks/useAdMobBanner";
 import { useUserTier } from "./hooks/useUserTier";
 import { usePageProgressCache } from "./hooks/usePageProgressCache";
+import { useMindmap } from "./hooks/useMindmap";
 import { AUTH_ENABLED } from "./config/auth";
 import {
   supabase,
@@ -35,8 +36,8 @@ import {
   getPremiumProfileStateFromUser,
   savePremiumProfileState,
   fetchExtractedText,
-  saveMindmap,
-  fetchMindmap,
+  getThemeFromUser,
+  saveTheme,
 } from "./services/supabase";
 import { ensureUploadPreviewPdf as ensureUploadPreviewPdfRequest } from "./services/document";
 import {
@@ -1162,9 +1163,6 @@ function App() {
     return AVAILABLE_OUTPUT_LANGUAGES.includes(stored) ? stored : DEFAULT_OUTPUT_LANGUAGE;
   });
   const [summary, setSummary] = useState("");
-  const [mindmapData, setMindmapData] = useState("");
-  const [isLoadingMindmap, setIsLoadingMindmap] = useState(false);
-  const mindmapSummarySourceRef = useRef("");
 
   const [questionStyleProfileContent, setQuestionStyleProfileContent] = useState("");
   const [questionStyleProfileScopeLabel, setQuestionStyleProfileScopeLabel] = useState("");
@@ -1432,21 +1430,6 @@ function App() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(OUTPUT_LANGUAGE_STORAGE_KEY, outputLanguage);
   }, [outputLanguage]);
-  // 요약이 바뀌면 Supabase에서 마인드맵 복원, 없으면 초기화
-  useEffect(() => {
-    const trimmed = String(summary || "").trim();
-    setMindmapData("");
-    mindmapSummarySourceRef.current = "";
-    if (!trimmed || !user?.id || !selectedFileId) return;
-    fetchMindmap({ userId: user.id, docId: selectedFileId })
-      .then((cached) => {
-        if (cached) {
-          setMindmapData(cached);
-          mindmapSummarySourceRef.current = trimmed;
-        }
-      })
-      .catch(() => {});
-  }, [summary, user?.id, selectedFileId]);
   const requestPreviewPdfConversion = useCallback(
     async (item, { force = false } = {}) => {
       const uploadId = item?.id;
@@ -2584,8 +2567,12 @@ function App() {
   );
 
   const toggleTheme = useCallback(() => {
-    setTheme((prev) => (prev === "light" ? "dark" : "light"));
-  }, []);
+    setTheme((prev) => {
+      const next = prev === "light" ? "dark" : "light";
+      if (user) saveTheme(next).catch(() => {});
+      return next;
+    });
+  }, [user]);
 
   const shortPreview = useMemo(
     () => (previewText.length > 700 ? `${previewText.slice(0, 700)}...` : previewText),
@@ -2631,6 +2618,13 @@ function App() {
       root.classList.remove("theme-light");
     }
   }, [theme]);
+
+  // 로그인한 유저의 저장된 테마 불러오기
+  useEffect(() => {
+    if (!user) return;
+    const saved = getThemeFromUser(user);
+    if (saved) setTheme(saved);
+  }, [user?.id]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -5960,32 +5954,13 @@ function App() {
     }
   };
 
-  const requestMindMap = useCallback(async ({ force = false } = {}) => {
-    const currentSummary = String(summary || "").trim();
-    console.log("[MindMap] requestMindMap called, summary length:", currentSummary.length);
-    if (!currentSummary) { console.log("[MindMap] abort: no summary"); return; }
-    if (isLoadingMindmap) { console.log("[MindMap] abort: already loading"); return; }
-    if (!force && mindmapSummarySourceRef.current === currentSummary && mindmapData) { console.log("[MindMap] abort: cached"); return; }
-
-    mindmapSummarySourceRef.current = "";
-    setIsLoadingMindmap(true);
-    setMindmapData("");
-    try {
-      const { generateMindMap } = await getOpenAiService();
-      console.log("[MindMap] calling generateMindMap...");
-      const result = await generateMindMap(currentSummary, { outputLanguage });
-      console.log("[MindMap] result length:", result?.length, "preview:", result?.slice(0, 100));
-      mindmapSummarySourceRef.current = currentSummary;
-      setMindmapData(result);
-      if (user?.id && selectedFileId) {
-        saveMindmap({ userId: user.id, docId: selectedFileId, mindmap: result }).catch(() => {});
-      }
-    } catch (e) {
-      console.error("[MindMap] generation failed", e);
-    } finally {
-      setIsLoadingMindmap(false);
-    }
-  }, [summary, mindmapData, isLoadingMindmap, outputLanguage, getOpenAiService, user?.id, selectedFileId]);
+  const { mindmapData, isLoadingMindmap, requestMindMap } = useMindmap({
+    summary,
+    userId: user?.id,
+    docId: selectedFileId,
+    outputLanguage,
+    getOpenAiService,
+  });
 
   const handleAutoDetectChapterRanges = useCallback(async () => {
     if (isDetectingChapterRanges || isLoadingSummary || isLoadingText) return;
