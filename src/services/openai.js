@@ -874,41 +874,58 @@ function buildSummaryPrompt(extractedText, outputLanguage = "ko") {
     : "";
 
   return `
-You are a senior teaching assistant writing a study-grade ${outputLanguageLabel} markdown summary from lecture material.
+You are a senior teaching assistant producing a structured, evidence-rich ${outputLanguageLabel} markdown summary from academic material.
 
 [Content check]
 - If the text is almost entirely cover page, table of contents, or publisher metadata with no substantive learning content, return only a 1-2 sentence notice stating that.
 - Otherwise always produce a full summary — do not refuse.
 
-[Structure — use this heading hierarchy]
-## 개요
-2-3 sentences: what this section covers and what the student should understand after reading.
+[Document structure identification]
+- First identify all chapters, sections, and logical divisions present in the document.
+- Map the hierarchy: Chapter → Section → Sub-section.
 
-## [Section or topic name]  ← one H2 per major topic found in the document
-- Explain each concept in 3-5 bullet points or a short paragraph.
-- Use H3 (###) for sub-concepts when a topic has meaningfully distinct parts.
-- If two or more terms in this section are commonly confused or explicitly contrasted in the document, include a comparison (table or side-by-side bullets).
+[Output structure — use this heading hierarchy exactly]
+
+## 개요
+2-3 sentences describing what the document covers and what the reader should understand after reading.
+
+## [Chapter or major section title]  ← one H2 per chapter/major section found in the document
+### [Sub-section title]  ← one H3 per sub-section; omit if no sub-sections exist
+
+Under each H2/H3 include ALL of the following:
+
+**핵심 내용**: 1-2 sentence summary of this section's main argument or concept.
+
+**주요 포인트**:
+- Point 1 with **bold** key terms
+- Point 2 ...
+(3-6 bullet points per section)
+
+**근거 및 인용**:
+- "의미 있는 원문 인용구를 그대로 인용" ${hasPageTags ? "[p.N]" : "[출처 불명]"}
+(Include 1-3 meaningful verbatim quotes from the source; cite page when available)
+
+**타 섹션 연관**: Note any explicit cross-references or logical connections to other sections (e.g., "→ Section 3.2의 개념과 직접 연결됨"). Omit if none.
 
 ## 핵심 공식  ← include only when the source contains formulas
 List every important formula with variable definitions immediately after.
 
 ## 주요 용어  ← include only when the document introduces 3 or more distinct technical terms
-Term — definition (original English term in parentheses if helpful).
+**Term** — definition (original English term in parentheses if helpful).
 
-[Language of headings]
-- Render all section headings (## 개요, ## 핵심 공식, ## 주요 용어, and any topic headings) in the output language.
-
-[Length guideline]
-- Short source (< ~500 words): concise, 1-2 paragraphs per section.
-- Medium source (~500-2000 words): 3-5 bullet points per concept, cover all sections.
-- Long source (> ~2000 words): comprehensive; do not skip sections or merge unrelated topics.
+[Citation rules]
+${hasPageTags
+  ? `- The source contains [p.N] page markers. Append [p.N] after every factual claim, formula, and verbatim quote. Format: "내용 [p.N]." Do NOT fabricate page numbers.`
+  : `- No page markers are present. Omit page citations but still include verbatim quotes where meaningful.`}
+- For verbatim quotes use the exact wording from the source, surrounded by "quotation marks".
+- Only cite specific sourced facts — skip citations for headings and general connective text.
 
 [Writing rules]
-- Do not reproduce sentences verbatim from the source — rephrase and teach.
-- Emphasize key ideas with **bold**.
+- **Bold** all key terms, named concepts, and critical values.
 - Use tables when comparing 3 or more items with shared attributes.
 - Use numbered lists only for steps or ranked sequences; use bullet lists otherwise.
-${citationSection}
+- Preserve important verbatim phrases/sentences from the source as evidence — do not paraphrase away key quotes.
+
 [Math formatting — strict]
 - Inline math: $...$
 - Block math: $$...$$ on its own line
@@ -1933,6 +1950,53 @@ function formatChapterSummaryMarkdown(parsed, summaryInput) {
     );
 
     markdown.push("## " + headingTitle);
+
+    // Sections (섹션별 분석: 핵심 내용 + 근거 인용 + 타 섹션 연관)
+    const sections = Array.isArray(candidate?.sections) ? candidate.sections.slice(0, 8) : [];
+    if (sections.length) {
+      for (const sec of sections) {
+        const secTitle = sanitizeSummaryLine(sec?.sectionTitle || "", 80);
+        if (secTitle && !looksLikeMojibake(secTitle)) {
+          markdown.push("### " + secTitle);
+        }
+        const keySummary = sanitizeSummaryLine(sec?.keySummary || "", 240);
+        if (keySummary && !looksLikeMojibake(keySummary)) {
+          markdown.push("**핵심 내용**: " + keySummary);
+          markdown.push("");
+        }
+        const mainPoints = Array.isArray(sec?.mainPoints) ? sec.mainPoints.slice(0, 6) : [];
+        if (mainPoints.length) {
+          markdown.push("**주요 포인트**:");
+          for (const pt of mainPoints) {
+            const line = sanitizeSummaryLine(pt, 200);
+            if (line && !looksLikeMojibake(line)) markdown.push("- " + line);
+          }
+          markdown.push("");
+        }
+        const evidence = Array.isArray(sec?.evidence) ? sec.evidence.slice(0, 3) : [];
+        if (evidence.length) {
+          markdown.push("**근거 및 인용**:");
+          for (const ev of evidence) {
+            const quote = sanitizeSummaryLine(ev?.quote || ev?.text || "", 280);
+            const anchor = sanitizeSummaryLine(ev?.anchor || "", 20);
+            if (quote && !looksLikeMojibake(quote)) {
+              markdown.push('- "' + quote + '"' + (anchor ? " " + anchor : ""));
+            }
+          }
+          markdown.push("");
+        }
+        const crossRefs = Array.isArray(sec?.crossReferences) ? sec.crossReferences.slice(0, 3) : [];
+        if (crossRefs.length) {
+          markdown.push("**타 섹션 연관**:");
+          for (const ref of crossRefs) {
+            const line = sanitizeSummaryLine(ref, 200);
+            if (line && !looksLikeMojibake(line)) markdown.push("- " + line);
+          }
+          markdown.push("");
+        }
+      }
+    }
+
     markdown.push("### Key Summary");
 
     const summaryPoints = Array.isArray(candidate?.summaryPoints)
@@ -2062,8 +2126,8 @@ async function generateChapterSummary(extractedText, { scope, chapterSections, o
   };
 
   const citationRule = hasPageTags
-    ? `- The chapter text may contain [p.N] page markers. When a summaryPoint explanation is derived from a specific page, append the citation [p.N] at the end of the "explanation" string (e.g., "...이 과정에서 포도당이 분해됩니다 [p.4]."). Only use page numbers visible in the chapter text. Do not fabricate page numbers.`
-    : "";
+    ? `- The chapter text contains [p.N] page markers. Append [p.N] at the end of every "explanation" string and every "quote" string where the content comes from that page. Only use page numbers visible in the chapter text. Do not fabricate page numbers.`
+    : `- No page markers are present. Omit page anchors but still include verbatim quotes where meaningful.`;
 
   const data = await postChatRequest(
     {
@@ -2072,7 +2136,7 @@ async function generateChapterSummary(extractedText, { scope, chapterSections, o
         {
           role: "system",
           content:
-            `You summarize academic PDFs in ${outputLanguageLabel}. Return JSON only. Use only provided chapter data. For visuals, estimate importance as high|medium|low only when supported by chapter text or visual hints.`,
+            `You are an expert academic analyst summarizing PDFs in ${outputLanguageLabel}. Return JSON only. Identify document structure (chapters → sections → sub-sections) and produce evidence-rich analysis with verbatim quotes and cross-references.`,
         },
         {
           role: "user",
@@ -2085,6 +2149,17 @@ Analyze the chapter input and return ${outputLanguageLabel} JSON with this schem
       "id": "ch_1",
       "chapterNumber": 1,
       "chapterTitle": "...",
+      "sections": [
+        {
+          "sectionTitle": "...",
+          "keySummary": "...",
+          "mainPoints": ["...", "..."],
+          "evidence": [
+            { "quote": "원문 그대로 인용", "anchor": "[p.N]" }
+          ],
+          "crossReferences": ["→ Chapter X / Section Y 와 연관: 이유"]
+        }
+      ],
       "summaryPoints": [
         { "point": "...", "explanation": "...", "example": "..." }
       ],
@@ -2106,23 +2181,26 @@ Analyze the chapter input and return ${outputLanguageLabel} JSON with this schem
 
 Rules:
 - Output language: ${outputLanguageLabel}.
-- Include 3-6 summary points per chapter.
-- Every summary point must include BOTH:
-  - "point": concise concept/topic line
-  - "explanation": why it matters, definition/condition/result in 1-2 sentences
-- Optionally add "example" when useful.
+- **Document structure**: Identify all logical sections within each chapter. If no explicit sections exist, group content into 2-4 logical sub-topics.
+- **sections** (NEW — required): For each section/sub-topic within the chapter:
+  - "sectionTitle": concise title of the section
+  - "keySummary": 1-2 sentence summary of the section's main argument
+  - "mainPoints": 3-5 bullet points of the most important ideas
+  - "evidence": 1-3 meaningful verbatim quotes from the source text, with page anchor when available
+  - "crossReferences": explicit mentions of or logical connections to other chapters/sections (empty array if none)
+- Include 3-6 summaryPoints per chapter (chapter-level overview points).
+- Every summaryPoint must include BOTH "point" and "explanation"; optionally add "example".
 - Do not return summaryPoints as plain strings.
 - Provide keyTerms, visuals, and sampleQuestionSolving for each chapter when evidence exists.
-- sampleQuestionSolving should include 1-2 representative problems with short step-by-step solving.
-- Render mathematical expressions using LaTeX delimiters: inline $...$, block $$...$$.
+- sampleQuestionSolving: 1-2 representative problems with step-by-step solving.
+- Render mathematical expressions using LaTeX: inline $...$, block $$$...$$$.
 - Never place $$...$$ inside a sentence. Use $...$ for inline formulas only.
-- Do not output escaped dollars (\\$) or placeholder tokens like @@MATH0@@.
-- Use \\cdot for multiplication when needed.
-- Use LaTeX commands for symbols/operators (e.g., \\sqrt{n}, \\to, \\infty, \\frac{a}{b}).
-- If no reliable visual evidence, return "visuals": [].
-- If no reliable sample solving evidence, return "sampleQuestionSolving": [].
-- Do not mention chapter detection/splitting logic or model processing notes (e.g., missing chapter titles, length-based split, virtual chapters).
-- Keep overview focused on lecture topic and learning goals only.
+- Do not output escaped dollars (\\$) or placeholder tokens.
+- Use \\cdot for multiplication; use LaTeX commands for all symbols.
+- If no visual evidence, return "visuals": [].
+- If no sample solving evidence, return "sampleQuestionSolving": [].
+- Do not mention chapter detection/splitting logic or model processing notes.
+- Keep overview focused on the document's overall topic and learning goals.
 - Preserve chapter ids exactly as input.
 ${citationRule}
 - Return strict JSON only.
