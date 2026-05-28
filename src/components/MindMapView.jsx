@@ -16,6 +16,7 @@ function injectCSS() {
 
 export default function MindMapView({ summary }) {
   const svgRef = useRef(null);
+  const containerRef = useRef(null);
 
   useEffect(() => {
     injectCSS();
@@ -24,8 +25,11 @@ export default function MindMapView({ summary }) {
   useEffect(() => {
     if (!svgRef.current || !summary) return;
 
-    // 이전 내용 초기화 후 새로 그리기
     svgRef.current.innerHTML = "";
+
+    const containerWidth = containerRef.current?.clientWidth || 360;
+    // 노드 최대 너비는 컨테이너의 30%, 최소 120px 최대 280px
+    const nodeMaxWidth = Math.min(280, Math.max(120, Math.floor(containerWidth * 0.3)));
 
     let mm;
     try {
@@ -33,7 +37,7 @@ export default function MindMapView({ summary }) {
       mm = Markmap.create(svgRef.current, {
         color: ["#34d399", "#60a5fa", "#f472b6", "#fb923c", "#a78bfa", "#facc15"],
         duration: 400,
-        maxWidth: 220,
+        maxWidth: nodeMaxWidth,
         initialExpandLevel: 3,
         paddingX: 8,
       }, root);
@@ -49,19 +53,18 @@ export default function MindMapView({ summary }) {
 
   if (!summary) {
     return (
-      <div className="flex h-64 items-center justify-center text-sm text-slate-400">
+      <div className="flex h-40 items-center justify-center text-sm text-slate-400">
         요약을 먼저 생성해 주세요.
       </div>
     );
   }
 
   return (
-    <div className="relative w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950">
+    <div ref={containerRef} className="relative w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950">
       <svg
         ref={svgRef}
         width="100%"
-        height="520"
-        style={{ display: "block" }}
+        style={{ display: "block", minHeight: "320px", height: "60vh", maxHeight: "640px" }}
       />
       <p className="absolute bottom-2 right-3 text-[10px] text-slate-500 select-none">
         스크롤·드래그로 탐색
