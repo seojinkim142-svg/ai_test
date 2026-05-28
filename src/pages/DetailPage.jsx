@@ -757,7 +757,7 @@ export default function DetailPage({
                       ? "생성 중..."
                       : summaryViewMode === "mindmap"
                       ? "텍스트 보기"
-                      : "카드뷰 + AI"}
+                      : "마인드맵"}
                   </button>
                 </div>
               </div>
