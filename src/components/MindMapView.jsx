@@ -421,7 +421,7 @@ async function generateWonderQuestions(label, content) {
   return raw.split("\n").map((l) => l.replace(/^\d+\.\s*/, "").trim()).filter(Boolean).slice(0, 5);
 }
 
-function NodeAIPanel({ activeNode, onAskAI }) {
+function NodeAIPanel({ activeNode, onJumpToPage }) {
   const [messages, setMessages]       = useState([]);
   const [input, setInput]             = useState("");
   const [loading, setLoading]         = useState(false);
@@ -589,6 +589,27 @@ function NodeAIPanel({ activeNode, onAskAI }) {
                     ? <code style={{ background: "#f1f5f9", borderRadius: 4, padding: "1px 5px", fontSize: 11, fontFamily: "monospace", color: "#0f172a" }}>{children}</code>
                     : <code style={{ display: "block", background: "#f1f5f9", borderRadius: 6, padding: "8px 10px", fontSize: 11, fontFamily: "monospace", color: "#0f172a", overflowX: "auto", margin: "6px 0" }}>{children}</code>,
                   blockquote: ({ children }) => <blockquote style={{ borderLeft: "3px solid #c7d2fe", paddingLeft: 10, margin: "4px 0", color: "#64748b", fontStyle: "italic" }}>{children}</blockquote>,
+                  text: ({ children }) => {
+                    const str = String(children || "");
+                    PAGE_RE.lastIndex = 0;
+                    if (!PAGE_RE.test(str)) { PAGE_RE.lastIndex = 0; return <>{str}</>; }
+                    PAGE_RE.lastIndex = 0;
+                    const parts = [];
+                    let last = 0, m;
+                    while ((m = PAGE_RE.exec(str)) !== null) {
+                      if (m.index > last) parts.push(<span key={last}>{str.slice(last, m.index)}</span>);
+                      const page = parseInt(m[1], 10);
+                      parts.push(
+                        <button key={m.index} type="button" onClick={() => onJumpToPage?.(page)}
+                          style={{ background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: 9999, color: "#7c3aed", fontSize: 10, padding: "1px 7px", cursor: "pointer", fontFamily: "inherit", lineHeight: 1.3, verticalAlign: "middle", margin: "0 2px" }}>
+                          p.{m[1]}
+                        </button>
+                      );
+                      last = m.index + m[0].length;
+                    }
+                    if (last < str.length) parts.push(<span key={last}>{str.slice(last)}</span>);
+                    return <>{parts}</>;
+                  },
                 }}
               >
                 {m.content}
@@ -733,7 +754,7 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
       </div>
 
       {/* always-visible AI panel */}
-      <NodeAIPanel activeNode={activeNode} />
+      <NodeAIPanel activeNode={activeNode} onJumpToPage={onJumpToPage} />
     </div>
   );
 }
