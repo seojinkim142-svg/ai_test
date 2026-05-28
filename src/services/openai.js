@@ -2643,6 +2643,28 @@ export async function generateQuestionStyleProfile(extractedText, { scopeLabel =
   return formatQuestionStyleProfile(profile);
 }
 
+// 난이도 미지정 시 하/중/상이 고르게 섞이도록 재정렬 (아이템 제거 없음)
+function interleaveDifficulty(items, fixedDifficulty) {
+  if (fixedDifficulty || items.length <= 1) return items;
+  const buckets = { 하: [], 중: [], 상: [] };
+  const rest = [];
+  items.forEach((item) => {
+    const d = item.difficulty;
+    if (buckets[d]) buckets[d].push(item);
+    else rest.push(item);
+  });
+  // 라운드로빈: 하→중→상 순서로 인터리브
+  const order = ["하", "중", "상"];
+  const result = [];
+  let maxLen = Math.max(...order.map((d) => buckets[d].length));
+  for (let i = 0; i < maxLen; i++) {
+    for (const d of order) {
+      if (buckets[d][i] !== undefined) result.push(buckets[d][i]);
+    }
+  }
+  return [...result, ...rest];
+}
+
 export async function generateQuiz(
   extractedText,
   {
@@ -2708,15 +2730,18 @@ export async function generateQuiz(
       ],
       response_format: { type: "json_object" },
     },
-    { retries: 0 }
+    { retries: 1 }
   );
 
   const content = data.choices?.[0]?.message?.content?.trim() || "";
   const sanitized = sanitizeJson(content);
   const parsed = parseJsonSafe(sanitized, "quiz JSON");
-  const multipleChoice = (Array.isArray(parsed?.multipleChoice) ? parsed.multipleChoice : [])
-    .map(normalizeGeneratedItem)
-    .filter((item) => !isLowValueStudyPrompt(String(item?.question || item?.prompt || "").trim()));
+  const multipleChoice = interleaveDifficulty(
+    (Array.isArray(parsed?.multipleChoice) ? parsed.multipleChoice : [])
+      .map(normalizeGeneratedItem)
+      .filter((item) => !isLowValueStudyPrompt(String(item?.question || item?.prompt || "").trim())),
+    normalizedDifficulty
+  );
   const shortAnswer = (Array.isArray(parsed?.shortAnswer) ? parsed.shortAnswer : [])
     .map(normalizeGeneratedItem)
     .filter((item) => !isLowValueStudyPrompt(String(item?.question || item?.prompt || "").trim()))
@@ -2772,7 +2797,7 @@ export async function generateHardQuiz(
       temperature: 1,
       response_format: { type: "json_object" },
     },
-    { retries: 0 }
+    { retries: 1 }
   );
 
   const content = data.choices?.[0]?.message?.content?.trim() || "";
@@ -2860,7 +2885,7 @@ export async function generateOxQuiz(
       temperature: 1,
       response_format: { type: "json_object" },
     },
-    { retries: 0 }
+    { retries: 1 }
   );
 
   const content = data.choices?.[0]?.message?.content?.trim() || "";
@@ -3064,7 +3089,7 @@ export async function generateExamCramSheet({
       ],
       temperature: 1,
     },
-    { retries: 0 }
+    { retries: 1 }
   );
 
   const content = data.choices?.[0]?.message?.content?.trim() || "";

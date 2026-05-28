@@ -5350,13 +5350,17 @@ function App() {
       const target = shortAnswers[idx];
       if (!target?.answer) return;
 
-      const user = String(targetSet?.shortAnswerInput?.[idx] || "").trim().toLowerCase();
-      const answer = String(target.answer).trim().toLowerCase();
-      const normalizedUser = user.replace(/\s+/g, "");
-      const normalizedAnswer = answer.replace(/\s+/g, "");
+      const userRaw = String(targetSet?.shortAnswerInput?.[idx] || "").trim();
+      const normalizedUser = userRaw.toLowerCase().replace(/\s+/g, "").replace(/[()（）[\]{}]/g, "");
       const existingResult = targetSet?.shortAnswerResult?.[idx];
       if (existingResult?.submittedValue === normalizedUser) return;
-      const isCorrect = normalizedUser === normalizedAnswer;
+
+      // 정답 필드에 "A / B" 또는 "A, B" 형태로 복수 정답이 올 수 있음
+      const answerCandidates = String(target.answer || "")
+        .split(/[/,]/)
+        .map((s) => s.trim().toLowerCase().replace(/\s+/g, "").replace(/[()（）[\]{}]/g, ""))
+        .filter(Boolean);
+      const isCorrect = answerCandidates.some((a) => a === normalizedUser);
 
       setQuizSets((prev) =>
         prev.map((set) => {
