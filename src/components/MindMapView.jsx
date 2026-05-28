@@ -14,17 +14,45 @@ function injectCSS() {
 }
 
 const EXTRA_CSS = `
-.markmap-node-circle { stroke-width: 1.5px; }
-.markmap-node > line { stroke-width: 1.5px; stroke-opacity: 0.5; }
-.markmap-link { stroke-opacity: 0.45; stroke-width: 1.5px; }
-.markmap-foreign { line-height: 1.55; }
-.markmap-foreign div { font-size: 13px; }
-.markmap-foreign strong { font-weight: 700; }
+/* ── connecting lines ── */
+.markmap-node > line { stroke-width: 2px; stroke-opacity: 0.4; }
+.markmap-link { stroke-opacity: 0.35; stroke-width: 2px; }
+
+/* ── hide default circle dot — card takes its place ── */
+.markmap-node-circle { r: 0 !important; stroke: none !important; fill: none !important; }
+
+/* ── card container ── */
+.markmap-foreign {
+  overflow: visible !important;
+  line-height: 1.5;
+}
+.markmap-foreign > div {
+  display: inline-block;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 5px 13px;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255,255,255,0.06);
+  font-size: 13px;
+  color: #e2e8f0;
+  white-space: nowrap;
+  cursor: default;
+  transition: box-shadow 0.15s, border-color 0.15s;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.markmap-foreign > div:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255,255,255,0.08);
+}
+.markmap-foreign strong { font-weight: 600; color: #f1f5f9; }
+
+/* ── page / tier badges ── */
 .markmap-foreign .mm-anchor,
 .markmap-foreign .mm-tier {
   display: inline-flex;
   align-items: center;
-  margin-left: 4px;
+  margin-left: 5px;
   padding: 1px 7px;
   border-radius: 9999px;
   font-size: 11px;
@@ -33,45 +61,33 @@ const EXTRA_CSS = `
   text-decoration: none;
 }
 .markmap-foreign .mm-anchor {
-  background: rgba(139, 92, 246, 0.15);
-  color: #a78bfa;
-  border: 1px solid rgba(139, 92, 246, 0.3);
+  background: rgba(139, 92, 246, 0.18);
+  color: #c4b5fd;
+  border: 1px solid rgba(139, 92, 246, 0.35);
   cursor: pointer;
   font-family: inherit;
   line-height: 1.35;
 }
 .markmap-foreign .mm-anchor:hover {
-  background: rgba(139, 92, 246, 0.3);
+  background: rgba(139, 92, 246, 0.32);
   color: #ddd6fe;
 }
-.markmap-foreign .mm-tier {
-  font-weight: 600;
-  border: 1px solid transparent;
-}
-.markmap-foreign .mm-tier--t1 {
-  background: rgba(34, 197, 94, 0.15);
-  color: #86efac;
-  border-color: rgba(34, 197, 94, 0.3);
-}
-.markmap-foreign .mm-tier--t2 {
-  background: rgba(234, 179, 8, 0.16);
-  color: #fde68a;
-  border-color: rgba(234, 179, 8, 0.35);
-}
-.markmap-foreign .mm-tier--t3 {
-  background: rgba(148, 163, 184, 0.14);
-  color: #cbd5e1;
-  border-color: rgba(148, 163, 184, 0.28);
-}
+.markmap-foreign .mm-tier { font-weight: 600; border: 1px solid transparent; }
+.markmap-foreign .mm-tier--t1 { background: rgba(34,197,94,0.15); color: #86efac; border-color: rgba(34,197,94,0.3); }
+.markmap-foreign .mm-tier--t2 { background: rgba(234,179,8,0.16); color: #fde68a; border-color: rgba(234,179,8,0.35); }
+.markmap-foreign .mm-tier--t3 { background: rgba(148,163,184,0.14); color: #cbd5e1; border-color: rgba(148,163,184,0.28); }
 `;
 
-let extraCSSInjected = false;
+let extraStyleEl = null;
 function injectExtraCSS() {
-  if (extraCSSInjected) return;
-  const style = document.createElement("style");
-  style.textContent = EXTRA_CSS;
-  document.head.appendChild(style);
-  extraCSSInjected = true;
+  if (extraStyleEl) {
+    extraStyleEl.textContent = EXTRA_CSS; // always update in case CSS changed
+    return;
+  }
+  extraStyleEl = document.createElement("style");
+  extraStyleEl.id = "mm-extra-css";
+  extraStyleEl.textContent = EXTRA_CSS;
+  document.head.appendChild(extraStyleEl);
 }
 
 // ── JSON tree → markmap markdown ─────────────────────────────────────────────
@@ -318,9 +334,9 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
         duration: 350,
         maxWidth: nodeMaxWidth,
         initialExpandLevel: 1,
-        paddingX: 16,
-        spacingHorizontal: 90,
-        spacingVertical: 8,
+        paddingX: 20,
+        spacingHorizontal: 110,
+        spacingVertical: 10,
       }));
 
       svg.addEventListener("pointerdown", handlePointerDown, true);
