@@ -71,16 +71,69 @@ function injectExtraCSS() {
   extraCSSInjected = true;
 }
 
-function injectAnchorTags(markdown) {
-  return String(markdown || "").replace(
-    /\[(?:[^\]:]+:)?p\.(\d+)\]|\[(T[123])\]|\((T[123])\)/g,
-    (_, page, bracketTier, parenTier) => {
-      const tier = bracketTier || parenTier;
-      return page
-        ? `<a class="mm-anchor" data-page="${page}" href="#">p.${page}</a>`
-        : `<span class="mm-tier mm-tier--${tier.toLowerCase()}">${tier}</span>`;
-    }
-  );
+const INLINE_BADGE_RE = /\[(?:[^\]:]+:)?p\.(\d+)\]|\[(T[123])\]|\((T[123])\)/g;
+
+function createPageAnchor(doc, page) {
+  const anchor = doc.createElement("a");
+  anchor.className = "mm-anchor";
+  anchor.dataset.page = page;
+  anchor.href = "#";
+  anchor.textContent = `p.${page}`;
+  return anchor;
+}
+
+function createTierBadge(doc, tier) {
+  const badge = doc.createElement("span");
+  badge.className = `mm-tier mm-tier--${tier.toLowerCase()}`;
+  badge.textContent = tier;
+  return badge;
+}
+
+function renderInlineBadges(svg) {
+  const doc = svg.ownerDocument || document;
+  const roots = svg.querySelectorAll(".markmap-foreign div");
+
+  roots.forEach((root) => {
+    const walker = doc.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (!INLINE_BADGE_RE.test(node.nodeValue || "")) {
+          INLINE_BADGE_RE.lastIndex = 0;
+          return NodeFilter.FILTER_REJECT;
+        }
+        INLINE_BADGE_RE.lastIndex = 0;
+        const parent = node.parentElement;
+        if (parent?.closest(".mm-anchor, .mm-tier")) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+
+    const textNodes = [];
+    while (walker.nextNode()) textNodes.push(walker.currentNode);
+
+    textNodes.forEach((node) => {
+      const text = node.nodeValue || "";
+      const fragment = doc.createDocumentFragment();
+      let lastIndex = 0;
+      INLINE_BADGE_RE.lastIndex = 0;
+
+      for (const match of text.matchAll(INLINE_BADGE_RE)) {
+        const index = match.index ?? 0;
+        if (lastIndex < index) {
+          fragment.appendChild(doc.createTextNode(text.slice(lastIndex, index)));
+        }
+
+        const page = match[1];
+        const tier = match[2] || match[3];
+        fragment.appendChild(page ? createPageAnchor(doc, page) : createTierBadge(doc, tier));
+        lastIndex = index + match[0].length;
+      }
+
+      if (lastIndex < text.length) {
+        fragment.appendChild(doc.createTextNode(text.slice(lastIndex)));
+      }
+      node.parentNode?.replaceChild(fragment, node);
+    });
+  });
 }
 
 export default function MindMapView({ summary, onJumpToPage }) {
@@ -103,6 +156,7 @@ export default function MindMapView({ summary, onJumpToPage }) {
     const nodeMaxWidth = Math.min(420, Math.max(220, Math.floor(containerWidth * 0.38)));
 
     let mm;
+    let badgeFrame = 0;
     const svg = svgRef.current;
     const handlePointerDown = (event) => {
       const anchor = event.target instanceof Element ? event.target.closest(".mm-anchor") : null;
@@ -130,7 +184,7 @@ export default function MindMapView({ summary, onJumpToPage }) {
     };
 
     try {
-      const { root } = transformer.transform(injectAnchorTags(summary));
+      const { root } = transformer.transform(summary);
       mm = Markmap.create(svg, deriveOptions({
         color: ["#34d399", "#60a5fa", "#f472b6", "#fb923c", "#a78bfa", "#facc15", "#38bdf8", "#f87171"],
         duration: 350,
@@ -140,6 +194,7 @@ export default function MindMapView({ summary, onJumpToPage }) {
         spacingHorizontal: 90,
         spacingVertical: 8,
       }), root);
+      badgeFrame = window.requestAnimationFrame(() => renderInlineBadges(svg));
       svg.addEventListener("pointerdown", handlePointerDown);
       svg.addEventListener("click", handleClick);
     } catch (e) {
@@ -147,6 +202,7 @@ export default function MindMapView({ summary, onJumpToPage }) {
     }
 
     return () => {
+      if (badgeFrame) window.cancelAnimationFrame(badgeFrame);
       svg.removeEventListener("pointerdown", handlePointerDown);
       svg.removeEventListener("click", handleClick);
       mm?.destroy?.();
