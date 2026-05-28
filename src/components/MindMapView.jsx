@@ -286,16 +286,6 @@ function CardNode({ data }) {
               bg="#eef2ff"
               border="#c7d2fe"
             />
-            {pages.length > 0 && (
-              <Chip
-                icon="→"
-                label="근거 보기"
-                onClick={() => data.onJumpToPage?.(pages[0])}
-                color="#0ea5e9"
-                bg="#f0f9ff"
-                border="#bae6fd"
-              />
-            )}
           </div>
         )}
       </div>
