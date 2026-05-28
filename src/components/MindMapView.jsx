@@ -11,18 +11,18 @@ import ReactFlow, {
 import dagre from "@dagrejs/dagre";
 import "reactflow/dist/style.css";
 
-// ── color palette ─────────────────────────────────────────────────────────────
+// ── light color palette ───────────────────────────────────────────────────────
 
 const COLOR_STYLES = {
-  "blue-200":   { bg: "#0d1f35", border: "#3b82f6", title: "#93c5fd", text: "#7ea8d8", accent: "#1d3a5f" },
-  "green-200":  { bg: "#0a1f12", border: "#22c55e", title: "#86efac", text: "#6aad80", accent: "#112d1a" },
-  "yellow-200": { bg: "#1f1200", border: "#eab308", title: "#fde68a", text: "#c8a84a", accent: "#2c1900" },
-  "red-200":    { bg: "#200c0c", border: "#ef4444", title: "#fca5a5", text: "#c87070", accent: "#2e1010" },
-  "sky-200":    { bg: "#071828", border: "#38bdf8", title: "#7dd3fc", text: "#5aafcc", accent: "#0c2236" },
-  "pink-200":   { bg: "#200b14", border: "#ec4899", title: "#f9a8d4", text: "#c87aa8", accent: "#2e0f1c" },
-  "purple-200": { bg: "#140820", border: "#a855f7", title: "#d8b4fe", text: "#a87ad4", accent: "#1e1030" },
+  "blue-200":   { headerBg: "#eff6ff", headerBorder: "#bfdbfe", accent: "#3b82f6", title: "#1e40af", text: "#374151" },
+  "green-200":  { headerBg: "#f0fdf4", headerBorder: "#bbf7d0", accent: "#22c55e", title: "#15803d", text: "#374151" },
+  "yellow-200": { headerBg: "#fefce8", headerBorder: "#fef08a", accent: "#eab308", title: "#a16207", text: "#374151" },
+  "red-200":    { headerBg: "#fff1f2", headerBorder: "#fecdd3", accent: "#ef4444", title: "#b91c1c", text: "#374151" },
+  "sky-200":    { headerBg: "#f0f9ff", headerBorder: "#bae6fd", accent: "#38bdf8", title: "#0369a1", text: "#374151" },
+  "pink-200":   { headerBg: "#fdf2f8", headerBorder: "#f9a8d4", accent: "#ec4899", title: "#9d174d", text: "#374151" },
+  "purple-200": { headerBg: "#faf5ff", headerBorder: "#e9d5ff", accent: "#a855f7", title: "#7e22ce", text: "#374151" },
 };
-const DEFAULT_STYLE = { bg: "#131c2b", border: "#3b4f6a", title: "#cbd5e1", text: "#8899aa", accent: "#1a2438" };
+const DEFAULT_STYLE = { headerBg: "#f8fafc", headerBorder: "#e2e8f0", accent: "#64748b", title: "#1e293b", text: "#374151" };
 
 function getStyle(color) {
   return COLOR_STYLES[color] || DEFAULT_STYLE;
@@ -48,8 +48,11 @@ function cleanLine(line) {
     .trim();
 }
 
-const TYPE_ICON = { start: "▶", next: "→", source: "◈", question: "❓" };
-const TYPE_LABEL = { start: "시작점", next: "다음 단계", source: "출처", branch: null, sub: null, leaf: null, question: "핵심 질문" };
+const TYPE_LABEL = {
+  start: "시작점", next: "다음 단계", source: "출처",
+  branch: null, sub: null, leaf: null, question: "핵심 질문",
+};
+const TYPE_ICON = { start: "▶", next: "→", source: "◈", question: "?" };
 
 // ── card node ─────────────────────────────────────────────────────────────────
 
@@ -58,13 +61,11 @@ function CardNode({ data }) {
   const isRoot = data.depth === 0;
   const isQuestion = data.nodeType === "question";
 
-  const headerBg = isRoot
-    ? "linear-gradient(135deg, rgba(59,130,246,0.22) 0%, rgba(30,41,59,0.5) 100%)"
-    : isQuestion
-      ? "rgba(234,179,8,0.12)"
-      : `${s.accent}`;
-
-  const borderColor = isQuestion ? "#eab308" : s.border;
+  const accentColor = isQuestion ? "#d97706" : s.accent;
+  const titleColor  = isQuestion ? "#92400e" : s.title;
+  const headerBg    = isQuestion ? "#fffbeb" : (isRoot ? "#f0f4ff" : s.headerBg);
+  const headerBorder= isQuestion ? "#fde68a" : (isRoot ? "#c7d7fe" : s.headerBorder);
+  const typeLabel   = TYPE_LABEL[data.nodeType];
 
   const contentLines = useMemo(() => {
     if (!data.content) return [];
@@ -82,34 +83,30 @@ function CardNode({ data }) {
     [data.label, data.content]
   );
 
-  const typeLabel = TYPE_LABEL[data.nodeType];
-
   return (
     <div
       style={{
-        background: isRoot
-          ? "linear-gradient(160deg, #0f2340 0%, #131c2b 100%)"
-          : s.bg,
-        border: `1.5px solid ${borderColor}`,
-        borderRadius: isRoot ? 18 : 14,
+        background: "#ffffff",
+        border: `1px solid ${isRoot ? "#c7d7fe" : "#e2e8f0"}`,
+        borderRadius: isRoot ? 16 : 12,
         minWidth: isRoot ? 240 : 196,
         maxWidth: isRoot ? 310 : 284,
         overflow: "hidden",
         fontFamily: "inherit",
         boxShadow: isRoot
-          ? `0 8px 32px rgba(0,0,0,0.7), 0 0 0 1px ${borderColor}33`
-          : `0 4px 18px rgba(0,0,0,0.55), 0 1px 4px rgba(0,0,0,0.35)`,
+          ? "0 4px 24px rgba(0,0,0,0.10), 0 1px 6px rgba(0,0,0,0.06)"
+          : "0 2px 12px rgba(0,0,0,0.07), 0 1px 3px rgba(0,0,0,0.04)",
       }}
     >
-      <Handle type="target" position={Position.Left} style={{ opacity: 0, pointerEvents: "none" }} />
+      <Handle type="target" position={Position.Left}  style={{ opacity: 0, pointerEvents: "none" }} />
       <Handle type="source" position={Position.Right} style={{ opacity: 0, pointerEvents: "none" }} />
 
       {/* ── header ── */}
       <div
         style={{
           background: headerBg,
-          padding: isRoot ? "11px 15px 10px" : "8px 12px 7px",
-          borderBottom: `1px solid ${borderColor}28`,
+          borderBottom: `1px solid ${headerBorder}`,
+          padding: isRoot ? "11px 15px 10px" : "8px 13px 7px",
           display: "flex",
           flexDirection: "column",
           gap: 3,
@@ -119,11 +116,10 @@ function CardNode({ data }) {
           <span
             style={{
               fontSize: 9,
-              fontWeight: 600,
+              fontWeight: 700,
               textTransform: "uppercase",
-              letterSpacing: "0.07em",
-              color: isQuestion ? "#ca8a04" : s.border,
-              opacity: 0.85,
+              letterSpacing: "0.08em",
+              color: accentColor,
             }}
           >
             {TYPE_ICON[data.nodeType] ? `${TYPE_ICON[data.nodeType]} ` : ""}
@@ -134,49 +130,27 @@ function CardNode({ data }) {
           style={{
             fontSize: isRoot ? 13.5 : 12,
             fontWeight: isRoot ? 800 : 700,
-            color: isQuestion ? "#fde68a" : s.title,
+            color: titleColor,
             lineHeight: 1.4,
             wordBreak: "break-word",
           }}
         >
           {!typeLabel && TYPE_ICON[data.nodeType] && (
-            <span style={{ marginRight: 5, fontSize: 11 }}>{TYPE_ICON[data.nodeType]}</span>
+            <span style={{ marginRight: 5, color: accentColor, fontSize: 11 }}>
+              {TYPE_ICON[data.nodeType]}
+            </span>
           )}
           {data.label}
         </span>
       </div>
 
-      {/* ── body (bullets) ── */}
+      {/* ── body ── */}
       {contentLines.length > 0 && (
-        <div
-          style={{
-            padding: "8px 12px 6px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 4,
-          }}
-        >
+        <div style={{ padding: "8px 13px 6px", display: "flex", flexDirection: "column", gap: 4 }}>
           {contentLines.map((line, i) => (
-            <div key={i} style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-              <span
-                style={{
-                  color: borderColor,
-                  fontSize: 8,
-                  flexShrink: 0,
-                  marginTop: 4,
-                  opacity: 0.7,
-                }}
-              >
-                ▸
-              </span>
-              <span
-                style={{
-                  fontSize: 11,
-                  color: s.text,
-                  lineHeight: 1.55,
-                  wordBreak: "break-word",
-                }}
-              >
+            <div key={i} style={{ display: "flex", gap: 7, alignItems: "flex-start" }}>
+              <span style={{ color: accentColor, fontSize: 8, flexShrink: 0, marginTop: 4, opacity: 0.7 }}>▸</span>
+              <span style={{ fontSize: 11, color: "#4b5563", lineHeight: 1.55, wordBreak: "break-word" }}>
                 {line}
               </span>
             </div>
@@ -188,26 +162,26 @@ function CardNode({ data }) {
       {pages.length > 0 && (
         <div
           style={{
-            borderTop: `1px solid ${borderColor}22`,
-            padding: "5px 12px 7px",
-            background: "rgba(0,0,0,0.25)",
+            borderTop: "1px solid #f1f5f9",
+            padding: "5px 13px 7px",
+            background: "#fafafa",
             display: "flex",
             gap: 4,
             flexWrap: "wrap",
             alignItems: "center",
           }}
         >
-          <span style={{ fontSize: 9, color: "#475569", marginRight: 2 }}>출처</span>
+          <span style={{ fontSize: 9, color: "#94a3b8", marginRight: 2 }}>출처</span>
           {pages.map((p) => (
             <button
               key={p}
               type="button"
               onClick={() => data.onJumpToPage?.(p)}
               style={{
-                background: "rgba(139,92,246,0.15)",
-                border: "1px solid rgba(139,92,246,0.35)",
+                background: "#f5f3ff",
+                border: "1px solid #ddd6fe",
                 borderRadius: 9999,
-                color: "#c4b5fd",
+                color: "#7c3aed",
                 fontSize: 10,
                 padding: "2px 8px",
                 cursor: "pointer",
@@ -246,16 +220,14 @@ function estimateHeight(node, isRoot) {
   const titleLines = Math.ceil((node.label || "").length / 26);
   const hasTypeLabel = !!TYPE_LABEL[node.type];
   const rawLines = (node.content || "")
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith("|"))
-    .length;
+    .split("\n").map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("|")).length;
   const contentLines = Math.min(isRoot ? 4 : 5, rawLines);
   const pages = extractPages((node.label || "") + " " + (node.content || ""));
   const headerH = (isRoot ? 21 : 15) + titleLines * (isRoot ? 20 : 17) + (hasTypeLabel ? 14 : 0);
-  const bodyH = contentLines > 0 ? 14 + contentLines * 20 : 0;
+  const bodyH   = contentLines > 0 ? 14 + contentLines * 20 : 0;
   const footerH = pages.length > 0 ? 28 : 0;
-  return Math.max(isRoot ? 64 : 50, headerH + bodyH + footerH);
+  return Math.max(isRoot ? 64 : 48, headerH + bodyH + footerH);
 }
 
 // ── flow element builder ──────────────────────────────────────────────────────
@@ -270,25 +242,18 @@ function jsonToFlowElements(jsonStr, onJumpToPage) {
 
     const flowNodes = [];
     const flowEdges = [];
-    const depthMap = {};
+    const depthMap  = {};
 
     function dfs(node, depth) {
-      const isRoot = depth === 0;
       depthMap[node.id] = depth;
+      const isRoot = depth === 0;
       const w = isRoot ? 310 : 284;
       const h = estimateHeight(node, isRoot);
 
       flowNodes.push({
         id: String(node.id),
         type: "card",
-        data: {
-          label: node.label || "",
-          content: node.content || "",
-          color: node.color,
-          nodeType: node.type,
-          depth,
-          onJumpToPage,
-        },
+        data: { label: node.label || "", content: node.content || "", color: node.color, nodeType: node.type, depth, onJumpToPage },
         width: w,
         height: h,
         position: { x: 0, y: 0 },
@@ -296,8 +261,8 @@ function jsonToFlowElements(jsonStr, onJumpToPage) {
 
       if (node.parentId) {
         const pDepth = depthMap[node.parentId] ?? 0;
-        const strokeWidth = pDepth === 0 ? 2.2 : pDepth === 1 ? 1.6 : 1.1;
-        const strokeColor = pDepth === 0 ? "#3b4f7a" : pDepth === 1 ? "#2e3f5c" : "#243043";
+        const strokeWidth = pDepth === 0 ? 1.8 : 1.2;
+        const strokeColor = pDepth === 0 ? "#cbd5e1" : "#e2e8f0";
 
         flowEdges.push({
           id: `e-${node.parentId}-${node.id}`,
@@ -318,10 +283,10 @@ function jsonToFlowElements(jsonStr, onJumpToPage) {
 
     dfs(root, 0);
 
-    // dagre layout
+    // dagre layout — generous spacing so cards never crowd
     const g = new dagre.graphlib.Graph();
     g.setDefaultEdgeLabel(() => ({}));
-    g.setGraph({ rankdir: "LR", nodesep: 24, ranksep: 80, marginx: 48, marginy: 48 });
+    g.setGraph({ rankdir: "LR", nodesep: 40, ranksep: 90, marginx: 60, marginy: 60 });
 
     flowNodes.forEach((n) => g.setNode(n.id, { width: n.width, height: n.height }));
     flowEdges.forEach((e) => g.setEdge(e.source, e.target));
@@ -372,8 +337,8 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
 
   return (
     <div
-      className="relative w-full overflow-hidden rounded-2xl border border-white/10"
-      style={{ height: 680, background: "#070e1a" }}
+      className="relative w-full overflow-hidden rounded-2xl border border-slate-200"
+      style={{ height: 680, background: "#f8fafc" }}
     >
       <ReactFlow
         nodes={nodes}
@@ -389,10 +354,10 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
         elementsSelectable={false}
         proOptions={{ hideAttribution: true }}
       >
-        <Background color="#0f1829" gap={28} size={1} variant="dots" />
+        <Background color="#e2e8f0" gap={28} size={1} variant="dots" />
         <Controls showInteractive={false} className="!bottom-3 !left-3" />
       </ReactFlow>
-      <p className="absolute bottom-2 right-3 text-[10px] text-slate-600 select-none pointer-events-none">
+      <p className="absolute bottom-2 right-3 text-[10px] text-slate-400 select-none pointer-events-none">
         스크롤·드래그로 탐색
       </p>
     </div>
