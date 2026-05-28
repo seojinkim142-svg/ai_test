@@ -89,17 +89,17 @@ function NodeMarkdown({ content, onJumpToPage }) {
       rehypePlugins={[rehypeKatex]}
       className="prose-mm"
       components={{
-        p: ({ children }) => <p className="text-[12px] text-slate-300 leading-relaxed mb-1">{children}</p>,
+        p: ({ children }) => <p className="text-[12px] text-slate-100 leading-relaxed mb-1">{children}</p>,
         ul: ({ children }) => <ul className="my-1 space-y-0.5 pl-3">{children}</ul>,
         ol: ({ children }) => <ol className="my-1 space-y-0.5 pl-4 list-decimal">{children}</ol>,
         li: ({ children }) => (
-          <li className="text-[12px] text-slate-300 leading-relaxed flex gap-1.5">
-            <span className="mt-[5px] h-1 w-1 flex-shrink-0 rounded-full bg-slate-500" />
+          <li className="text-[12px] text-slate-100 leading-relaxed flex gap-1.5">
+            <span className="mt-[5px] h-1 w-1 flex-shrink-0 rounded-full bg-slate-400" />
             <span className="flex-1">{children}</span>
           </li>
         ),
-        strong: ({ children }) => <strong className="font-semibold text-slate-100">{children}</strong>,
-        em: ({ children }) => <em className="italic text-slate-300">{children}</em>,
+        strong: ({ children }) => <strong className="font-semibold text-white">{children}</strong>,
+        em: ({ children }) => <em className="italic text-slate-200">{children}</em>,
         table: ({ children }) => (
           <div className="overflow-x-auto my-2">
             <table className="w-full text-[11px] border-collapse">{children}</table>
@@ -278,7 +278,7 @@ export default function MindMapTreeView({ mindmapData, onJumpToPage }) {
       <div className="rounded-2xl border border-white/15 bg-gradient-to-r from-slate-800/80 to-slate-900/60 px-5 py-4">
         <p className="text-base font-bold text-white">{root.label}</p>
         {root.content && (
-          <p className="mt-1 text-[12px] text-slate-400">{root.content}</p>
+          <p className="mt-1 text-[12px] text-slate-200">{root.content}</p>
         )}
       </div>
 
