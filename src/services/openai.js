@@ -937,6 +937,17 @@ ${anchorRule}
 - Verbatim quotes must use the exact source wording, enclosed in "quotation marks".
 - Skip citations for headings and pure connective sentences.
 
+[Anti-hallucination — No Fabrication]
+- If evidence extraction fails for a claim, write "근거를 찾을 수 없음" explicitly — do NOT assert it as fact.
+- Never fabricate page numbers, quotes, or data not present in the source.
+- Unverified paraphrases must be marked [T2]; cross-references must be marked [T3].
+
+[Language matching]
+- Output language: ${outputLanguageLabel}.
+- Technical and domain-specific terms: write in ${outputLanguageLabel} with original English in parentheses where helpful.
+  e.g. "**능동 수송 (Active Transport)**"
+- Keep the primary language consistent throughout; never mix languages mid-sentence.
+
 [Output]
 - Markdown only. No preamble or meta-commentary.
 - Language: ${outputLanguageLabel}.
@@ -2947,69 +2958,72 @@ export async function generateMindMap(summaryText, { outputLanguage = "ko" } = {
   if (!trimmed) throw new Error("No summary text available for mindmap generation.");
 
   const prompt = `
-Convert the following study summary into a traceable, hierarchical mindmap in Markdown format (for markmap rendering).
-Generate 15–30 nodes in a single response — produce the full structure at once.
+Convert the following study summary into a traceable, hierarchical mindmap in Markdown (for markmap).
+Generate 15–30 nodes in a SINGLE response — full structure at once (Parallel Ordering).
 
-━━━ PRINCIPLE ① HIERARCHY (요약 → 상세 → 데이터, 3-layer) ━━━
-- # Root: one concise document title (1 short phrase)
-- ## Layer 1 — Major branches (4–8 total):
-  · One per chapter/section identified in the summary
-  · Text = 1-sentence summary of that section's core argument
-  · Add two fixed navigation branches (see PRINCIPLE ⑤ below)
-- ### Layer 2 — Sub-branches (2–5 per ## branch):
-  · One per key concept or component within the section
-  · Text = concise label of the concept (not a full sentence)
-- - Layer 3 — Leaf bullet points (2–4 per ### node):
-  · Text = specific detail, data point, or evidence for the concept above
-  · One concept per bullet — split any long idea into separate bullets
+━━━ RULE ① HIERARCHY — Zoom Levels (요약 → 상세 → 데이터) ━━━
+# Root: one concise document title (1 short phrase)
 
-━━━ PRINCIPLE ② TRACEABILITY (추적 가능성) ━━━
-- Every leaf bullet that makes a factual claim MUST end with a page anchor: [p.N]
-- Only use page numbers that appear in the summary (e.g. [p.3], [p.7])
-- If no page anchor is available, mark the bullet with (T2) to signal lower confidence
-- Example: "- **정의**: 미토콘드리아는 ATP를 생산한다 [p.4]"
+## Layer 1 — Major branches (4–8):
+  One per chapter/section. Text = 1-sentence core argument of that section.
+  Fixed branches added: 시작점, 다음 단계, 출처 (see below).
 
-━━━ PRINCIPLE ③ INTERACTIVE QUESTIONS (확인 질문) ━━━
-Add one fixed ## branch at the end:
-## 확인 질문
-- Under it, list 3–5 key questions the reader should be able to answer after studying this material
-- Frame as genuine comprehension checks, not generic questions
-- Example: "- 이 개념이 다른 섹션의 X와 어떻게 연결되는가?"
+### Layer 2 — Sub-branches (2–5 per ##):
+  One per key concept. Text = short concept label (NOT a full sentence).
+  Technical terms: write in ${outputLanguageLabel} with English in parentheses when helpful.
+  e.g. "### 능동 수송 (Active Transport)"
 
-━━━ PRINCIPLE ④ MANDATORY SOURCE NODE (출처) ━━━
-Add one fixed ## branch:
-## 출처
-- List the inferred document title or topic as a bullet
-- List the page range covered if determinable from anchors in the summary
-- Example: "- 문서: [문서 제목 또는 주제]", "- 페이지 범위: p.1 – p.N"
+- Layer 3 — Leaf bullets (2–4 per ###):
+  One concept per bullet — ATOMICITY. If an idea has two parts, split into two bullets.
+  Format: "- **핵심어 (English)**: 설명 [문서:p.N]"
 
-━━━ PRINCIPLE ⑤ NAVIGATION NODES (내비게이션) ━━━
-Add these two fixed ## branches (place them first, right after the root):
+━━━ RULE ② TRACEABILITY — Precise Citation ━━━
+- Every factual leaf bullet MUST end with an anchor: [문서:p.N]
+  Use page numbers that appear in the summary. If the summary shows "[p.4]", write [문서:p.4].
+- If NO anchor is available for a claim → write "근거를 찾을 수 없음" instead of asserting it.
+- T2 content (paraphrase only, no direct quote): allowed, append (T2) at end of bullet.
+- T3 content (cross-reference to another section): place under "타 섹션 연관" sub-node, mark (T3).
+- NEVER fabricate page numbers or assert unverified facts.
+
+━━━ RULE ③ ANTI-HALLUCINATION ━━━
+- If evidence extraction fails for a claim: write "- 근거를 찾을 수 없음" as a leaf bullet.
+- Do not silently omit or rephrase — make the gap visible.
+
+━━━ RULE ④ DISTRIBUTED INTERACTIVE QUESTIONS ━━━
+Within EACH major ## branch, add one ### sub-node called "핵심 질문":
+  - Place 1–2 specific comprehension questions relevant to THAT branch only.
+  - Frame as "이 개념이 왜 중요한가?", "X와 Y의 차이는?", etc.
+  - Do NOT collect all questions into a single terminal section.
+
+━━━ RULE ⑤ MANDATORY NAVIGATION NODES ━━━
+Place immediately after the root (#), before content branches:
+
 ## 시작점
-- 이 문서의 전체 주제와 목적 (1–2 bullets)
-- 권장 읽기 순서: [섹션 순서] (1 bullet)
+- 전체 주제 및 학습 목적 (1–2 bullets)
+- 권장 읽기 순서: [섹션 나열] (1 bullet)
 
 ## 다음 단계
-- 3–5 concrete actions the reader should take after reviewing this mindmap
-  (e.g. "핵심 근거 [T1] 항목을 원문에서 직접 확인", "미해결 쟁점 추가 조사")
+- 3–5 concrete post-study actions (e.g. "T1 근거를 원문에서 직접 확인", "미해결 쟁점 추가 조사")
 
-━━━ PRINCIPLE ⑥ VISUAL STRATEGY (3-layer 구조 엄수) ━━━
-- ## = 요약 레이어 (1-sentence argument)
-- ### = 상세 레이어 (concept label)
-- - = 데이터 레이어 (evidence + anchor)
-- Do NOT collapse multiple layers into one long node
-- Do NOT use emoji or decorative symbols
-- Use **bold** only for key terms and named concepts within bullet text
+Place at the very end:
+## 출처
+- 문서: [inferred document title or subject from summary]
+- 페이지 범위: [p.N – p.M if determinable from anchors, else "확인 필요"]
 
-━━━ COMMIT GATE (PRINCIPLE ⑤ evidence filter) ━━━
-- Include a node ONLY if its content can be traced to the summary's T1 evidence (verbatim quote + anchor)
-- T2 content (paraphrase, no direct quote): allowed but must end with (T2)
-- T3 content (cross-reference only): move to "타 섹션 연관" sub-node, mark (T3)
-- Never assert facts that have no traceability marker
+━━━ RULE ⑥ VISUAL STRATEGY ━━━
+- ## = 요약 레이어 | ### = 상세 레이어 | - = 데이터+앵커 레이어
+- Do NOT collapse layers — never put data in a ## node or summary in a - bullet.
+- Do NOT use emoji, icons, or decorative symbols.
+- Use **bold** only for key terms within bullets.
+- No color directives — colors are system-assigned only.
 
-Formatting rules:
-- Output ONLY the markdown. No code fences, no extra commentary.
-- Language: ${outputLanguageLabel}
+━━━ RULE ⑦ LANGUAGE MATCHING ━━━
+- Output language: ${outputLanguageLabel}.
+- Technical / domain-specific terms: write in ${outputLanguageLabel} with original English in parentheses.
+  e.g. "**세포 호흡 (Cellular Respiration)**"
+- Never mix languages mid-sentence; always keep the primary language consistent.
+
+Output ONLY the markdown. No code fences, no meta-commentary.
 
 [Summary]
 ${trimmed}
@@ -3022,7 +3036,7 @@ ${trimmed}
         {
           role: "system",
           content:
-            "You are an expert at building traceable, hierarchical mindmaps from academic summaries using Markdown for markmap. Apply strict 3-layer structure (## summary → ### detail → - data+anchor). Add navigation, source, and question nodes. Generate the full 15–30 node structure in a single response. Output ONLY the markdown.",
+            "You are an expert at building traceable, evidence-gated hierarchical mindmaps from academic summaries, using Markdown for markmap. Strict rules: 3-layer zoom structure (##/###/-), distributed pendingQuestion nodes per branch, mandatory navigation/source nodes, anti-hallucination gate ('근거를 찾을 수 없음' when evidence missing), language matching with bilingual technical terms. Generate 15–30 nodes in one response. Output ONLY the markdown.",
         },
         { role: "user", content: prompt },
       ],
