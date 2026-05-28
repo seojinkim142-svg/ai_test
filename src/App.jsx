@@ -1160,6 +1160,9 @@ function App() {
     return AVAILABLE_OUTPUT_LANGUAGES.includes(stored) ? stored : DEFAULT_OUTPUT_LANGUAGE;
   });
   const [summary, setSummary] = useState("");
+  const [mindmapData, setMindmapData] = useState("");
+  const [isLoadingMindmap, setIsLoadingMindmap] = useState(false);
+  const mindmapSummarySourceRef = useRef("");
   const [questionStyleProfileContent, setQuestionStyleProfileContent] = useState("");
   const [questionStyleProfileScopeLabel, setQuestionStyleProfileScopeLabel] = useState("");
   const [quizSets, setQuizSets] = useState([]);
@@ -1426,6 +1429,11 @@ function App() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(OUTPUT_LANGUAGE_STORAGE_KEY, outputLanguage);
   }, [outputLanguage]);
+  // 요약이 바뀌면 마인드맵 캐시 초기화
+  useEffect(() => {
+    setMindmapData("");
+    mindmapSummarySourceRef.current = "";
+  }, [summary]);
   const requestPreviewPdfConversion = useCallback(
     async (item, { force = false } = {}) => {
       const uploadId = item?.id;
@@ -5875,6 +5883,27 @@ function App() {
     }
   };
 
+  const requestMindMap = useCallback(async () => {
+    const currentSummary = String(summary || "").trim();
+    if (!currentSummary) return;
+    if (isLoadingMindmap) return;
+    // 이미 같은 요약으로 생성된 마인드맵이 있으면 재생성 안 함
+    if (mindmapSummarySourceRef.current === currentSummary && mindmapData) return;
+
+    setIsLoadingMindmap(true);
+    setMindmapData("");
+    try {
+      const { generateMindMap } = await getOpenAiService();
+      const result = await generateMindMap(currentSummary, { outputLanguage });
+      mindmapSummarySourceRef.current = currentSummary;
+      setMindmapData(result);
+    } catch (e) {
+      console.error("MindMap generation failed", e);
+    } finally {
+      setIsLoadingMindmap(false);
+    }
+  }, [summary, mindmapData, isLoadingMindmap, outputLanguage, getOpenAiService]);
+
   const handleAutoDetectChapterRanges = useCallback(async () => {
     if (isDetectingChapterRanges || isLoadingSummary || isLoadingText) return;
     if (!file) {
@@ -7815,6 +7844,9 @@ function App() {
     setPanelTab,
     outputLanguage,
     requestSummary,
+    requestMindMap,
+    mindmapData,
+    isLoadingMindmap,
     onJumpToSummaryPage: handlePageChange,
     isLoadingSummary,
     isLoadingText,

@@ -158,6 +158,9 @@ export default function DetailPage({
   setPanelTab,
   outputLanguage = "ko",
   requestSummary,
+  requestMindMap,
+  mindmapData,
+  isLoadingMindmap,
   onJumpToSummaryPage,
   isLoadingSummary,
   isLoadingText,
@@ -736,16 +739,26 @@ export default function DetailPage({
                   >
                     {isExportingSummary ? copy.summary.exporting : copy.summary.export}
                   </button>
-                  {summary && (
-                    <button
-                      type="button"
-                      onClick={() => setSummaryViewMode((m) => m === "mindmap" ? "text" : "mindmap")}
-                      className="ghost-button text-xs"
-                      style={{ "--ghost-color": summaryViewMode === "mindmap" ? "52, 211, 153" : "148, 163, 184" }}
-                    >
-                      {summaryViewMode === "mindmap" ? "텍스트 보기" : "마인드맵"}
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    disabled={!summary || isLoadingSummary}
+                    title={!summary ? "요약을 먼저 생성해 주세요" : undefined}
+                    onClick={() => {
+                      const next = summaryViewMode === "mindmap" ? "text" : "mindmap";
+                      setSummaryViewMode(next);
+                      if (next === "mindmap" && !mindmapData && !isLoadingMindmap) {
+                        requestMindMap?.();
+                      }
+                    }}
+                    className="ghost-button text-xs"
+                    style={{ "--ghost-color": summaryViewMode === "mindmap" ? "52, 211, 153" : "148, 163, 184" }}
+                  >
+                    {isLoadingMindmap && summaryViewMode === "mindmap"
+                      ? "생성 중..."
+                      : summaryViewMode === "mindmap"
+                      ? "텍스트 보기"
+                      : "마인드맵"}
+                  </button>
                 </div>
               </div>
               {status && <p className="mt-2 text-sm text-emerald-200">{status}</p>}
@@ -1016,7 +1029,13 @@ export default function DetailPage({
               {isLoadingSummary && <p className="mt-2 text-sm text-slate-300">{"\uC694\uC57D \uC0DD\uC131 \uC911..."}</p>}
               {!isLoadingSummary && summary && summaryViewMode === "mindmap" && (
                 <div className="mt-3">
-                  <MindMapView summary={summary} />
+                  {isLoadingMindmap ? (
+                    <div className="flex h-40 items-center justify-center text-sm text-slate-400">
+                      마인드맵 생성 중...
+                    </div>
+                  ) : (
+                    <MindMapView summary={mindmapData} />
+                  )}
                 </div>
               )}
               {!isLoadingSummary && summary && summaryViewMode === "text" && (

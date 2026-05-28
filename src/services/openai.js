@@ -2831,6 +2831,46 @@ export async function generateSummary(
   return sanitized;
 }
 
+export async function generateMindMap(summaryText, { outputLanguage = "ko" } = {}) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
+  const trimmed = String(summaryText || "").trim();
+  if (!trimmed) throw new Error("No summary text available for mindmap generation.");
+
+  const prompt = `
+Convert the following study summary into a concise mindmap skeleton using markdown headings only.
+
+Rules:
+- Use # for the single root topic (overall subject — 1 short line)
+- Use ## for main topics (4–8 total)
+- Use ### for subtopics where useful (max 3–4 per parent)
+- Each node MUST be a short keyword or phrase (2–6 words). No full sentences, no colons.
+- Output ONLY markdown headings. No bullet points, no prose, no explanations.
+- Integrate key formulas, terms, and concepts as heading names — do NOT reproduce section headers like "개요", "핵심 공식", "주요 용어" verbatim.
+- Language: ${outputLanguageLabel}
+
+[Summary]
+${trimmed}
+  `.trim();
+
+  const data = await postChatRequest(
+    {
+      model: MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are converting an academic summary into a compact mindmap outline. Output ONLY markdown headings (# ## ###). No bullet points, no prose, no extra commentary.",
+        },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.4,
+    },
+    { retries: 1 }
+  );
+
+  return String(data.choices?.[0]?.message?.content || "").trim();
+}
+
 export async function generateExamCramSheet({
   summaryText = "",
   oxItems = [],
