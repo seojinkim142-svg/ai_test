@@ -2850,7 +2850,7 @@ Structure:
 
 Formatting rules:
 - Use **bold** to highlight important terms, names, and formulas within bullet points
-- Add a relevant emoji (💡🔑📌⚡🔧📐✅🧩) at the start of ## headings for visual variety
+- Do NOT use any emoji or special symbols
 - Keep bullet text informative — not just a single keyword, but a meaningful phrase
 - Reference section numbers or page labels (e.g. "p3:L2") only if clearly present in the summary
 - Do NOT use generic branch names like "개요", "Overview", "핵심 공식", "주요 용어"
