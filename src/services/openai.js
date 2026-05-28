@@ -2958,72 +2958,41 @@ export async function generateMindMap(summaryText, { outputLanguage = "ko" } = {
   if (!trimmed) throw new Error("No summary text available for mindmap generation.");
 
   const prompt = `
-Convert the following study summary into a traceable, hierarchical mindmap in Markdown (for markmap).
-Generate 15–30 nodes in a SINGLE response — full structure at once (Parallel Ordering).
+Analyze the following study summary and generate a mindmap as a JSON array of nodes.
 
-━━━ RULE ① HIERARCHY — Zoom Levels (요약 → 상세 → 데이터) ━━━
-# Root: one concise document title (1 short phrase)
+━━━ NODE SCHEMA (every node must include all 6 fields) ━━━
+{
+  "id": "string",           // unique ID — "1" for root, then "2","3",... in creation order
+  "parentId": "string|null", // null ONLY for root; otherwise parent's id
+  "label": "string",        // card header, max 7 words, in ${outputLanguageLabel}
+  "content": "string",      // markdown body — use bullets, **bold**, tables, $LaTeX$, [p.N] citations
+  "color": "string|null",   // one of: "blue-200","green-200","yellow-200","red-200","sky-200","pink-200","purple-200" — or null
+  "type": "string"          // one of: "root","source","start","next","branch","sub","leaf","question"
+}
 
-## Layer 1 — Major branches (4–8):
-  One per chapter/section. Text = 1-sentence core argument of that section.
-  Fixed branches added: 시작점, 다음 단계, 출처 (see below).
+━━━ REQUIRED STRUCTURE ━━━
+• id "1" — ROOT (parentId:null, type:"root", color:null): document title as label, one-sentence thesis as content
+• type "start" (color:"sky-200"): label="시작점", content = learning objectives + recommended reading order (bullets)
+• type "next"  (color:"green-200"): label="다음 단계", content = 3-5 concrete post-study actions
+• type "source" (color:"purple-200"): label="출처", content = document title + page range citations [p.N]
+• type "branch" (4–6 nodes, each with a distinct color): one per major section/chapter
+  └─ type "sub" (2–4 per branch, color:null): key concept nodes under each branch
+     └─ type "leaf" (2–3 per sub, color:null): atomic facts, MUST cite [p.N] when evidence exists
+     └─ type "question" (1 per branch, color:null): label="핵심 질문", content=1-2 comprehension questions
 
-### Layer 2 — Sub-branches (2–5 per ##):
-  One per key concept. Text = short concept label (NOT a full sentence).
-  Technical terms: write in ${outputLanguageLabel} with English in parentheses when helpful.
-  e.g. "### 능동 수송 (Active Transport)"
+━━━ CONTENT RULES ━━━
+① ATOMICITY: one concept per node. If content gets long, split into child nodes.
+② TRACEABILITY: every factual leaf MUST end with [p.N]. If no evidence → write "근거를 찾을 수 없음".
+③ ANTI-HALLUCINATION: never fabricate page numbers or assert unverified facts.
+④ LATEX: use $formula$ inline or $$formula$$ block for math/science content.
+⑤ TABLES: use markdown table syntax for comparison data within a node's content.
+⑥ LANGUAGE: output in ${outputLanguageLabel}. Technical terms: ${outputLanguageLabel}(English) e.g. "세포 호흡 (Cellular Respiration)".
+⑦ COLORING: assign colors semantically — blue for core theory, green for methods, yellow for results, red for warnings/conflicts, sky for navigation, purple for sources.
 
-- Layer 3 — Leaf bullets (2–4 per ###):
-  One concept per bullet — ATOMICITY. If an idea has two parts, split into two bullets.
-  Format: "- **핵심어 (English)**: 설명 [문서:p.N]"
+━━━ TOTAL NODE COUNT ━━━
+Generate 20–35 nodes total. Start/next/source + 4-6 branches + 2-4 subs per branch + 2-3 leaves per sub + 1 question per branch.
 
-━━━ RULE ② TRACEABILITY — Precise Citation ━━━
-- Every factual leaf bullet MUST end with an anchor: [문서:p.N]
-  Use page numbers that appear in the summary. If the summary shows "[p.4]", write [문서:p.4].
-- If NO anchor is available for a claim → write "근거를 찾을 수 없음" instead of asserting it.
-- T2 content (paraphrase only, no direct quote): allowed, append (T2) at end of bullet.
-- T3 content (cross-reference to another section): place under "타 섹션 연관" sub-node, mark (T3).
-- NEVER fabricate page numbers or assert unverified facts.
-
-━━━ RULE ③ ANTI-HALLUCINATION ━━━
-- If evidence extraction fails for a claim: write "- 근거를 찾을 수 없음" as a leaf bullet.
-- Do not silently omit or rephrase — make the gap visible.
-
-━━━ RULE ④ DISTRIBUTED INTERACTIVE QUESTIONS ━━━
-Within EACH major ## branch, add one ### sub-node called "핵심 질문":
-  - Place 1–2 specific comprehension questions relevant to THAT branch only.
-  - Frame as "이 개념이 왜 중요한가?", "X와 Y의 차이는?", etc.
-  - Do NOT collect all questions into a single terminal section.
-
-━━━ RULE ⑤ MANDATORY NAVIGATION NODES ━━━
-Place immediately after the root (#), before content branches:
-
-## 시작점
-- 전체 주제 및 학습 목적 (1–2 bullets)
-- 권장 읽기 순서: [섹션 나열] (1 bullet)
-
-## 다음 단계
-- 3–5 concrete post-study actions (e.g. "T1 근거를 원문에서 직접 확인", "미해결 쟁점 추가 조사")
-
-Place at the very end:
-## 출처
-- 문서: [inferred document title or subject from summary]
-- 페이지 범위: [p.N – p.M if determinable from anchors, else "확인 필요"]
-
-━━━ RULE ⑥ VISUAL STRATEGY ━━━
-- ## = 요약 레이어 | ### = 상세 레이어 | - = 데이터+앵커 레이어
-- Do NOT collapse layers — never put data in a ## node or summary in a - bullet.
-- Do NOT use emoji, icons, or decorative symbols.
-- Use **bold** only for key terms within bullets.
-- No color directives — colors are system-assigned only.
-
-━━━ RULE ⑦ LANGUAGE MATCHING ━━━
-- Output language: ${outputLanguageLabel}.
-- Technical / domain-specific terms: write in ${outputLanguageLabel} with original English in parentheses.
-  e.g. "**세포 호흡 (Cellular Respiration)**"
-- Never mix languages mid-sentence; always keep the primary language consistent.
-
-Output ONLY the markdown. No code fences, no meta-commentary.
+Return ONLY a valid JSON array. No markdown fences, no explanation, no trailing text.
 
 [Summary]
 ${trimmed}
@@ -3035,17 +3004,25 @@ ${trimmed}
       messages: [
         {
           role: "system",
-          content:
-            "You are an expert at building traceable, evidence-gated hierarchical mindmaps from academic summaries, using Markdown for markmap. Strict rules: 3-layer zoom structure (##/###/-), distributed pendingQuestion nodes per branch, mandatory navigation/source nodes, anti-hallucination gate ('근거를 찾을 수 없음' when evidence missing), language matching with bilingual technical terms. Generate 15–30 nodes in one response. Output ONLY the markdown.",
+          content: `You are an expert knowledge architect. Generate a structured mindmap as a JSON array of nodes following the exact schema provided. Output ONLY valid JSON — no markdown code fences, no explanation. All text in ${outputLanguageLabel} unless schema says otherwise.`,
         },
         { role: "user", content: prompt },
       ],
-      temperature: 0.5,
+      temperature: 0.4,
+      max_tokens: 4000,
     },
     { retries: 1 }
   );
 
-  return String(data.choices?.[0]?.message?.content || "").trim();
+  const raw = String(data.choices?.[0]?.message?.content || "").trim();
+  const cleaned = sanitizeJson(raw);
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed)) return JSON.stringify(parsed);
+  } catch {
+    // fallback: return raw as legacy markdown string
+  }
+  return raw;
 }
 
 export async function generateExamCramSheet({

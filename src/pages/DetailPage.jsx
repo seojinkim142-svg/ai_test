@@ -13,7 +13,7 @@ import PdfPreview from "../components/PdfPreview";
 import QuizSection from "../components/QuizSection";
 import ReviewNotesPanel from "../components/ReviewNotesPanel";
 import SummaryCard from "../components/SummaryCard";
-import SummaryCardView from "../components/SummaryCardView";
+import MindMapTreeView from "../components/MindMapTreeView";
 import { useQuizMixCarousel } from "../hooks/useQuizMixCarousel";
 import { LETTERS } from "../constants";
 import { getDetailCopy } from "../utils/detailCopy";
@@ -1035,10 +1035,8 @@ export default function DetailPage({
                     </div>
                   ) : (
                     <>
-                      <SummaryCardView
-                        summary={summary}
+                      <MindMapTreeView
                         mindmapData={mindmapData}
-                        outputLanguage={outputLanguage}
                         onJumpToPage={typeof onJumpToSummaryPage === "function"
                           ? (pageNumber, ...rest) => { onJumpToSummaryPage(pageNumber, ...rest); }
                           : undefined}
