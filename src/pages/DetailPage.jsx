@@ -13,7 +13,7 @@ import PdfPreview from "../components/PdfPreview";
 import QuizSection from "../components/QuizSection";
 import ReviewNotesPanel from "../components/ReviewNotesPanel";
 import SummaryCard from "../components/SummaryCard";
-import MindMapView from "../components/MindMapView";
+import SummaryCardView from "../components/SummaryCardView";
 import { useQuizMixCarousel } from "../hooks/useQuizMixCarousel";
 import { LETTERS } from "../constants";
 import { getDetailCopy } from "../utils/detailCopy";
@@ -757,7 +757,7 @@ export default function DetailPage({
                       ? "생성 중..."
                       : summaryViewMode === "mindmap"
                       ? "텍스트 보기"
-                      : "마인드맵"}
+                      : "카드뷰 + AI"}
                   </button>
                 </div>
               </div>
@@ -1031,31 +1031,29 @@ export default function DetailPage({
                 <div className="mt-3">
                   {isLoadingMindmap ? (
                     <div className="flex h-40 items-center justify-center text-sm text-slate-400">
-                      마인드맵 생성 중...
+                      분석 중...
                     </div>
                   ) : (
                     <>
-                      <MindMapView
-                        summary={mindmapData}
+                      <SummaryCardView
+                        summary={summary}
+                        mindmapData={mindmapData}
+                        outputLanguage={outputLanguage}
                         onJumpToPage={typeof onJumpToSummaryPage === "function"
-                          ? (pageNumber, ...rest) => {
-                              onJumpToSummaryPage(pageNumber, ...rest);
-                            }
+                          ? (pageNumber, ...rest) => { onJumpToSummaryPage(pageNumber, ...rest); }
                           : undefined}
                       />
-                      {mindmapData && (
-                        <div className="mt-2 flex justify-end">
-                          <button
-                            type="button"
-                            onClick={() => requestMindMap?.({ force: true })}
-                            className="ghost-button text-[11px] text-slate-400"
-                            data-ghost-size="sm"
-                            style={{ "--ghost-color": "148, 163, 184" }}
-                          >
-                            ↺ 재생성
-                          </button>
-                        </div>
-                      )}
+                      <div className="mt-2 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => requestMindMap?.({ force: true })}
+                          className="ghost-button text-[11px] text-slate-400"
+                          data-ghost-size="sm"
+                          style={{ "--ghost-color": "148, 163, 184" }}
+                        >
+                          ↺ 재생성
+                        </button>
+                      </div>
                     </>
                   )}
                 </div>

@@ -3686,6 +3686,31 @@ export async function generateDocComparison(docs, { outputLanguage = "ko" } = {}
 }
 
 // ─── Feature: 의미론적 검색 ───────────────────────────────────────────────────
+export async function generateDocAnswer(question, summaryText, { outputLanguage = "ko" } = {}) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
+  const trimmed = String(summaryText || "").trim();
+  if (!trimmed || !question) throw new Error("질문 또는 요약이 없습니다.");
+  const data = await postChatRequest(
+    {
+      model: MODEL,
+      messages: [
+        {
+          role: "system",
+          content: `You are a study assistant. Answer questions based ONLY on the provided document summary. Be concise and cite page numbers as [p.N] when available. Respond in ${outputLanguageLabel}.`,
+        },
+        {
+          role: "user",
+          content: `## 문서 요약\n${trimmed.slice(0, 6000)}\n\n## 질문\n${question}`,
+        },
+      ],
+      temperature: 0.4,
+      max_tokens: 600,
+    },
+    { retries: 1 }
+  );
+  return String(data.choices?.[0]?.message?.content || "").trim();
+}
+
 export async function generateSemanticSearch(query, docsInfo, { outputLanguage = "ko" } = {}) {
   if (!query || !docsInfo?.length) return [];
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
