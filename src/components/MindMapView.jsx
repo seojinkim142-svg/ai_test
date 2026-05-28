@@ -21,9 +21,9 @@ import katex from "katex";
 import "reactflow/dist/style.css";
 import "katex/dist/katex.min.css";
 
-// ── light color palette ───────────────────────────────────────────────────────
+// ── color palettes ────────────────────────────────────────────────────────────
 
-const COLOR_STYLES = {
+const LIGHT_STYLES = {
   "blue-200":   { headerBg: "#eff6ff", headerBorder: "#bfdbfe", accent: "#3b82f6", title: "#1e40af", text: "#374151" },
   "green-200":  { headerBg: "#f0fdf4", headerBorder: "#bbf7d0", accent: "#22c55e", title: "#15803d", text: "#374151" },
   "yellow-200": { headerBg: "#fefce8", headerBorder: "#fef08a", accent: "#eab308", title: "#a16207", text: "#374151" },
@@ -32,11 +32,27 @@ const COLOR_STYLES = {
   "pink-200":   { headerBg: "#fdf2f8", headerBorder: "#f9a8d4", accent: "#ec4899", title: "#9d174d", text: "#374151" },
   "purple-200": { headerBg: "#faf5ff", headerBorder: "#e9d5ff", accent: "#a855f7", title: "#7e22ce", text: "#374151" },
 };
-const DEFAULT_STYLE = { headerBg: "#f8fafc", headerBorder: "#e2e8f0", accent: "#64748b", title: "#1e293b", text: "#374151" };
+const LIGHT_DEFAULT = { headerBg: "#f8fafc", headerBorder: "#e2e8f0", accent: "#64748b", title: "#1e293b", text: "#374151" };
 
-function getStyle(color) {
-  return COLOR_STYLES[color] || DEFAULT_STYLE;
+const DARK_STYLES = {
+  "blue-200":   { headerBg: "#0d1f35", headerBorder: "#1e3a5f", accent: "#60a5fa", title: "#93c5fd", text: "#94a3b8" },
+  "green-200":  { headerBg: "#0a1f12", headerBorder: "#112d1a", accent: "#34d399", title: "#86efac", text: "#94a3b8" },
+  "yellow-200": { headerBg: "#1f1200", headerBorder: "#2c1900", accent: "#fbbf24", title: "#fde68a", text: "#94a3b8" },
+  "red-200":    { headerBg: "#200c0c", headerBorder: "#2e1010", accent: "#f87171", title: "#fca5a5", text: "#94a3b8" },
+  "sky-200":    { headerBg: "#071828", headerBorder: "#0c2236", accent: "#38bdf8", title: "#7dd3fc", text: "#94a3b8" },
+  "pink-200":   { headerBg: "#200b14", headerBorder: "#2e0f1c", accent: "#f472b6", title: "#f9a8d4", text: "#94a3b8" },
+  "purple-200": { headerBg: "#140820", headerBorder: "#1e1030", accent: "#c084fc", title: "#d8b4fe", text: "#94a3b8" },
+};
+const DARK_DEFAULT = { headerBg: "#1e293b", headerBorder: "#334155", accent: "#94a3b8", title: "#e2e8f0", text: "#94a3b8" };
+
+function getStyle(color, dark = false) {
+  return dark
+    ? (DARK_STYLES[color] || DARK_DEFAULT)
+    : (LIGHT_STYLES[color] || LIGHT_DEFAULT);
 }
+
+// single-export for AI panel default style
+const DEFAULT_STYLE = LIGHT_DEFAULT;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -143,14 +159,19 @@ function Chip({ icon, label, onClick, color = "#6366f1", bg = "#eef2ff", border 
 function CardNode({ data }) {
   const [hovered, setHovered] = useState(false);
 
-  const s = getStyle(data.color);
+  const dark = data.dark || false;
+  const s = getStyle(data.color, dark);
   const isRoot = data.depth === 0;
   const isQuestion = data.nodeType === "question";
 
-  const accentColor  = isQuestion ? "#d97706" : s.accent;
-  const titleColor   = isQuestion ? "#92400e" : s.title;
-  const headerBg     = isQuestion ? "#fffbeb" : (isRoot ? "#f0f4ff" : s.headerBg);
-  const headerBorder = isQuestion ? "#fde68a" : (isRoot ? "#c7d7fe" : s.headerBorder);
+  const accentColor  = isQuestion ? (dark ? "#fbbf24" : "#d97706") : s.accent;
+  const titleColor   = isQuestion ? (dark ? "#fde68a" : "#92400e") : s.title;
+  const headerBg     = isQuestion ? (dark ? "#1c1500" : "#fffbeb") : (isRoot ? (dark ? "#111827" : "#f0f4ff") : s.headerBg);
+  const headerBorder = isQuestion ? (dark ? "#78350f" : "#fde68a") : (isRoot ? (dark ? "#1e3a5f" : "#c7d7fe") : s.headerBorder);
+  const cardBg       = dark ? (isRoot ? "#0f172a" : "#1e293b") : "#ffffff";
+  const cardBorder   = dark ? (isRoot ? "#1e3a5f" : "#334155") : (isRoot ? "#c7d7fe" : "#e2e8f0");
+  const footerBg     = dark ? "#151f2e" : "#fafafa";
+  const footerBorder = dark ? "#1e293b" : "#f1f5f9";
   const typeLabel    = TYPE_LABEL[data.nodeType];
 
   const contentLines = useMemo(() => {
@@ -170,21 +191,21 @@ function CardNode({ data }) {
   );
 
   const borderColor = hovered
-    ? (isRoot ? "#818cf8" : accentColor)
-    : (isRoot ? "#c7d7fe" : "#e2e8f0");
+    ? accentColor
+    : cardBorder;
 
   const shadow = hovered
-    ? `0 8px 28px rgba(0,0,0,0.13), 0 2px 8px rgba(0,0,0,0.07), 0 0 0 2px ${accentColor}22`
+    ? `0 8px 28px rgba(0,0,0,${dark ? 0.5 : 0.13}), 0 2px 8px rgba(0,0,0,0.07), 0 0 0 2px ${accentColor}33`
     : isRoot
-      ? "0 4px 20px rgba(0,0,0,0.09), 0 1px 5px rgba(0,0,0,0.05)"
-      : "0 2px 10px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.03)";
+      ? `0 4px 20px rgba(0,0,0,${dark ? 0.4 : 0.09}), 0 1px 5px rgba(0,0,0,0.05)`
+      : `0 2px 10px rgba(0,0,0,${dark ? 0.3 : 0.06}), 0 1px 3px rgba(0,0,0,0.03)`;
 
   return (
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
-        background: "#ffffff",
+        background: cardBg,
         border: `1.5px solid ${borderColor}`,
         borderRadius: isRoot ? 16 : 12,
         minWidth: isRoot ? 240 : 196,
@@ -236,9 +257,9 @@ function CardNode({ data }) {
       {/* ── footer: citations + hover chips ── */}
       <div
         style={{
-          borderTop: (pages.length > 0 || hovered) ? "1px solid #f1f5f9" : "none",
+          borderTop: (pages.length > 0 || hovered) ? `1px solid ${footerBorder}` : "none",
           padding: (pages.length > 0 || hovered) ? "5px 13px 8px" : "0 13px",
-          background: "#fafafa",
+          background: footerBg,
           display: "flex",
           flexWrap: "wrap",
           gap: 4,
@@ -257,10 +278,10 @@ function CardNode({ data }) {
                 type="button"
                 onClick={() => data.onJumpToPage?.(p)}
                 style={{
-                  background: "#f5f3ff",
-                  border: "1px solid #ddd6fe",
+                  background: dark ? "rgba(139,92,246,0.15)" : "#f5f3ff",
+                  border: `1px solid ${dark ? "rgba(139,92,246,0.35)" : "#ddd6fe"}`,
                   borderRadius: 9999,
-                  color: "#7c3aed",
+                  color: dark ? "#c4b5fd" : "#7c3aed",
                   fontSize: 10,
                   padding: "2px 8px",
                   cursor: "pointer",
@@ -349,7 +370,7 @@ function runDagreLayout(nodes, edges) {
 
 // ── flow element builder (positions are 0,0 — layout applied separately) ─────
 
-function jsonToFlowElements(jsonStr, onJumpToPage, onAskAI) {
+function jsonToFlowElements(jsonStr, onJumpToPage, onAskAI, dark = false) {
   try {
     const parsed = JSON.parse(jsonStr);
     if (!Array.isArray(parsed)) return null;
@@ -368,7 +389,7 @@ function jsonToFlowElements(jsonStr, onJumpToPage, onAskAI) {
       flowNodes.push({
         id: String(node.id),
         type: "card",
-        data: { label: node.label || "", content: node.content || "", color: node.color, nodeType: node.type, depth, onJumpToPage, onAskAI },
+        data: { label: node.label || "", content: node.content || "", color: node.color, nodeType: node.type, depth, onJumpToPage, onAskAI, dark },
         width: isRoot ? 310 : 284,
         position: { x: 0, y: 0 },
       });
@@ -425,7 +446,7 @@ async function generateWonderQuestions(label, content) {
   return raw.split("\n").map((l) => l.replace(/^\d+\.\s*/, "").trim()).filter(Boolean).slice(0, 5);
 }
 
-function NodeAIPanel({ activeNode, onJumpToPage }) {
+function NodeAIPanel({ activeNode, onJumpToPage, dark, panelBg, panelBorder }) {
   const [messages, setMessages]       = useState([]);
   const [input, setInput]             = useState("");
   const [loading, setLoading]         = useState(false);
@@ -434,7 +455,7 @@ function NodeAIPanel({ activeNode, onJumpToPage }) {
   const bottomRef = useRef(null);
   const inputRef  = useRef(null);
 
-  const s = activeNode ? getStyle(activeNode.color) : DEFAULT_STYLE;
+  const s = activeNode ? getStyle(activeNode.color, dark) : (dark ? DARK_DEFAULT : DEFAULT_STYLE);
 
   const contextDoc = useMemo(() => activeNode
     ? `<CurrentSelection>\n제목: ${activeNode.label}\n${activeNode.content ? `내용:\n${activeNode.content}` : ""}\n</CurrentSelection>\n\n위는 학습 중인 마인드맵 카드입니다. 이 카드 내용을 중심으로 답변하세요.`
@@ -480,16 +501,16 @@ function NodeAIPanel({ activeNode, onJumpToPage }) {
       flexShrink: 0,
       display: "flex",
       flexDirection: "column",
-      borderLeft: "1px solid #e2e8f0",
-      background: "#fff",
+      borderLeft: `1px solid ${panelBorder || "#e2e8f0"}`,
+      background: panelBg || "#fff",
       height: "100%",
       overflow: "hidden",
     }}>
       {/* header */}
-      <div style={{ padding: "12px 14px 10px", borderBottom: "1px solid #f1f5f9", background: "#fafbff" }}>
+      <div style={{ padding: "12px 14px 10px", borderBottom: `1px solid ${dark ? "#1e293b" : "#f1f5f9"}`, background: dark ? "#0f172a" : "#fafbff" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ fontSize: 12, color: "#6366f1" }}>✦</span>
-          <span style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", flex: 1 }}>AI에게 묻기</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: dark ? "#e2e8f0" : "#1e293b", flex: 1 }}>AI에게 묻기</span>
         </div>
         {activeNode && (
           <p style={{ fontSize: 11, color: s.accent, marginTop: 6, fontWeight: 600, wordBreak: "break-word", lineHeight: 1.35 }}>
@@ -520,9 +541,12 @@ function NodeAIPanel({ activeNode, onJumpToPage }) {
                   onClick={() => send(a.prompt)}
                   disabled={loading}
                   style={{
-                    background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10,
-                    padding: "8px 10px", fontSize: 11, color: "#374151", cursor: "pointer",
-                    textAlign: "left", lineHeight: 1.4, fontFamily: "inherit",
+                    background: dark ? "#1e293b" : "#f8fafc",
+                    border: `1px solid ${dark ? "#334155" : "#e2e8f0"}`,
+                    borderRadius: 10,
+                    padding: "8px 10px", fontSize: 11,
+                    color: dark ? "#cbd5e1" : "#374151",
+                    cursor: "pointer", textAlign: "left", lineHeight: 1.4, fontFamily: "inherit",
                     display: "flex", alignItems: "center", gap: 5,
                   }}
                 >
@@ -537,7 +561,7 @@ function NodeAIPanel({ activeNode, onJumpToPage }) {
               I Wonder<span style={{ color: "#6366f1" }}>…</span>
             </p>
             {wonderLoading && (
-              <p style={{ fontSize: 11, color: "#cbd5e1" }}>질문 생성 중…</p>
+              <p style={{ fontSize: 11, color: dark ? "#334155" : "#cbd5e1" }}>질문 생성 중…</p>
             )}
             {wonders.map((q, i) => (
               <button
@@ -547,13 +571,13 @@ function NodeAIPanel({ activeNode, onJumpToPage }) {
                 disabled={loading}
                 style={{
                   background: "none", border: "none", padding: "4px 0",
-                  fontSize: 12, color: "#475569", cursor: "pointer",
-                  textAlign: "left", lineHeight: 1.5, fontFamily: "inherit",
+                  fontSize: 12, color: dark ? "#94a3b8" : "#475569",
+                  cursor: "pointer", textAlign: "left", lineHeight: 1.5, fontFamily: "inherit",
                   display: "flex", alignItems: "flex-start", gap: 7,
                 }}
               >
                 <span style={{ color: "#a5b4fc", fontSize: 11, flexShrink: 0, marginTop: 2 }}>?</span>
-                <span style={{ borderBottom: "1px dashed #e2e8f0", paddingBottom: 4, flex: 1 }}>{q}</span>
+                <span style={{ borderBottom: `1px dashed ${dark ? "#1e293b" : "#e2e8f0"}`, paddingBottom: 4, flex: 1 }}>{q}</span>
               </button>
             ))}
           </>
@@ -622,7 +646,7 @@ function NodeAIPanel({ activeNode, onJumpToPage }) {
       {/* input */}
       <form
         onSubmit={(e) => { e.preventDefault(); send(); }}
-        style={{ borderTop: "1px solid #f1f5f9", padding: "8px 10px", display: "flex", gap: 6 }}
+        style={{ borderTop: `1px solid ${dark ? "#1e293b" : "#f1f5f9"}`, padding: "8px 10px", display: "flex", gap: 6 }}
       >
         <input
           ref={inputRef}
@@ -631,8 +655,13 @@ function NodeAIPanel({ activeNode, onJumpToPage }) {
           placeholder={activeNode ? "질문을 입력하세요…" : "카드를 먼저 선택하세요"}
           disabled={loading || !activeNode}
           style={{
-            flex: 1, border: "1px solid #e2e8f0", borderRadius: 10, padding: "7px 11px",
-            fontSize: 12, color: "#1e293b", outline: "none", background: "#f8fafc",
+            flex: 1,
+            border: `1px solid ${dark ? "#334155" : "#e2e8f0"}`,
+            borderRadius: 10, padding: "7px 11px",
+            fontSize: 12,
+            color: dark ? "#e2e8f0" : "#1e293b",
+            outline: "none",
+            background: dark ? "#1e293b" : "#f8fafc",
             fontFamily: "inherit",
           }}
         />
@@ -656,7 +685,7 @@ function NodeAIPanel({ activeNode, onJumpToPage }) {
 
 // ── inner flow ────────────────────────────────────────────────────────────────
 
-function MindMapFlow({ result }) {
+function MindMapFlow({ result, dark }) {
   const { fitView } = useReactFlow();
   const nodesInitialized = useNodesInitialized();
   const [nodes, setNodes, onNodesChange] = useNodesState(result?.nodes ?? []);
@@ -696,7 +725,7 @@ function MindMapFlow({ result }) {
       elementsSelectable={false}
       proOptions={{ hideAttribution: true }}
     >
-      <Background color="#e2e8f0" gap={28} size={1} variant="dots" />
+      <Background color={dark ? "#0f172a" : "#e2e8f0"} gap={28} size={1} variant="dots" />
       <Controls showInteractive={false} className="!bottom-3 !left-3" />
     </ReactFlow>
   );
@@ -706,14 +735,15 @@ function MindMapFlow({ result }) {
 
 export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
   const [activeNode, setActiveNode] = useState(null);
+  const [dark, setDark] = useState(false);
 
   const onAskAI = useCallback((label, content, color) => {
     setActiveNode({ label, content, color });
   }, []);
 
   const result = useMemo(
-    () => (mindmapData ? jsonToFlowElements(mindmapData, onJumpToPage, onAskAI) : null),
-    [mindmapData, onJumpToPage, onAskAI]
+    () => (mindmapData ? jsonToFlowElements(mindmapData, onJumpToPage, onAskAI, dark) : null),
+    [mindmapData, onJumpToPage, onAskAI, dark]
   );
 
   if (!mindmapData && !summary) {
@@ -732,23 +762,48 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
     );
   }
 
+  const canvasBg  = dark ? "#070e1a" : "#f8fafc";
+  const borderCls = dark ? "border-slate-700" : "border-slate-200";
+  const panelBg   = dark ? "#0f172a" : "#ffffff";
+  const panelBorder = dark ? "#1e293b" : "#e2e8f0";
+
   return (
     <div
-      className="w-full overflow-hidden rounded-2xl border border-slate-200"
-      style={{ height: 680, background: "#f8fafc", display: "flex" }}
+      className={`w-full overflow-hidden rounded-2xl border ${borderCls}`}
+      style={{ height: 680, background: canvasBg, display: "flex" }}
     >
       {/* mindmap canvas */}
       <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
         <ReactFlowProvider>
-          <MindMapFlow result={result} />
+          <MindMapFlow result={result} dark={dark} />
         </ReactFlowProvider>
-        <p className="absolute bottom-2 left-3 text-[10px] text-slate-400 select-none pointer-events-none">
+
+        {/* theme toggle */}
+        <button
+          type="button"
+          onClick={() => setDark((d) => !d)}
+          title={dark ? "라이트 모드" : "다크 모드"}
+          style={{
+            position: "absolute", top: 10, right: 10,
+            width: 30, height: 30, borderRadius: 8,
+            border: `1px solid ${dark ? "#334155" : "#e2e8f0"}`,
+            background: dark ? "#1e293b" : "#f8fafc",
+            color: dark ? "#94a3b8" : "#64748b",
+            cursor: "pointer", fontSize: 14,
+            display: "flex", alignItems: "center", justifyContent: "center",
+            zIndex: 5,
+          }}
+        >
+          {dark ? "☀" : "🌙"}
+        </button>
+
+        <p style={{ position: "absolute", bottom: 8, left: 12, fontSize: 10, color: dark ? "#334155" : "#cbd5e1", userSelect: "none", pointerEvents: "none" }}>
           스크롤·드래그로 탐색
         </p>
       </div>
 
       {/* always-visible AI panel */}
-      <NodeAIPanel activeNode={activeNode} onJumpToPage={onJumpToPage} />
+      <NodeAIPanel activeNode={activeNode} onJumpToPage={onJumpToPage} dark={dark} panelBg={panelBg} panelBorder={panelBorder} />
     </div>
   );
 }
