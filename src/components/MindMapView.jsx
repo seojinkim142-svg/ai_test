@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { generateDocAnswer } from "../services/openai";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import ReactFlow, {
   Background,
   Controls,
@@ -564,11 +568,32 @@ function NodeAIPanel({ activeNode, onAskAI }) {
             padding: "8px 11px",
             fontSize: 12,
             color: m.role === "user" ? s.title : "#374151",
-            lineHeight: 1.55,
-            whiteSpace: "pre-wrap",
+            lineHeight: 1.6,
             wordBreak: "break-word",
+            overflowX: "auto",
           }}>
-            {m.content}
+            {m.role === "user" ? (
+              <span style={{ whiteSpace: "pre-wrap" }}>{m.content}</span>
+            ) : (
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm, remarkMath]}
+                rehypePlugins={[rehypeKatex]}
+                components={{
+                  p: ({ children }) => <p style={{ margin: "0 0 6px", lineHeight: 1.6 }}>{children}</p>,
+                  ul: ({ children }) => <ul style={{ margin: "4px 0", paddingLeft: 16 }}>{children}</ul>,
+                  ol: ({ children }) => <ol style={{ margin: "4px 0", paddingLeft: 18 }}>{children}</ol>,
+                  li: ({ children }) => <li style={{ marginBottom: 3, lineHeight: 1.5 }}>{children}</li>,
+                  strong: ({ children }) => <strong style={{ fontWeight: 700, color: "#1e293b" }}>{children}</strong>,
+                  em: ({ children }) => <em style={{ fontStyle: "italic", color: "#475569" }}>{children}</em>,
+                  code: ({ inline, children }) => inline
+                    ? <code style={{ background: "#f1f5f9", borderRadius: 4, padding: "1px 5px", fontSize: 11, fontFamily: "monospace", color: "#0f172a" }}>{children}</code>
+                    : <code style={{ display: "block", background: "#f1f5f9", borderRadius: 6, padding: "8px 10px", fontSize: 11, fontFamily: "monospace", color: "#0f172a", overflowX: "auto", margin: "6px 0" }}>{children}</code>,
+                  blockquote: ({ children }) => <blockquote style={{ borderLeft: "3px solid #c7d2fe", paddingLeft: 10, margin: "4px 0", color: "#64748b", fontStyle: "italic" }}>{children}</blockquote>,
+                }}
+              >
+                {m.content}
+              </ReactMarkdown>
+            )}
           </div>
         ))}
         {loading && (
