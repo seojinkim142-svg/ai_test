@@ -1035,7 +1035,15 @@ export default function DetailPage({
                     </div>
                   ) : (
                     <>
-                      <MindMapView summary={mindmapData} onJumpToPage={onJumpToSummaryPage} />
+                      <MindMapView
+                        summary={mindmapData}
+                        onJumpToPage={typeof onJumpToSummaryPage === "function"
+                          ? (pageNumber, ...rest) => {
+                              onJumpToSummaryPage(pageNumber, ...rest);
+                              window.scrollTo({ top: 0, behavior: "smooth" });
+                            }
+                          : undefined}
+                      />
                       {mindmapData && (
                         <div className="mt-2 flex justify-end">
                           <button
