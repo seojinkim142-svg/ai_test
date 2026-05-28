@@ -20,6 +20,29 @@ const PREMIUM_PROFILES_META_KEY = "premium_profiles_v1";
 const PREMIUM_ACTIVE_PROFILE_META_KEY = "premium_active_profile_id_v1";
 const PREMIUM_SPACE_MODE_META_KEY = "premium_space_mode_v1";
 const THEME_META_KEY = "app_theme_v1";
+
+// ── artifacts 인메모리 캐시 (TTL: 5분) ────────────────────────────────────────
+const ARTIFACTS_CACHE_TTL = 5 * 60 * 1000;
+const _artifactsCache = new Map(); // key: "userId:docId"
+
+function _artifactsCacheKey(userId, docId) {
+  return `${userId}:${docId}`;
+}
+function _getArtifactsCache(userId, docId) {
+  const entry = _artifactsCache.get(_artifactsCacheKey(userId, docId));
+  if (!entry) return undefined;
+  if (Date.now() - entry.ts > ARTIFACTS_CACHE_TTL) {
+    _artifactsCache.delete(_artifactsCacheKey(userId, docId));
+    return undefined;
+  }
+  return entry.data;
+}
+function _setArtifactsCache(userId, docId, data) {
+  _artifactsCache.set(_artifactsCacheKey(userId, docId), { data, ts: Date.now() });
+}
+function _invalidateArtifactsCache(userId, docId) {
+  _artifactsCache.delete(_artifactsCacheKey(userId, docId));
+}
 const normalizeAbsoluteUrl = (value) => {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -503,6 +526,8 @@ export async function fetchMultipleDocArtifacts({ userId, docIds }) {
 
 export async function fetchDocArtifacts({ userId, docId }) {
   if (!supabase || !userId || !docId) return null;
+  const cached = _getArtifactsCache(userId, docId);
+  if (cached !== undefined) return cached;
   const { data, error } = await supabase
     .from(ARTIFACTS_TABLE)
     .select("*")
@@ -510,12 +535,15 @@ export async function fetchDocArtifacts({ userId, docId }) {
     .eq("doc_id", docId)
     .maybeSingle();
   if (error) throw error;
-  return data || null;
+  const result = data || null;
+  _setArtifactsCache(userId, docId, result);
+  return result;
 }
 
 export async function saveMindmap({ userId, docId, mindmap }) {
   const client = requireSupabase();
   if (!userId || !docId) throw new Error("userId and docId are required.");
+  _invalidateArtifactsCache(userId, docId);
   const { data, error } = await client
     .from(ARTIFACTS_TABLE)
     .upsert({ user_id: userId, doc_id: docId, mindmap }, { onConflict: "user_id,doc_id" })
@@ -527,6 +555,9 @@ export async function saveMindmap({ userId, docId, mindmap }) {
 
 export async function fetchMindmap({ userId, docId }) {
   if (!supabase || !userId || !docId) return null;
+  // fetchDocArtifacts 캐시에 mindmap 포함 시 재사용
+  const cached = _getArtifactsCache(userId, docId);
+  if (cached !== undefined) return cached?.mindmap || null;
   const { data, error } = await supabase
     .from(ARTIFACTS_TABLE)
     .select("mindmap")
@@ -540,6 +571,7 @@ export async function fetchMindmap({ userId, docId }) {
 export async function saveDocArtifacts({ userId, docId, summary, quiz, ox, highlights, extractedText, extractedTextMetadata }) {
   const client = requireSupabase();
   if (!userId || !docId) throw new Error("userId and docId are required.");
+  _invalidateArtifactsCache(userId, docId);
   const payload = {
     user_id: userId,
     doc_id: docId,
@@ -574,6 +606,7 @@ export async function saveExtractedText({ userId, docId, extractedText, metadata
   if (!userId || !docId || !extractedText) {
     throw new Error("userId, docId, and extractedText are required.");
   }
+  _invalidateArtifactsCache(userId, docId);
   
   const payload = {
     user_id: userId,
@@ -598,14 +631,24 @@ export async function saveExtractedText({ userId, docId, extractedText, metadata
 export async function fetchExtractedText({ userId, docId }) {
   const client = requireSupabase();
   if (!userId || !docId) return null;
-  
+  // fetchDocArtifacts 캐시에 해당 필드 포함 시 재사용
+  const cached = _getArtifactsCache(userId, docId);
+  if (cached !== undefined) {
+    if (cached === null) return null;
+    return {
+      extracted_text: cached.extracted_text ?? null,
+      extracted_text_metadata: cached.extracted_text_metadata ?? null,
+      extracted_at: cached.extracted_at ?? null,
+      text_size_bytes: cached.text_size_bytes ?? null,
+    };
+  }
   const { data, error } = await client
     .from(ARTIFACTS_TABLE)
     .select("extracted_text, extracted_text_metadata, extracted_at, text_size_bytes")
     .eq("user_id", userId)
     .eq("doc_id", docId)
     .maybeSingle();
-    
+
   if (error) throw error;
   return data;
 }
