@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { generateDocAnswer } from "../services/openai";
 import ReactFlow, {
   Background,
   Controls,
@@ -284,7 +285,7 @@ function CardNode({ data }) {
             <Chip
               icon="✦"
               label="AI에게 물어보기"
-              onClick={() => data.onAskAI?.(data.label, data.content)}
+              onClick={() => data.onAskAI?.(data.label, data.content, data.color)}
               color="#6366f1"
               bg="#eef2ff"
               border="#c7d2fe"
@@ -397,30 +398,197 @@ function jsonToFlowElements(jsonStr, onJumpToPage, onAskAI) {
   }
 }
 
-// ── inner flow (needs ReactFlowProvider context) ──────────────────────────────
+// ── node chat drawer ──────────────────────────────────────────────────────────
 
-function MindMapFlow({ result }) {
+function NodeChatDrawer({ node, onClose }) {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef(null);
+  const inputRef  = useRef(null);
+
+  // context injected to AI as the "document"
+  const contextDoc = useMemo(() => `<CurrentSelection>
+제목: ${node.label}
+${node.content ? `내용:\n${node.content}` : ""}
+</CurrentSelection>
+
+위는 사용자가 현재 학습 중인 마인드맵 카드입니다. 이 카드의 내용을 중심으로 답변하세요.`, [node]);
+
+  useEffect(() => {
+    setMessages([]);
+    setInput("");
+    setTimeout(() => inputRef.current?.focus(), 120);
+  }, [node.label]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const send = useCallback(async (q) => {
+    const question = (q || input).trim();
+    if (!question || loading) return;
+    setMessages((prev) => [...prev, { role: "user", content: question }]);
+    setInput("");
+    setLoading(true);
+    try {
+      const answer = await generateDocAnswer(question, contextDoc, { outputLanguage: "ko" });
+      setMessages((prev) => [...prev, { role: "assistant", content: answer }]);
+    } catch {
+      setMessages((prev) => [...prev, { role: "assistant", content: "답변을 가져오지 못했습니다. 다시 시도해 주세요." }]);
+    } finally {
+      setLoading(false);
+    }
+  }, [input, loading, contextDoc]);
+
+  const s = getStyle(node.color);
+
+  const QUICK = ["핵심 개념을 쉽게 설명해줘", "관련 예시를 들어줘", "더 깊이 파고들어줘"];
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 0, right: 0,
+        height: "100%",
+        width: 320,
+        background: "#fff",
+        borderLeft: "1px solid #e2e8f0",
+        display: "flex",
+        flexDirection: "column",
+        boxShadow: "-4px 0 24px rgba(0,0,0,0.08)",
+        zIndex: 10,
+        animation: "drawerIn 0.22s cubic-bezier(0.22,1,0.36,1)",
+      }}
+    >
+      <style>{`@keyframes drawerIn { from { transform: translateX(100%) } to { transform: translateX(0) } }`}</style>
+
+      {/* header */}
+      <div style={{ borderBottom: "1px solid #f1f5f9", padding: "12px 14px 10px", background: s.headerBg }}>
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: s.accent, marginBottom: 3 }}>
+              ✦ AI에게 묻기
+            </p>
+            <p style={{ fontSize: 12, fontWeight: 700, color: s.title, lineHeight: 1.35, wordBreak: "break-word" }}>
+              {node.label}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ flexShrink: 0, background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: 16, lineHeight: 1, padding: 2 }}
+          >
+            ×
+          </button>
+        </div>
+      </div>
+
+      {/* messages */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+        {messages.length === 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <p style={{ fontSize: 10, color: "#94a3b8", marginBottom: 2 }}>빠른 질문</p>
+            {QUICK.map((q) => (
+              <button
+                key={q}
+                type="button"
+                onClick={() => send(q)}
+                style={{
+                  background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10,
+                  padding: "7px 11px", fontSize: 11, color: "#475569", textAlign: "left",
+                  cursor: "pointer", lineHeight: 1.4, fontFamily: "inherit",
+                }}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
+        {messages.map((m, i) => (
+          <div
+            key={i}
+            style={{
+              alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+              maxWidth: "90%",
+              background: m.role === "user" ? s.headerBg : "#f8fafc",
+              border: `1px solid ${m.role === "user" ? s.headerBorder : "#e2e8f0"}`,
+              borderRadius: m.role === "user" ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
+              padding: "8px 11px",
+              fontSize: 12,
+              color: m.role === "user" ? s.title : "#374151",
+              lineHeight: 1.55,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}
+          >
+            {m.content}
+          </div>
+        ))}
+        {loading && (
+          <div style={{ alignSelf: "flex-start", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px 12px 12px 4px", padding: "8px 14px", fontSize: 12, color: "#94a3b8" }}>
+            생각 중…
+          </div>
+        )}
+        <div ref={bottomRef} />
+      </div>
+
+      {/* input */}
+      <form
+        onSubmit={(e) => { e.preventDefault(); send(); }}
+        style={{ borderTop: "1px solid #f1f5f9", padding: "8px 10px", display: "flex", gap: 6 }}
+      >
+        <input
+          ref={inputRef}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="이 카드에 대해 물어보세요…"
+          disabled={loading}
+          style={{
+            flex: 1, border: "1px solid #e2e8f0", borderRadius: 10, padding: "7px 11px",
+            fontSize: 12, color: "#1e293b", outline: "none", background: "#f8fafc",
+            fontFamily: "inherit",
+          }}
+        />
+        <button
+          type="submit"
+          disabled={loading || !input.trim()}
+          style={{
+            width: 32, height: 32, borderRadius: 10, border: "none",
+            background: s.accent, color: "#fff", cursor: "pointer",
+            fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center",
+            opacity: (loading || !input.trim()) ? 0.4 : 1,
+            flexShrink: 0,
+          }}
+        >
+          ↑
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ── inner flow ────────────────────────────────────────────────────────────────
+
+function MindMapFlow({ result, onNodeAsk }) {
   const { fitView } = useReactFlow();
   const nodesInitialized = useNodesInitialized();
   const [nodes, setNodes, onNodesChange] = useNodesState(result?.nodes ?? []);
   const [edges, setEdges, onEdgesChange] = useEdgesState(result?.edges ?? []);
   const [layoutDone, setLayoutDone] = useState(false);
 
-  // reset when data changes
   useEffect(() => {
     setNodes(result?.nodes ?? []);
     setEdges(result?.edges ?? []);
     setLayoutDone(false);
   }, [result, setNodes, setEdges]);
 
-  // re-layout once React Flow has measured actual node sizes
   useEffect(() => {
     if (!nodesInitialized || layoutDone || !nodes.length) return;
     setNodes((curr) => runDagreLayout(curr, edges));
     setLayoutDone(true);
   }, [nodesInitialized, layoutDone, nodes.length, edges, setNodes]);
 
-  // fit view after layout settles
   useEffect(() => {
     if (!layoutDone) return;
     const t = setTimeout(() => fitView({ padding: 0.12, duration: 300 }), 50);
@@ -450,7 +618,13 @@ function MindMapFlow({ result }) {
 
 // ── main component ────────────────────────────────────────────────────────────
 
-export default function MindMapView({ summary, mindmapData, onJumpToPage, onAskAI }) {
+export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
+  const [activeNode, setActiveNode] = useState(null); // { label, content, color }
+
+  const onAskAI = useCallback((label, content, color) => {
+    setActiveNode({ label, content, color });
+  }, []);
+
   const result = useMemo(
     () => (mindmapData ? jsonToFlowElements(mindmapData, onJumpToPage, onAskAI) : null),
     [mindmapData, onJumpToPage, onAskAI]
@@ -480,9 +654,19 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage, onAskA
       <ReactFlowProvider>
         <MindMapFlow result={result} />
       </ReactFlowProvider>
-      <p className="absolute bottom-2 right-3 text-[10px] text-slate-400 select-none pointer-events-none">
-        스크롤·드래그로 탐색
-      </p>
+
+      {activeNode && (
+        <NodeChatDrawer
+          node={activeNode}
+          onClose={() => setActiveNode(null)}
+        />
+      )}
+
+      {!activeNode && (
+        <p className="absolute bottom-2 right-3 text-[10px] text-slate-400 select-none pointer-events-none">
+          스크롤·드래그로 탐색
+        </p>
+      )}
     </div>
   );
 }

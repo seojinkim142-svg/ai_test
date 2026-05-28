@@ -1041,12 +1041,6 @@ export default function DetailPage({
                         onJumpToPage={typeof onJumpToSummaryPage === "function"
                           ? (pageNumber, ...rest) => { onJumpToSummaryPage(pageNumber, ...rest); }
                           : undefined}
-                        onAskAI={typeof handleSendTutorMessage === "function"
-                          ? (label, content) => {
-                              setPanelTab("tutor");
-                              handleSendTutorMessage(`마인드맵 노드 "${label}"에 대해 자세히 설명해줘.\n\n${content ? `내용: ${content}` : ""}`);
-                            }
-                          : undefined}
                       />
                       <div className="mt-2 flex justify-end">
                         <button
@@ -1733,7 +1727,7 @@ export default function DetailPage({
                 )}
               </div>
 
-              <div className="hidden mt-4 flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
+              <div className="hidden mt-4 flex-col items-center gap-2 sm:flex-row sm:justify-center">
                 <button
                   type="button"
                   onClick={requestQuestions}
