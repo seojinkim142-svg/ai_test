@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { cloneElement, isValidElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import {
@@ -365,18 +365,22 @@ function isInteractiveElement(target) {
 
 // ── Inline citation helpers ──────────────────────────────────────────────────
 
-const CITATION_RE = /\[p\.(\d+)\]/g;
+const INLINE_BADGE_RE = /\[(?:문서:)?p\.(\d+)\]|\[(T[123])\]/g;
 
-function parseInlineCitations(text) {
+function parseInlineBadges(text) {
   const segments = [];
   let lastIndex = 0;
   let match;
-  CITATION_RE.lastIndex = 0;
-  while ((match = CITATION_RE.exec(text)) !== null) {
+  INLINE_BADGE_RE.lastIndex = 0;
+  while ((match = INLINE_BADGE_RE.exec(text)) !== null) {
     if (lastIndex < match.index) {
       segments.push({ type: "text", content: text.slice(lastIndex, match.index) });
     }
-    segments.push({ type: "cite", pageNumber: parseInt(match[1], 10) });
+    if (match[1]) {
+      segments.push({ type: "page", pageNumber: parseInt(match[1], 10) });
+    } else {
+      segments.push({ type: "tier", tier: match[2] });
+    }
     lastIndex = match.index + match[0].length;
   }
   if (lastIndex < text.length) {
@@ -385,72 +389,82 @@ function parseInlineCitations(text) {
   return segments;
 }
 
-function CitationBadge({ pageNumber, onJumpToPage }) {
-  const [open, setOpen] = useState(false);
-  const timerRef = useRef(null);
-
-  const show = () => {
-    clearTimeout(timerRef.current);
-    setOpen(true);
-  };
-  const hide = () => {
-    timerRef.current = setTimeout(() => setOpen(false), 120);
-  };
-
+function PageAnchorBadge({ pageNumber, onJumpToPage }) {
   return (
-    <span className="relative inline-block">
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          if (typeof onJumpToPage === "function") onJumpToPage(pageNumber);
-        }}
-        onMouseEnter={show}
-        onMouseLeave={hide}
-        onFocus={show}
-        onBlur={hide}
-        aria-label={`PDF ${pageNumber}페이지로 이동`}
-        className="mx-[2px] cursor-pointer rounded px-[5px] py-[1px] text-[10px] font-semibold
-                   text-violet-300 ring-1 ring-violet-400/40
-                   transition-colors hover:bg-violet-500/20 hover:text-violet-100
-                   focus:outline-none focus:ring-violet-400"
-      >
-        p.{pageNumber}
-      </button>
-      {open && (
-        <span
-          className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-1 -translate-x-1/2
-                     whitespace-nowrap rounded-lg bg-slate-800 px-2 py-1
-                     text-[11px] text-slate-200 shadow-lg ring-1 ring-white/10"
+    <span className="inline-block">
+      {typeof onJumpToPage === "function" ? (
+        <button
+          type="button"
+          className="anchor-badge"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onJumpToPage(pageNumber);
+          }}
+          aria-label={`PDF ${pageNumber}페이지로 이동`}
         >
-          PDF {pageNumber}페이지로 이동
+          p.{pageNumber}
+        </button>
+      ) : (
+        <span className="anchor-badge" aria-label={`PDF ${pageNumber}페이지`}>
+          p.{pageNumber}
         </span>
       )}
     </span>
   );
 }
 
-function renderWithCitations(children, onJumpToPage) {
-  if (typeof onJumpToPage !== "function") return children;
-  return Array.isArray(children)
-    ? children.flatMap((child, i) =>
-        typeof child === "string" ? renderStringWithCitations(child, onJumpToPage, i) : [child]
-      )
-    : typeof children === "string"
-    ? renderStringWithCitations(children, onJumpToPage, 0)
-    : children;
+function TierBadge({ tier }) {
+  return (
+    <span className={`tier-badge tier-badge--${String(tier || "").toLowerCase()}`} aria-label={`${tier} evidence tier`}>
+      {tier}
+    </span>
+  );
 }
 
-function renderStringWithCitations(text, onJumpToPage, keyBase) {
-  const segments = parseInlineCitations(text);
+function renderWithInlineBadges(children, onJumpToPage) {
+  if (Array.isArray(children)) {
+    return children.flatMap((child, i) => renderNodeWithInlineBadges(child, onJumpToPage, i));
+  }
+  return renderNodeWithInlineBadges(children, onJumpToPage, 0);
+}
+
+function renderNodeWithInlineBadges(node, onJumpToPage, keyBase) {
+  if (typeof node === "string") {
+    return renderStringWithInlineBadges(node, onJumpToPage, keyBase);
+  }
+
+  if (Array.isArray(node)) {
+    return renderWithInlineBadges(node, onJumpToPage);
+  }
+
+  if (isValidElement(node) && node.props?.children) {
+    return cloneElement(node, {
+      children: renderWithInlineBadges(node.props.children, onJumpToPage),
+    });
+  }
+
+  return node;
+}
+
+function renderStringWithInlineBadges(text, onJumpToPage, keyBase) {
+  const segments = parseInlineBadges(text);
   if (segments.length === 1 && segments[0].type === "text") return [text];
-  return segments.map((seg, i) =>
-    seg.type === "cite" ? (
-      <CitationBadge key={`${keyBase}-cite-${i}`} pageNumber={seg.pageNumber} onJumpToPage={onJumpToPage} />
-    ) : (
-      <span key={`${keyBase}-text-${i}`}>{seg.content}</span>
-    )
-  );
+  return segments.map((seg, i) => {
+    if (seg.type === "page") {
+      return (
+        <PageAnchorBadge
+          key={`${keyBase}-page-${i}`}
+          pageNumber={seg.pageNumber}
+          onJumpToPage={onJumpToPage}
+        />
+      );
+    }
+    if (seg.type === "tier") {
+      return <TierBadge key={`${keyBase}-tier-${i}`} tier={seg.tier} />;
+    }
+    return <span key={`${keyBase}-text-${i}`}>{seg.content}</span>;
+  });
 }
 
 function SummaryCard({
@@ -473,24 +487,39 @@ function SummaryCard({
   const [pageIndexBySummary, setPageIndexBySummary] = useState({});
   const markdownComponents = useMemo(
     () => ({
-      h1: (props) => <h1 className="mt-4 text-xl font-bold text-white" {...props} />,
-      h2: (props) => <h2 className="mt-3 text-lg font-semibold text-white" {...props} />,
-      h3: (props) => <h3 className="mt-2 text-base font-semibold text-emerald-100" {...props} />,
+      h1: ({ children, ...props }) => (
+        <h1 className="mt-4 text-xl font-bold text-white" {...props}>
+          {renderWithInlineBadges(children, onJumpToEvidencePage)}
+        </h1>
+      ),
+      h2: ({ children, ...props }) => (
+        <h2 className="mt-3 text-lg font-semibold text-white" {...props}>
+          {renderWithInlineBadges(children, onJumpToEvidencePage)}
+        </h2>
+      ),
+      h3: ({ children, ...props }) => (
+        <h3 className="mt-2 text-base font-semibold text-emerald-100" {...props}>
+          {renderWithInlineBadges(children, onJumpToEvidencePage)}
+        </h3>
+      ),
       p: ({ children, ...props }) => (
         <p className="text-sm leading-relaxed text-slate-100 md:text-[15px]" {...props}>
-          {renderWithCitations(children, onJumpToEvidencePage)}
+          {renderWithInlineBadges(children, onJumpToEvidencePage)}
         </p>
       ),
       strong: ({ children, ...props }) => (
         <strong className="font-semibold text-slate-50" {...props}>
-          {renderWithCitations(children, onJumpToEvidencePage)}
+          {renderWithInlineBadges(children, onJumpToEvidencePage)}
         </strong>
+      ),
+      em: ({ children, ...props }) => (
+        <em {...props}>{renderWithInlineBadges(children, onJumpToEvidencePage)}</em>
       ),
       ul: (props) => <ul className="list-disc space-y-1 pl-5 text-sm text-slate-100 md:text-[15px]" {...props} />,
       ol: (props) => <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-100 md:text-[15px]" {...props} />,
       li: ({ children, ...props }) => (
         <li className="leading-relaxed" {...props}>
-          {renderWithCitations(children, onJumpToEvidencePage)}
+          {renderWithInlineBadges(children, onJumpToEvidencePage)}
         </li>
       ),
       code: ({ inline, className, children, ...props }) =>
@@ -508,10 +537,16 @@ function SummaryCard({
           <table className="min-w-full text-left text-sm text-slate-100 md:text-[15px]" {...props} />
         </div>
       ),
-      th: (props) => (
-        <th className="border-b border-white/10 px-3 py-2 font-semibold text-emerald-100" {...props} />
+      th: ({ children, ...props }) => (
+        <th className="border-b border-white/10 px-3 py-2 font-semibold text-emerald-100" {...props}>
+          {renderWithInlineBadges(children, onJumpToEvidencePage)}
+        </th>
       ),
-      td: (props) => <td className="border-b border-white/5 px-3 py-2 text-slate-100" {...props} />,
+      td: ({ children, ...props }) => (
+        <td className="border-b border-white/5 px-3 py-2 text-slate-100" {...props}>
+          {renderWithInlineBadges(children, onJumpToEvidencePage)}
+        </td>
+      ),
     }),
     [onJumpToEvidencePage]
   );
@@ -731,12 +766,11 @@ function SummaryCard({
         ? "summary-prose prose max-w-none space-y-2 text-slate-900 prose-p:leading-relaxed prose-headings:text-slate-900 prose-strong:text-slate-900 prose-a:text-slate-900 caret-transparent"
         : "summary-prose prose prose-invert max-w-none space-y-2 text-slate-100 prose-p:leading-relaxed prose-headings:text-slate-50 prose-strong:text-slate-50 prose-a:text-slate-50 caret-transparent";
 
-    // remark parses [p.N] as an unresolved link reference and splits it into
-    // three separate text nodes ("[", "p.N", "]"), breaking citation detection.
-    // Escape the brackets so remark treats them as literal text "[p.N]" instead.
+    // remark parses bracket-only anchors as unresolved link references and splits
+    // them into separate text nodes, so escape supported badge tokens first.
     const escapedContent = String(pageContent || "").replace(
-      /\[p\.(\d+)\]/g,
-      (_, n) => `\\[p.${n}\\]`
+      /\[(?:문서:)?p\.(\d+)\]|\[(T[123])\]/g,
+      (match, page, tier) => (page ? `\\${match.slice(0, -1)}\\]` : `\\[${tier}\\]`)
     );
 
     return (

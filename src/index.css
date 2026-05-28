@@ -210,6 +210,55 @@ select {
   min-width: min-content;
 }
 
+.anchor-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 500;
+  background: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.anchor-badge:hover {
+  background: rgba(139, 92, 246, 0.28);
+}
+
+.tier-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  padding: 1px 7px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.tier-badge--t1 {
+  background: rgba(34, 197, 94, 0.15);
+  color: #86efac;
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.tier-badge--t2 {
+  background: rgba(234, 179, 8, 0.16);
+  color: #fde68a;
+  border-color: rgba(234, 179, 8, 0.35);
+}
+
+.tier-badge--t3 {
+  background: rgba(148, 163, 184, 0.14);
+  color: #cbd5e1;
+  border-color: rgba(148, 163, 184, 0.28);
+}
+
 .mock-exam-rich-text,
 .mock-exam-rich-text :where(p, li, strong, em) {
   min-width: 0;
