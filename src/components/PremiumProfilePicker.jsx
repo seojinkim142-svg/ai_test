@@ -17,16 +17,25 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
   onDisablePin,
   onClose,
 }) {
+  // create dialog
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [draftName, setDraftName] = useState("");
+
+  // profile login PIN dialog
   const [targetProfileId, setTargetProfileId] = useState(null);
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
   const [isPinSubmitting, setIsPinSubmitting] = useState(false);
 
-  // unified profile settings dialog state
+  // settings auth popup (PIN verification before entering settings)
+  const [settingsAuthTargetId, setSettingsAuthTargetId] = useState(null);
+  const [settingsAuthPin, setSettingsAuthPin] = useState("");
+  const [settingsAuthError, setSettingsAuthError] = useState("");
+  const [settingsAuthSubmitting, setSettingsAuthSubmitting] = useState(false);
+
+  // settings dialog (opened after PIN verified)
   const [settingsTargetId, setSettingsTargetId] = useState(null);
-  const [settingsCurrentPin, setSettingsCurrentPin] = useState("");
+  const [settingsVerifiedPin, setSettingsVerifiedPin] = useState("");
   const [settingsNewName, setSettingsNewName] = useState("");
   const [settingsNewPin, setSettingsNewPin] = useState("");
   const [settingsConfirmPin, setSettingsConfirmPin] = useState("");
@@ -36,6 +45,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
 
   const nameInputRef = useRef(null);
   const pinInputRef = useRef(null);
+  const settingsAuthPinRef = useRef(null);
   const settingsNameInputRef = useRef(null);
   const isLight = theme === "light";
 
@@ -45,6 +55,19 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
   );
   const isPinDialogOpen = Boolean(targetProfile);
 
+  const settingsAuthProfile = useMemo(
+    () => profiles.find((p) => p.id === settingsAuthTargetId) || null,
+    [profiles, settingsAuthTargetId]
+  );
+  const isSettingsAuthOpen = Boolean(settingsAuthProfile);
+
+  const settingsTargetProfile = useMemo(
+    () => profiles.find((p) => p.id === settingsTargetId) || null,
+    [profiles, settingsTargetId]
+  );
+  const isSettingsDialogOpen = Boolean(settingsTargetProfile);
+
+  // ── create ──────────────────────────────────────────────────────────────
   const openCreateDialog = useCallback(() => {
     if (profiles.length >= maxProfiles) return;
     setTargetProfileId(null);
@@ -54,10 +77,21 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
     setIsCreateDialogOpen(true);
   }, [maxProfiles, profiles.length]);
 
-  const closeCreateDialog = useCallback(() => {
-    setIsCreateDialogOpen(false);
-  }, []);
+  const closeCreateDialog = useCallback(() => setIsCreateDialogOpen(false), []);
 
+  const handleCreateSubmit = useCallback(
+    (event) => {
+      event.preventDefault();
+      if (profiles.length >= maxProfiles) return;
+      const fallback = `Member ${profiles.length + 1}`;
+      const name = String(draftName || "").trim().slice(0, 16) || fallback;
+      onCreateProfile?.(name);
+      setIsCreateDialogOpen(false);
+    },
+    [draftName, maxProfiles, onCreateProfile, profiles.length]
+  );
+
+  // ── profile login PIN ────────────────────────────────────────────────────
   const openPinDialog = useCallback((profileId) => {
     setIsCreateDialogOpen(false);
     setTargetProfileId(profileId);
@@ -71,18 +105,6 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
     setPinError("");
     setIsPinSubmitting(false);
   }, []);
-
-  const handleCreateSubmit = useCallback(
-    (event) => {
-      event.preventDefault();
-      if (profiles.length >= maxProfiles) return;
-      const fallback = `Member ${profiles.length + 1}`;
-      const name = String(draftName || "").trim().slice(0, 16) || fallback;
-      onCreateProfile?.(name);
-      setIsCreateDialogOpen(false);
-    },
-    [draftName, maxProfiles, onCreateProfile, profiles.length]
-  );
 
   const handleProfileClick = useCallback(
     (profileId) => {
@@ -126,26 +148,69 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
     [closePinDialog, isPinSubmitting, onSelectProfile, pinInput, targetProfileId]
   );
 
-  const openSettingsDialog = useCallback(
+  // ── settings auth popup ──────────────────────────────────────────────────
+  const openSettingsAuthPopup = useCallback(
     (profileId, event) => {
       event.stopPropagation();
       const profile = profiles.find((p) => p.id === profileId);
       if (!profile) return;
-      setSettingsTargetId(profileId);
-      setSettingsCurrentPin("");
-      setSettingsNewName(profile.name);
-      setSettingsNewPin("");
-      setSettingsConfirmPin("");
-      setSettingsError("");
-      setSettingsSubmitting(null);
-      setSettingsDisableConfirm(false);
+      setSettingsAuthTargetId(profileId);
+      setSettingsAuthPin("");
+      setSettingsAuthError("");
     },
     [profiles]
   );
 
+  const closeSettingsAuthPopup = useCallback(() => {
+    setSettingsAuthTargetId(null);
+    setSettingsAuthPin("");
+    setSettingsAuthError("");
+    setSettingsAuthSubmitting(false);
+  }, []);
+
+  const handleSettingsAuthSubmit = useCallback(
+    async (event) => {
+      event.preventDefault();
+      if (!settingsAuthTargetId || settingsAuthSubmitting) return;
+      if (!/^\d{4}$/.test(settingsAuthPin)) {
+        setSettingsAuthError("PIN은 4자리 숫자로 입력해주세요.");
+        return;
+      }
+      setSettingsAuthSubmitting(true);
+      try {
+        const profile = profiles.find((p) => p.id === settingsAuthTargetId);
+        if (!profile) { setSettingsAuthError("프로필을 찾을 수 없습니다."); return; }
+        // Verify PIN via onRenameProfile with the same name (no-op rename to check PIN)
+        // Actually verify directly: call onRenameProfile with trimmed same name to check
+        // Better: use a dedicated verifyPin if available, or call onRenameProfile
+        // We'll just try rename with same name to verify — it returns ok/fail
+        const result = await onRenameProfile?.(settingsAuthTargetId, settingsAuthPin, profile.name);
+        const isOk = result?.ok ?? result === true;
+        if (!isOk) {
+          setSettingsAuthError(result?.message || "PIN이 올바르지 않습니다.");
+          return;
+        }
+        // PIN verified — open settings dialog
+        setSettingsVerifiedPin(settingsAuthPin);
+        setSettingsTargetId(settingsAuthTargetId);
+        setSettingsNewName(profile.name);
+        setSettingsNewPin("");
+        setSettingsConfirmPin("");
+        setSettingsError("");
+        setSettingsSubmitting(null);
+        setIsDisablePopupOpen(false);
+        closeSettingsAuthPopup();
+      } finally {
+        setSettingsAuthSubmitting(false);
+      }
+    },
+    [closeSettingsAuthPopup, onRenameProfile, profiles, settingsAuthPin, settingsAuthSubmitting, settingsAuthTargetId]
+  );
+
+  // ── settings dialog ──────────────────────────────────────────────────────
   const closeSettingsDialog = useCallback(() => {
     setSettingsTargetId(null);
-    setSettingsCurrentPin("");
+    setSettingsVerifiedPin("");
     setSettingsNewName("");
     setSettingsNewPin("");
     setSettingsConfirmPin("");
@@ -160,58 +225,56 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
       if (!settingsTargetId || settingsSubmitting) return;
       const trimmedName = settingsNewName.trim().slice(0, 16);
       if (!trimmedName) { setSettingsError("이름을 입력해주세요."); return; }
-      if (!/^\d{4}$/.test(settingsCurrentPin)) { setSettingsError("현재 PIN 4자리를 입력해주세요."); return; }
       setSettingsSubmitting("rename");
       try {
-        const result = await onRenameProfile?.(settingsTargetId, settingsCurrentPin, trimmedName);
+        const result = await onRenameProfile?.(settingsTargetId, settingsVerifiedPin, trimmedName);
         const isOk = result?.ok ?? result === true;
-        if (!isOk) { setSettingsError(result?.message || "PIN이 올바르지 않습니다."); return; }
+        if (!isOk) { setSettingsError(result?.message || "오류가 발생했습니다."); return; }
         closeSettingsDialog();
       } finally {
         setSettingsSubmitting(null);
       }
     },
-    [closeSettingsDialog, onRenameProfile, settingsCurrentPin, settingsNewName, settingsSubmitting, settingsTargetId]
+    [closeSettingsDialog, onRenameProfile, settingsNewName, settingsSubmitting, settingsTargetId, settingsVerifiedPin]
   );
 
   const handleSettingsPinChange = useCallback(
     async (event) => {
       event.preventDefault();
       if (!settingsTargetId || settingsSubmitting) return;
-      if (!/^\d{4}$/.test(settingsCurrentPin)) { setSettingsError("현재 PIN 4자리를 입력해주세요."); return; }
       if (!/^\d{4}$/.test(settingsNewPin)) { setSettingsError("새 PIN은 4자리 숫자로 입력해주세요."); return; }
       if (settingsNewPin !== settingsConfirmPin) { setSettingsError("새 PIN과 확인 PIN이 일치하지 않습니다."); return; }
       setSettingsSubmitting("pin");
       try {
-        const result = await onChangePin?.(settingsTargetId, settingsCurrentPin, settingsNewPin);
+        const result = await onChangePin?.(settingsTargetId, settingsVerifiedPin, settingsNewPin);
         const isOk = result?.ok ?? result === true;
-        if (!isOk) { setSettingsError(result?.message || "PIN이 올바르지 않습니다."); return; }
+        if (!isOk) { setSettingsError(result?.message || "오류가 발생했습니다."); return; }
         closeSettingsDialog();
       } finally {
         setSettingsSubmitting(null);
       }
     },
-    [closeSettingsDialog, onChangePin, settingsConfirmPin, settingsCurrentPin, settingsNewPin, settingsSubmitting, settingsTargetId]
+    [closeSettingsDialog, onChangePin, settingsConfirmPin, settingsNewPin, settingsSubmitting, settingsTargetId, settingsVerifiedPin]
   );
 
   const handleDisablePopupConfirm = useCallback(
     async () => {
       if (!settingsTargetId || settingsSubmitting) return;
-      if (!/^\d{4}$/.test(settingsCurrentPin)) { setSettingsError("현재 PIN 4자리를 입력해주세요."); setIsDisablePopupOpen(false); return; }
       setSettingsSubmitting("disable");
       try {
-        const result = await onDisablePin?.(settingsTargetId, settingsCurrentPin);
+        const result = await onDisablePin?.(settingsTargetId, settingsVerifiedPin);
         const isOk = result?.ok ?? result === true;
-        if (!isOk) { setSettingsError(result?.message || "PIN이 올바르지 않습니다."); setIsDisablePopupOpen(false); return; }
+        if (!isOk) { setSettingsError(result?.message || "오류가 발생했습니다."); setIsDisablePopupOpen(false); return; }
         closeSettingsDialog();
       } finally {
         setSettingsSubmitting(null);
         setIsDisablePopupOpen(false);
       }
     },
-    [closeSettingsDialog, onDisablePin, settingsCurrentPin, settingsSubmitting, settingsTargetId]
+    [closeSettingsDialog, onDisablePin, settingsSubmitting, settingsTargetId, settingsVerifiedPin]
   );
 
+  // ── avatar error ─────────────────────────────────────────────────────────
   const handleAvatarError = useCallback((event) => {
     const img = event.currentTarget;
     const step = Number(img.dataset.fallbackStep || "0");
@@ -220,6 +283,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
     img.src = step === 0 ? DEFAULT_PROFILE_AVATAR : BACKUP_PROFILE_AVATAR;
   }, []);
 
+  // ── focus effects ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!isCreateDialogOpen) return;
     nameInputRef.current?.focus();
@@ -232,11 +296,11 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
     pinInputRef.current?.select();
   }, [isPinDialogOpen]);
 
-  const isSettingsDialogOpen = Boolean(settingsTargetId);
-  const settingsTargetProfile = useMemo(
-    () => profiles.find((p) => p.id === settingsTargetId) || null,
-    [profiles, settingsTargetId]
-  );
+  useEffect(() => {
+    if (!isSettingsAuthOpen) return;
+    settingsAuthPinRef.current?.focus();
+    settingsAuthPinRef.current?.select();
+  }, [isSettingsAuthOpen]);
 
   useEffect(() => {
     if (!isSettingsDialogOpen) return;
@@ -244,25 +308,17 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
     settingsNameInputRef.current?.select();
   }, [isSettingsDialogOpen]);
 
+  // ── Escape key ───────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!isCreateDialogOpen && !isPinDialogOpen && !isSettingsDialogOpen && !isDisablePopupOpen) return undefined;
+    const anyOpen = isCreateDialogOpen || isPinDialogOpen || isSettingsAuthOpen || isSettingsDialogOpen || isDisablePopupOpen;
+    if (!anyOpen) return undefined;
     const onKeyDown = (event) => {
       if (event.key !== "Escape") return;
-      if (isDisablePopupOpen) {
-        setIsDisablePopupOpen(false);
-        return;
-      }
-      if (isSettingsDialogOpen) {
-        closeSettingsDialog();
-        return;
-      }
-      if (isPinDialogOpen) {
-        closePinDialog();
-        return;
-      }
-      if (isCreateDialogOpen) {
-        closeCreateDialog();
-      }
+      if (isDisablePopupOpen) { setIsDisablePopupOpen(false); return; }
+      if (isSettingsDialogOpen) { closeSettingsDialog(); return; }
+      if (isSettingsAuthOpen) { closeSettingsAuthPopup(); return; }
+      if (isPinDialogOpen) { closePinDialog(); return; }
+      if (isCreateDialogOpen) { closeCreateDialog(); }
     };
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -271,8 +327,14 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
       document.body.style.overflow = prevOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [closeCreateDialog, closePinDialog, closeSettingsDialog, isCreateDialogOpen, isDisablePopupOpen, isPinDialogOpen, isSettingsDialogOpen]);
+  }, [closeCreateDialog, closePinDialog, closeSettingsAuthPopup, closeSettingsDialog, isCreateDialogOpen, isDisablePopupOpen, isPinDialogOpen, isSettingsAuthOpen, isSettingsDialogOpen]);
 
+  // ── input class helper ───────────────────────────────────────────────────
+  const inputCls = `h-10 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
+    isLight ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
+  }`;
+
+  // ── portals ──────────────────────────────────────────────────────────────
   const createProfileDialog =
     isCreateDialogOpen && typeof document !== "undefined"
       ? createPortal(
@@ -281,9 +343,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
               type="button"
               aria-label="프로필 생성 닫기"
               onClick={closeCreateDialog}
-              className={`absolute inset-0 ${
-                isLight ? "bg-slate-900/[0.22] backdrop-blur-[2px]" : "bg-black/[0.72] backdrop-blur-[1px]"
-              }`}
+              className={`absolute inset-0 ${isLight ? "bg-slate-900/[0.22] backdrop-blur-[2px]" : "bg-black/[0.72] backdrop-blur-[1px]"}`}
             />
             <form
               onSubmit={handleCreateSubmit}
@@ -293,9 +353,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
                   : "border-white/10 bg-slate-950/[0.96] shadow-[0_20px_80px_rgba(0,0,0,0.65)]"
               }`}
             >
-              <p className={`text-sm font-semibold ${isLight ? "text-slate-900" : "text-slate-100"}`}>
-                새 프로필 만들기
-              </p>
+              <p className={`text-sm font-semibold ${isLight ? "text-slate-900" : "text-slate-100"}`}>새 프로필 만들기</p>
               <p className={`mt-1 text-xs ${isLight ? "text-slate-500" : "text-slate-400"}`}>
                 프로필 이름은 최대 16자까지 입력할 수 있습니다.
               </p>
@@ -306,26 +364,13 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
                 value={draftName}
                 maxLength={16}
                 onChange={(event) => setDraftName(event.target.value)}
-                className={`mt-4 h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                  isLight ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
-                }`}
+                className={`mt-4 ${inputCls}`}
               />
               <div className="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={closeCreateDialog}
-                  className={`ghost-button text-xs ${isLight ? "text-slate-700" : "text-slate-200"}`}
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "148, 163, 184" }}
-                >
+                <button type="button" onClick={closeCreateDialog} className={`ghost-button text-xs ${isLight ? "text-slate-700" : "text-slate-200"}`} data-ghost-size="sm" style={{ "--ghost-color": "148, 163, 184" }}>
                   취소
                 </button>
-                <button
-                  type="submit"
-                  className="ghost-button text-xs text-emerald-100"
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "52, 211, 153" }}
-                >
+                <button type="submit" className="ghost-button text-xs text-emerald-100" data-ghost-size="sm" style={{ "--ghost-color": "52, 211, 153" }}>
                   확인
                 </button>
               </div>
@@ -343,9 +388,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
               type="button"
               aria-label="PIN 입력 닫기"
               onClick={closePinDialog}
-              className={`absolute inset-0 ${
-                isLight ? "bg-slate-900/[0.24] backdrop-blur-[2px]" : "bg-black/[0.74] backdrop-blur-[1px]"
-              }`}
+              className={`absolute inset-0 ${isLight ? "bg-slate-900/[0.24] backdrop-blur-[2px]" : "bg-black/[0.74] backdrop-blur-[1px]"}`}
             />
             <form
               onSubmit={handlePinSubmit}
@@ -368,35 +411,67 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
                 inputMode="numeric"
                 maxLength={4}
                 value={pinInput}
-                onChange={(event) => {
-                  const next = String(event.target.value || "").replace(/\D/g, "").slice(0, 4);
-                  setPinInput(next);
-                  setPinError("");
-                }}
+                onChange={(event) => { setPinInput(String(event.target.value || "").replace(/\D/g, "").slice(0, 4)); setPinError(""); }}
                 placeholder="4자리 PIN"
-                className={`mt-4 h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                  isLight ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
-                }`}
+                className={`mt-4 ${inputCls}`}
               />
               {pinError && <p className="mt-2 text-xs text-rose-300">{pinError}</p>}
               <div className="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={closePinDialog}
-                  className={`ghost-button text-xs ${isLight ? "text-slate-700" : "text-slate-200"}`}
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "148, 163, 184" }}
-                >
+                <button type="button" onClick={closePinDialog} className={`ghost-button text-xs ${isLight ? "text-slate-700" : "text-slate-200"}`} data-ghost-size="sm" style={{ "--ghost-color": "148, 163, 184" }}>
                   취소
                 </button>
-                <button
-                  type="submit"
-                  disabled={isPinSubmitting}
-                  className="ghost-button text-xs text-emerald-100 disabled:opacity-60"
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "52, 211, 153" }}
-                >
+                <button type="submit" disabled={isPinSubmitting} className="ghost-button text-xs text-emerald-100 disabled:opacity-60" data-ghost-size="sm" style={{ "--ghost-color": "52, 211, 153" }}>
                   {isPinSubmitting ? "확인 중..." : "확인"}
+                </button>
+              </div>
+            </form>
+          </div>,
+          document.body
+        )
+      : null;
+
+  const settingsAuthPopup =
+    isSettingsAuthOpen && typeof document !== "undefined"
+      ? createPortal(
+          <div className="fixed inset-0 z-[160] flex items-center justify-center px-4">
+            <button
+              type="button"
+              aria-label="설정 인증 닫기"
+              onClick={closeSettingsAuthPopup}
+              className={`absolute inset-0 ${isLight ? "bg-slate-900/[0.24] backdrop-blur-[2px]" : "bg-black/[0.74] backdrop-blur-[1px]"}`}
+            />
+            <form
+              onSubmit={handleSettingsAuthSubmit}
+              className={`relative z-[161] w-full max-w-sm rounded-2xl border p-5 ${
+                isLight
+                  ? "border-slate-200 bg-white shadow-[0_20px_80px_rgba(15,23,42,0.2)]"
+                  : "border-white/10 bg-slate-950/[0.97] shadow-[0_20px_80px_rgba(0,0,0,0.7)]"
+              }`}
+            >
+              <p className={`text-sm font-semibold ${isLight ? "text-slate-900" : "text-slate-100"}`}>
+                프로필 설정
+              </p>
+              <p className={`mt-1 text-xs ${isLight ? "text-slate-500" : "text-slate-400"}`}>
+                "{settingsAuthProfile?.name}" 프로필의 PIN을 입력하세요.
+              </p>
+              <input
+                ref={settingsAuthPinRef}
+                name="settings-auth-pin"
+                type="password"
+                inputMode="numeric"
+                maxLength={4}
+                value={settingsAuthPin}
+                onChange={(e) => { setSettingsAuthPin(String(e.target.value || "").replace(/\D/g, "").slice(0, 4)); setSettingsAuthError(""); }}
+                placeholder="4자리 PIN"
+                className={`mt-4 ${inputCls}`}
+              />
+              {settingsAuthError && <p className="mt-2 text-xs text-rose-300">{settingsAuthError}</p>}
+              <div className="mt-4 flex justify-end gap-2">
+                <button type="button" onClick={closeSettingsAuthPopup} className={`ghost-button text-xs ${isLight ? "text-slate-700" : "text-slate-200"}`} data-ghost-size="sm" style={{ "--ghost-color": "148, 163, 184" }}>
+                  취소
+                </button>
+                <button type="submit" disabled={settingsAuthSubmitting} className="ghost-button text-xs text-emerald-100 disabled:opacity-60" data-ghost-size="sm" style={{ "--ghost-color": "52, 211, 153" }}>
+                  {settingsAuthSubmitting ? "확인 중..." : "확인"}
                 </button>
               </div>
             </form>
@@ -413,9 +488,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
               type="button"
               aria-label="프로필 설정 닫기"
               onClick={closeSettingsDialog}
-              className={`absolute inset-0 ${
-                isLight ? "bg-slate-900/[0.24] backdrop-blur-[2px]" : "bg-black/[0.74] backdrop-blur-[1px]"
-              }`}
+              className={`absolute inset-0 ${isLight ? "bg-slate-900/[0.24] backdrop-blur-[2px]" : "bg-black/[0.74] backdrop-blur-[1px]"}`}
             />
             <div
               className={`relative z-[161] w-full max-w-md rounded-2xl border p-5 ${
@@ -424,39 +497,12 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
                   : "border-white/10 bg-slate-950/[0.97] shadow-[0_20px_80px_rgba(0,0,0,0.7)]"
               }`}
             >
-              <p className={`text-sm font-semibold ${isLight ? "text-slate-900" : "text-slate-100"}`}>
-                프로필 설정
-              </p>
-              <p className={`mt-1 text-xs ${isLight ? "text-slate-500" : "text-slate-400"}`}>
-                "{settingsTargetProfile?.name}" 프로필
-              </p>
-
-              {/* Shared current PIN */}
-              <div className="mt-4">
-                <label className={`mb-1 block text-xs font-medium ${isLight ? "text-slate-600" : "text-slate-400"}`}>
-                  현재 PIN
-                </label>
-                <input
-                  name="settings-current-pin"
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={4}
-                  value={settingsCurrentPin}
-                  onChange={(e) => {
-                    setSettingsCurrentPin(String(e.target.value || "").replace(/\D/g, "").slice(0, 4));
-                    setSettingsError("");
-                    setSettingsDisableConfirm(false);
-                  }}
-                  placeholder="4자리 PIN"
-                  className={`h-10 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                    isLight ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
-                  }`}
-                />
-              </div>
+              <p className={`text-sm font-semibold ${isLight ? "text-slate-900" : "text-slate-100"}`}>프로필 설정</p>
+              <p className={`mt-1 text-xs ${isLight ? "text-slate-500" : "text-slate-400"}`}>"{settingsTargetProfile?.name}" 프로필</p>
 
               <hr className={`my-4 ${isLight ? "border-slate-200" : "border-white/10"}`} />
 
-              {/* Rename section */}
+              {/* Rename */}
               <form onSubmit={handleSettingsRename}>
                 <p className={`mb-2 text-xs font-semibold ${isLight ? "text-slate-700" : "text-slate-300"}`}>이름 변경</p>
                 <input
@@ -467,18 +513,10 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
                   maxLength={16}
                   onChange={(e) => { setSettingsNewName(e.target.value); setSettingsError(""); }}
                   placeholder="새 이름 (최대 16자)"
-                  className={`h-10 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                    isLight ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
-                  }`}
+                  className={inputCls}
                 />
                 <div className="mt-2 flex justify-end">
-                  <button
-                    type="submit"
-                    disabled={settingsSubmitting === "rename"}
-                    className="ghost-button text-xs text-emerald-100 disabled:opacity-60"
-                    data-ghost-size="sm"
-                    style={{ "--ghost-color": "52, 211, 153" }}
-                  >
+                  <button type="submit" disabled={settingsSubmitting === "rename"} className="ghost-button text-xs text-emerald-100 disabled:opacity-60" data-ghost-size="sm" style={{ "--ghost-color": "52, 211, 153" }}>
                     {settingsSubmitting === "rename" ? "변경 중..." : "이름 변경"}
                   </button>
                 </div>
@@ -486,7 +524,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
 
               <hr className={`my-4 ${isLight ? "border-slate-200" : "border-white/10"}`} />
 
-              {/* PIN change section */}
+              {/* PIN change */}
               <form onSubmit={handleSettingsPinChange}>
                 <p className={`mb-2 text-xs font-semibold ${isLight ? "text-slate-700" : "text-slate-300"}`}>PIN 변경</p>
                 <div className="flex flex-col gap-2">
@@ -498,9 +536,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
                     value={settingsNewPin}
                     onChange={(e) => { setSettingsNewPin(String(e.target.value || "").replace(/\D/g, "").slice(0, 4)); setSettingsError(""); }}
                     placeholder="새 PIN 4자리"
-                    className={`h-10 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                      isLight ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
-                    }`}
+                    className={inputCls}
                   />
                   <input
                     name="settings-confirm-pin"
@@ -510,19 +546,11 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
                     value={settingsConfirmPin}
                     onChange={(e) => { setSettingsConfirmPin(String(e.target.value || "").replace(/\D/g, "").slice(0, 4)); setSettingsError(""); }}
                     placeholder="새 PIN 확인"
-                    className={`h-10 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                      isLight ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
-                    }`}
+                    className={inputCls}
                   />
                 </div>
                 <div className="mt-2 flex justify-end">
-                  <button
-                    type="submit"
-                    disabled={settingsSubmitting === "pin"}
-                    className="ghost-button text-xs text-sky-200 disabled:opacity-60"
-                    data-ghost-size="sm"
-                    style={{ "--ghost-color": "125, 211, 252" }}
-                  >
+                  <button type="submit" disabled={settingsSubmitting === "pin"} className="ghost-button text-xs text-sky-200 disabled:opacity-60" data-ghost-size="sm" style={{ "--ghost-color": "125, 211, 252" }}>
                     {settingsSubmitting === "pin" ? "변경 중..." : "PIN 변경"}
                   </button>
                 </div>
@@ -530,7 +558,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
 
               <hr className={`my-4 ${isLight ? "border-slate-200" : "border-white/10"}`} />
 
-              {/* Disable PIN section */}
+              {/* Disable PIN */}
               <div>
                 <p className={`mb-1 text-xs font-semibold ${isLight ? "text-slate-700" : "text-slate-300"}`}>PIN 없이 사용</p>
                 <p className={`mb-2 text-[11px] ${isLight ? "text-slate-500" : "text-slate-500"}`}>
@@ -551,13 +579,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
               {settingsError && <p className="mt-3 text-xs text-rose-300">{settingsError}</p>}
 
               <div className={`mt-4 flex justify-end border-t pt-3 ${isLight ? "border-slate-200" : "border-white/10"}`}>
-                <button
-                  type="button"
-                  onClick={closeSettingsDialog}
-                  className={`ghost-button text-xs ${isLight ? "text-slate-700" : "text-slate-200"}`}
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "148, 163, 184" }}
-                >
+                <button type="button" onClick={closeSettingsDialog} className={`ghost-button text-xs ${isLight ? "text-slate-700" : "text-slate-200"}`} data-ghost-size="sm" style={{ "--ghost-color": "148, 163, 184" }}>
                   닫기
                 </button>
               </div>
@@ -575,9 +597,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
               type="button"
               aria-label="취소"
               onClick={() => setIsDisablePopupOpen(false)}
-              className={`absolute inset-0 ${
-                isLight ? "bg-slate-900/[0.3] backdrop-blur-[2px]" : "bg-black/[0.8] backdrop-blur-[1px]"
-              }`}
+              className={`absolute inset-0 ${isLight ? "bg-slate-900/[0.3] backdrop-blur-[2px]" : "bg-black/[0.8] backdrop-blur-[1px]"}`}
             />
             <div
               className={`relative z-[171] w-full max-w-sm rounded-2xl border p-5 ${
@@ -586,30 +606,15 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
                   : "border-white/10 bg-slate-950/[0.97] shadow-[0_20px_80px_rgba(0,0,0,0.72)]"
               }`}
             >
-              <p className={`text-sm font-semibold ${isLight ? "text-slate-900" : "text-slate-100"}`}>
-                PIN 보호 해제
-              </p>
+              <p className={`text-sm font-semibold ${isLight ? "text-slate-900" : "text-slate-100"}`}>PIN 보호 해제</p>
               <p className={`mt-2 text-xs ${isLight ? "text-slate-500" : "text-slate-400"}`}>
                 PIN 보호를 해제하면 누구나 이 프로필에 바로 접근할 수 있습니다. 정말 해제하시겠습니까?
               </p>
               <div className="mt-4 flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsDisablePopupOpen(false)}
-                  className={`ghost-button text-xs ${isLight ? "text-slate-700" : "text-slate-200"}`}
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "148, 163, 184" }}
-                >
+                <button type="button" onClick={() => setIsDisablePopupOpen(false)} className={`ghost-button text-xs ${isLight ? "text-slate-700" : "text-slate-200"}`} data-ghost-size="sm" style={{ "--ghost-color": "148, 163, 184" }}>
                   취소
                 </button>
-                <button
-                  type="button"
-                  onClick={handleDisablePopupConfirm}
-                  disabled={settingsSubmitting === "disable"}
-                  className="ghost-button text-xs text-rose-300 disabled:opacity-60"
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "252, 165, 165" }}
-                >
+                <button type="button" onClick={handleDisablePopupConfirm} disabled={settingsSubmitting === "disable"} className="ghost-button text-xs text-rose-300 disabled:opacity-60" data-ghost-size="sm" style={{ "--ghost-color": "252, 165, 165" }}>
                   {settingsSubmitting === "disable" ? "처리 중..." : "PIN 해제"}
                 </button>
               </div>
@@ -701,7 +706,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
                   <button
                     type="button"
                     aria-label={`${profile.name} 프로필 설정`}
-                    onClick={(e) => openSettingsDialog(profile.id, e)}
+                    onClick={(e) => openSettingsAuthPopup(profile.id, e)}
                     className={`absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border opacity-0 transition group-hover:opacity-100 ${
                       isLight
                         ? "border-slate-300 bg-white text-slate-500 hover:border-emerald-400 hover:text-emerald-600"
@@ -741,6 +746,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
       </section>
       {createProfileDialog}
       {pinDialog}
+      {settingsAuthPopup}
       {settingsDialog}
       {disablePopup}
     </>
