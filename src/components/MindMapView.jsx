@@ -154,12 +154,17 @@ function renderInlineBadges(svg) {
 export default function MindMapView({ summary, onJumpToPage }) {
   const svgRef = useRef(null);
   const containerRef = useRef(null);
+  const onJumpToPageRef = useRef(onJumpToPage);
   const pointerDownRef = useRef(null);
 
   useEffect(() => {
     injectCSS();
     injectExtraCSS();
   }, []);
+
+  useEffect(() => {
+    onJumpToPageRef.current = onJumpToPage;
+  }, [onJumpToPage]);
 
   useEffect(() => {
     if (!svgRef.current || !summary) return;
@@ -210,8 +215,9 @@ export default function MindMapView({ summary, onJumpToPage }) {
       if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 5) return;
 
       const page = parseInt(anchor.dataset.page || "", 10);
-      if (!Number.isNaN(page) && typeof onJumpToPage === "function") {
-        onJumpToPage(page);
+      const jumpToPage = onJumpToPageRef.current;
+      if (!Number.isNaN(page) && typeof jumpToPage === "function") {
+        jumpToPage(page);
       }
     };
 
@@ -261,7 +267,7 @@ export default function MindMapView({ summary, onJumpToPage }) {
       mm?.destroy?.();
       svg.innerHTML = "";
     };
-  }, [onJumpToPage, summary]);
+  }, [summary]);
 
   if (!summary) {
     return (
