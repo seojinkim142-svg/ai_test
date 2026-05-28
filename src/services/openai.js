@@ -862,78 +862,83 @@ ${contextText}
 function buildSummaryPrompt(extractedText, outputLanguage = "ko") {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const hasPageTags = /\[p\.\d+\]/.test(String(extractedText || ""));
-  const citationSection = hasPageTags
-    ? `
-[Citation rules — the source text contains [p.N] page markers]
-- After each key fact, definition, formula, or important claim in your summary, append the citation marker [p.N] where N is the page number from the nearest preceding [p.N] tag in the source.
-- Place the [p.N] marker at the very end of the sentence or bullet point it applies to, just before the period or line break.
-- Only cite specific, sourced facts — skip citations for headings, overview sentences, and general connective text.
-- Do NOT fabricate page numbers. Only use page numbers that appear in the source [p.N] tags.
-- Example output: "미토콘드리아는 ATP를 생산하는 세포 소기관입니다 [p.4]."
-`
-    : "";
+  const anchorRule = hasPageTags
+    ? "- Source text contains [p.N] markers. Append [p.N] after every verbatim quote, factual claim, and formula. Do NOT fabricate page numbers."
+    : "- No page markers detected. Omit page anchors but still extract verbatim quotes.";
 
   return `
-You are a senior teaching assistant producing a structured, evidence-rich ${outputLanguageLabel} markdown summary from academic material.
+You are an expert academic analyst. Apply the following 5-stage pipeline to produce a ${outputLanguageLabel} markdown summary.
 
 [Content check]
-- If the text is almost entirely cover page, table of contents, or publisher metadata with no substantive learning content, return only a 1-2 sentence notice stating that.
-- Otherwise always produce a full summary — do not refuse.
+- If the text is almost entirely cover page, table of contents, or publisher metadata with no substantive content, return a 1-2 sentence notice only.
+- Otherwise always produce a full analysis — do not refuse.
 
-[Document structure identification]
-- First identify all chapters, sections, and logical divisions present in the document.
-- Map the hierarchy: Chapter → Section → Sub-section.
+━━━ STAGE 1 · SCOPE ━━━
+Identify the document's overall subject in 1 sentence. Map the full structure:
+- Chapters / major sections / sub-sections present in the document.
 
-[Output structure — use this heading hierarchy exactly]
+━━━ STAGE 2 · EXTRACT ━━━
+For every section:
+- Decompose its structure (what argument does it make?).
+- Extract 1–3 verbatim quotes (원문 그대로) that are the core evidence for that argument.
+- Record page anchor [p.N] immediately after each quote where available.
+- Do NOT summarize from memory or general knowledge — only use what is literally present.
+
+━━━ STAGE 3 · LEDGER ━━━
+Classify each piece of evidence:
+- **[T1]** Direct full-text quote with page anchor → highest confidence
+- **[T2]** Paraphrase or metadata-only (no direct quote) → state claim with caution
+- **[T3]** Cross-reference to another section/source cited in the text → flag as indirect
+
+━━━ STAGE 4 · DRAFT ━━━
+Structure the output in the following sections:
 
 ## 개요
-2-3 sentences describing what the document covers and what the reader should understand after reading.
+1-sentence SCOPE statement + 2-sentence overview of learning goals.
 
-## [Chapter or major section title]  ← one H2 per chapter/major section found in the document
-### [Sub-section title]  ← one H3 per sub-section; omit if no sub-sections exist
+## [Chapter / Section Title]  ← one H2 per major section identified in SCOPE
+### [Sub-section title]  ← H3 for sub-sections; omit if none
 
-Under each H2/H3 include ALL of the following:
+**핵심 내용** (Core Findings — T1 evidence only):
+- Key finding with **bold** terms. "verbatim quote" [p.N] [T1]
+- (3–5 points per section)
 
-**핵심 내용**: 1-2 sentence summary of this section's main argument or concept.
+**보조 증거** (Weak-evidence — T2):
+- Claims supported only by paraphrase or abstract-level information. [T2]
+- Omit this block if all evidence is T1.
 
-**주요 포인트**:
-- Point 1 with **bold** key terms
-- Point 2 ...
-(3-6 bullet points per section)
+**미해결 쟁점** (Unresolved conflicts):
+- Contradictions, ambiguities, or conflicting claims found in the document. Omit if none.
 
-**근거 및 인용**:
-- "의미 있는 원문 인용구를 그대로 인용" ${hasPageTags ? "[p.N]" : "[출처 불명]"}
-(Include 1-3 meaningful verbatim quotes from the source; cite page when available)
+**커버리지 공백** (Coverage gaps):
+- Topics the document mentions but does not explain in depth. Omit if none.
 
-**타 섹션 연관**: Note any explicit cross-references or logical connections to other sections (e.g., "→ Section 3.2의 개념과 직접 연결됨"). Omit if none.
+**타 섹션 연관** [T3]:
+- Explicit cross-references or logical connections to other sections. Omit if none.
 
-## 핵심 공식  ← include only when the source contains formulas
-List every important formula with variable definitions immediately after.
+## 핵심 공식  ← only when formulas are present
+Formula with variable definitions. [T1 anchor]
 
-## 주요 용어  ← include only when the document introduces 3 or more distinct technical terms
-**Term** — definition (original English term in parentheses if helpful).
+## 주요 용어  ← only when 3+ distinct technical terms exist
+**Term** — definition. (English in parentheses if helpful)
 
-[Citation rules]
-${hasPageTags
-  ? `- The source contains [p.N] page markers. Append [p.N] after every factual claim, formula, and verbatim quote. Format: "내용 [p.N]." Do NOT fabricate page numbers.`
-  : `- No page markers are present. Omit page citations but still include verbatim quotes where meaningful.`}
-- For verbatim quotes use the exact wording from the source, surrounded by "quotation marks".
-- Only cite specific sourced facts — skip citations for headings and general connective text.
-
-[Writing rules]
-- **Bold** all key terms, named concepts, and critical values.
-- Use tables when comparing 3 or more items with shared attributes.
-- Use numbered lists only for steps or ranked sequences; use bullet lists otherwise.
-- Preserve important verbatim phrases/sentences from the source as evidence — do not paraphrase away key quotes.
+━━━ STAGE 5 · COMMIT ━━━
+- Every node in this summary must trace back to a T1 or T2 source.
+- Never assert facts as T1 unless a verbatim quote with a page anchor supports it.
+- Clearly mark T2 claims so the reader knows confidence is limited.
 
 [Math formatting — strict]
-- Inline math: $...$
-- Block math: $$...$$ on its own line
-- Define every variable/symbol immediately after the formula.
-- Use LaTeX commands for all operators and symbols; no plain-text substitutes.
+- Inline math: $...$  Block math: $$...$$ on its own line.
+- Define every variable immediately after the formula.
+- Use LaTeX commands for all operators; no plain-text substitutes.
+
+[Citation rules]
+${anchorRule}
+- Verbatim quotes must use the exact source wording, enclosed in "quotation marks".
+- Skip citations for headings and pure connective sentences.
 
 [Output]
-- Markdown only. No preamble, no meta-commentary about the summary itself.
+- Markdown only. No preamble or meta-commentary.
 - Language: ${outputLanguageLabel}.
 
 [Document]
@@ -1951,45 +1956,74 @@ function formatChapterSummaryMarkdown(parsed, summaryInput) {
 
     markdown.push("## " + headingTitle);
 
-    // Sections (섹션별 분석: 핵심 내용 + 근거 인용 + 타 섹션 연관)
+    // Sections — 5-stage pipeline DRAFT 출력 (LEDGER 등급 포함)
     const sections = Array.isArray(candidate?.sections) ? candidate.sections.slice(0, 8) : [];
     if (sections.length) {
       for (const sec of sections) {
         const secTitle = sanitizeSummaryLine(sec?.sectionTitle || "", 80);
-        if (secTitle && !looksLikeMojibake(secTitle)) {
-          markdown.push("### " + secTitle);
-        }
+        if (secTitle && !looksLikeMojibake(secTitle)) markdown.push("### " + secTitle);
+
         const keySummary = sanitizeSummaryLine(sec?.keySummary || "", 240);
         if (keySummary && !looksLikeMojibake(keySummary)) {
-          markdown.push("**핵심 내용**: " + keySummary);
+          markdown.push("**핵심 주장**: " + keySummary);
           markdown.push("");
         }
-        const mainPoints = Array.isArray(sec?.mainPoints) ? sec.mainPoints.slice(0, 6) : [];
-        if (mainPoints.length) {
-          markdown.push("**주요 포인트**:");
-          for (const pt of mainPoints) {
-            const line = sanitizeSummaryLine(pt, 200);
+
+        // Core Findings — T1 only
+        const coreFindings = Array.isArray(sec?.coreFindings) ? sec.coreFindings.slice(0, 5) : [];
+        if (coreFindings.length) {
+          markdown.push("**핵심 근거 [T1]**:");
+          for (const f of coreFindings) {
+            const point = sanitizeSummaryLine(f?.point || "", 180);
+            const quote = sanitizeSummaryLine(f?.quote || "", 280);
+            const anchor = sanitizeSummaryLine(f?.anchor || "", 20);
+            if (!point && !quote) continue;
+            if (looksLikeMojibake(point) || looksLikeMojibake(quote)) continue;
+            if (point) markdown.push("- **" + point + "**");
+            if (quote) markdown.push('  > "' + quote + '"' + (anchor ? " " + anchor : ""));
+          }
+          markdown.push("");
+        }
+
+        // Weak Evidence — T2
+        const weakEvidence = Array.isArray(sec?.weakEvidence) ? sec.weakEvidence.slice(0, 3) : [];
+        if (weakEvidence.length) {
+          markdown.push("**보조 증거 [T2]** *(직접 인용 없음, 신뢰도 제한)*:");
+          for (const w of weakEvidence) {
+            const claim = sanitizeSummaryLine(w?.claim || (typeof w === "string" ? w : ""), 220);
+            if (claim && !looksLikeMojibake(claim)) markdown.push("- " + claim);
+          }
+          markdown.push("");
+        }
+
+        // Unresolved Conflicts
+        const conflicts = Array.isArray(sec?.unresolvedConflicts) ? sec.unresolvedConflicts.slice(0, 3) : [];
+        if (conflicts.length) {
+          markdown.push("**미해결 쟁점**:");
+          for (const c of conflicts) {
+            const line = sanitizeSummaryLine(c, 220);
             if (line && !looksLikeMojibake(line)) markdown.push("- " + line);
           }
           markdown.push("");
         }
-        const evidence = Array.isArray(sec?.evidence) ? sec.evidence.slice(0, 3) : [];
-        if (evidence.length) {
-          markdown.push("**근거 및 인용**:");
-          for (const ev of evidence) {
-            const quote = sanitizeSummaryLine(ev?.quote || ev?.text || "", 280);
-            const anchor = sanitizeSummaryLine(ev?.anchor || "", 20);
-            if (quote && !looksLikeMojibake(quote)) {
-              markdown.push('- "' + quote + '"' + (anchor ? " " + anchor : ""));
-            }
+
+        // Coverage Gaps
+        const gaps = Array.isArray(sec?.coverageGaps) ? sec.coverageGaps.slice(0, 3) : [];
+        if (gaps.length) {
+          markdown.push("**커버리지 공백**:");
+          for (const g of gaps) {
+            const line = sanitizeSummaryLine(g, 220);
+            if (line && !looksLikeMojibake(line)) markdown.push("- " + line);
           }
           markdown.push("");
         }
+
+        // Cross-references — T3
         const crossRefs = Array.isArray(sec?.crossReferences) ? sec.crossReferences.slice(0, 3) : [];
         if (crossRefs.length) {
-          markdown.push("**타 섹션 연관**:");
+          markdown.push("**타 섹션 연관 [T3]**:");
           for (const ref of crossRefs) {
-            const line = sanitizeSummaryLine(ref, 200);
+            const line = sanitizeSummaryLine(ref, 220);
             if (line && !looksLikeMojibake(line)) markdown.push("- " + line);
           }
           markdown.push("");
@@ -2126,8 +2160,8 @@ async function generateChapterSummary(extractedText, { scope, chapterSections, o
   };
 
   const citationRule = hasPageTags
-    ? `- The chapter text contains [p.N] page markers. Append [p.N] at the end of every "explanation" string and every "quote" string where the content comes from that page. Only use page numbers visible in the chapter text. Do not fabricate page numbers.`
-    : `- No page markers are present. Omit page anchors but still include verbatim quotes where meaningful.`;
+    ? `- Source text contains [p.N] page markers. Append [p.N] after every "quote", "explanation", and formula. Only use page numbers visible in the source. Do NOT fabricate.`
+    : `- No page markers detected. Omit anchors but still extract verbatim quotes.`;
 
   const data = await postChatRequest(
     {
@@ -2136,14 +2170,15 @@ async function generateChapterSummary(extractedText, { scope, chapterSections, o
         {
           role: "system",
           content:
-            `You are an expert academic analyst summarizing PDFs in ${outputLanguageLabel}. Return JSON only. Identify document structure (chapters → sections → sub-sections) and produce evidence-rich analysis with verbatim quotes and cross-references.`,
+            `You are an expert academic analyst applying a 5-stage evidence pipeline (SCOPE→EXTRACT→LEDGER→DRAFT→COMMIT) to summarize PDFs in ${outputLanguageLabel}. Return strict JSON only. Never assert facts without tracing them to the source text.`,
         },
         {
           role: "user",
           content: `
-Analyze the chapter input and return ${outputLanguageLabel} JSON with this schema:
+Apply the 5-stage pipeline and return ${outputLanguageLabel} JSON with this schema:
+
 {
-  "overview": ["..."],
+  "overview": ["1-sentence SCOPE + learning goals..."],
   "chapters": [
     {
       "id": "ch_1",
@@ -2152,12 +2187,16 @@ Analyze the chapter input and return ${outputLanguageLabel} JSON with this schem
       "sections": [
         {
           "sectionTitle": "...",
-          "keySummary": "...",
-          "mainPoints": ["...", "..."],
-          "evidence": [
-            { "quote": "원문 그대로 인용", "anchor": "[p.N]" }
+          "keySummary": "core argument of this section (1-2 sentences)",
+          "coreFindings": [
+            { "point": "...", "quote": "verbatim from source", "anchor": "[p.N]", "tier": "T1" }
           ],
-          "crossReferences": ["→ Chapter X / Section Y 와 연관: 이유"]
+          "weakEvidence": [
+            { "claim": "...", "tier": "T2" }
+          ],
+          "unresolvedConflicts": ["contradiction or ambiguity found in the text..."],
+          "coverageGaps": ["topic mentioned but not explained in depth..."],
+          "crossReferences": ["→ Chapter X / Section Y 와 연관: 이유 [T3]"]
         }
       ],
       "summaryPoints": [
@@ -2168,39 +2207,32 @@ Analyze the chapter input and return ${outputLanguageLabel} JSON with this schem
         { "item": "...", "importance": "high|medium|low", "reason": "...", "insight": "..." }
       ],
       "sampleQuestionSolving": [
-        {
-          "question": "...",
-          "steps": ["...", "..."],
-          "answer": "...",
-          "insight": "..."
-        }
+        { "question": "...", "steps": ["...", "..."], "answer": "...", "insight": "..." }
       ]
     }
   ]
 }
 
-Rules:
+Pipeline rules:
+- **SCOPE**: Map the document structure (chapters → sections). Use this as the skeleton.
+- **EXTRACT**: For each section, extract verbatim quotes from the source. Do NOT summarize from general knowledge — only from the provided text.
+- **LEDGER**: Classify every piece of evidence:
+  · T1 — direct verbatim quote with page anchor (highest confidence)
+  · T2 — paraphrase or abstract-level claim without direct quote
+  · T3 — cross-reference to another section/source cited in the text
+- **DRAFT**: Populate sections fields:
+  · "coreFindings": T1 evidence only. Each entry must have a verbatim "quote".
+  · "weakEvidence": T2 claims. Include only when direct quote is unavailable.
+  · "unresolvedConflicts": contradictions or ambiguities in the document. Empty array if none.
+  · "coverageGaps": topics mentioned but underexplained. Empty array if none.
+  · "crossReferences": T3 cross-references. Empty array if none.
+- **COMMIT**: Every summaryPoint and keyTerm must trace back to T1 or T2. Mark confidence tier.
 - Output language: ${outputLanguageLabel}.
-- **Document structure**: Identify all logical sections within each chapter. If no explicit sections exist, group content into 2-4 logical sub-topics.
-- **sections** (NEW — required): For each section/sub-topic within the chapter:
-  - "sectionTitle": concise title of the section
-  - "keySummary": 1-2 sentence summary of the section's main argument
-  - "mainPoints": 3-5 bullet points of the most important ideas
-  - "evidence": 1-3 meaningful verbatim quotes from the source text, with page anchor when available
-  - "crossReferences": explicit mentions of or logical connections to other chapters/sections (empty array if none)
-- Include 3-6 summaryPoints per chapter (chapter-level overview points).
-- Every summaryPoint must include BOTH "point" and "explanation"; optionally add "example".
-- Do not return summaryPoints as plain strings.
-- Provide keyTerms, visuals, and sampleQuestionSolving for each chapter when evidence exists.
-- sampleQuestionSolving: 1-2 representative problems with step-by-step solving.
-- Render mathematical expressions using LaTeX: inline $...$, block $$$...$$$.
-- Never place $$...$$ inside a sentence. Use $...$ for inline formulas only.
-- Do not output escaped dollars (\\$) or placeholder tokens.
-- Use \\cdot for multiplication; use LaTeX commands for all symbols.
-- If no visual evidence, return "visuals": [].
-- If no sample solving evidence, return "sampleQuestionSolving": [].
-- Do not mention chapter detection/splitting logic or model processing notes.
-- Keep overview focused on the document's overall topic and learning goals.
+- Include 3-6 summaryPoints per chapter; every point needs "point" + "explanation".
+- sampleQuestionSolving: 1-2 problems with step-by-step solving (omit if no evidence).
+- Math: inline $...$, block $$...$$ on its own line. LaTeX only, no plain-text math.
+- If no visual evidence: "visuals": []. If no sample solving: "sampleQuestionSolving": [].
+- Do not mention chapter detection/splitting logic.
 - Preserve chapter ids exactly as input.
 ${citationRule}
 - Return strict JSON only.
@@ -2926,11 +2958,16 @@ Structure:
   · A brief but informative explanation (phrase or short sentence)
   · Formulas, definitions, or important distinctions where relevant
 
+COMMIT rules (evidence gate):
+- Use ONLY content marked as [T1] (verbatim quote with page anchor) or clearly sourced facts for mindmap nodes.
+- If a piece of information is only [T2] (paraphrase) or [T3] (cross-reference), either omit it or mark it with a "(T2)" or "(T3)" suffix on the bullet.
+- Never assert facts in the mindmap that cannot be traced back to the summary's evidence.
+- Include page anchors (e.g. [p.3]) in bullet points when present in the summary.
+
 Formatting rules:
 - Use **bold** to highlight important terms, names, and formulas within bullet points
 - Do NOT use any emoji or special symbols
-- Keep bullet text informative — not just a single keyword, but a meaningful phrase
-- Reference section numbers or page labels (e.g. "p3:L2") only if clearly present in the summary
+- Keep bullet text informative — include the evidence anchor when available (e.g. "**개념명**: 설명 [p.3]")
 - Do NOT use generic branch names like "개요", "Overview", "핵심 공식", "주요 용어"
 - Output ONLY the markdown. No code fences, no extra commentary.
 - Language: ${outputLanguageLabel}
