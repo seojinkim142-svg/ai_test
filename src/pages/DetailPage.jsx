@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -13,6 +13,7 @@ import PdfPreview from "../components/PdfPreview";
 import QuizSection from "../components/QuizSection";
 import ReviewNotesPanel from "../components/ReviewNotesPanel";
 import SummaryCard from "../components/SummaryCard";
+import MindMapView from "../components/MindMapView";
 import { useQuizMixCarousel } from "../hooks/useQuizMixCarousel";
 import { LETTERS } from "../constants";
 import { getDetailCopy } from "../utils/detailCopy";
@@ -311,6 +312,7 @@ export default function DetailPage({
 }) {
   const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
   const copy = useMemo(() => getDetailCopy(outputLanguage), [outputLanguage]);
+  const [summaryViewMode, setSummaryViewMode] = useState("text"); // "text" | "mindmap"
   const detailTabs = useMemo(
     () => [
       { id: "summary", label: copy.tabs.summary },
@@ -734,6 +736,16 @@ export default function DetailPage({
                   >
                     {isExportingSummary ? copy.summary.exporting : copy.summary.export}
                   </button>
+                  {summary && (
+                    <button
+                      type="button"
+                      onClick={() => setSummaryViewMode((m) => m === "mindmap" ? "text" : "mindmap")}
+                      className="ghost-button text-xs"
+                      style={{ "--ghost-color": summaryViewMode === "mindmap" ? "52, 211, 153" : "148, 163, 184" }}
+                    >
+                      {summaryViewMode === "mindmap" ? "텍스트 보기" : "마인드맵"}
+                    </button>
+                  )}
                 </div>
               </div>
               {status && <p className="mt-2 text-sm text-emerald-200">{status}</p>}
@@ -1002,7 +1014,12 @@ export default function DetailPage({
                 )}
               </div>
               {isLoadingSummary && <p className="mt-2 text-sm text-slate-300">{"\uC694\uC57D \uC0DD\uC131 \uC911..."}</p>}
-              {!isLoadingSummary && summary && (
+              {!isLoadingSummary && summary && summaryViewMode === "mindmap" && (
+                <div className="mt-3">
+                  <MindMapView summary={summary} />
+                </div>
+              )}
+              {!isLoadingSummary && summary && summaryViewMode === "text" && (
                 <div ref={summaryRef}>
                   <SummaryCard
                     summary={summary}
