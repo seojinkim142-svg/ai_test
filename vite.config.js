@@ -165,12 +165,6 @@ export default defineConfig(async ({ mode }) => {
     ],
     esbuild: {
       jsx: "automatic",
-      // 트리 쉐이킹 최적화
-      treeShaking: true,
-      // 데드 코드 제거
-      minifyIdentifiers: mode === 'production',
-      minifySyntax: mode === 'production',
-      minifyWhitespace: mode === 'production',
     },
     build: {
       // 소스맵 설정
@@ -194,8 +188,6 @@ export default defineConfig(async ({ mode }) => {
           assetFileNames: mode === 'production'
             ? 'assets/[name]-[hash].[ext]'
             : 'assets/[name].[ext]',
-          // 코드 스플리팅 최적화
-          experimentalMinChunkSize: 10000, // 10KB
         },
         // 외부 의존성 제외 (CDN에서 로드)
         external: [],
