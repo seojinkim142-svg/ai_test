@@ -490,8 +490,6 @@ function NodeAIPanel({ activeNode, onJumpToPage }) {
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           <span style={{ fontSize: 12, color: "#6366f1" }}>✦</span>
           <span style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", flex: 1 }}>AI에게 묻기</span>
-          {/* send icon placeholder */}
-          <span style={{ width: 28, height: 28, borderRadius: 8, background: "#eef2ff", display: "flex", alignItems: "center", justifyContent: "center", color: "#6366f1", fontSize: 13 }}>→</span>
         </div>
         {activeNode && (
           <p style={{ fontSize: 11, color: s.accent, marginTop: 6, fontWeight: 600, wordBreak: "break-word", lineHeight: 1.35 }}>
