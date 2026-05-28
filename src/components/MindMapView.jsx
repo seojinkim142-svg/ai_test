@@ -411,6 +411,10 @@ const QUICK_ACTIONS = [
   { icon: "📌", label: "예시",           prompt: "이 내용을 실제 예시를 들어 설명해줘." },
 ];
 
+function preprocessCitations(text) {
+  return text.replace(/\[(?:문서:)?p\.(\d+)\]/g, "[p.$1](#page-$1)");
+}
+
 async function generateWonderQuestions(label, content) {
   const ctx = `제목: ${label}\n${content ? `내용: ${content}` : ""}`;
   const raw = await generateDocAnswer(
@@ -579,6 +583,7 @@ function NodeAIPanel({ activeNode, onJumpToPage }) {
                 remarkPlugins={[remarkGfm, remarkMath]}
                 rehypePlugins={[rehypeKatex]}
                 components={{
+
                   p: ({ children }) => <p style={{ margin: "0 0 6px", lineHeight: 1.6 }}>{children}</p>,
                   ul: ({ children }) => <ul style={{ margin: "4px 0", paddingLeft: 16 }}>{children}</ul>,
                   ol: ({ children }) => <ol style={{ margin: "4px 0", paddingLeft: 18 }}>{children}</ol>,
@@ -589,30 +594,21 @@ function NodeAIPanel({ activeNode, onJumpToPage }) {
                     ? <code style={{ background: "#f1f5f9", borderRadius: 4, padding: "1px 5px", fontSize: 11, fontFamily: "monospace", color: "#0f172a" }}>{children}</code>
                     : <code style={{ display: "block", background: "#f1f5f9", borderRadius: 6, padding: "8px 10px", fontSize: 11, fontFamily: "monospace", color: "#0f172a", overflowX: "auto", margin: "6px 0" }}>{children}</code>,
                   blockquote: ({ children }) => <blockquote style={{ borderLeft: "3px solid #c7d2fe", paddingLeft: 10, margin: "4px 0", color: "#64748b", fontStyle: "italic" }}>{children}</blockquote>,
-                  text: ({ children }) => {
-                    const str = String(children || "");
-                    PAGE_RE.lastIndex = 0;
-                    if (!PAGE_RE.test(str)) { PAGE_RE.lastIndex = 0; return <>{str}</>; }
-                    PAGE_RE.lastIndex = 0;
-                    const parts = [];
-                    let last = 0, m;
-                    while ((m = PAGE_RE.exec(str)) !== null) {
-                      if (m.index > last) parts.push(<span key={last}>{str.slice(last, m.index)}</span>);
-                      const page = parseInt(m[1], 10);
-                      parts.push(
-                        <button key={m.index} type="button" onClick={() => onJumpToPage?.(page)}
+                  a: ({ href, children }) => {
+                    const match = href?.match(/^#page-(\d+)$/);
+                    if (match) {
+                      return (
+                        <button type="button" onClick={() => onJumpToPage?.(parseInt(match[1], 10))}
                           style={{ background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: 9999, color: "#7c3aed", fontSize: 10, padding: "1px 7px", cursor: "pointer", fontFamily: "inherit", lineHeight: 1.3, verticalAlign: "middle", margin: "0 2px" }}>
-                          p.{m[1]}
+                          {children}
                         </button>
                       );
-                      last = m.index + m[0].length;
                     }
-                    if (last < str.length) parts.push(<span key={last}>{str.slice(last)}</span>);
-                    return <>{parts}</>;
+                    return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>;
                   },
                 }}
               >
-                {m.content}
+                {preprocessCitations(m.content)}
               </ReactMarkdown>
             )}
           </div>
