@@ -37,6 +37,8 @@ const EXTRA_CSS = `
   color: #a78bfa;
   border: 1px solid rgba(139, 92, 246, 0.3);
   cursor: pointer;
+  font-family: inherit;
+  line-height: 1.35;
 }
 .markmap-foreign .mm-anchor:hover {
   background: rgba(139, 92, 246, 0.3);
@@ -80,17 +82,17 @@ function injectAnchorTags(markdown) {
     (_, page, bracketTier, parenTier) => {
       const tier = bracketTier || parenTier;
       return page
-        ? `<a class="mm-anchor" data-page="${page}" href="#">p.${page}</a>`
+        ? `<button type="button" class="mm-anchor" data-page="${page}">p.${page}</button>`
         : `<span class="mm-tier mm-tier--${tier.toLowerCase()}">${tier}</span>`;
     }
   );
 }
 
 function createPageAnchor(doc, page) {
-  const anchor = doc.createElement("a");
+  const anchor = doc.createElement("button");
+  anchor.type = "button";
   anchor.className = "mm-anchor";
   anchor.dataset.page = page;
-  anchor.href = "#";
   anchor.textContent = `p.${page}`;
   return anchor;
 }
@@ -190,7 +192,9 @@ export default function MindMapView({ summary, onJumpToPage }) {
         pointerDownRef.current = null;
         return;
       }
+      event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation?.();
       pointerDownRef.current = { x: event.clientX, y: event.clientY };
     };
     const handleClick = (event) => {
@@ -199,6 +203,7 @@ export default function MindMapView({ summary, onJumpToPage }) {
 
       event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation?.();
 
       const start = pointerDownRef.current;
       pointerDownRef.current = null;

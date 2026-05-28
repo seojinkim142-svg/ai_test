@@ -1040,7 +1040,6 @@ export default function DetailPage({
                         onJumpToPage={typeof onJumpToSummaryPage === "function"
                           ? (pageNumber, ...rest) => {
                               onJumpToSummaryPage(pageNumber, ...rest);
-                              window.scrollTo({ top: 0, behavior: "smooth" });
                             }
                           : undefined}
                       />
