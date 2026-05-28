@@ -19,6 +19,7 @@ const MS_PER_DAY = 1000 * 60 * 60 * 24;
 const PREMIUM_PROFILES_META_KEY = "premium_profiles_v1";
 const PREMIUM_ACTIVE_PROFILE_META_KEY = "premium_active_profile_id_v1";
 const PREMIUM_SPACE_MODE_META_KEY = "premium_space_mode_v1";
+const THEME_META_KEY = "app_theme_v1";
 const normalizeAbsoluteUrl = (value) => {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -831,6 +832,21 @@ export async function savePremiumProfileState({
   };
 
   const { data, error } = await client.auth.updateUser({ data: payload });
+  if (error) throw error;
+  return data?.user || null;
+}
+
+export function getThemeFromUser(user) {
+  const meta = user?.user_metadata;
+  const saved = meta?.[THEME_META_KEY];
+  return saved === "light" || saved === "dark" ? saved : null;
+}
+
+export async function saveTheme(theme) {
+  const client = requireSupabase();
+  const { data, error } = await client.auth.updateUser({
+    data: { [THEME_META_KEY]: theme },
+  });
   if (error) throw error;
   return data?.user || null;
 }
