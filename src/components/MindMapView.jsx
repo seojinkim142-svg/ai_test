@@ -55,10 +55,10 @@ export default function MindMapView({ summary }) {
         color: ["#34d399", "#60a5fa", "#f472b6", "#fb923c", "#a78bfa", "#facc15", "#38bdf8", "#f87171"],
         duration: 350,
         maxWidth: nodeMaxWidth,
-        initialExpandLevel: 2,
+        initialExpandLevel: 1,
         paddingX: 16,
-        spacingHorizontal: 80,
-        spacingVertical: 10,
+        spacingHorizontal: 90,
+        spacingVertical: 8,
       }), root);
     } catch (e) {
       console.error("MindMap render error", e);

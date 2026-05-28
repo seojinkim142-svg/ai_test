@@ -2947,28 +2947,67 @@ export async function generateMindMap(summaryText, { outputLanguage = "ko" } = {
   if (!trimmed) throw new Error("No summary text available for mindmap generation.");
 
   const prompt = `
-Convert the following study summary into a detailed, visually rich mindmap in Markdown format (for markmap rendering).
+Convert the following study summary into a traceable, hierarchical mindmap in Markdown format (for markmap rendering).
+Generate 15–30 nodes in a single response — produce the full structure at once.
 
-Structure:
-- # Root: one concise title representing the overall subject
-- ## Main branches: 4–7 major sections or concepts (use meaningful subject names, not generic labels)
-- ### Sub-branches: 2–5 per main branch, each representing a key concept or component
-- Under each branch/sub-branch, add 2–4 bullet points (- ) that include:
-  · **Bold** key terms or names
-  · A brief but informative explanation (phrase or short sentence)
-  · Formulas, definitions, or important distinctions where relevant
+━━━ PRINCIPLE ① HIERARCHY (요약 → 상세 → 데이터, 3-layer) ━━━
+- # Root: one concise document title (1 short phrase)
+- ## Layer 1 — Major branches (4–8 total):
+  · One per chapter/section identified in the summary
+  · Text = 1-sentence summary of that section's core argument
+  · Add two fixed navigation branches (see PRINCIPLE ⑤ below)
+- ### Layer 2 — Sub-branches (2–5 per ## branch):
+  · One per key concept or component within the section
+  · Text = concise label of the concept (not a full sentence)
+- - Layer 3 — Leaf bullet points (2–4 per ### node):
+  · Text = specific detail, data point, or evidence for the concept above
+  · One concept per bullet — split any long idea into separate bullets
 
-COMMIT rules (evidence gate):
-- Use ONLY content marked as [T1] (verbatim quote with page anchor) or clearly sourced facts for mindmap nodes.
-- If a piece of information is only [T2] (paraphrase) or [T3] (cross-reference), either omit it or mark it with a "(T2)" or "(T3)" suffix on the bullet.
-- Never assert facts in the mindmap that cannot be traced back to the summary's evidence.
-- Include page anchors (e.g. [p.3]) in bullet points when present in the summary.
+━━━ PRINCIPLE ② TRACEABILITY (추적 가능성) ━━━
+- Every leaf bullet that makes a factual claim MUST end with a page anchor: [p.N]
+- Only use page numbers that appear in the summary (e.g. [p.3], [p.7])
+- If no page anchor is available, mark the bullet with (T2) to signal lower confidence
+- Example: "- **정의**: 미토콘드리아는 ATP를 생산한다 [p.4]"
+
+━━━ PRINCIPLE ③ INTERACTIVE QUESTIONS (확인 질문) ━━━
+Add one fixed ## branch at the end:
+## 확인 질문
+- Under it, list 3–5 key questions the reader should be able to answer after studying this material
+- Frame as genuine comprehension checks, not generic questions
+- Example: "- 이 개념이 다른 섹션의 X와 어떻게 연결되는가?"
+
+━━━ PRINCIPLE ④ MANDATORY SOURCE NODE (출처) ━━━
+Add one fixed ## branch:
+## 출처
+- List the inferred document title or topic as a bullet
+- List the page range covered if determinable from anchors in the summary
+- Example: "- 문서: [문서 제목 또는 주제]", "- 페이지 범위: p.1 – p.N"
+
+━━━ PRINCIPLE ⑤ NAVIGATION NODES (내비게이션) ━━━
+Add these two fixed ## branches (place them first, right after the root):
+## 시작점
+- 이 문서의 전체 주제와 목적 (1–2 bullets)
+- 권장 읽기 순서: [섹션 순서] (1 bullet)
+
+## 다음 단계
+- 3–5 concrete actions the reader should take after reviewing this mindmap
+  (e.g. "핵심 근거 [T1] 항목을 원문에서 직접 확인", "미해결 쟁점 추가 조사")
+
+━━━ PRINCIPLE ⑥ VISUAL STRATEGY (3-layer 구조 엄수) ━━━
+- ## = 요약 레이어 (1-sentence argument)
+- ### = 상세 레이어 (concept label)
+- - = 데이터 레이어 (evidence + anchor)
+- Do NOT collapse multiple layers into one long node
+- Do NOT use emoji or decorative symbols
+- Use **bold** only for key terms and named concepts within bullet text
+
+━━━ COMMIT GATE (PRINCIPLE ⑤ evidence filter) ━━━
+- Include a node ONLY if its content can be traced to the summary's T1 evidence (verbatim quote + anchor)
+- T2 content (paraphrase, no direct quote): allowed but must end with (T2)
+- T3 content (cross-reference only): move to "타 섹션 연관" sub-node, mark (T3)
+- Never assert facts that have no traceability marker
 
 Formatting rules:
-- Use **bold** to highlight important terms, names, and formulas within bullet points
-- Do NOT use any emoji or special symbols
-- Keep bullet text informative — include the evidence anchor when available (e.g. "**개념명**: 설명 [p.3]")
-- Do NOT use generic branch names like "개요", "Overview", "핵심 공식", "주요 용어"
 - Output ONLY the markdown. No code fences, no extra commentary.
 - Language: ${outputLanguageLabel}
 
@@ -2983,7 +3022,7 @@ ${trimmed}
         {
           role: "system",
           content:
-            "You are an expert at converting academic content into detailed, visually rich mindmaps using Markdown for markmap. Use headings (#, ##, ###) for hierarchy and bullet points (- ) for details. Bold key terms. Add emojis to main branches. Output ONLY the markdown.",
+            "You are an expert at building traceable, hierarchical mindmaps from academic summaries using Markdown for markmap. Apply strict 3-layer structure (## summary → ### detail → - data+anchor). Add navigation, source, and question nodes. Generate the full 15–30 node structure in a single response. Output ONLY the markdown.",
         },
         { role: "user", content: prompt },
       ],
