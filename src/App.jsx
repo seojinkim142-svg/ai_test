@@ -5883,13 +5883,14 @@ function App() {
     }
   };
 
-  const requestMindMap = useCallback(async () => {
+  const requestMindMap = useCallback(async ({ force = false } = {}) => {
     const currentSummary = String(summary || "").trim();
     console.log("[MindMap] requestMindMap called, summary length:", currentSummary.length);
     if (!currentSummary) { console.log("[MindMap] abort: no summary"); return; }
     if (isLoadingMindmap) { console.log("[MindMap] abort: already loading"); return; }
-    if (mindmapSummarySourceRef.current === currentSummary && mindmapData) { console.log("[MindMap] abort: cached"); return; }
+    if (!force && mindmapSummarySourceRef.current === currentSummary && mindmapData) { console.log("[MindMap] abort: cached"); return; }
 
+    mindmapSummarySourceRef.current = "";
     setIsLoadingMindmap(true);
     setMindmapData("");
     try {

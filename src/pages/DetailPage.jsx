@@ -1034,7 +1034,22 @@ export default function DetailPage({
                       마인드맵 생성 중...
                     </div>
                   ) : (
-                    <MindMapView summary={mindmapData} />
+                    <>
+                      <MindMapView summary={mindmapData} />
+                      {mindmapData && (
+                        <div className="mt-2 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => requestMindMap?.({ force: true })}
+                            className="ghost-button text-[11px] text-slate-400"
+                            data-ghost-size="sm"
+                            style={{ "--ghost-color": "148, 163, 184" }}
+                          >
+                            ↺ 재생성
+                          </button>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}

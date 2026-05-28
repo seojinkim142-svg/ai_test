@@ -2837,15 +2837,24 @@ export async function generateMindMap(summaryText, { outputLanguage = "ko" } = {
   if (!trimmed) throw new Error("No summary text available for mindmap generation.");
 
   const prompt = `
-Convert the following study summary into a concise mindmap skeleton using markdown headings only.
+Convert the following study summary into a detailed, visually rich mindmap in Markdown format (for markmap rendering).
 
-Rules:
-- Use # for the single root topic (overall subject — 1 short line)
-- Use ## for main topics (4–8 total)
-- Use ### for subtopics where useful (max 3–4 per parent)
-- Each node MUST be a short keyword or phrase (2–6 words). No full sentences, no colons.
-- Output ONLY markdown headings. No bullet points, no prose, no explanations.
-- Integrate key formulas, terms, and concepts as heading names — do NOT reproduce section headers like "개요", "핵심 공식", "주요 용어" verbatim.
+Structure:
+- # Root: one concise title representing the overall subject
+- ## Main branches: 4–7 major sections or concepts (use meaningful subject names, not generic labels)
+- ### Sub-branches: 2–5 per main branch, each representing a key concept or component
+- Under each branch/sub-branch, add 2–4 bullet points (- ) that include:
+  · **Bold** key terms or names
+  · A brief but informative explanation (phrase or short sentence)
+  · Formulas, definitions, or important distinctions where relevant
+
+Formatting rules:
+- Use **bold** to highlight important terms, names, and formulas within bullet points
+- Add a relevant emoji (💡🔑📌⚡🔧📐✅🧩) at the start of ## headings for visual variety
+- Keep bullet text informative — not just a single keyword, but a meaningful phrase
+- Reference section numbers or page labels (e.g. "p3:L2") only if clearly present in the summary
+- Do NOT use generic branch names like "개요", "Overview", "핵심 공식", "주요 용어"
+- Output ONLY the markdown. No code fences, no extra commentary.
 - Language: ${outputLanguageLabel}
 
 [Summary]
@@ -2859,11 +2868,11 @@ ${trimmed}
         {
           role: "system",
           content:
-            "You are converting an academic summary into a compact mindmap outline. Output ONLY markdown headings (# ## ###). No bullet points, no prose, no extra commentary.",
+            "You are an expert at converting academic content into detailed, visually rich mindmaps using Markdown for markmap. Use headings (#, ##, ###) for hierarchy and bullet points (- ) for details. Bold key terms. Add emojis to main branches. Output ONLY the markdown.",
         },
         { role: "user", content: prompt },
       ],
-      temperature: 0.4,
+      temperature: 0.5,
     },
     { retries: 1 }
   );
