@@ -294,7 +294,7 @@ const resolveLimitParam = (req) => {
 const resolveSyncErrorMessage = (error) => {
   const rawMessage = text(error?.responseText || error?.response || error?.message);
   if (error?.authenticationFailed || text(error?.serverResponseCode).toUpperCase() === "AUTH") {
-    return "?ㅼ씠踰?IMAP 濡쒓렇?몄뿉 ?ㅽ뙣?덉뒿?덈떎. ?ㅼ씠踰?硫붿씪??IMAP/SMTP ?ъ슜?? 2?④퀎 ?몄쬆, ?좏뵆由ъ??댁뀡 鍮꾨?踰덊샇瑜??ㅼ떆 ?뺤씤??二쇱꽭??";
+    return "이메일 IMAP 서버 인증에 실패했습니다. 이메일 계정의 IMAP/SMTP 사용, 2단계 인증, 앱 비밀번호 설정을 다시 확인해 주세요.";
   }
   return rawMessage || "Feedback reply sync failed.";
 };
@@ -320,15 +320,15 @@ const buildReplySubject = (feedback) => {
 
 const buildReplyText = ({ replyContent, adminName, senderName, originalContent }) =>
   [
-    `?덈뀞?섏꽭??{senderName ? `, ${senderName}?? : ""}.`,
+    `안녕하세요${senderName ? `, ${senderName}님` : ""}.`,
     "",
-    "Zeusian ?댁쁺?먯뿉???쇰뱶諛깆뿉 ?듬??쒕┰?덈떎.",
-    adminName ? `?대떦?? ${adminName}` : "",
+    "Zeusian 서비스에서 보낸 피드백에 답변 드립니다.",
+    adminName ? `담당자: ${adminName}` : "",
     "",
-    "[?듬?]",
+    "[답변]",
     text(replyContent),
     "",
-    "[蹂대궡二쇱떊 ?쇰뱶諛?",
+    "[원본 피드백]",
     text(originalContent),
   ]
     .filter(Boolean)
@@ -336,13 +336,13 @@ const buildReplyText = ({ replyContent, adminName, senderName, originalContent }
 
 const buildReplyHtml = ({ replyContent, adminName, senderName, originalContent }) => `
   <div style="font-family:Arial,sans-serif;line-height:1.7;color:#0f172a;">
-    <p style="margin:0 0 12px;">?덈뀞?섏꽭??{senderName ? `, ${escapeHtml(senderName)}?? : ""}.</p>
-    <p style="margin:0 0 16px;">Zeusian ?댁쁺?먯뿉???쇰뱶諛깆뿉 ?듬??쒕┰?덈떎.${adminName ? ` ?대떦?? ${escapeHtml(adminName)}` : ""}</p>
-    <h3 style="margin:0 0 8px;">?듬?</h3>
+    <p style="margin:0 0 12px;">안녕하세요${senderName ? `, ${escapeHtml(senderName)}님` : ""}.</p>
+    <p style="margin:0 0 16px;">Zeusian 서비스에서 보낸 피드백에 답변 드립니다.${adminName ? ` 담당자: ${escapeHtml(adminName)}` : ""}</p>
+    <h3 style="margin:0 0 8px;">답변</h3>
     <div style="white-space:pre-wrap;padding:14px;border:1px solid #cbd5e1;background:#f8fafc;">${escapeHtml(
       replyContent
     )}</div>
-    <h3 style="margin:20px 0 8px;">蹂대궡二쇱떊 ?쇰뱶諛?/h3>
+    <h3 style="margin:20px 0 8px;">원본 피드백</h3>
     <div style="white-space:pre-wrap;padding:14px;border:1px solid #cbd5e1;background:#f8fafc;">${escapeHtml(
       originalContent
     )}</div>

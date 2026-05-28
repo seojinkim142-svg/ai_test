@@ -262,7 +262,7 @@ function AiTutorPanel({
             const hasContent = Boolean(String(message?.content || "").trim());
             return (
               <div
-                key={`tutor-${index}`}
+                key={message.id ?? `tutor-${index}`}
                 className={`max-w-[75%] min-w-0 rounded-2xl border px-4 py-3 shadow-inner shadow-black/20 caret-transparent ${
                   isUser
                     ? "self-end border-emerald-300/30 bg-emerald-500/10"
