@@ -183,8 +183,8 @@ const FileUpload = memo(function FileUpload({
     [currentTier, maxPdfSizeBytes, copy]
   );
   const uploadGridClassName = isNativePlatform
-    ? `relative mt-1 grid gap-3 sm:mt-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 ${sidebarOpen ? "grid-cols-1 sm:grid-cols-3" : "grid-cols-2"}`
-    : `relative mt-1 grid gap-3 sm:mt-2 sm:flex sm:flex-wrap ${sidebarOpen ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-2"}`;
+    ? `relative mt-1 grid gap-3 sm:mt-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 ${sidebarOpen ? "grid-cols-1" : "grid-cols-2"}`
+    : `relative mt-1 grid gap-3 sm:mt-2 sm:flex sm:flex-wrap grid-cols-2`;
   const emptyStateClassName = isNativePlatform
     ? "col-span-full flex min-h-[170px] w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 text-center text-sm text-slate-300 ring-1 ring-white/5"
     : "col-span-2 flex min-h-[170px] w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 text-center text-sm text-slate-300 ring-1 ring-white/5 sm:w-[260px] sm:flex-shrink-0";
@@ -296,7 +296,7 @@ const FileUpload = memo(function FileUpload({
             onOpenMenu={handleOpenAddMenu}
             inputRef={fileInputRef}
             compactGrid={isNativePlatform}
-            rowLayout={sidebarOpen}
+            rowLayout={isNativePlatform && sidebarOpen}
             title={copy.upload.addDocument}
             description={copy.upload.uploadPrompt}
             caption={copy.upload.previewPdfOnly}
@@ -377,7 +377,7 @@ const FileUpload = memo(function FileUpload({
               onDragStart={undefined}
               onDragEnd={undefined}
               compactGrid={isNativePlatform}
-              rowLayout={sidebarOpen}
+              rowLayout={isNativePlatform && sidebarOpen}
               onProceed={() => onSelectFile?.(item)}
               onContextMenu={(e) => handleContextMenuUpload(e, item)}
               onDelete={() => onDeleteUpload?.(item)}
