@@ -32,7 +32,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
   const [settingsConfirmPin, setSettingsConfirmPin] = useState("");
   const [settingsError, setSettingsError] = useState("");
   const [settingsSubmitting, setSettingsSubmitting] = useState(null); // "rename"|"pin"|"disable"|null
-  const [settingsDisableConfirm, setSettingsDisableConfirm] = useState(false);
+  const [isDisablePopupOpen, setIsDisablePopupOpen] = useState(false);
 
   const nameInputRef = useRef(null);
   const pinInputRef = useRef(null);
@@ -151,7 +151,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
     setSettingsConfirmPin("");
     setSettingsError("");
     setSettingsSubmitting(null);
-    setSettingsDisableConfirm(false);
+    setIsDisablePopupOpen(false);
   }, []);
 
   const handleSettingsRename = useCallback(
@@ -194,22 +194,22 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
     [closeSettingsDialog, onChangePin, settingsConfirmPin, settingsCurrentPin, settingsNewPin, settingsSubmitting, settingsTargetId]
   );
 
-  const handleSettingsDisablePin = useCallback(
+  const handleDisablePopupConfirm = useCallback(
     async () => {
       if (!settingsTargetId || settingsSubmitting) return;
-      if (!settingsDisableConfirm) { setSettingsDisableConfirm(true); return; }
-      if (!/^\d{4}$/.test(settingsCurrentPin)) { setSettingsError("현재 PIN 4자리를 입력해주세요."); return; }
+      if (!/^\d{4}$/.test(settingsCurrentPin)) { setSettingsError("현재 PIN 4자리를 입력해주세요."); setIsDisablePopupOpen(false); return; }
       setSettingsSubmitting("disable");
       try {
         const result = await onDisablePin?.(settingsTargetId, settingsCurrentPin);
         const isOk = result?.ok ?? result === true;
-        if (!isOk) { setSettingsError(result?.message || "PIN이 올바르지 않습니다."); return; }
+        if (!isOk) { setSettingsError(result?.message || "PIN이 올바르지 않습니다."); setIsDisablePopupOpen(false); return; }
         closeSettingsDialog();
       } finally {
         setSettingsSubmitting(null);
+        setIsDisablePopupOpen(false);
       }
     },
-    [closeSettingsDialog, onDisablePin, settingsCurrentPin, settingsDisableConfirm, settingsSubmitting, settingsTargetId]
+    [closeSettingsDialog, onDisablePin, settingsCurrentPin, settingsSubmitting, settingsTargetId]
   );
 
   const handleAvatarError = useCallback((event) => {
@@ -245,9 +245,13 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
   }, [isSettingsDialogOpen]);
 
   useEffect(() => {
-    if (!isCreateDialogOpen && !isPinDialogOpen && !isSettingsDialogOpen) return undefined;
+    if (!isCreateDialogOpen && !isPinDialogOpen && !isSettingsDialogOpen && !isDisablePopupOpen) return undefined;
     const onKeyDown = (event) => {
       if (event.key !== "Escape") return;
+      if (isDisablePopupOpen) {
+        setIsDisablePopupOpen(false);
+        return;
+      }
       if (isSettingsDialogOpen) {
         closeSettingsDialog();
         return;
@@ -267,7 +271,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
       document.body.style.overflow = prevOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [closeCreateDialog, closePinDialog, closeSettingsDialog, isCreateDialogOpen, isPinDialogOpen, isSettingsDialogOpen]);
+  }, [closeCreateDialog, closePinDialog, closeSettingsDialog, isCreateDialogOpen, isDisablePopupOpen, isPinDialogOpen, isSettingsDialogOpen]);
 
   const createProfileDialog =
     isCreateDialogOpen && typeof document !== "undefined"
@@ -530,25 +534,17 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
               <div>
                 <p className={`mb-1 text-xs font-semibold ${isLight ? "text-slate-700" : "text-slate-300"}`}>PIN 없이 사용</p>
                 <p className={`mb-2 text-[11px] ${isLight ? "text-slate-500" : "text-slate-500"}`}>
-                  {settingsDisableConfirm
-                    ? "정말로 이 프로필의 PIN 보호를 해제하시겠습니까?"
-                    : "이 프로필을 PIN 없이 바로 접근할 수 있게 합니다."}
+                  이 프로필을 PIN 없이 바로 접근할 수 있게 합니다.
                 </p>
                 <button
                   type="button"
-                  onClick={handleSettingsDisablePin}
+                  onClick={() => setIsDisablePopupOpen(true)}
                   disabled={settingsSubmitting === "disable"}
-                  className={`ghost-button text-xs disabled:opacity-60 ${
-                    settingsDisableConfirm ? "text-rose-300" : isLight ? "text-slate-600" : "text-slate-400"
-                  }`}
+                  className={`ghost-button text-xs disabled:opacity-60 ${isLight ? "text-slate-600" : "text-slate-400"}`}
                   data-ghost-size="sm"
-                  style={{ "--ghost-color": settingsDisableConfirm ? "252, 165, 165" : "148, 163, 184" }}
+                  style={{ "--ghost-color": "148, 163, 184" }}
                 >
-                  {settingsSubmitting === "disable"
-                    ? "처리 중..."
-                    : settingsDisableConfirm
-                      ? "PIN 해제 확인"
-                      : "PIN 없이 사용"}
+                  PIN 없이 사용
                 </button>
               </div>
 
@@ -563,6 +559,58 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
                   style={{ "--ghost-color": "148, 163, 184" }}
                 >
                   닫기
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
+
+  const disablePopup =
+    isDisablePopupOpen && typeof document !== "undefined"
+      ? createPortal(
+          <div className="fixed inset-0 z-[170] flex items-center justify-center px-4">
+            <button
+              type="button"
+              aria-label="취소"
+              onClick={() => setIsDisablePopupOpen(false)}
+              className={`absolute inset-0 ${
+                isLight ? "bg-slate-900/[0.3] backdrop-blur-[2px]" : "bg-black/[0.8] backdrop-blur-[1px]"
+              }`}
+            />
+            <div
+              className={`relative z-[171] w-full max-w-sm rounded-2xl border p-5 ${
+                isLight
+                  ? "border-slate-200 bg-white shadow-[0_20px_80px_rgba(15,23,42,0.22)]"
+                  : "border-white/10 bg-slate-950/[0.97] shadow-[0_20px_80px_rgba(0,0,0,0.72)]"
+              }`}
+            >
+              <p className={`text-sm font-semibold ${isLight ? "text-slate-900" : "text-slate-100"}`}>
+                PIN 보호 해제
+              </p>
+              <p className={`mt-2 text-xs ${isLight ? "text-slate-500" : "text-slate-400"}`}>
+                PIN 보호를 해제하면 누구나 이 프로필에 바로 접근할 수 있습니다. 정말 해제하시겠습니까?
+              </p>
+              <div className="mt-4 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsDisablePopupOpen(false)}
+                  className={`ghost-button text-xs ${isLight ? "text-slate-700" : "text-slate-200"}`}
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": "148, 163, 184" }}
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDisablePopupConfirm}
+                  disabled={settingsSubmitting === "disable"}
+                  className="ghost-button text-xs text-rose-300 disabled:opacity-60"
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": "252, 165, 165" }}
+                >
+                  {settingsSubmitting === "disable" ? "처리 중..." : "PIN 해제"}
                 </button>
               </div>
             </div>
@@ -694,6 +742,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
       {createProfileDialog}
       {pinDialog}
       {settingsDialog}
+      {disablePopup}
     </>
   );
 });
