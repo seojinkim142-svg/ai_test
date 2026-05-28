@@ -71,7 +71,7 @@ function injectExtraCSS() {
   extraCSSInjected = true;
 }
 
-const INLINE_BADGE_RE = /\[(?:[^\]:]+:)?p\.(\d+)\]|\[(T[123])\]|\((T[123])\)/g;
+const INLINE_BADGE_RE = /\[(?:[^\]:]+:)?p\.(\d+)\]|\[(T[123])\]|\((T[123])\)/gi;
 
 function createPageAnchor(doc, page) {
   const anchor = doc.createElement("a");
@@ -164,6 +164,7 @@ export default function MindMapView({ summary, onJumpToPage }) {
         pointerDownRef.current = null;
         return;
       }
+      event.stopPropagation();
       pointerDownRef.current = { x: event.clientX, y: event.clientY };
     };
     const handleClick = (event) => {
@@ -195,16 +196,16 @@ export default function MindMapView({ summary, onJumpToPage }) {
         spacingVertical: 8,
       }), root);
       badgeFrame = window.requestAnimationFrame(() => renderInlineBadges(svg));
-      svg.addEventListener("pointerdown", handlePointerDown);
-      svg.addEventListener("click", handleClick);
+      svg.addEventListener("pointerdown", handlePointerDown, true);
+      svg.addEventListener("click", handleClick, true);
     } catch (e) {
       console.error("MindMap render error", e);
     }
 
     return () => {
       if (badgeFrame) window.cancelAnimationFrame(badgeFrame);
-      svg.removeEventListener("pointerdown", handlePointerDown);
-      svg.removeEventListener("click", handleClick);
+      svg.removeEventListener("pointerdown", handlePointerDown, true);
+      svg.removeEventListener("click", handleClick, true);
       mm?.destroy?.();
       svg.innerHTML = "";
     };
