@@ -20,8 +20,8 @@ const EXTRA_CSS = `
 .markmap-foreign { line-height: 1.55; }
 .markmap-foreign div { font-size: 13px; }
 .markmap-foreign strong { font-weight: 700; }
-.mm-anchor,
-.mm-tier {
+.markmap-foreign .mm-anchor,
+.markmap-foreign .mm-tier {
   display: inline-flex;
   align-items: center;
   margin-left: 4px;
@@ -32,30 +32,31 @@ const EXTRA_CSS = `
   white-space: nowrap;
   text-decoration: none;
 }
-.mm-anchor {
+.markmap-foreign .mm-anchor {
   background: rgba(139, 92, 246, 0.15);
   color: #a78bfa;
   border: 1px solid rgba(139, 92, 246, 0.3);
   cursor: pointer;
 }
-.mm-anchor:hover {
+.markmap-foreign .mm-anchor:hover {
   background: rgba(139, 92, 246, 0.3);
+  color: #ddd6fe;
 }
-.mm-tier {
+.markmap-foreign .mm-tier {
   font-weight: 600;
   border: 1px solid transparent;
 }
-.mm-tier--t1 {
+.markmap-foreign .mm-tier--t1 {
   background: rgba(34, 197, 94, 0.15);
   color: #86efac;
   border-color: rgba(34, 197, 94, 0.3);
 }
-.mm-tier--t2 {
+.markmap-foreign .mm-tier--t2 {
   background: rgba(234, 179, 8, 0.16);
   color: #fde68a;
   border-color: rgba(234, 179, 8, 0.35);
 }
-.mm-tier--t3 {
+.markmap-foreign .mm-tier--t3 {
   background: rgba(148, 163, 184, 0.14);
   color: #cbd5e1;
   border-color: rgba(148, 163, 184, 0.28);
@@ -72,6 +73,18 @@ function injectExtraCSS() {
 }
 
 const INLINE_BADGE_RE = /\[(?:[^\]:]+:)?p\.(\d+)\]|\[(T[123])\]|\((T[123])\)/gi;
+
+function injectAnchorTags(markdown) {
+  return String(markdown || "").replace(
+    INLINE_BADGE_RE,
+    (_, page, bracketTier, parenTier) => {
+      const tier = bracketTier || parenTier;
+      return page
+        ? `<a class="mm-anchor" data-page="${page}" href="#">p.${page}</a>`
+        : `<span class="mm-tier mm-tier--${tier.toLowerCase()}">${tier}</span>`;
+    }
+  );
+}
 
 function createPageAnchor(doc, page) {
   const anchor = doc.createElement("a");
@@ -151,13 +164,26 @@ export default function MindMapView({ summary, onJumpToPage }) {
 
     svgRef.current.innerHTML = "";
     pointerDownRef.current = null;
+    let isDisposed = false;
 
     const containerWidth = containerRef.current?.clientWidth || 500;
     const nodeMaxWidth = Math.min(420, Math.max(220, Math.floor(containerWidth * 0.38)));
 
     let mm;
     let badgeFrame = 0;
+    let badgeTimer = 0;
     const svg = svgRef.current;
+    const scheduleBadgeRender = () => {
+      if (isDisposed) return;
+      if (badgeFrame) window.cancelAnimationFrame(badgeFrame);
+      if (badgeTimer) window.clearTimeout(badgeTimer);
+      badgeFrame = window.requestAnimationFrame(() => {
+        if (!isDisposed) renderInlineBadges(svg);
+        badgeTimer = window.setTimeout(() => {
+          if (!isDisposed) renderInlineBadges(svg);
+        }, 120);
+      });
+    };
     const handlePointerDown = (event) => {
       const anchor = event.target instanceof Element ? event.target.closest(".mm-anchor") : null;
       if (!anchor) {
@@ -184,8 +210,8 @@ export default function MindMapView({ summary, onJumpToPage }) {
       }
     };
 
-    try {
-      const { root } = transformer.transform(summary);
+    const renderMindMap = async () => {
+      const { root } = transformer.transform(injectAnchorTags(summary));
       mm = Markmap.create(svg, deriveOptions({
         color: ["#34d399", "#60a5fa", "#f472b6", "#fb923c", "#a78bfa", "#facc15", "#38bdf8", "#f87171"],
         duration: 350,
@@ -194,16 +220,37 @@ export default function MindMapView({ summary, onJumpToPage }) {
         paddingX: 16,
         spacingHorizontal: 90,
         spacingVertical: 8,
-      }), root);
-      badgeFrame = window.requestAnimationFrame(() => renderInlineBadges(svg));
+      }));
+
+      const originalRenderData = mm.renderData.bind(mm);
+      mm.renderData = async (...args) => {
+        const result = await originalRenderData(...args);
+        scheduleBadgeRender();
+        return result;
+      };
+
       svg.addEventListener("pointerdown", handlePointerDown, true);
       svg.addEventListener("click", handleClick, true);
+
+      await mm.setData(root);
+      if (!isDisposed) {
+        await mm.fit().catch(() => {});
+        scheduleBadgeRender();
+      }
+    };
+
+    try {
+      renderMindMap().catch((e) => {
+        if (!isDisposed) console.error("MindMap render error", e);
+      });
     } catch (e) {
       console.error("MindMap render error", e);
     }
 
     return () => {
+      isDisposed = true;
       if (badgeFrame) window.cancelAnimationFrame(badgeFrame);
+      if (badgeTimer) window.clearTimeout(badgeTimer);
       svg.removeEventListener("pointerdown", handlePointerDown, true);
       svg.removeEventListener("click", handleClick, true);
       mm?.destroy?.();
