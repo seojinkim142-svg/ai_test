@@ -35,6 +35,8 @@ import {
   getPremiumProfileStateFromUser,
   savePremiumProfileState,
   fetchExtractedText,
+  saveMindmap,
+  fetchMindmap,
 } from "./services/supabase";
 import { ensureUploadPreviewPdf as ensureUploadPreviewPdfRequest } from "./services/document";
 import {
@@ -1164,28 +1166,6 @@ function App() {
   const [isLoadingMindmap, setIsLoadingMindmap] = useState(false);
   const mindmapSummarySourceRef = useRef("");
 
-  function mindmapCacheKey(text) {
-    let h = 5381;
-    for (let i = 0; i < text.length; i++) h = ((h << 5) + h) ^ text.charCodeAt(i);
-    return `mindmap_cache_${(h >>> 0).toString(36)}`;
-  }
-
-  function loadMindmapCache(summaryText) {
-    try {
-      const key = mindmapCacheKey(summaryText);
-      const raw = localStorage.getItem(key);
-      if (!raw) return null;
-      const { data } = JSON.parse(raw);
-      return data || null;
-    } catch { return null; }
-  }
-
-  function saveMindmapCache(summaryText, data) {
-    try {
-      const key = mindmapCacheKey(summaryText);
-      localStorage.setItem(key, JSON.stringify({ data }));
-    } catch {}
-  }
   const [questionStyleProfileContent, setQuestionStyleProfileContent] = useState("");
   const [questionStyleProfileScopeLabel, setQuestionStyleProfileScopeLabel] = useState("");
   const [quizSets, setQuizSets] = useState([]);
@@ -1452,23 +1432,21 @@ function App() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(OUTPUT_LANGUAGE_STORAGE_KEY, outputLanguage);
   }, [outputLanguage]);
-  // 요약이 바뀌면 localStorage에서 마인드맵 복원, 없으면 초기화
+  // 요약이 바뀌면 Supabase에서 마인드맵 복원, 없으면 초기화
   useEffect(() => {
     const trimmed = String(summary || "").trim();
-    if (!trimmed) {
-      setMindmapData("");
-      mindmapSummarySourceRef.current = "";
-      return;
-    }
-    const cached = loadMindmapCache(trimmed);
-    if (cached) {
-      setMindmapData(cached);
-      mindmapSummarySourceRef.current = trimmed;
-    } else {
-      setMindmapData("");
-      mindmapSummarySourceRef.current = "";
-    }
-  }, [summary]);
+    setMindmapData("");
+    mindmapSummarySourceRef.current = "";
+    if (!trimmed || !user?.id || !selectedFileId) return;
+    fetchMindmap({ userId: user.id, docId: selectedFileId })
+      .then((cached) => {
+        if (cached) {
+          setMindmapData(cached);
+          mindmapSummarySourceRef.current = trimmed;
+        }
+      })
+      .catch(() => {});
+  }, [summary, user?.id, selectedFileId]);
   const requestPreviewPdfConversion = useCallback(
     async (item, { force = false } = {}) => {
       const uploadId = item?.id;
@@ -5935,13 +5913,15 @@ function App() {
       console.log("[MindMap] result length:", result?.length, "preview:", result?.slice(0, 100));
       mindmapSummarySourceRef.current = currentSummary;
       setMindmapData(result);
-      saveMindmapCache(currentSummary, result);
+      if (user?.id && selectedFileId) {
+        saveMindmap({ userId: user.id, docId: selectedFileId, mindmap: result }).catch(() => {});
+      }
     } catch (e) {
       console.error("[MindMap] generation failed", e);
     } finally {
       setIsLoadingMindmap(false);
     }
-  }, [summary, mindmapData, isLoadingMindmap, outputLanguage, getOpenAiService]);
+  }, [summary, mindmapData, isLoadingMindmap, outputLanguage, getOpenAiService, user?.id, selectedFileId]);
 
   const handleAutoDetectChapterRanges = useCallback(async () => {
     if (isDetectingChapterRanges || isLoadingSummary || isLoadingText) return;
