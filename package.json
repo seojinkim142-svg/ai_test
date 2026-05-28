@@ -39,6 +39,8 @@
     "jspdf": "^3.0.4",
     "katex": "^0.16.27",
     "mailparser": "^3.9.6",
+    "markmap-lib": "^0.18.12",
+    "markmap-view": "^0.18.12",
     "pdfjs-dist": "^5.4.449",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
