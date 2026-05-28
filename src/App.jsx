@@ -6680,7 +6680,7 @@ function App() {
         tutorRequestInFlightRef.current = true;
         setTutorError("");
         setStatus("");
-        setTutorMessages((prev) => [...prev, { role: "user", content: effectiveDisplayPrompt }]);
+        setTutorMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "user", content: effectiveDisplayPrompt }]);
         setIsTutorLoading(true);
         void (async () => {
           try {
@@ -6692,7 +6692,7 @@ function App() {
             const { generateTutorReply } = await getOpenAiService();
             const history = tutorMessages.slice(-8).map((msg) => ({ role: msg?.role, content: String(msg?.content || "").slice(0, 1200) })).filter((m) => m.role && m.content.trim());
             const reply = await generateTutorReply({ question: effectivePrompt, extractedText: folderContext, messages: history, outputLanguage });
-            setTutorMessages((prev) => [...prev, { role: "assistant", content: reply }]);
+            setTutorMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", content: reply }]);
           } catch (err) {
             setTutorError(`폴더 튜터 오류: ${err.message}`);
           } finally {
@@ -6722,6 +6722,7 @@ function App() {
         }))
         .filter((msg) => msg.role && msg.content.trim());
       const userMessage = {
+        id: crypto.randomUUID(),
         role: "user",
         content: effectiveDisplayPrompt,
         ...(hasAttachment && attachmentFile?.name
@@ -7041,7 +7042,7 @@ function App() {
             });
             setTutorMessages((prev) => {
               if (!attachmentMeta) {
-                return [...prev, { role: "assistant", content: safeReply }];
+                return [...prev, { id: crypto.randomUUID(), role: "assistant", content: safeReply }];
               }
               const next = [...prev];
               const lastUserIndex = [...next]
@@ -7054,7 +7055,7 @@ function App() {
                   ...attachmentMeta,
                 };
               }
-              next.push({ role: "assistant", content: safeReply });
+              next.push({ id: crypto.randomUUID(), role: "assistant", content: safeReply });
               return next;
             });
           } catch (err) {
