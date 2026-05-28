@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -7,6 +7,9 @@ import ReactFlow, {
   MarkerType,
   useNodesState,
   useEdgesState,
+  useNodesInitialized,
+  useReactFlow,
+  ReactFlowProvider,
 } from "reactflow";
 import dagre from "@dagrejs/dagre";
 import katex from "katex";
@@ -313,21 +316,33 @@ function buildTreeFromJson(nodes) {
   return root;
 }
 
-function estimateHeight(node, isRoot) {
-  const titleLines = Math.ceil((node.label || "").length / 26);
-  const hasTypeLabel = !!TYPE_LABEL[node.type];
-  const rawLines = (node.content || "")
-    .split("\n").map((l) => l.trim())
-    .filter((l) => l && !l.startsWith("|")).length;
-  const contentLines = Math.min(isRoot ? 4 : 5, rawLines);
-  const pages = extractPages((node.label || "") + " " + (node.content || ""));
-  const headerH = (isRoot ? 21 : 15) + titleLines * (isRoot ? 20 : 17) + (hasTypeLabel ? 14 : 0);
-  const bodyH   = contentLines > 0 ? 14 + contentLines * 20 : 0;
-  const footerH = pages.length > 0 ? 28 : 0;
-  return Math.max(isRoot ? 64 : 48, headerH + bodyH + footerH);
+// ── dagre layout (runs with measured or estimated sizes) ─────────────────────
+
+const NODESEP = 52;   // vertical gap between cards in same rank
+const RANKSEP = 100;  // horizontal gap between ranks
+
+function runDagreLayout(nodes, edges) {
+  const g = new dagre.graphlib.Graph();
+  g.setDefaultEdgeLabel(() => ({}));
+  g.setGraph({ rankdir: "LR", nodesep: NODESEP, ranksep: RANKSEP, marginx: 64, marginy: 64 });
+
+  nodes.forEach((n) => {
+    const w = n.measured?.width  ?? n.width  ?? 300;
+    const h = n.measured?.height ?? n.height ?? 100;
+    g.setNode(n.id, { width: w, height: h });
+  });
+  edges.forEach((e) => g.setEdge(e.source, e.target));
+  dagre.layout(g);
+
+  return nodes.map((n) => {
+    const pos = g.node(n.id);
+    const w   = n.measured?.width  ?? n.width  ?? 300;
+    const h   = n.measured?.height ?? n.height ?? 100;
+    return { ...n, position: { x: pos.x - w / 2, y: pos.y - h / 2 } };
+  });
 }
 
-// ── flow element builder ──────────────────────────────────────────────────────
+// ── flow element builder (positions are 0,0 — layout applied separately) ─────
 
 function jsonToFlowElements(jsonStr, onJumpToPage, onAskAI) {
   try {
@@ -344,29 +359,23 @@ function jsonToFlowElements(jsonStr, onJumpToPage, onAskAI) {
     function dfs(node, depth) {
       depthMap[node.id] = depth;
       const isRoot = depth === 0;
-      const w = isRoot ? 310 : 284;
-      const h = estimateHeight(node, isRoot);
 
       flowNodes.push({
         id: String(node.id),
         type: "card",
         data: { label: node.label || "", content: node.content || "", color: node.color, nodeType: node.type, depth, onJumpToPage, onAskAI },
-        width: w,
-        height: h,
+        width: isRoot ? 310 : 284,
         position: { x: 0, y: 0 },
       });
 
       if (node.parentId) {
         const pDepth = depthMap[node.parentId] ?? 0;
-        const strokeWidth = pDepth === 0 ? 1.8 : 1.2;
-        const strokeColor = pDepth === 0 ? "#cbd5e1" : "#e2e8f0";
-
         flowEdges.push({
           id: `e-${node.parentId}-${node.id}`,
           source: String(node.parentId),
           target: String(node.id),
           type: "smoothstep",
-          style: { stroke: strokeColor, strokeWidth },
+          style: { stroke: pDepth === 0 ? "#cbd5e1" : "#e2e8f0", strokeWidth: pDepth === 0 ? 1.8 : 1.2 },
           markerEnd: { type: MarkerType.None },
         });
       }
@@ -380,24 +389,63 @@ function jsonToFlowElements(jsonStr, onJumpToPage, onAskAI) {
 
     dfs(root, 0);
 
-    // dagre layout — generous spacing so cards never crowd
-    const g = new dagre.graphlib.Graph();
-    g.setDefaultEdgeLabel(() => ({}));
-    g.setGraph({ rankdir: "LR", nodesep: 40, ranksep: 90, marginx: 60, marginy: 60 });
-
-    flowNodes.forEach((n) => g.setNode(n.id, { width: n.width, height: n.height }));
-    flowEdges.forEach((e) => g.setEdge(e.source, e.target));
-    dagre.layout(g);
-
-    const layoutedNodes = flowNodes.map((n) => {
-      const pos = g.node(n.id);
-      return { ...n, position: { x: pos.x - n.width / 2, y: pos.y - n.height / 2 } };
-    });
-
-    return { nodes: layoutedNodes, edges: flowEdges };
+    // initial layout with estimated sizes so nodes don't all stack at 0,0
+    const positioned = runDagreLayout(flowNodes, flowEdges);
+    return { nodes: positioned, edges: flowEdges };
   } catch {
     return null;
   }
+}
+
+// ── inner flow (needs ReactFlowProvider context) ──────────────────────────────
+
+function MindMapFlow({ result }) {
+  const { fitView } = useReactFlow();
+  const nodesInitialized = useNodesInitialized();
+  const [nodes, setNodes, onNodesChange] = useNodesState(result?.nodes ?? []);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(result?.edges ?? []);
+  const [layoutDone, setLayoutDone] = useState(false);
+
+  // reset when data changes
+  useEffect(() => {
+    setNodes(result?.nodes ?? []);
+    setEdges(result?.edges ?? []);
+    setLayoutDone(false);
+  }, [result, setNodes, setEdges]);
+
+  // re-layout once React Flow has measured actual node sizes
+  useEffect(() => {
+    if (!nodesInitialized || layoutDone || !nodes.length) return;
+    setNodes((curr) => runDagreLayout(curr, edges));
+    setLayoutDone(true);
+  }, [nodesInitialized, layoutDone, nodes.length, edges, setNodes]);
+
+  // fit view after layout settles
+  useEffect(() => {
+    if (!layoutDone) return;
+    const t = setTimeout(() => fitView({ padding: 0.12, duration: 300 }), 50);
+    return () => clearTimeout(t);
+  }, [layoutDone, fitView]);
+
+  return (
+    <ReactFlow
+      nodes={nodes}
+      edges={edges}
+      onNodesChange={onNodesChange}
+      onEdgesChange={onEdgesChange}
+      nodeTypes={NODE_TYPES}
+      fitView
+      fitViewOptions={{ padding: 0.12, minZoom: 0.2 }}
+      minZoom={0.15}
+      maxZoom={2.5}
+      nodesDraggable
+      elementsSelectable={false}
+      proOptions={{ hideAttribution: true }}
+    >
+      <Background color="#e2e8f0" gap={28} size={1} variant="dots" />
+      <Controls showInteractive={false} className="!bottom-3 !left-3" />
+    </ReactFlow>
+  );
 }
 
 // ── main component ────────────────────────────────────────────────────────────
@@ -407,14 +455,6 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage, onAskA
     () => (mindmapData ? jsonToFlowElements(mindmapData, onJumpToPage, onAskAI) : null),
     [mindmapData, onJumpToPage, onAskAI]
   );
-
-  const [nodes, setNodes, onNodesChange] = useNodesState(result?.nodes ?? []);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(result?.edges ?? []);
-
-  useEffect(() => {
-    setNodes(result?.nodes ?? []);
-    setEdges(result?.edges ?? []);
-  }, [result, setNodes, setEdges]);
 
   if (!mindmapData && !summary) {
     return (
@@ -437,23 +477,9 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage, onAskA
       className="relative w-full overflow-hidden rounded-2xl border border-slate-200"
       style={{ height: 680, background: "#f8fafc" }}
     >
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        nodeTypes={NODE_TYPES}
-        fitView
-        fitViewOptions={{ padding: 0.12, minZoom: 0.25 }}
-        minZoom={0.15}
-        maxZoom={2.5}
-        nodesDraggable
-        elementsSelectable={false}
-        proOptions={{ hideAttribution: true }}
-      >
-        <Background color="#e2e8f0" gap={28} size={1} variant="dots" />
-        <Controls showInteractive={false} className="!bottom-3 !left-3" />
-      </ReactFlow>
+      <ReactFlowProvider>
+        <MindMapFlow result={result} />
+      </ReactFlowProvider>
       <p className="absolute bottom-2 right-3 text-[10px] text-slate-400 select-none pointer-events-none">
         스크롤·드래그로 탐색
       </p>
