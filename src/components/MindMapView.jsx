@@ -4,7 +4,6 @@ import { Markmap, globalCSS } from "markmap-view";
 
 const transformer = new Transformer();
 
-// markmap 전역 CSS를 한 번만 주입
 let cssInjected = false;
 function injectCSS() {
   if (cssInjected || !globalCSS) return;
@@ -28,7 +27,6 @@ export default function MindMapView({ summary }) {
     svgRef.current.innerHTML = "";
 
     const containerWidth = containerRef.current?.clientWidth || 360;
-    // 노드 최대 너비는 컨테이너의 30%, 최소 120px 최대 280px
     const nodeMaxWidth = Math.min(280, Math.max(120, Math.floor(containerWidth * 0.3)));
 
     let mm;
@@ -60,11 +58,16 @@ export default function MindMapView({ summary }) {
   }
 
   return (
-    <div ref={containerRef} className="relative w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950">
+    <div
+      ref={containerRef}
+      className="relative w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950"
+      style={{ height: "520px" }}
+    >
       <svg
         ref={svgRef}
         width="100%"
-        style={{ display: "block", minHeight: "320px", height: "60vh", maxHeight: "640px" }}
+        height="100%"
+        style={{ display: "block" }}
       />
       <p className="absolute bottom-2 right-3 text-[10px] text-slate-500 select-none">
         스크롤·드래그로 탐색
