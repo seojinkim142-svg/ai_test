@@ -2428,6 +2428,8 @@ function App() {
     [persistChapterRangeInput, uploadedFiles, user]
   );
 
+  const uploadedFilesRef = useRef(uploadedFiles);
+
   const handleMoveUploadsToFolder = useCallback(
     async (uploadIds, targetFolderId) => {
       if (!isFolderFeatureEnabled) return;
@@ -3760,7 +3762,6 @@ function App() {
     closePayment,
   ]);
 
-  const uploadedFilesRef = useRef(uploadedFiles);
   const goBackToListRef = useRef(goBackToList);
   const processSelectedFileRef = useRef(processSelectedFile);
   const ensureFileForItemRef = useRef(ensureFileForItem);
