@@ -121,7 +121,7 @@ const QUICK_ACTIONS = [
 // ── main component ────────────────────────────────────────────────────────────
 
 export default function SummaryCardView({ summary, mindmapData, onJumpToPage, outputLanguage = "ko" }) {
-  const cards = parseSummaryCards(summary);
+  const cards = parseSummaryCards(mindmapData || summary);
   const suggestedQuestions = extractQuestions(mindmapData);
   const [qaHistory, setQaHistory] = useState([]);
   const [inputValue, setInputValue] = useState("");
