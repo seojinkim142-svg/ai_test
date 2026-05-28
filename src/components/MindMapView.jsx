@@ -398,28 +398,53 @@ function jsonToFlowElements(jsonStr, onJumpToPage, onAskAI) {
   }
 }
 
-// ── node chat drawer ──────────────────────────────────────────────────────────
+// ── AI side panel ─────────────────────────────────────────────────────────────
 
-function NodeChatDrawer({ node, onClose }) {
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
+const QUICK_ACTIONS = [
+  { icon: "⚡", label: "깊이 뛰어들기",  prompt: "이 내용의 가장 핵심적인 개념을 깊이 있게 설명해줘." },
+  { icon: "💬", label: "설명",           prompt: "이 내용을 초보자도 이해할 수 있게 쉽게 설명해줘." },
+  { icon: "✂️", label: "단순화",         prompt: "이 내용을 3줄로 핵심만 요약해줘." },
+  { icon: "📌", label: "예시",           prompt: "이 내용을 실제 예시를 들어 설명해줘." },
+];
+
+async function generateWonderQuestions(label, content) {
+  const ctx = `제목: ${label}\n${content ? `내용: ${content}` : ""}`;
+  const raw = await generateDocAnswer(
+    "위 카드 내용을 공부하는 학생이 가질 법한 핵심 질문 5개를 생성해. 각 질문은 한 줄로, 번호 없이 줄바꿈으로 구분해.",
+    ctx,
+    { outputLanguage: "ko" }
+  );
+  return raw.split("\n").map((l) => l.replace(/^\d+\.\s*/, "").trim()).filter(Boolean).slice(0, 5);
+}
+
+function NodeAIPanel({ activeNode, onAskAI }) {
+  const [messages, setMessages]       = useState([]);
+  const [input, setInput]             = useState("");
+  const [loading, setLoading]         = useState(false);
+  const [wonders, setWonders]         = useState([]);
+  const [wonderLoading, setWonderLoading] = useState(false);
   const bottomRef = useRef(null);
   const inputRef  = useRef(null);
 
-  // context injected to AI as the "document"
-  const contextDoc = useMemo(() => `<CurrentSelection>
-제목: ${node.label}
-${node.content ? `내용:\n${node.content}` : ""}
-</CurrentSelection>
+  const s = activeNode ? getStyle(activeNode.color) : DEFAULT_STYLE;
 
-위는 사용자가 현재 학습 중인 마인드맵 카드입니다. 이 카드의 내용을 중심으로 답변하세요.`, [node]);
+  const contextDoc = useMemo(() => activeNode
+    ? `<CurrentSelection>\n제목: ${activeNode.label}\n${activeNode.content ? `내용:\n${activeNode.content}` : ""}\n</CurrentSelection>\n\n위는 학습 중인 마인드맵 카드입니다. 이 카드 내용을 중심으로 답변하세요.`
+    : "", [activeNode]);
 
+  // reset + generate I Wonder questions when node changes
   useEffect(() => {
     setMessages([]);
     setInput("");
-    setTimeout(() => inputRef.current?.focus(), 120);
-  }, [node.label]);
+    setWonders([]);
+    if (!activeNode) return;
+    setWonderLoading(true);
+    generateWonderQuestions(activeNode.label, activeNode.content)
+      .then(setWonders)
+      .catch(() => {})
+      .finally(() => setWonderLoading(false));
+    setTimeout(() => inputRef.current?.focus(), 80);
+  }, [activeNode?.label]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -427,7 +452,7 @@ ${node.content ? `내용:\n${node.content}` : ""}
 
   const send = useCallback(async (q) => {
     const question = (q || input).trim();
-    if (!question || loading) return;
+    if (!question || loading || !activeNode) return;
     setMessages((prev) => [...prev, { role: "user", content: question }]);
     setInput("");
     setLoading(true);
@@ -435,93 +460,114 @@ ${node.content ? `내용:\n${node.content}` : ""}
       const answer = await generateDocAnswer(question, contextDoc, { outputLanguage: "ko" });
       setMessages((prev) => [...prev, { role: "assistant", content: answer }]);
     } catch {
-      setMessages((prev) => [...prev, { role: "assistant", content: "답변을 가져오지 못했습니다. 다시 시도해 주세요." }]);
+      setMessages((prev) => [...prev, { role: "assistant", content: "답변을 가져오지 못했습니다." }]);
     } finally {
       setLoading(false);
     }
-  }, [input, loading, contextDoc]);
-
-  const s = getStyle(node.color);
-
-  const QUICK = ["핵심 개념을 쉽게 설명해줘", "관련 예시를 들어줘", "더 깊이 파고들어줘"];
+  }, [input, loading, contextDoc, activeNode]);
 
   return (
-    <div
-      style={{
-        position: "absolute",
-        top: 0, right: 0,
-        height: "100%",
-        width: 320,
-        background: "#fff",
-        borderLeft: "1px solid #e2e8f0",
-        display: "flex",
-        flexDirection: "column",
-        boxShadow: "-4px 0 24px rgba(0,0,0,0.08)",
-        zIndex: 10,
-        animation: "drawerIn 0.22s cubic-bezier(0.22,1,0.36,1)",
-      }}
-    >
-      <style>{`@keyframes drawerIn { from { transform: translateX(100%) } to { transform: translateX(0) } }`}</style>
-
+    <div style={{
+      width: 288,
+      flexShrink: 0,
+      display: "flex",
+      flexDirection: "column",
+      borderLeft: "1px solid #e2e8f0",
+      background: "#fff",
+      height: "100%",
+      overflow: "hidden",
+    }}>
       {/* header */}
-      <div style={{ borderBottom: "1px solid #f1f5f9", padding: "12px 14px 10px", background: s.headerBg }}>
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.07em", color: s.accent, marginBottom: 3 }}>
-              ✦ AI에게 묻기
-            </p>
-            <p style={{ fontSize: 12, fontWeight: 700, color: s.title, lineHeight: 1.35, wordBreak: "break-word" }}>
-              {node.label}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{ flexShrink: 0, background: "none", border: "none", cursor: "pointer", color: "#94a3b8", fontSize: 16, lineHeight: 1, padding: 2 }}
-          >
-            ×
-          </button>
+      <div style={{ padding: "12px 14px 10px", borderBottom: "1px solid #f1f5f9", background: "#fafbff" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 12, color: "#6366f1" }}>✦</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", flex: 1 }}>AI에게 묻기</span>
+          {/* send icon placeholder */}
+          <span style={{ width: 28, height: 28, borderRadius: 8, background: "#eef2ff", display: "flex", alignItems: "center", justifyContent: "center", color: "#6366f1", fontSize: 13 }}>→</span>
         </div>
+        {activeNode && (
+          <p style={{ fontSize: 11, color: s.accent, marginTop: 6, fontWeight: 600, wordBreak: "break-word", lineHeight: 1.35 }}>
+            {activeNode.label}
+          </p>
+        )}
       </div>
 
-      {/* messages */}
+      {/* body */}
       <div style={{ flex: 1, overflowY: "auto", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
-        {messages.length === 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <p style={{ fontSize: 10, color: "#94a3b8", marginBottom: 2 }}>빠른 질문</p>
-            {QUICK.map((q) => (
+
+        {/* no node selected */}
+        {!activeNode && (
+          <p style={{ fontSize: 11, color: "#94a3b8", textAlign: "center", marginTop: 24, lineHeight: 1.6 }}>
+            카드 위의 <strong style={{ color: "#6366f1" }}>✦ AI에게 물어보기</strong> 버튼을 눌러 카드를 선택하세요.
+          </p>
+        )}
+
+        {/* quick actions */}
+        {activeNode && messages.length === 0 && (
+          <>
+            <p style={{ fontSize: 10, color: "#94a3b8", fontWeight: 600 }}>빠른 작업</p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+              {QUICK_ACTIONS.map((a) => (
+                <button
+                  key={a.label}
+                  type="button"
+                  onClick={() => send(a.prompt)}
+                  disabled={loading}
+                  style={{
+                    background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10,
+                    padding: "8px 10px", fontSize: 11, color: "#374151", cursor: "pointer",
+                    textAlign: "left", lineHeight: 1.4, fontFamily: "inherit",
+                    display: "flex", alignItems: "center", gap: 5,
+                  }}
+                >
+                  <span style={{ fontSize: 13 }}>{a.icon}</span>
+                  {a.label}
+                </button>
+              ))}
+            </div>
+
+            {/* I Wonder section */}
+            <p style={{ fontSize: 10, color: "#94a3b8", fontWeight: 600, marginTop: 6 }}>
+              I Wonder<span style={{ color: "#6366f1" }}>…</span>
+            </p>
+            {wonderLoading && (
+              <p style={{ fontSize: 11, color: "#cbd5e1" }}>질문 생성 중…</p>
+            )}
+            {wonders.map((q, i) => (
               <button
-                key={q}
+                key={i}
                 type="button"
                 onClick={() => send(q)}
+                disabled={loading}
                 style={{
-                  background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10,
-                  padding: "7px 11px", fontSize: 11, color: "#475569", textAlign: "left",
-                  cursor: "pointer", lineHeight: 1.4, fontFamily: "inherit",
+                  background: "none", border: "none", padding: "4px 0",
+                  fontSize: 12, color: "#475569", cursor: "pointer",
+                  textAlign: "left", lineHeight: 1.5, fontFamily: "inherit",
+                  display: "flex", alignItems: "flex-start", gap: 7,
                 }}
               >
-                {q}
+                <span style={{ color: "#a5b4fc", fontSize: 11, flexShrink: 0, marginTop: 2 }}>?</span>
+                <span style={{ borderBottom: "1px dashed #e2e8f0", paddingBottom: 4, flex: 1 }}>{q}</span>
               </button>
             ))}
-          </div>
+          </>
         )}
+
+        {/* chat messages */}
         {messages.map((m, i) => (
-          <div
-            key={i}
-            style={{
-              alignSelf: m.role === "user" ? "flex-end" : "flex-start",
-              maxWidth: "90%",
-              background: m.role === "user" ? s.headerBg : "#f8fafc",
-              border: `1px solid ${m.role === "user" ? s.headerBorder : "#e2e8f0"}`,
-              borderRadius: m.role === "user" ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
-              padding: "8px 11px",
-              fontSize: 12,
-              color: m.role === "user" ? s.title : "#374151",
-              lineHeight: 1.55,
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-            }}
-          >
+          <div key={i} style={{
+            alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+            maxWidth: "92%",
+            background: m.role === "user" ? s.headerBg : "#f8fafc",
+            border: `1px solid ${m.role === "user" ? s.headerBorder : "#e2e8f0"}`,
+            borderRadius: m.role === "user" ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
+            padding: "8px 11px",
+            fontSize: 12,
+            color: m.role === "user" ? s.title : "#374151",
+            lineHeight: 1.55,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}>
             {m.content}
           </div>
         ))}
@@ -542,8 +588,8 @@ ${node.content ? `내용:\n${node.content}` : ""}
           ref={inputRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="이 카드에 대해 물어보세요…"
-          disabled={loading}
+          placeholder={activeNode ? "질문을 입력하세요…" : "카드를 먼저 선택하세요"}
+          disabled={loading || !activeNode}
           style={{
             flex: 1, border: "1px solid #e2e8f0", borderRadius: 10, padding: "7px 11px",
             fontSize: 12, color: "#1e293b", outline: "none", background: "#f8fafc",
@@ -552,12 +598,12 @@ ${node.content ? `내용:\n${node.content}` : ""}
         />
         <button
           type="submit"
-          disabled={loading || !input.trim()}
+          disabled={loading || !input.trim() || !activeNode}
           style={{
             width: 32, height: 32, borderRadius: 10, border: "none",
-            background: s.accent, color: "#fff", cursor: "pointer",
+            background: "#6366f1", color: "#fff", cursor: "pointer",
             fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center",
-            opacity: (loading || !input.trim()) ? 0.4 : 1,
+            opacity: (loading || !input.trim() || !activeNode) ? 0.35 : 1,
             flexShrink: 0,
           }}
         >
@@ -570,7 +616,7 @@ ${node.content ? `내용:\n${node.content}` : ""}
 
 // ── inner flow ────────────────────────────────────────────────────────────────
 
-function MindMapFlow({ result, onNodeAsk }) {
+function MindMapFlow({ result }) {
   const { fitView } = useReactFlow();
   const nodesInitialized = useNodesInitialized();
   const [nodes, setNodes, onNodesChange] = useNodesState(result?.nodes ?? []);
@@ -619,7 +665,7 @@ function MindMapFlow({ result, onNodeAsk }) {
 // ── main component ────────────────────────────────────────────────────────────
 
 export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
-  const [activeNode, setActiveNode] = useState(null); // { label, content, color }
+  const [activeNode, setActiveNode] = useState(null);
 
   const onAskAI = useCallback((label, content, color) => {
     setActiveNode({ label, content, color });
@@ -648,25 +694,21 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
 
   return (
     <div
-      className="relative w-full overflow-hidden rounded-2xl border border-slate-200"
-      style={{ height: 680, background: "#f8fafc" }}
+      className="w-full overflow-hidden rounded-2xl border border-slate-200"
+      style={{ height: 680, background: "#f8fafc", display: "flex" }}
     >
-      <ReactFlowProvider>
-        <MindMapFlow result={result} />
-      </ReactFlowProvider>
-
-      {activeNode && (
-        <NodeChatDrawer
-          node={activeNode}
-          onClose={() => setActiveNode(null)}
-        />
-      )}
-
-      {!activeNode && (
-        <p className="absolute bottom-2 right-3 text-[10px] text-slate-400 select-none pointer-events-none">
+      {/* mindmap canvas */}
+      <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
+        <ReactFlowProvider>
+          <MindMapFlow result={result} />
+        </ReactFlowProvider>
+        <p className="absolute bottom-2 left-3 text-[10px] text-slate-400 select-none pointer-events-none">
           스크롤·드래그로 탐색
         </p>
-      )}
+      </div>
+
+      {/* always-visible AI panel */}
+      <NodeAIPanel activeNode={activeNode} />
     </div>
   );
 }
