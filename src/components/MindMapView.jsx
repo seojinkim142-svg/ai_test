@@ -733,9 +733,22 @@ function MindMapFlow({ result, dark }) {
 
 // ── main component ────────────────────────────────────────────────────────────
 
+function useAppDark() {
+  const [dark, setDark] = useState(() => !document.documentElement.classList.contains("theme-light"));
+  useEffect(() => {
+    const el = document.documentElement;
+    const obs = new MutationObserver(() => {
+      setDark(!el.classList.contains("theme-light"));
+    });
+    obs.observe(el, { attributeFilter: ["class"] });
+    return () => obs.disconnect();
+  }, []);
+  return dark;
+}
+
 export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
   const [activeNode, setActiveNode] = useState(null);
-  const [dark, setDark] = useState(false);
+  const dark = useAppDark();
 
   const onAskAI = useCallback((label, content, color) => {
     setActiveNode({ label, content, color });
@@ -778,26 +791,7 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
           <MindMapFlow result={result} dark={dark} />
         </ReactFlowProvider>
 
-        {/* theme toggle */}
-        <button
-          type="button"
-          onClick={() => setDark((d) => !d)}
-          title={dark ? "라이트 모드" : "다크 모드"}
-          style={{
-            position: "absolute", top: 10, right: 10,
-            width: 30, height: 30, borderRadius: 8,
-            border: `1px solid ${dark ? "#334155" : "#e2e8f0"}`,
-            background: dark ? "#1e293b" : "#f8fafc",
-            color: dark ? "#94a3b8" : "#64748b",
-            cursor: "pointer", fontSize: 14,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            zIndex: 5,
-          }}
-        >
-          {dark ? "☀" : "🌙"}
-        </button>
-
-        <p style={{ position: "absolute", bottom: 8, left: 12, fontSize: 10, color: dark ? "#334155" : "#cbd5e1", userSelect: "none", pointerEvents: "none" }}>
+<p style={{ position: "absolute", bottom: 8, left: 12, fontSize: 10, color: dark ? "#334155" : "#cbd5e1", userSelect: "none", pointerEvents: "none" }}>
           스크롤·드래그로 탐색
         </p>
       </div>
