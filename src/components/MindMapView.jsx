@@ -159,7 +159,7 @@ function Chip({ icon, label, onClick, color = "#6366f1", bg = "#eef2ff", border 
 function CardNode({ data }) {
   const [hovered, setHovered] = useState(false);
 
-  const dark = data.dark || false;
+  const dark = useAppDark();
   const s = getStyle(data.color, dark);
   const isRoot = data.depth === 0;
   const isQuestion = data.nodeType === "question";
@@ -189,6 +189,7 @@ function CardNode({ data }) {
     () => extractPages((data.label || "") + " " + (data.content || "")),
     [data.label, data.content]
   );
+  const bodyTextColor = dark ? "#f8fafc" : s.text;
 
   const borderColor = hovered
     ? accentColor
@@ -248,7 +249,7 @@ function CardNode({ data }) {
           {contentLines.map((line, i) => (
             <div key={i} style={{ display: "flex", gap: 7, alignItems: "flex-start" }}>
               <span style={{ color: accentColor, fontSize: 8, flexShrink: 0, marginTop: 4, opacity: 0.7 }}>▸</span>
-              <MathText text={line} style={{ fontSize: 11, color: "#4b5563", lineHeight: 1.55, wordBreak: "break-word" }} />
+              <MathText text={line} style={{ fontSize: 11, color: bodyTextColor, lineHeight: 1.55, wordBreak: "break-word" }} />
             </div>
           ))}
         </div>
@@ -456,6 +457,17 @@ function NodeAIPanel({ activeNode, onJumpToPage, dark, panelBg, panelBorder }) {
   const inputRef  = useRef(null);
 
   const s = activeNode ? getStyle(activeNode.color, dark) : (dark ? DARK_DEFAULT : DEFAULT_STYLE);
+  const assistantBubbleBg = dark ? "#111827" : "#f8fafc";
+  const assistantBubbleBorder = dark ? "#243244" : "#e2e8f0";
+  const assistantTextColor = dark ? "#e5e7eb" : "#374151";
+  const assistantStrongColor = dark ? "#f8fafc" : "#1e293b";
+  const assistantMutedColor = dark ? "#cbd5e1" : "#475569";
+  const assistantCodeBg = dark ? "#020617" : "#f1f5f9";
+  const assistantCodeColor = dark ? "#f8fafc" : "#0f172a";
+  const assistantQuoteColor = dark ? "#cbd5e1" : "#64748b";
+  const assistantCitationBg = dark ? "rgba(139,92,246,0.15)" : "#f5f3ff";
+  const assistantCitationBorder = dark ? "rgba(139,92,246,0.35)" : "#ddd6fe";
+  const assistantCitationColor = dark ? "#ddd6fe" : "#7c3aed";
 
   const contextDoc = useMemo(() => activeNode
     ? `<CurrentSelection>\n제목: ${activeNode.label}\n${activeNode.content ? `내용:\n${activeNode.content}` : ""}\n</CurrentSelection>\n\n위는 학습 중인 마인드맵 카드입니다. 이 카드 내용을 중심으로 답변하세요.`
@@ -561,7 +573,7 @@ function NodeAIPanel({ activeNode, onJumpToPage, dark, panelBg, panelBorder }) {
               I Wonder<span style={{ color: "#6366f1" }}>…</span>
             </p>
             {wonderLoading && (
-              <p style={{ fontSize: 11, color: dark ? "#334155" : "#cbd5e1" }}>질문 생성 중…</p>
+              <p style={{ fontSize: 11, color: dark ? "#94a3b8" : "#64748b" }}>질문 생성 중…</p>
             )}
             {wonders.map((q, i) => (
               <button
@@ -588,12 +600,12 @@ function NodeAIPanel({ activeNode, onJumpToPage, dark, panelBg, panelBorder }) {
           <div key={i} style={{
             alignSelf: m.role === "user" ? "flex-end" : "flex-start",
             maxWidth: "92%",
-            background: m.role === "user" ? s.headerBg : "#f8fafc",
-            border: `1px solid ${m.role === "user" ? s.headerBorder : "#e2e8f0"}`,
+            background: m.role === "user" ? s.headerBg : assistantBubbleBg,
+            border: `1px solid ${m.role === "user" ? s.headerBorder : assistantBubbleBorder}`,
             borderRadius: m.role === "user" ? "12px 12px 4px 12px" : "12px 12px 12px 4px",
             padding: "8px 11px",
             fontSize: 12,
-            color: m.role === "user" ? s.title : "#374151",
+            color: m.role === "user" ? s.title : assistantTextColor,
             lineHeight: 1.6,
             wordBreak: "break-word",
             overflowX: "auto",
@@ -610,18 +622,18 @@ function NodeAIPanel({ activeNode, onJumpToPage, dark, panelBg, panelBorder }) {
                   ul: ({ children }) => <ul style={{ margin: "4px 0", paddingLeft: 16 }}>{children}</ul>,
                   ol: ({ children }) => <ol style={{ margin: "4px 0", paddingLeft: 18 }}>{children}</ol>,
                   li: ({ children }) => <li style={{ marginBottom: 3, lineHeight: 1.5 }}>{children}</li>,
-                  strong: ({ children }) => <strong style={{ fontWeight: 700, color: "#1e293b" }}>{children}</strong>,
-                  em: ({ children }) => <em style={{ fontStyle: "italic", color: "#475569" }}>{children}</em>,
+                  strong: ({ children }) => <strong style={{ fontWeight: 700, color: assistantStrongColor }}>{children}</strong>,
+                  em: ({ children }) => <em style={{ fontStyle: "italic", color: assistantMutedColor }}>{children}</em>,
                   code: ({ inline, children }) => inline
-                    ? <code style={{ background: "#f1f5f9", borderRadius: 4, padding: "1px 5px", fontSize: 11, fontFamily: "monospace", color: "#0f172a" }}>{children}</code>
-                    : <code style={{ display: "block", background: "#f1f5f9", borderRadius: 6, padding: "8px 10px", fontSize: 11, fontFamily: "monospace", color: "#0f172a", overflowX: "auto", margin: "6px 0" }}>{children}</code>,
-                  blockquote: ({ children }) => <blockquote style={{ borderLeft: "3px solid #c7d2fe", paddingLeft: 10, margin: "4px 0", color: "#64748b", fontStyle: "italic" }}>{children}</blockquote>,
+                    ? <code style={{ background: assistantCodeBg, borderRadius: 4, padding: "1px 5px", fontSize: 11, fontFamily: "monospace", color: assistantCodeColor }}>{children}</code>
+                    : <code style={{ display: "block", background: assistantCodeBg, borderRadius: 6, padding: "8px 10px", fontSize: 11, fontFamily: "monospace", color: assistantCodeColor, overflowX: "auto", margin: "6px 0" }}>{children}</code>,
+                  blockquote: ({ children }) => <blockquote style={{ borderLeft: "3px solid #c7d2fe", paddingLeft: 10, margin: "4px 0", color: assistantQuoteColor, fontStyle: "italic" }}>{children}</blockquote>,
                   a: ({ href, children }) => {
                     const match = href?.match(/^#page-(\d+)$/);
                     if (match) {
                       return (
                         <button type="button" onClick={() => onJumpToPage?.(parseInt(match[1], 10))}
-                          style={{ background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: 9999, color: "#7c3aed", fontSize: 10, padding: "1px 7px", cursor: "pointer", fontFamily: "inherit", lineHeight: 1.3, verticalAlign: "middle", margin: "0 2px" }}>
+                          style={{ background: assistantCitationBg, border: `1px solid ${assistantCitationBorder}`, borderRadius: 9999, color: assistantCitationColor, fontSize: 10, padding: "1px 7px", cursor: "pointer", fontFamily: "inherit", lineHeight: 1.3, verticalAlign: "middle", margin: "0 2px" }}>
                           {children}
                         </button>
                       );
@@ -636,7 +648,7 @@ function NodeAIPanel({ activeNode, onJumpToPage, dark, panelBg, panelBorder }) {
           </div>
         ))}
         {loading && (
-          <div style={{ alignSelf: "flex-start", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "12px 12px 12px 4px", padding: "8px 14px", fontSize: 12, color: "#94a3b8" }}>
+          <div style={{ alignSelf: "flex-start", background: assistantBubbleBg, border: `1px solid ${assistantBubbleBorder}`, borderRadius: "12px 12px 12px 4px", padding: "8px 14px", fontSize: 12, color: dark ? "#cbd5e1" : "#94a3b8" }}>
             생각 중…
           </div>
         )}
