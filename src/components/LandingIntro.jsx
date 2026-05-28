@@ -1103,7 +1103,7 @@ const OUTPUT_LANGUAGE_OPTIONS = [
   { code: "ko", label: "한국어" },
 ];
 
-const SUMMARY_DEMO_VIDEO_SRC = encodeURI("/화면 녹화 중 2026-04-09 235144.mp4");
+const SUMMARY_DEMO_VIDEO_SRC = "/summary-demo.mp4";
 const QUIZ_DEMO_VIDEO_SRC = "/quiz-generation-demo.mp4";
 const FLASHCARD_DEMO_VIDEO_SRC = "/flashcard-demo.mp4";
 const TUTOR_DEMO_VIDEO_SRC = "/tutor-demo.mp4";
