@@ -1908,6 +1908,24 @@ function App() {
     []
   );
 
+  const handleDisablePinWithAuth = useCallback(() => {
+    if (!activePremiumProfileId) return;
+    const currentProfile = premiumProfiles.find((p) => p.id === activePremiumProfileId);
+    if (!currentProfile) return;
+    const inputPin = normalizePremiumProfilePinInput(profilePinInputs.currentPin);
+    if (!inputPin) {
+      setProfilePinError("현재 PIN 4자리를 입력해주세요.");
+      return;
+    }
+    if (inputPin !== sanitizePremiumProfilePin(currentProfile.pin)) {
+      setProfilePinError("현재 PIN이 올바르지 않습니다.");
+      return;
+    }
+    handleDisableProfilePin(activePremiumProfileId);
+    handleCloseProfilePinDialog();
+    setStatus("PIN 보호가 해제되었습니다.");
+  }, [activePremiumProfileId, handleCloseProfilePinDialog, handleDisableProfilePin, premiumProfiles, profilePinInputs.currentPin]);
+
   const handleSubmitProfilePinChange = useCallback(
     (event) => {
       event.preventDefault();
@@ -8198,24 +8216,36 @@ function App() {
               />
             </div>
             {safeProfilePinError && <p className="mt-2 text-xs text-rose-300">{safeProfilePinError}</p>}
-            <div className="mt-4 flex justify-end gap-2">
+            <div className="mt-4 flex items-center justify-between gap-2">
               <button
                 type="button"
-                onClick={handleCloseProfilePinDialog}
-                className={`ghost-button text-xs ${theme === "light" ? "text-slate-700" : "text-slate-200"}`}
+                onClick={handleDisablePinWithAuth}
+                className={`ghost-button text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}
                 data-ghost-size="sm"
                 style={{ "--ghost-color": "148, 163, 184" }}
+                title="현재 PIN 인증 후 이 프로필의 PIN을 해제합니다"
               >
-                Cancel
+                PIN 없이 사용
               </button>
-              <button
-                type="submit"
-                className="ghost-button text-xs text-emerald-100"
-                data-ghost-size="sm"
-                style={{ "--ghost-color": "52, 211, 153" }}
-              >
-                Save
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleCloseProfilePinDialog}
+                  className={`ghost-button text-xs ${theme === "light" ? "text-slate-700" : "text-slate-200"}`}
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": "148, 163, 184" }}
+                >
+                  취소
+                </button>
+                <button
+                  type="submit"
+                  className="ghost-button text-xs text-emerald-100"
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": "52, 211, 153" }}
+                >
+                  변경
+                </button>
+              </div>
             </div>
           </form>
         </div>

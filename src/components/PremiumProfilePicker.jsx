@@ -13,7 +13,6 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
   onSelectProfile,
   onCreateProfile,
   onRenameProfile,
-  onDisablePin,
   onClose,
 }) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -22,7 +21,6 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
   const [pinInput, setPinInput] = useState("");
   const [pinError, setPinError] = useState("");
   const [isPinSubmitting, setIsPinSubmitting] = useState(false);
-  const [showDisablePinConfirm, setShowDisablePinConfirm] = useState(false);
 
   // rename dialog state
   const [renameTargetId, setRenameTargetId] = useState(null);
@@ -337,73 +335,10 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
                 }`}
               />
               {pinError && <p className="mt-2 text-xs text-rose-300">{pinError}</p>}
-              <div className="mt-4 flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowDisablePinConfirm(true)}
-                  className={`ghost-button text-xs ${isLight ? "text-slate-500" : "text-slate-400"}`}
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "148, 163, 184" }}
-                >
-                  PIN 없이 사용
-                </button>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={closePinDialog}
-                    className={`ghost-button text-xs ${isLight ? "text-slate-700" : "text-slate-200"}`}
-                    data-ghost-size="sm"
-                    style={{ "--ghost-color": "148, 163, 184" }}
-                  >
-                    취소
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={isPinSubmitting}
-                    className="ghost-button text-xs text-emerald-100 disabled:opacity-60"
-                    data-ghost-size="sm"
-                    style={{ "--ghost-color": "52, 211, 153" }}
-                  >
-                    {isPinSubmitting ? "확인 중..." : "확인"}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>,
-          document.body
-        )
-      : null;
-
-  const disablePinConfirmDialog =
-    showDisablePinConfirm && typeof document !== "undefined"
-      ? createPortal(
-          <div className="fixed inset-0 z-[170] flex items-center justify-center px-4">
-            <button
-              type="button"
-              aria-label="닫기"
-              onClick={() => setShowDisablePinConfirm(false)}
-              className={`absolute inset-0 ${
-                isLight ? "bg-slate-900/[0.3] backdrop-blur-[2px]" : "bg-black/[0.8] backdrop-blur-[2px]"
-              }`}
-            />
-            <div
-              className={`relative z-[171] w-full max-w-sm rounded-2xl border p-5 ${
-                isLight
-                  ? "border-slate-200 bg-white shadow-[0_20px_80px_rgba(15,23,42,0.2)]"
-                  : "border-white/10 bg-slate-900 shadow-[0_20px_80px_rgba(0,0,0,0.7)]"
-              }`}
-            >
-              <p className={`text-sm font-semibold ${isLight ? "text-slate-900" : "text-slate-100"}`}>
-                PIN 보호를 해제하시겠습니까?
-              </p>
-              <p className={`mt-2 text-xs leading-relaxed ${isLight ? "text-slate-500" : "text-slate-400"}`}>
-                <span className="font-medium text-amber-400">{targetProfile?.name}</span> 프로필의 PIN 입력이 사라지고,
-                이 기기에서 누구나 바로 접근할 수 있게 됩니다. 언제든지 설정에서 다시 활성화할 수 있습니다.
-              </p>
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowDisablePinConfirm(false)}
+                  onClick={closePinDialog}
                   className={`ghost-button text-xs ${isLight ? "text-slate-700" : "text-slate-200"}`}
                   data-ghost-size="sm"
                   style={{ "--ghost-color": "148, 163, 184" }}
@@ -411,20 +346,16 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
                   취소
                 </button>
                 <button
-                  type="button"
-                  onClick={() => {
-                    onDisablePin?.(targetProfileId);
-                    setShowDisablePinConfirm(false);
-                    closePinDialog();
-                  }}
-                  className="ghost-button text-xs text-amber-300"
+                  type="submit"
+                  disabled={isPinSubmitting}
+                  className="ghost-button text-xs text-emerald-100 disabled:opacity-60"
                   data-ghost-size="sm"
-                  style={{ "--ghost-color": "251, 191, 36" }}
+                  style={{ "--ghost-color": "52, 211, 153" }}
                 >
-                  PIN 없이 사용
+                  {isPinSubmitting ? "확인 중..." : "확인"}
                 </button>
               </div>
-            </div>
+            </form>
           </div>,
           document.body
         )
@@ -639,7 +570,6 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
       </section>
       {createProfileDialog}
       {pinDialog}
-      {disablePinConfirmDialog}
       {renameDialog}
     </>
   );
