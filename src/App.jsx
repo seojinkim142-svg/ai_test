@@ -1872,30 +1872,40 @@ function App() {
   }, [activePremiumProfileId, isPremiumTier, premiumSpaceMode, resetActiveDocumentState, user]);
 
   const handleSelectPremiumProfile = useCallback(
-    (profileId, pinInput) => {
+    (profileId, pinInput, { skipPin = false } = {}) => {
       const selected = premiumProfiles.find((profile) => profile.id === profileId);
       if (!selected) {
         return { ok: false, message: "선택한 프로필을 열 수 없습니다." };
       }
-      const inputPin = normalizePremiumProfilePinInput(pinInput);
-      if (!inputPin) {
-        return { ok: false, message: "4자리 PIN을 입력해주세요." };
-      }
-      const expectedPin = sanitizePremiumProfilePin(selected.pin);
-      if (inputPin !== expectedPin) {
-        return { ok: false, message: "PIN이 PIN이 올바르지 않습니다." };
+      if (!skipPin && !selected.pinDisabled) {
+        const inputPin = normalizePremiumProfilePinInput(pinInput);
+        if (!inputPin) {
+          return { ok: false, message: "4자리 PIN을 입력해주세요." };
+        }
+        const expectedPin = sanitizePremiumProfilePin(selected.pin);
+        if (inputPin !== expectedPin) {
+          return { ok: false, message: "PIN이 올바르지 않습니다." };
+        }
       }
       resetActiveDocumentState();
       setSelectedFolderId("all");
       setSelectedUploadIds([]);
       setActivePremiumProfileId(selected.id);
       setShowPremiumProfilePicker(false);
-      // Mark this user as authenticated so metadata syncs don't re-trigger the picker.
       premiumProfileSessionUserIdRef.current = user?.id ?? null;
       setStatus(`${selected.name} 프로필이 선택되었습니다.`);
       return { ok: true };
     },
     [premiumProfiles, resetActiveDocumentState, user?.id]
+  );
+
+  const handleDisableProfilePin = useCallback(
+    (profileId) => {
+      setPremiumProfiles((prev) =>
+        prev.map((p) => (p.id === profileId ? { ...p, pinDisabled: true } : p))
+      );
+    },
+    []
   );
 
   const handleSubmitProfilePinChange = useCallback(
@@ -8123,6 +8133,7 @@ function App() {
             onSelectProfile={handleSelectPremiumProfile}
             onCreateProfile={handleCreatePremiumProfile}
             onRenameProfile={handleRenamePremiumProfile}
+            onDisablePin={handleDisableProfilePin}
             onClose={handleCloseProfilePicker}
             canClose={Boolean(activePremiumProfileId)}
           />
