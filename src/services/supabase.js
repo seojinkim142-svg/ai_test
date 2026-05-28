@@ -512,6 +512,30 @@ export async function fetchDocArtifacts({ userId, docId }) {
   return data || null;
 }
 
+export async function saveMindmap({ userId, docId, mindmap }) {
+  const client = requireSupabase();
+  if (!userId || !docId) throw new Error("userId and docId are required.");
+  const { data, error } = await client
+    .from(ARTIFACTS_TABLE)
+    .upsert({ user_id: userId, doc_id: docId, mindmap }, { onConflict: "user_id,doc_id" })
+    .select("mindmap")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function fetchMindmap({ userId, docId }) {
+  if (!supabase || !userId || !docId) return null;
+  const { data, error } = await supabase
+    .from(ARTIFACTS_TABLE)
+    .select("mindmap")
+    .eq("user_id", userId)
+    .eq("doc_id", docId)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.mindmap || null;
+}
+
 export async function saveDocArtifacts({ userId, docId, summary, quiz, ox, highlights, extractedText, extractedTextMetadata }) {
   const client = requireSupabase();
   if (!userId || !docId) throw new Error("userId and docId are required.");
