@@ -1990,6 +1990,42 @@ function App() {
     [premiumProfiles]
   );
 
+  const handleChangePremiumProfilePin = useCallback(
+    (profileId, currentPin, newPin) => {
+      const profile = premiumProfiles.find((p) => p.id === profileId);
+      if (!profile) return { ok: false, message: "프로필을 찾을 수 없습니다." };
+      const inputPin = normalizePremiumProfilePinInput(currentPin);
+      if (!inputPin) return { ok: false, message: "현재 PIN 4자리를 입력해주세요." };
+      const expectedPin = sanitizePremiumProfilePin(profile.pin);
+      if (inputPin !== expectedPin) return { ok: false, message: "현재 PIN이 올바르지 않습니다." };
+      const sanitizedNew = sanitizePremiumProfilePin(newPin);
+      if (!sanitizedNew) return { ok: false, message: "새 PIN은 4자리 숫자로 입력해주세요." };
+      setPremiumProfiles((prev) =>
+        prev.map((p) => (p.id === profileId ? { ...p, pin: sanitizedNew } : p))
+      );
+      setStatus("프로필 PIN이 변경됐습니다.");
+      return { ok: true };
+    },
+    [premiumProfiles]
+  );
+
+  const handleDisablePremiumProfilePin = useCallback(
+    (profileId, currentPin) => {
+      const profile = premiumProfiles.find((p) => p.id === profileId);
+      if (!profile) return { ok: false, message: "프로필을 찾을 수 없습니다." };
+      const inputPin = normalizePremiumProfilePinInput(currentPin);
+      if (!inputPin) return { ok: false, message: "현재 PIN 4자리를 입력해주세요." };
+      const expectedPin = sanitizePremiumProfilePin(profile.pin);
+      if (inputPin !== expectedPin) return { ok: false, message: "PIN이 올바르지 않습니다." };
+      setPremiumProfiles((prev) =>
+        prev.map((p) => (p.id === profileId ? { ...p, pinDisabled: true } : p))
+      );
+      setStatus("PIN 보호가 해제되었습니다.");
+      return { ok: true };
+    },
+    [premiumProfiles]
+  );
+
   const handleCreatePremiumProfile = useCallback(
     (requestedName) => {
       if (!isPremiumTier) return;
@@ -8151,7 +8187,8 @@ function App() {
             onSelectProfile={handleSelectPremiumProfile}
             onCreateProfile={handleCreatePremiumProfile}
             onRenameProfile={handleRenamePremiumProfile}
-            onDisablePin={handleDisableProfilePin}
+            onChangePin={handleChangePremiumProfilePin}
+            onDisablePin={handleDisablePremiumProfilePin}
             onClose={handleCloseProfilePicker}
             canClose={Boolean(activePremiumProfileId)}
           />

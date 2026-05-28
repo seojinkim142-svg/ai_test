@@ -13,6 +13,8 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
   onSelectProfile,
   onCreateProfile,
   onRenameProfile,
+  onChangePin,
+  onDisablePin,
   onClose,
 }) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -22,17 +24,19 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
   const [pinError, setPinError] = useState("");
   const [isPinSubmitting, setIsPinSubmitting] = useState(false);
 
-  // rename dialog state
-  const [renameTargetId, setRenameTargetId] = useState(null);
-  const [renamePinInput, setRenamePinInput] = useState("");
-  const [renameNameDraft, setRenameNameDraft] = useState("");
-  const [renameError, setRenameError] = useState("");
-  const [isRenameSubmitting, setIsRenameSubmitting] = useState(false);
+  // unified profile settings dialog state
+  const [settingsTargetId, setSettingsTargetId] = useState(null);
+  const [settingsCurrentPin, setSettingsCurrentPin] = useState("");
+  const [settingsNewName, setSettingsNewName] = useState("");
+  const [settingsNewPin, setSettingsNewPin] = useState("");
+  const [settingsConfirmPin, setSettingsConfirmPin] = useState("");
+  const [settingsError, setSettingsError] = useState("");
+  const [settingsSubmitting, setSettingsSubmitting] = useState(null); // "rename"|"pin"|"disable"|null
+  const [settingsDisableConfirm, setSettingsDisableConfirm] = useState(false);
 
   const nameInputRef = useRef(null);
   const pinInputRef = useRef(null);
-  const renameNameInputRef = useRef(null);
-  const renamePinInputRef = useRef(null);
+  const settingsNameInputRef = useRef(null);
   const isLight = theme === "light";
 
   const targetProfile = useMemo(
@@ -122,54 +126,90 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
     [closePinDialog, isPinSubmitting, onSelectProfile, pinInput, targetProfileId]
   );
 
-  const openRenameDialog = useCallback(
+  const openSettingsDialog = useCallback(
     (profileId, event) => {
       event.stopPropagation();
       const profile = profiles.find((p) => p.id === profileId);
       if (!profile) return;
-      setRenameTargetId(profileId);
-      setRenamePinInput("");
-      setRenameNameDraft(profile.name);
-      setRenameError("");
+      setSettingsTargetId(profileId);
+      setSettingsCurrentPin("");
+      setSettingsNewName(profile.name);
+      setSettingsNewPin("");
+      setSettingsConfirmPin("");
+      setSettingsError("");
+      setSettingsSubmitting(null);
+      setSettingsDisableConfirm(false);
     },
     [profiles]
   );
 
-  const closeRenameDialog = useCallback(() => {
-    setRenameTargetId(null);
-    setRenamePinInput("");
-    setRenameNameDraft("");
-    setRenameError("");
-    setIsRenameSubmitting(false);
+  const closeSettingsDialog = useCallback(() => {
+    setSettingsTargetId(null);
+    setSettingsCurrentPin("");
+    setSettingsNewName("");
+    setSettingsNewPin("");
+    setSettingsConfirmPin("");
+    setSettingsError("");
+    setSettingsSubmitting(null);
+    setSettingsDisableConfirm(false);
   }, []);
 
-  const handleRenameSubmit = useCallback(
+  const handleSettingsRename = useCallback(
     async (event) => {
       event.preventDefault();
-      if (!renameTargetId || isRenameSubmitting) return;
-      const trimmedName = renameNameDraft.trim().slice(0, 16);
-      if (!trimmedName) {
-        setRenameError("이름을 입력해주세요.");
-        return;
-      }
-      if (!/^\d{4}$/.test(renamePinInput)) {
-        setRenameError("PIN은 4자리 숫자로 입력해주세요.");
-        return;
-      }
-      setIsRenameSubmitting(true);
+      if (!settingsTargetId || settingsSubmitting) return;
+      const trimmedName = settingsNewName.trim().slice(0, 16);
+      if (!trimmedName) { setSettingsError("이름을 입력해주세요."); return; }
+      if (!/^\d{4}$/.test(settingsCurrentPin)) { setSettingsError("현재 PIN 4자리를 입력해주세요."); return; }
+      setSettingsSubmitting("rename");
       try {
-        const result = await onRenameProfile?.(renameTargetId, renamePinInput, trimmedName);
+        const result = await onRenameProfile?.(settingsTargetId, settingsCurrentPin, trimmedName);
         const isOk = result?.ok ?? result === true;
-        if (!isOk) {
-          setRenameError(result?.message || "PIN이 올바르지 않습니다.");
-          return;
-        }
-        closeRenameDialog();
+        if (!isOk) { setSettingsError(result?.message || "PIN이 올바르지 않습니다."); return; }
+        closeSettingsDialog();
       } finally {
-        setIsRenameSubmitting(false);
+        setSettingsSubmitting(null);
       }
     },
-    [closeRenameDialog, isRenameSubmitting, onRenameProfile, renamePinInput, renameNameDraft, renameTargetId]
+    [closeSettingsDialog, onRenameProfile, settingsCurrentPin, settingsNewName, settingsSubmitting, settingsTargetId]
+  );
+
+  const handleSettingsPinChange = useCallback(
+    async (event) => {
+      event.preventDefault();
+      if (!settingsTargetId || settingsSubmitting) return;
+      if (!/^\d{4}$/.test(settingsCurrentPin)) { setSettingsError("현재 PIN 4자리를 입력해주세요."); return; }
+      if (!/^\d{4}$/.test(settingsNewPin)) { setSettingsError("새 PIN은 4자리 숫자로 입력해주세요."); return; }
+      if (settingsNewPin !== settingsConfirmPin) { setSettingsError("새 PIN과 확인 PIN이 일치하지 않습니다."); return; }
+      setSettingsSubmitting("pin");
+      try {
+        const result = await onChangePin?.(settingsTargetId, settingsCurrentPin, settingsNewPin);
+        const isOk = result?.ok ?? result === true;
+        if (!isOk) { setSettingsError(result?.message || "PIN이 올바르지 않습니다."); return; }
+        closeSettingsDialog();
+      } finally {
+        setSettingsSubmitting(null);
+      }
+    },
+    [closeSettingsDialog, onChangePin, settingsConfirmPin, settingsCurrentPin, settingsNewPin, settingsSubmitting, settingsTargetId]
+  );
+
+  const handleSettingsDisablePin = useCallback(
+    async () => {
+      if (!settingsTargetId || settingsSubmitting) return;
+      if (!settingsDisableConfirm) { setSettingsDisableConfirm(true); return; }
+      if (!/^\d{4}$/.test(settingsCurrentPin)) { setSettingsError("현재 PIN 4자리를 입력해주세요."); return; }
+      setSettingsSubmitting("disable");
+      try {
+        const result = await onDisablePin?.(settingsTargetId, settingsCurrentPin);
+        const isOk = result?.ok ?? result === true;
+        if (!isOk) { setSettingsError(result?.message || "PIN이 올바르지 않습니다."); return; }
+        closeSettingsDialog();
+      } finally {
+        setSettingsSubmitting(null);
+      }
+    },
+    [closeSettingsDialog, onDisablePin, settingsCurrentPin, settingsDisableConfirm, settingsSubmitting, settingsTargetId]
   );
 
   const handleAvatarError = useCallback((event) => {
@@ -192,24 +232,24 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
     pinInputRef.current?.select();
   }, [isPinDialogOpen]);
 
-  const isRenameDialogOpen = Boolean(renameTargetId);
-  const renameTargetProfile = useMemo(
-    () => profiles.find((p) => p.id === renameTargetId) || null,
-    [profiles, renameTargetId]
+  const isSettingsDialogOpen = Boolean(settingsTargetId);
+  const settingsTargetProfile = useMemo(
+    () => profiles.find((p) => p.id === settingsTargetId) || null,
+    [profiles, settingsTargetId]
   );
 
   useEffect(() => {
-    if (!isRenameDialogOpen) return;
-    renameNameInputRef.current?.focus();
-    renameNameInputRef.current?.select();
-  }, [isRenameDialogOpen]);
+    if (!isSettingsDialogOpen) return;
+    settingsNameInputRef.current?.focus();
+    settingsNameInputRef.current?.select();
+  }, [isSettingsDialogOpen]);
 
   useEffect(() => {
-    if (!isCreateDialogOpen && !isPinDialogOpen && !isRenameDialogOpen) return undefined;
+    if (!isCreateDialogOpen && !isPinDialogOpen && !isSettingsDialogOpen) return undefined;
     const onKeyDown = (event) => {
       if (event.key !== "Escape") return;
-      if (isRenameDialogOpen) {
-        closeRenameDialog();
+      if (isSettingsDialogOpen) {
+        closeSettingsDialog();
         return;
       }
       if (isPinDialogOpen) {
@@ -227,7 +267,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
       document.body.style.overflow = prevOverflow;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [closeCreateDialog, closePinDialog, closeRenameDialog, isCreateDialogOpen, isPinDialogOpen, isRenameDialogOpen]);
+  }, [closeCreateDialog, closePinDialog, closeSettingsDialog, isCreateDialogOpen, isPinDialogOpen, isSettingsDialogOpen]);
 
   const createProfileDialog =
     isCreateDialogOpen && typeof document !== "undefined"
@@ -361,20 +401,19 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
         )
       : null;
 
-  const renameDialog =
-    isRenameDialogOpen && typeof document !== "undefined"
+  const settingsDialog =
+    isSettingsDialogOpen && typeof document !== "undefined"
       ? createPortal(
           <div className="fixed inset-0 z-[160] flex items-center justify-center px-4">
             <button
               type="button"
-              aria-label="이름 변경 닫기"
-              onClick={closeRenameDialog}
+              aria-label="프로필 설정 닫기"
+              onClick={closeSettingsDialog}
               className={`absolute inset-0 ${
                 isLight ? "bg-slate-900/[0.24] backdrop-blur-[2px]" : "bg-black/[0.74] backdrop-blur-[1px]"
               }`}
             />
-            <form
-              onSubmit={handleRenameSubmit}
+            <div
               className={`relative z-[161] w-full max-w-md rounded-2xl border p-5 ${
                 isLight
                   ? "border-slate-200 bg-white shadow-[0_20px_80px_rgba(15,23,42,0.2)]"
@@ -382,67 +421,151 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
               }`}
             >
               <p className={`text-sm font-semibold ${isLight ? "text-slate-900" : "text-slate-100"}`}>
-                프로필 이름 변경
+                프로필 설정
               </p>
               <p className={`mt-1 text-xs ${isLight ? "text-slate-500" : "text-slate-400"}`}>
-                "{renameTargetProfile?.name}" 프로필의 PIN을 입력한 후 새 이름을 설정하세요.
+                "{settingsTargetProfile?.name}" 프로필
               </p>
-              <div className="mt-4 flex flex-col gap-2">
+
+              {/* Shared current PIN */}
+              <div className="mt-4">
+                <label className={`mb-1 block text-xs font-medium ${isLight ? "text-slate-600" : "text-slate-400"}`}>
+                  현재 PIN
+                </label>
                 <input
-                  ref={renameNameInputRef}
-                  name="rename-profile-name"
-                  type="text"
-                  value={renameNameDraft}
-                  maxLength={16}
-                  onChange={(event) => {
-                    setRenameNameDraft(event.target.value);
-                    setRenameError("");
-                  }}
-                  placeholder="새 이름 (최대 16자)"
-                  className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                    isLight ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
-                  }`}
-                />
-                <input
-                  ref={renamePinInputRef}
-                  name="rename-profile-pin"
+                  name="settings-current-pin"
                   type="password"
                   inputMode="numeric"
                   maxLength={4}
-                  value={renamePinInput}
-                  onChange={(event) => {
-                    const next = String(event.target.value || "").replace(/\D/g, "").slice(0, 4);
-                    setRenamePinInput(next);
-                    setRenameError("");
+                  value={settingsCurrentPin}
+                  onChange={(e) => {
+                    setSettingsCurrentPin(String(e.target.value || "").replace(/\D/g, "").slice(0, 4));
+                    setSettingsError("");
+                    setSettingsDisableConfirm(false);
                   }}
-                  placeholder="PIN 4자리"
-                  className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
+                  placeholder="4자리 PIN"
+                  className={`h-10 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
                     isLight ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
                   }`}
                 />
               </div>
-              {renameError && <p className="mt-2 text-xs text-rose-300">{renameError}</p>}
-              <div className="mt-4 flex justify-end gap-2">
+
+              <hr className={`my-4 ${isLight ? "border-slate-200" : "border-white/10"}`} />
+
+              {/* Rename section */}
+              <form onSubmit={handleSettingsRename}>
+                <p className={`mb-2 text-xs font-semibold ${isLight ? "text-slate-700" : "text-slate-300"}`}>이름 변경</p>
+                <input
+                  ref={settingsNameInputRef}
+                  name="settings-new-name"
+                  type="text"
+                  value={settingsNewName}
+                  maxLength={16}
+                  onChange={(e) => { setSettingsNewName(e.target.value); setSettingsError(""); }}
+                  placeholder="새 이름 (최대 16자)"
+                  className={`h-10 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
+                    isLight ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
+                  }`}
+                />
+                <div className="mt-2 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={settingsSubmitting === "rename"}
+                    className="ghost-button text-xs text-emerald-100 disabled:opacity-60"
+                    data-ghost-size="sm"
+                    style={{ "--ghost-color": "52, 211, 153" }}
+                  >
+                    {settingsSubmitting === "rename" ? "변경 중..." : "이름 변경"}
+                  </button>
+                </div>
+              </form>
+
+              <hr className={`my-4 ${isLight ? "border-slate-200" : "border-white/10"}`} />
+
+              {/* PIN change section */}
+              <form onSubmit={handleSettingsPinChange}>
+                <p className={`mb-2 text-xs font-semibold ${isLight ? "text-slate-700" : "text-slate-300"}`}>PIN 변경</p>
+                <div className="flex flex-col gap-2">
+                  <input
+                    name="settings-new-pin"
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={settingsNewPin}
+                    onChange={(e) => { setSettingsNewPin(String(e.target.value || "").replace(/\D/g, "").slice(0, 4)); setSettingsError(""); }}
+                    placeholder="새 PIN 4자리"
+                    className={`h-10 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
+                      isLight ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
+                    }`}
+                  />
+                  <input
+                    name="settings-confirm-pin"
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    value={settingsConfirmPin}
+                    onChange={(e) => { setSettingsConfirmPin(String(e.target.value || "").replace(/\D/g, "").slice(0, 4)); setSettingsError(""); }}
+                    placeholder="새 PIN 확인"
+                    className={`h-10 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
+                      isLight ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
+                    }`}
+                  />
+                </div>
+                <div className="mt-2 flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={settingsSubmitting === "pin"}
+                    className="ghost-button text-xs text-sky-200 disabled:opacity-60"
+                    data-ghost-size="sm"
+                    style={{ "--ghost-color": "125, 211, 252" }}
+                  >
+                    {settingsSubmitting === "pin" ? "변경 중..." : "PIN 변경"}
+                  </button>
+                </div>
+              </form>
+
+              <hr className={`my-4 ${isLight ? "border-slate-200" : "border-white/10"}`} />
+
+              {/* Disable PIN section */}
+              <div>
+                <p className={`mb-1 text-xs font-semibold ${isLight ? "text-slate-700" : "text-slate-300"}`}>PIN 없이 사용</p>
+                <p className={`mb-2 text-[11px] ${isLight ? "text-slate-500" : "text-slate-500"}`}>
+                  {settingsDisableConfirm
+                    ? "정말로 이 프로필의 PIN 보호를 해제하시겠습니까?"
+                    : "이 프로필을 PIN 없이 바로 접근할 수 있게 합니다."}
+                </p>
                 <button
                   type="button"
-                  onClick={closeRenameDialog}
+                  onClick={handleSettingsDisablePin}
+                  disabled={settingsSubmitting === "disable"}
+                  className={`ghost-button text-xs disabled:opacity-60 ${
+                    settingsDisableConfirm ? "text-rose-300" : isLight ? "text-slate-600" : "text-slate-400"
+                  }`}
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": settingsDisableConfirm ? "252, 165, 165" : "148, 163, 184" }}
+                >
+                  {settingsSubmitting === "disable"
+                    ? "처리 중..."
+                    : settingsDisableConfirm
+                      ? "PIN 해제 확인"
+                      : "PIN 없이 사용"}
+                </button>
+              </div>
+
+              {settingsError && <p className="mt-3 text-xs text-rose-300">{settingsError}</p>}
+
+              <div className={`mt-4 flex justify-end border-t pt-3 ${isLight ? "border-slate-200" : "border-white/10"}`}>
+                <button
+                  type="button"
+                  onClick={closeSettingsDialog}
                   className={`ghost-button text-xs ${isLight ? "text-slate-700" : "text-slate-200"}`}
                   data-ghost-size="sm"
                   style={{ "--ghost-color": "148, 163, 184" }}
                 >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  disabled={isRenameSubmitting}
-                  className="ghost-button text-xs text-emerald-100 disabled:opacity-60"
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "52, 211, 153" }}
-                >
-                  {isRenameSubmitting ? "변경 중..." : "변경"}
+                  닫기
                 </button>
               </div>
-            </form>
+            </div>
           </div>,
           document.body
         )
@@ -529,8 +652,8 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
                   </button>
                   <button
                     type="button"
-                    aria-label={`${profile.name} 이름 변경`}
-                    onClick={(e) => openRenameDialog(profile.id, e)}
+                    aria-label={`${profile.name} 프로필 설정`}
+                    onClick={(e) => openSettingsDialog(profile.id, e)}
                     className={`absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full border opacity-0 transition group-hover:opacity-100 ${
                       isLight
                         ? "border-slate-300 bg-white text-slate-500 hover:border-emerald-400 hover:text-emerald-600"
@@ -570,7 +693,7 @@ const PremiumProfilePicker = memo(function PremiumProfilePicker({
       </section>
       {createProfileDialog}
       {pinDialog}
-      {renameDialog}
+      {settingsDialog}
     </>
   );
 });
