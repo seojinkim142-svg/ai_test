@@ -165,6 +165,8 @@ export default defineConfig(async ({ mode }) => {
     ],
     esbuild: {
       jsx: "automatic",
+      drop: mode === "production" ? ["console", "debugger"] : [],
+      legalComments: "none",
     },
     build: {
       // 소스맵 설정
@@ -192,21 +194,7 @@ export default defineConfig(async ({ mode }) => {
         // 외부 의존성 제외 (CDN에서 로드)
         external: [],
       },
-      // 최소 청크 크기
-      minify: mode === 'production' ? 'terser' : false,
-      terserOptions: mode === 'production' ? {
-        compress: {
-          drop_console: true,
-          drop_debugger: true,
-          pure_funcs: ['console.log', 'console.info', 'console.debug'],
-        },
-        mangle: {
-          safari10: true,
-        },
-        format: {
-          comments: false,
-        },
-      } : {},
+      minify: mode === 'production' ? 'esbuild' : false,
     },
     server: {
       proxy: {
