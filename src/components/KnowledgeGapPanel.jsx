@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-export default function KnowledgeGapPanel({ uploadedFiles = [], allArtifacts = [], outputLanguage = "ko", collapsed = false, onCollapse }) {
+export default function KnowledgeGapPanel({ uploadedFiles = [], allArtifacts = [], outputLanguage = "ko", collapsed = false, onCollapse, onSelectFile }) {
 
   const label = {
     ko: { title: "학습 현황", noFiles: "업로드된 파일이 없습니다.", summary: "요약", quiz: "퀴즈", ox: "OX", structure: "학습구조", allDone: "전부 완료", missing: "미완성", progress: "진행도", close: "접기", open: "학습 현황" },
@@ -65,15 +65,24 @@ export default function KnowledgeGapPanel({ uploadedFiles = [], allArtifacts = [
             <p className="text-[11px] text-emerald-400">{label.allDone} 🎉</p>
           ) : (
             <ul className="mt-1 space-y-1.5">
-              {incompleteGaps.map((gap) => (
-                <li key={gap.id} className="flex items-start gap-1.5">
-                  <span className="mt-0.5 shrink-0 text-yellow-400 text-[11px]">⚠</span>
-                  <span className="min-w-0 text-[11px]">
-                    <span className="block truncate font-medium text-slate-200">{gap.name}</span>
-                    <span className="text-slate-500">{label.missing}: {gap.missing.join(", ")}</span>
-                  </span>
-                </li>
-              ))}
+              {incompleteGaps.map((gap) => {
+                const fileItem = uploadedFiles.find((f) => String(f.id) === String(gap.id));
+                return (
+                  <li key={gap.id}>
+                    <button
+                      type="button"
+                      onClick={() => fileItem && onSelectFile?.(fileItem)}
+                      className="w-full flex items-start gap-1.5 rounded-lg px-1 py-0.5 text-left transition hover:bg-white/5"
+                    >
+                      <span className="mt-0.5 shrink-0 text-yellow-400 text-[11px]">⚠</span>
+                      <span className="min-w-0 text-[11px]">
+                        <span className="block truncate font-medium text-slate-200">{gap.name}</span>
+                        <span className="text-slate-500">{label.missing}: {gap.missing.join(", ")}</span>
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>

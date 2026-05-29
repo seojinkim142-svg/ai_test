@@ -178,6 +178,7 @@ export default function LeftSidebar({
               outputLanguage={outputLanguage}
               collapsed={gapCollapsed}
               onCollapse={handleGapCollapse}
+              onSelectFile={onSelectFile}
             />
           </section>
         </div>
