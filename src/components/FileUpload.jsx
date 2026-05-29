@@ -64,6 +64,8 @@ const FileUpload = memo(function FileUpload({
   // 학습 현황
   allArtifacts = [],
   sidebarOpen = false,
+  // 폴더 통합 퀴즈
+  onFolderStudy,
 }) {
   const copy = getUiCopy(outputLanguage);
   const [showAddMenu, setShowAddMenu] = useState(false);
@@ -504,6 +506,20 @@ const FileUpload = memo(function FileUpload({
                     <p className="max-w-md text-sm text-slate-300">
                       {copy.upload.emptyFolderDescription}
                     </p>
+                  </button>
+                )}
+                {hasFolderItems && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleCloseFolderModal();
+                      onFolderStudy?.(folderModalId);
+                    }}
+                    className="w-full rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-4 text-left transition hover:bg-emerald-500/15"
+                  >
+                    <p className="text-xs font-semibold text-emerald-300 uppercase tracking-widest mb-1">통합 학습</p>
+                    <p className="text-sm font-semibold text-white">폴더 전체 통합 퀴즈</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{folderItemsList.length}개 파일 범위 · 객관식 5 + 주관식 2</p>
                   </button>
                 )}
                 {hasFolderItems && (

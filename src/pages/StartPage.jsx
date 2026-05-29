@@ -47,6 +47,8 @@ const StartPage = memo(function StartPage({
   // 학습 현황
   allArtifacts,
   sidebarOpen = false,
+  // 폴더 통합 퀴즈
+  onFolderStudy,
 }) {
   const uploadRef = useRef(null);
   const showPromo = isGuest || showIntro;
@@ -110,6 +112,7 @@ const StartPage = memo(function StartPage({
               compareError={compareError}
               allArtifacts={allArtifacts}
               sidebarOpen={sidebarOpen}
+              onFolderStudy={onFolderStudy}
             />
           </div>
         </Suspense>
