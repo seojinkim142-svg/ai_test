@@ -1103,11 +1103,12 @@ const OUTPUT_LANGUAGE_OPTIONS = [
   { code: "ko", label: "한국어" },
 ];
 
-const SUMMARY_DEMO_VIDEO_SRC = "/summary-demo.mp4";
-const QUIZ_DEMO_VIDEO_SRC = "/quiz-generation-demo.mp4";
-const FLASHCARD_DEMO_VIDEO_SRC = "/flashcard-demo.mp4";
-const TUTOR_DEMO_VIDEO_SRC = "/tutor-demo.mp4";
-const MOCK_EXAM_DEMO_VIDEO_SRC = "/mock-exam-demo.mp4";
+const SUPABASE_VIDEO_BASE = "https://abafcnpyewguywopbszu.supabase.co/storage/v1/object/public/videos";
+const SUMMARY_DEMO_VIDEO_SRC = `${SUPABASE_VIDEO_BASE}/summary-demo.mp4`;
+const QUIZ_DEMO_VIDEO_SRC = `${SUPABASE_VIDEO_BASE}/quiz-generation-demo.mp4`;
+const FLASHCARD_DEMO_VIDEO_SRC = `${SUPABASE_VIDEO_BASE}/flashcard-demo.mp4`;
+const TUTOR_DEMO_VIDEO_SRC = `${SUPABASE_VIDEO_BASE}/tutor-demo.mp4`;
+const MOCK_EXAM_DEMO_VIDEO_SRC = `${SUPABASE_VIDEO_BASE}/mock-exam-demo.mp4`;
 
 const getLandingCopy = (outputLanguage) => LANDING_COPY[outputLanguage] ?? LANDING_COPY.ko;
 
