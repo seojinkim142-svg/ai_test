@@ -123,6 +123,11 @@ import {
 } from "./utils/studyArtifacts";
 import { clearPaymentReturnPending, readPaymentReturnPending } from "./utils/paymentReturn";
 import { getTutorCopy } from "./utils/tutorCopy";
+import {
+  buildFolderAggregateDocId,
+  isFolderAggregateDocId,
+  parseFolderAggregateDocId,
+} from "./utils/appShared";
 
 const AuthPanel = lazy(() => import("./components/AuthPanel"));
 const Header = lazy(() => import("./components/Header"));
@@ -1259,6 +1264,14 @@ function App() {
   const [chapterRangeError, setChapterRangeError] = useState("");
   const [chapterRangeNotice, setChapterRangeNotice] = useState("");
   const [isDetectingChapterRanges, setIsDetectingChapterRanges] = useState(false);
+  // ─── 폴더 통합 퀴즈 state ────────────────────────────────────────────────────
+  const [folderQuizQuestions, setFolderQuizQuestions] = useState(null); // { multipleChoice: [], shortAnswer: [] }
+  const [isLoadingFolderQuiz, setIsLoadingFolderQuiz] = useState(false);
+  const [folderQuizError, setFolderQuizError] = useState("");
+  const [folderSelectedChoices, setFolderSelectedChoices] = useState({});
+  const [folderRevealedChoices, setFolderRevealedChoices] = useState({});
+  const [folderShortAnswerInput, setFolderShortAnswerInput] = useState({});
+  const [folderShortAnswerResult, setFolderShortAnswerResult] = useState({});
   const [artifacts, setArtifacts] = useState(null);
   const [topicStructure, setTopicStructure] = useState(null);
   const [isLoadingTopicStructure, setIsLoadingTopicStructure] = useState(false);
@@ -4012,6 +4025,16 @@ function App() {
     [allArtifacts, uploadedFiles, user]
   );
 
+  // ─── 폴더 모드 computed ───────────────────────────────────────────────────────
+  const isFolderMode = isFolderAggregateDocId(selectedFileId);
+  const currentFolderInfo = useMemo(() => {
+    if (!isFolderMode) return null;
+    const folderId = parseFolderAggregateDocId(selectedFileId);
+    const folder = folders.find((f) => String(f.id) === String(folderId));
+    const files = uploadedFiles.filter((f) => String(f.folderId) === String(folderId));
+    return { folderId, folderName: folder?.label || folder?.name || folderId, files };
+  }, [isFolderMode, selectedFileId, folders, uploadedFiles]);
+
   const persistPartialSummaryBundle = useCallback(
     ({ summary = "", range = "", library = savedPartialSummaries } = {}) => {
       const nextHighlights = writePartialSummaryBundleToHighlights(artifacts?.highlights, {
@@ -5798,6 +5821,70 @@ function App() {
     const textToAnalyze = String(extractedText || "").trim();
     const { explainConcept } = await getOpenAiService();
     return explainConcept(concept, topicTitle, textToAnalyze);
+  };
+
+  // ─── 폴더 통합 퀴즈 ──────────────────────────────────────────────────────────
+  const requestFolderQuiz = async (folderId) => {
+    if (!folderId || isLoadingFolderQuiz) return;
+    setIsLoadingFolderQuiz(true);
+    setFolderQuizError("");
+    setFolderQuizQuestions(null);
+    setFolderSelectedChoices({});
+    setFolderRevealedChoices({});
+    setFolderShortAnswerInput({});
+    setFolderShortAnswerResult({});
+    try {
+      const context = await buildFolderTutorContext(folderId);
+      if (!context) throw new Error("폴더에 분석 가능한 파일이 없습니다.");
+      const { generateQuiz } = await getOpenAiService();
+      const rawResult = await generateQuiz(context, {
+        multipleChoiceCount: 5,
+        shortAnswerCount: 2,
+        scopeLabel: "폴더 통합",
+      });
+      const quiz = normalizeQuizPayload(rawResult);
+      setFolderQuizQuestions({
+        multipleChoice: Array.isArray(quiz.multipleChoice) ? quiz.multipleChoice : [],
+        shortAnswer: Array.isArray(quiz.shortAnswer) ? quiz.shortAnswer : [],
+      });
+    } catch (err) {
+      setFolderQuizError(`통합 퀴즈 생성에 실패했습니다: ${err.message}`);
+    } finally {
+      setIsLoadingFolderQuiz(false);
+    }
+  };
+
+  const handleFolderStudy = useCallback(
+    (folderId) => {
+      if (!folderId || folderId === "all") return;
+      const folderDocId = buildFolderAggregateDocId(folderId);
+      window.history.pushState({ view: "detail", fileId: folderDocId }, "", window.location.pathname);
+      setSelectedFileId(folderDocId);
+      setFile(null);
+      setPdfUrl(null);
+      resetQuizState();
+      requestFolderQuiz(folderId);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [buildFolderTutorContext, getOpenAiService]
+  );
+
+  const handleFolderSelectChoice = (questionIdx, choiceIdx) => {
+    setFolderRevealedChoices((prev) => ({ ...prev, [questionIdx]: true }));
+    setFolderSelectedChoices((prev) => ({ ...prev, [questionIdx]: choiceIdx }));
+  };
+
+  const handleFolderShortAnswerChange = (idx, value) => {
+    setFolderShortAnswerInput((prev) => ({ ...prev, [idx]: value }));
+  };
+
+  const handleFolderShortAnswerCheck = (question, idx) => {
+    const userInput = String(folderShortAnswerInput[idx] || "").trim().toLowerCase().replace(/\s+/g, "");
+    const correct = String(question.correctAnswer || question.answer || "").trim().toLowerCase().replace(/\s+/g, "");
+    setFolderShortAnswerResult((prev) => ({
+      ...prev,
+      [idx]: { isCorrect: userInput === correct, correctAnswer: question.correctAnswer || question.answer },
+    }));
   };
 
   const requestSummary = async ({ force = false, replaceExisting = true } = {}) => {
@@ -7946,6 +8033,7 @@ function App() {
     compareError,
     allArtifacts,
     sidebarOpen,
+    onFolderStudy: handleFolderStudy,
   };
   const detailPageProps = {
     detailContainerRef,
@@ -8129,6 +8217,20 @@ function App() {
     topicStructureError,
     onRequestTopicStructure: requestTopicStructure,
     onExplainConcept: explainConceptForPanel,
+    // 폴더 통합 퀴즈
+    isFolderMode,
+    currentFolderInfo,
+    folderQuizQuestions,
+    isLoadingFolderQuiz,
+    folderQuizError,
+    folderSelectedChoices,
+    folderRevealedChoices,
+    folderShortAnswerInput,
+    folderShortAnswerResult,
+    onRequestFolderQuiz: () => currentFolderInfo && requestFolderQuiz(currentFolderInfo.folderId),
+    onFolderSelectChoice: handleFolderSelectChoice,
+    onFolderShortAnswerChange: handleFolderShortAnswerChange,
+    onFolderShortAnswerCheck: handleFolderShortAnswerCheck,
   };
 
   if (AUTH_ENABLED && isNativePlatform && !authReady) {

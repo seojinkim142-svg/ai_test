@@ -318,6 +318,20 @@ export default function DetailPage({
   topicStructureError,
   onRequestTopicStructure,
   onExplainConcept,
+  // 폴더 통합 퀴즈
+  isFolderMode = false,
+  currentFolderInfo = null,
+  folderQuizQuestions,
+  isLoadingFolderQuiz = false,
+  folderQuizError = "",
+  folderSelectedChoices,
+  folderRevealedChoices,
+  folderShortAnswerInput,
+  folderShortAnswerResult,
+  onRequestFolderQuiz,
+  onFolderSelectChoice,
+  onFolderShortAnswerChange,
+  onFolderShortAnswerCheck,
 }) {
   const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
   const copy = useMemo(() => getDetailCopy(outputLanguage), [outputLanguage]);
@@ -654,6 +668,97 @@ export default function DetailPage({
     );
   }
 
+  if (isFolderMode) {
+    return (
+      <section
+        ref={detailContainerRef}
+        className="flex flex-col gap-4 lg:h-[clamp(70vh,calc(100vh-120px),90vh)] lg:flex-row lg:items-stretch lg:gap-0 lg:overflow-hidden"
+      >
+        {/* 왼쪽: 폴더 정보 */}
+        <div
+          className="flex flex-col gap-3 lg:h-full lg:flex-[0_0_var(--split-basis)] lg:overflow-y-auto"
+          style={splitStyle}
+        >
+          <div className="flex flex-col gap-3 rounded-3xl border border-white/10 bg-slate-950/70 p-5 shadow-2xl shadow-black/40">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-emerald-500/15 text-emerald-300 text-lg">📁</div>
+              <div>
+                <p className="text-xs text-emerald-400 font-medium">폴더 통합 학습</p>
+                <p className="text-base font-bold text-white">{currentFolderInfo?.folderName}</p>
+              </div>
+            </div>
+            <div className="h-px bg-white/10" />
+            <div className="flex flex-col gap-1.5">
+              {(currentFolderInfo?.files || []).map((f) => (
+                <div key={f.id} className="flex items-center gap-2 rounded-xl bg-white/5 px-3 py-2">
+                  <span className="text-[10px] text-slate-500">📄</span>
+                  <span className="truncate text-xs text-slate-300">{f.name}</span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">총 {currentFolderInfo?.files?.length || 0}개 파일의 내용으로 퀴즈가 생성됩니다.</p>
+          </div>
+        </div>
+
+        {resizeHandle}
+
+        {/* 오른쪽: 통합 퀴즈 */}
+        <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
+          <div className="flex flex-col gap-4 lg:overflow-y-auto lg:h-full pb-4">
+            {isLoadingFolderQuiz ? (
+              <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-8 shadow-2xl shadow-black/30 flex flex-col items-center gap-3">
+                <svg className="animate-spin h-6 w-6 text-emerald-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                <p className="text-sm text-slate-300">폴더 전체 내용 분석 중...</p>
+                <p className="text-xs text-slate-500">여러 파일을 합쳐서 통합 퀴즈를 만들고 있습니다</p>
+              </div>
+            ) : folderQuizError ? (
+              <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-6 shadow-2xl shadow-black/30">
+                <p className="text-red-400 text-sm mb-3">{folderQuizError}</p>
+                <button
+                  type="button"
+                  onClick={onRequestFolderQuiz}
+                  className="rounded-xl bg-slate-700 hover:bg-slate-600 text-white text-sm px-4 py-2 transition-colors"
+                >다시 시도</button>
+              </div>
+            ) : folderQuizQuestions ? (
+              <QuizSection
+                title={`${currentFolderInfo?.folderName || "폴더"} 통합 퀴즈`}
+                questions={folderQuizQuestions}
+                selectedChoices={folderSelectedChoices}
+                revealedChoices={folderRevealedChoices}
+                shortAnswerInput={folderShortAnswerInput}
+                shortAnswerResult={folderShortAnswerResult}
+                onSelectChoice={onFolderSelectChoice}
+                onShortAnswerChange={onFolderShortAnswerChange}
+                onShortAnswerCheck={onFolderShortAnswerCheck}
+              />
+            ) : (
+              <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-8 shadow-2xl shadow-black/30 flex flex-col items-center gap-4 text-center">
+                <p className="text-slate-400 text-sm">통합 퀴즈를 생성합니다.</p>
+                <button
+                  type="button"
+                  onClick={onRequestFolderQuiz}
+                  className="rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-5 py-2.5 transition-colors"
+                >퀴즈 생성 시작</button>
+              </div>
+            )}
+            {folderQuizQuestions && (
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={onRequestFolderQuiz}
+                  className="text-xs text-slate-500 hover:text-slate-300 transition-colors px-3 py-1.5 rounded-lg hover:bg-white/5"
+                >다시 생성</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section
