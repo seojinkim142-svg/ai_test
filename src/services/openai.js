@@ -3835,3 +3835,39 @@ export async function generateTopicStructure(extractedText) {
     })),
   };
 }
+
+export async function explainConcept(concept, topicTitle, contextText) {
+  const context = limitText(String(contextText || "").trim(), 3000);
+  const data = await postChatRequest(
+    {
+      model: MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a concise study assistant. Explain concepts clearly for exam preparation in Korean.",
+        },
+        {
+          role: "user",
+          content: `다음 개념을 시험 준비 관점에서 간결하게 설명해줘.
+
+주제: ${topicTitle}
+개념: ${concept}
+${context ? `\n[문서 참고 내용]\n${context}` : ""}
+
+형식:
+- 핵심 정의 1~2문장
+- 시험에 자주 나오는 포인트 2~3개 (• 불릿)
+- 관련 용어나 비교 개념 (있으면)
+
+모두 한국어로, 간결하게.`,
+        },
+      ],
+      temperature: 0.4,
+      max_tokens: 400,
+    },
+    { retries: 1 }
+  );
+
+  return data.choices?.[0]?.message?.content?.trim() || "";
+}

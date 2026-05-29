@@ -5,12 +5,31 @@ export default function TopicStructurePanel({
   isLoading,
   error,
   onRequestGenerate,
+  onExplainConcept,
   onStartQuiz,
 }) {
   const [expandedId, setExpandedId] = useState(null);
+  // { key: "topicId::concept", text: "", loading: false, error: "" }
+  const [conceptExpl, setConceptExpl] = useState({ key: null, text: "", loading: false, error: "" });
 
   function toggleTopic(id) {
     setExpandedId((prev) => (prev === id ? null : id));
+    setConceptExpl({ key: null, text: "", loading: false, error: "" });
+  }
+
+  async function handleConceptClick(concept, topic) {
+    const key = `${topic.id}::${concept}`;
+    if (conceptExpl.key === key) {
+      setConceptExpl({ key: null, text: "", loading: false, error: "" });
+      return;
+    }
+    setConceptExpl({ key, text: "", loading: true, error: "" });
+    try {
+      const text = await onExplainConcept(concept, topic.title);
+      setConceptExpl({ key, text, loading: false, error: "" });
+    } catch (err) {
+      setConceptExpl({ key, text: "", loading: false, error: err.message || "설명을 불러오지 못했습니다." });
+    }
   }
 
   function renderStars(importance) {
@@ -155,17 +174,48 @@ export default function TopicStructurePanel({
                       </div>
                     </div>
 
-                    {/* 핵심 개념 태그 */}
+                    {/* 핵심 개념 태그 — 클릭 시 설명 */}
                     {topic.keyConcepts.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {topic.keyConcepts.map((concept) => (
-                          <span
-                            key={concept}
-                            className="text-xs bg-emerald-500/15 text-emerald-300 border border-emerald-500/25 rounded-full px-2.5 py-0.5"
-                          >
-                            {concept}
-                          </span>
-                        ))}
+                      <div className="flex flex-col gap-2">
+                        <p className="text-[11px] text-slate-500">개념 탭을 눌러 설명을 확인하세요</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {topic.keyConcepts.map((concept) => {
+                            const key = `${topic.id}::${concept}`;
+                            const isActive = conceptExpl.key === key;
+                            return (
+                              <button
+                                key={concept}
+                                onClick={() => handleConceptClick(concept, topic)}
+                                className={`text-xs rounded-full px-2.5 py-0.5 border transition-colors ${
+                                  isActive
+                                    ? "bg-emerald-500/30 text-emerald-200 border-emerald-400/50"
+                                    : "bg-emerald-500/15 text-emerald-300 border-emerald-500/25 hover:bg-emerald-500/25"
+                                }`}
+                              >
+                                {concept}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* 인라인 설명 박스 */}
+                        {conceptExpl.key?.startsWith(topic.id) && (
+                          <div className="rounded-xl bg-slate-800/60 border border-white/8 px-3.5 py-3">
+                            {conceptExpl.loading ? (
+                              <div className="flex items-center gap-2 text-slate-400 text-xs">
+                                <svg className="animate-spin h-3.5 w-3.5 text-emerald-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                </svg>
+                                <span>개념 설명 불러오는 중...</span>
+                              </div>
+                            ) : conceptExpl.error ? (
+                              <p className="text-red-400 text-xs">{conceptExpl.error}</p>
+                            ) : (
+                              <p className="text-slate-200 text-xs leading-relaxed whitespace-pre-wrap">{conceptExpl.text}</p>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
 
