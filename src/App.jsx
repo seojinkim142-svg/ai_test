@@ -5794,6 +5794,12 @@ function App() {
     }
   };
 
+  const explainConceptForPanel = async (concept, topicTitle) => {
+    const textToAnalyze = String(extractedText || "").trim();
+    const { explainConcept } = await getOpenAiService();
+    return explainConcept(concept, topicTitle, textToAnalyze);
+  };
+
   const requestSummary = async ({ force = false, replaceExisting = true } = {}) => {
     const hasExistingSummary = Boolean(String(summary || "").trim());
     const shouldReplaceExisting = replaceExisting && hasExistingSummary;
@@ -8122,6 +8128,7 @@ function App() {
     isLoadingTopicStructure,
     topicStructureError,
     onRequestTopicStructure: requestTopicStructure,
+    onExplainConcept: explainConceptForPanel,
   };
 
   if (AUTH_ENABLED && isNativePlatform && !authReady) {

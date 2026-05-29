@@ -317,6 +317,7 @@ export default function DetailPage({
   isLoadingTopicStructure,
   topicStructureError,
   onRequestTopicStructure,
+  onExplainConcept,
 }) {
   const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
   const copy = useMemo(() => getDetailCopy(outputLanguage), [outputLanguage]);
@@ -705,6 +706,7 @@ export default function DetailPage({
                 isLoading={isLoadingTopicStructure}
                 error={topicStructureError}
                 onRequestGenerate={onRequestTopicStructure}
+                onExplainConcept={onExplainConcept}
                 onStartQuiz={(topic) => {
                   if (topic?.title) setQuizPromptAddonInput(topic.title + " 위주로");
                   setPanelTab("quiz");
