@@ -448,5 +448,6 @@ export function readTopicStructureFromHighlights(highlightsValue) {
   if (!isPlainObject(highlightsValue)) return null;
   const stored = highlightsValue[TOPIC_STRUCTURE_ARTIFACT_KEY];
   if (!stored || !Array.isArray(stored?.topics) || stored.topics.length === 0) return null;
+  if (stored.version !== 1) return null;
   return stored;
 }

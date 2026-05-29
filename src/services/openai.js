@@ -3750,7 +3750,7 @@ export async function generateSemanticSearch(query, docsInfo, { outputLanguage =
   return [];
 }
 
-function buildTopicStructurePrompt(headText) {
+function buildTopicStructurePrompt(analysisText) {
   return `You are a study assistant. Analyze the following document excerpt and extract its main learning topics for exam preparation.
 
 Return JSON only with this exact schema:
@@ -3776,13 +3776,19 @@ Rules:
 - All text (rootTopic, title, keyConcepts) must be in Korean.
 - Return valid JSON only, no explanation or markdown fences.
 
-[Document excerpt — first portion of the document]
-${headText}`;
+[Document excerpt — representative portions of the document]
+${analysisText}`;
 }
 
 export async function generateTopicStructure(extractedText) {
-  const headText = limitText(String(extractedText || "").trim(), 5000);
-  if (!headText) throw new Error("텍스트가 없습니다.");
+  const rawText = String(extractedText || "").trim();
+  if (!rawText) throw new Error("텍스트가 없습니다.");
+  const HEAD_CHARS = 3000;
+  const TAIL_CHARS = 2000;
+  const analysisText =
+    rawText.length <= HEAD_CHARS + TAIL_CHARS
+      ? rawText
+      : rawText.slice(0, HEAD_CHARS) + "\n\n...\n\n" + rawText.slice(-TAIL_CHARS);
 
   const data = await postChatRequest(
     {
@@ -3793,7 +3799,7 @@ export async function generateTopicStructure(extractedText) {
           content:
             "Extract a structured topic list from a study document for exam preparation. Return valid JSON only.",
         },
-        { role: "user", content: buildTopicStructurePrompt(headText) },
+        { role: "user", content: buildTopicStructurePrompt(analysisText) },
       ],
       response_format: { type: "json_object" },
       temperature: 0.3,

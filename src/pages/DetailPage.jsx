@@ -705,7 +705,10 @@ export default function DetailPage({
                 isLoading={isLoadingTopicStructure}
                 error={topicStructureError}
                 onRequestGenerate={onRequestTopicStructure}
-                onStartQuiz={() => setPanelTab("quiz")}
+                onStartQuiz={(topic) => {
+                  if (topic?.title) setQuizPromptAddonInput(topic.title + " 위주로");
+                  setPanelTab("quiz");
+                }}
               />
             </div>
           )}

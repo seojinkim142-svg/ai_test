@@ -5794,11 +5794,6 @@ function App() {
     }
   };
 
-  useEffect(() => {
-    if (!extractedText || topicStructureRequestedRef.current || !selectedFileId) return;
-    requestTopicStructure();
-  }, [extractedText, selectedFileId]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const requestSummary = async ({ force = false, replaceExisting = true } = {}) => {
     const hasExistingSummary = Boolean(String(summary || "").trim());
     const shouldReplaceExisting = replaceExisting && hasExistingSummary;

@@ -171,7 +171,7 @@ export default function TopicStructurePanel({
 
                     {/* 퀴즈 시작 버튼 */}
                     <button
-                      onClick={onStartQuiz}
+                      onClick={() => onStartQuiz(topic)}
                       className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-sm font-medium px-4 py-2.5 transition-colors"
                     >
                       퀴즈 시작
