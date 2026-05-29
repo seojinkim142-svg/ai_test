@@ -13,6 +13,9 @@ export default function LeftSidebar({
   onSelectFile,
 }) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [gapCollapsed, setGapCollapsed] = useState(() => {
+    try { return localStorage.getItem("knowledgeGapCollapsed") === "true"; } catch { return false; }
+  });
   const inputRef = useRef(null);
 
   const handleSearch = (e) => {
@@ -25,6 +28,16 @@ export default function LeftSidebar({
     setSearchQuery("");
     onSemanticSearch?.("");
     inputRef.current?.focus();
+  };
+
+  const handleQueryChange = (e) => {
+    setSearchQuery(e.target.value);
+    if (semanticSearchResults) onSemanticSearch?.("");
+  };
+
+  const handleGapCollapse = (next) => {
+    setGapCollapsed(next);
+    try { localStorage.setItem("knowledgeGapCollapsed", String(next)); } catch {}
   };
 
   // 파일명 로컬 매칭 — useMemo 없이 직접 계산
@@ -70,7 +83,7 @@ export default function LeftSidebar({
           {/* 내용 검색 */}
           <section>
             <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-slate-300">
-              내용검색
+              자료 검색
             </p>
             <form onSubmit={handleSearch}>
               <div className="flex items-center gap-1.5 rounded-xl border border-slate-600 bg-slate-800 px-2.5 py-2 ring-1 ring-transparent transition focus-within:border-emerald-400/60 focus-within:ring-emerald-400/20">
@@ -81,7 +94,7 @@ export default function LeftSidebar({
                   ref={inputRef}
                   type="text"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={handleQueryChange}
                   placeholder={`파일 검색... (${uploadedFiles.length}개)`}
                   className="min-w-0 flex-1 bg-transparent text-xs text-white outline-none placeholder:text-slate-500"
                 />
@@ -163,6 +176,8 @@ export default function LeftSidebar({
               uploadedFiles={uploadedFiles}
               allArtifacts={allArtifacts}
               outputLanguage={outputLanguage}
+              collapsed={gapCollapsed}
+              onCollapse={handleGapCollapse}
             />
           </section>
         </div>
