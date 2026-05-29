@@ -14,6 +14,7 @@ import QuizSection from "../components/QuizSection";
 import ReviewNotesPanel from "../components/ReviewNotesPanel";
 import SummaryCard from "../components/SummaryCard";
 import MindMapView from "../components/MindMapView";
+import TopicStructurePanel from "../components/TopicStructurePanel";
 import { useQuizMixCarousel } from "../hooks/useQuizMixCarousel";
 import { LETTERS } from "../constants";
 import { getDetailCopy } from "../utils/detailCopy";
@@ -312,12 +313,17 @@ export default function DetailPage({
   onToggleFolderTutorMode,
   canUseFolderTutorMode = false,
   folderName = "",
+  topicStructure,
+  isLoadingTopicStructure,
+  topicStructureError,
+  onRequestTopicStructure,
 }) {
   const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
   const copy = useMemo(() => getDetailCopy(outputLanguage), [outputLanguage]);
   const [summaryViewMode, setSummaryViewMode] = useState("text"); // "text" | "mindmap"
   const detailTabs = useMemo(
     () => [
+      { id: "topicStructure", label: copy.tabs.topicStructure },
       { id: "summary", label: copy.tabs.summary },
       { id: "quiz", label: copy.tabs.quiz },
       { id: "reviewNotes", label: copy.tabs.reviewNotes },
@@ -672,7 +678,7 @@ export default function DetailPage({
       {resizeHandle}
 
       <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
-        <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 sm:grid-cols-6 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
+        <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 sm:grid-cols-7 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
           {detailTabs.map((item) => {
             const active = panelTab === item.id;
             return (
@@ -692,6 +698,17 @@ export default function DetailPage({
         </div>
 
         <div className="flex-1 overflow-auto pr-1 pb-1">
+          {panelTab === "topicStructure" && (
+            <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-0 shadow-lg shadow-black/30">
+              <TopicStructurePanel
+                topicStructure={topicStructure}
+                isLoading={isLoadingTopicStructure}
+                error={topicStructureError}
+                onRequestGenerate={onRequestTopicStructure}
+                onStartQuiz={() => setPanelTab("quiz")}
+              />
+            </div>
+          )}
           {panelTab === "summary" && (
             <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
