@@ -758,9 +758,21 @@ function useAppDark() {
   return dark;
 }
 
+function useIsMobile(breakpoint = 640) {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpoint);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
+    const handler = (e) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [breakpoint]);
+  return isMobile;
+}
+
 export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
   const [activeNode, setActiveNode] = useState(null);
   const dark = useAppDark();
+  const isMobile = useIsMobile();
 
   const onAskAI = useCallback((label, content, color) => {
     setActiveNode({ label, content, color });
@@ -795,21 +807,52 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
   return (
     <div
       className={`w-full overflow-hidden rounded-2xl border ${borderCls}`}
-      style={{ height: 680, background: canvasBg, display: "flex" }}
+      style={{ height: isMobile ? 480 : 680, background: canvasBg, display: "flex", position: "relative" }}
     >
-      {/* mindmap canvas */}
+      {/* mindmap canvas — full width on mobile */}
       <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
         <ReactFlowProvider>
           <MindMapFlow result={result} dark={dark} />
         </ReactFlowProvider>
 
-<p style={{ position: "absolute", bottom: 8, left: 12, fontSize: 10, color: dark ? "#334155" : "#cbd5e1", userSelect: "none", pointerEvents: "none" }}>
+        <p style={{ position: "absolute", bottom: 8, left: 12, fontSize: 10, color: dark ? "#334155" : "#cbd5e1", userSelect: "none", pointerEvents: "none" }}>
           스크롤·드래그로 탐색
         </p>
       </div>
 
-      {/* always-visible AI panel */}
-      <NodeAIPanel activeNode={activeNode} onJumpToPage={onJumpToPage} dark={dark} panelBg={panelBg} panelBorder={panelBorder} />
+      {/* desktop: side panel / mobile: bottom-sheet overlay */}
+      {isMobile ? (
+        activeNode && (
+          <>
+            {/* backdrop */}
+            <div
+              onClick={() => setActiveNode(null)}
+              style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 10 }}
+            />
+            {/* bottom sheet */}
+            <div style={{
+              position: "absolute", left: 0, right: 0, bottom: 0,
+              height: "72%",
+              zIndex: 11,
+              borderRadius: "16px 16px 0 0",
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}>
+              {/* drag handle */}
+              <div
+                onClick={() => setActiveNode(null)}
+                style={{ background: panelBg, paddingTop: 10, paddingBottom: 6, display: "flex", justifyContent: "center", cursor: "pointer", borderBottom: `1px solid ${panelBorder}` }}
+              >
+                <div style={{ width: 36, height: 4, borderRadius: 2, background: dark ? "#334155" : "#cbd5e1" }} />
+              </div>
+              <NodeAIPanel activeNode={activeNode} onJumpToPage={onJumpToPage} dark={dark} panelBg={panelBg} panelBorder={panelBorder} />
+            </div>
+          </>
+        )
+      ) : (
+        <NodeAIPanel activeNode={activeNode} onJumpToPage={onJumpToPage} dark={dark} panelBg={panelBg} panelBorder={panelBorder} />
+      )}
     </div>
   );
 }
