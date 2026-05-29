@@ -428,3 +428,25 @@ export function readConceptTagsFromHighlights(highlightsValue) {
   if (!Array.isArray(tags)) return [];
   return tags.map((t) => String(t).trim()).filter(Boolean);
 }
+
+const TOPIC_STRUCTURE_ARTIFACT_KEY = "__topic_structure_v1";
+
+export function writeTopicStructureToHighlights(highlightsValue, topicStructure) {
+  const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
+  if (!isPlainObject(highlightsValue) && highlightsValue != null) {
+    base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
+  }
+  if (topicStructure && Array.isArray(topicStructure.topics) && topicStructure.topics.length > 0) {
+    base[TOPIC_STRUCTURE_ARTIFACT_KEY] = topicStructure;
+  } else {
+    delete base[TOPIC_STRUCTURE_ARTIFACT_KEY];
+  }
+  return Object.keys(base).length > 0 ? base : null;
+}
+
+export function readTopicStructureFromHighlights(highlightsValue) {
+  if (!isPlainObject(highlightsValue)) return null;
+  const stored = highlightsValue[TOPIC_STRUCTURE_ARTIFACT_KEY];
+  if (!stored || !Array.isArray(stored?.topics) || stored.topics.length === 0) return null;
+  return stored;
+}

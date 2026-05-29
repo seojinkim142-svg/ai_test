@@ -118,6 +118,8 @@ import {
   writeQuestionStyleProfileToHighlights,
   writeConceptTagsToHighlights,
   readConceptTagsFromHighlights,
+  readTopicStructureFromHighlights,
+  writeTopicStructureToHighlights,
 } from "./utils/studyArtifacts";
 import { clearPaymentReturnPending, readPaymentReturnPending } from "./utils/paymentReturn";
 import { getTutorCopy } from "./utils/tutorCopy";
@@ -1258,9 +1260,13 @@ function App() {
   const [chapterRangeNotice, setChapterRangeNotice] = useState("");
   const [isDetectingChapterRanges, setIsDetectingChapterRanges] = useState(false);
   const [artifacts, setArtifacts] = useState(null);
+  const [topicStructure, setTopicStructure] = useState(null);
+  const [isLoadingTopicStructure, setIsLoadingTopicStructure] = useState(false);
+  const [topicStructureError, setTopicStructureError] = useState("");
   const downloadCacheRef = useRef(new Map()); // storagePath -> { file, thumbnail, remoteUrl, bucket }
   const backfillInProgressRef = useRef(false);
   const summaryRequestedRef = useRef(false);
+  const topicStructureRequestedRef = useRef(false);
   const summaryContextCacheRef = useRef(new Map()); // fileId -> extended summary text
   const tutorPageTextCacheRef = useRef(new Map()); // docId:page -> { text, ocrUsed }
   const tutorSectionRangeCacheRef = useRef(new Map()); // docId:section:anchor -> range
@@ -2932,6 +2938,7 @@ function App() {
         const reviewNoteEntries = readReviewNotesFromHighlights(mapped.highlights);
         const examCramBundle = readExamCramFromHighlights(mapped.highlights);
         const questionStyleBundle = readQuestionStyleProfileFromHighlights(mapped.highlights);
+        const storedTopicStructure = readTopicStructureFromHighlights(mapped.highlights);
         const activeInstructorText = normalizeInstructorEmphasisInput(
           partialBundle.instructorEmphasisLibrary.find(
             (item) => item.id === partialBundle.activeInstructorEmphasisId
@@ -2980,6 +2987,10 @@ function App() {
               total: Math.max(Number(prev?.total || 0), storedTotalPages),
             }));
           }
+        }
+        if (storedTopicStructure) {
+          setTopicStructure(storedTopicStructure);
+          topicStructureRequestedRef.current = true;
         }
         if (mapped.summary) {
           setSummary(mapped.summary);
@@ -3337,11 +3348,14 @@ function App() {
       );
       setFile(targetFile);
       setSelectedFileId(nextDocId);
-      setPanelTab("summary");
+      setPanelTab("topicStructure");
       resetQuizState();
       summaryRequestedRef.current = false;
+      topicStructureRequestedRef.current = false;
       quizAutoRequestedRef.current = false;
       setError("");
+      setTopicStructure(null);
+      setTopicStructureError("");
       setSummary("");
       setPartialSummary("");
       setPartialSummaryRange("");
@@ -3772,8 +3786,11 @@ function App() {
     setOxSelections({});
     setPanelTab("summary");
     summaryRequestedRef.current = false;
+    topicStructureRequestedRef.current = false;
     quizAutoRequestedRef.current = false;
     oxAutoRequestedRef.current = false;
+    setTopicStructure(null);
+    setTopicStructureError("");
     setArtifacts(null);
     setIsLoadingText(false);
     resetQuizState();
@@ -5746,6 +5763,41 @@ function App() {
   useEffect(() => {
     extractTextForChapterSelectionRef.current = extractTextForChapterSelection;
   }, [extractTextForChapterSelection]);
+
+  const requestTopicStructure = async ({ force = false } = {}) => {
+    if (isLoadingTopicStructure || (!force && topicStructureRequestedRef.current)) return;
+    if (!file) {
+      setTopicStructureError("먼저 PDF를 열어주세요.");
+      return;
+    }
+    const textToAnalyze = String(extractedText || "").trim();
+    if (!textToAnalyze) {
+      setTopicStructureError("텍스트 추출을 기다리는 중입니다.");
+      return;
+    }
+
+    topicStructureRequestedRef.current = true;
+    setIsLoadingTopicStructure(true);
+    setTopicStructureError("");
+
+    try {
+      const { generateTopicStructure } = await getOpenAiService();
+      const result = await generateTopicStructure(textToAnalyze);
+      setTopicStructure(result);
+      const nextHighlights = writeTopicStructureToHighlights(artifacts?.highlights, result);
+      await persistArtifacts({ highlights: nextHighlights });
+    } catch (err) {
+      setTopicStructureError(`학습 구조 분석에 실패했습니다: ${err.message}`);
+      topicStructureRequestedRef.current = false;
+    } finally {
+      setIsLoadingTopicStructure(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!extractedText || topicStructureRequestedRef.current || !selectedFileId) return;
+    requestTopicStructure();
+  }, [extractedText, selectedFileId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const requestSummary = async ({ force = false, replaceExisting = true } = {}) => {
     const hasExistingSummary = Boolean(String(summary || "").trim());
@@ -8070,6 +8122,11 @@ function App() {
     onToggleFolderTutorMode: () => setFolderTutorMode((v) => !v),
     canUseFolderTutorMode: Boolean(selectedFolderId && selectedFolderId !== "all" && uploadedFiles.some((f) => String(f.folderId || "") === String(selectedFolderId))),
     folderName: folders.find((f) => String(f.id) === String(selectedFolderId))?.name || "",
+    // 학습 구조
+    topicStructure,
+    isLoadingTopicStructure,
+    topicStructureError,
+    onRequestTopicStructure: requestTopicStructure,
   };
 
   if (AUTH_ENABLED && isNativePlatform && !authReady) {

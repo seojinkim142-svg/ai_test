@@ -1,6 +1,7 @@
 const DETAIL_COPY = {
   ko: {
     tabs: {
+      topicStructure: "학습구조",
       summary: "요약",
       quiz: "퀴즈",
       reviewNotes: "오답노트",
@@ -34,6 +35,7 @@ const DETAIL_COPY = {
   },
   en: {
     tabs: {
+      topicStructure: "Structure",
       summary: "Summary",
       quiz: "Quiz",
       reviewNotes: "Review Notes",
@@ -67,6 +69,7 @@ const DETAIL_COPY = {
   },
   zh: {
     tabs: {
+      topicStructure: "学习结构",
       summary: "摘要",
       quiz: "测验",
       reviewNotes: "错题笔记",
@@ -99,6 +102,7 @@ const DETAIL_COPY = {
   },
   ja: {
     tabs: {
+      topicStructure: "学習構造",
       summary: "要約",
       quiz: "クイズ",
       reviewNotes: "復習ノート",
@@ -132,6 +136,7 @@ const DETAIL_COPY = {
   },
   hi: {
     tabs: {
+      topicStructure: "संरचना",
       summary: "सारांश",
       quiz: "क्विज़",
       reviewNotes: "रिव्यू नोट्स",

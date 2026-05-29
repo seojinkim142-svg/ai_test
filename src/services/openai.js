@@ -3749,3 +3749,83 @@ export async function generateSemanticSearch(query, docsInfo, { outputLanguage =
   }
   return [];
 }
+
+function buildTopicStructurePrompt(headText) {
+  return `You are a study assistant. Analyze the following document excerpt and extract its main learning topics for exam preparation.
+
+Return JSON only with this exact schema:
+{
+  "rootTopic": "<overall document subject, 2-5 words in Korean>",
+  "topics": [
+    {
+      "id": "topic-0",
+      "title": "<topic name, 2-5 words in Korean>",
+      "conceptCount": <integer 2-15, estimated number of key concepts in this topic>,
+      "importance": <integer 1-5, where 5 = highest exam importance>,
+      "expectedQuestions": <integer 1-20, estimated number of exam questions from this topic>,
+      "keyConcepts": ["<key term 1>", "<key term 2>", ...]
+    }
+  ]
+}
+
+Rules:
+- Extract 3 to 8 main topics covering the document's major sections.
+- importance: 5 = core exam material tested every year, 1 = supplementary background only.
+- expectedQuestions: realistic estimate based on topic depth and importance.
+- keyConcepts: 2 to 5 short key terms per topic (1-4 words each, Korean preferred).
+- All text (rootTopic, title, keyConcepts) must be in Korean.
+- Return valid JSON only, no explanation or markdown fences.
+
+[Document excerpt — first portion of the document]
+${headText}`;
+}
+
+export async function generateTopicStructure(extractedText) {
+  const headText = limitText(String(extractedText || "").trim(), 5000);
+  if (!headText) throw new Error("텍스트가 없습니다.");
+
+  const data = await postChatRequest(
+    {
+      model: MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Extract a structured topic list from a study document for exam preparation. Return valid JSON only.",
+        },
+        { role: "user", content: buildTopicStructurePrompt(headText) },
+      ],
+      response_format: { type: "json_object" },
+      temperature: 0.3,
+    },
+    { retries: 1 }
+  );
+
+  const content = data.choices?.[0]?.message?.content?.trim() || "";
+  const sanitized = sanitizeJson(content);
+  const parsed = parseJsonSafe(sanitized, "topic structure JSON");
+
+  const rootTopic = String(parsed?.rootTopic || "").trim();
+  const topics = Array.isArray(parsed?.topics) ? parsed.topics : [];
+
+  if (!rootTopic || topics.length === 0) throw new Error("주제 구조를 추출하지 못했습니다.");
+
+  return {
+    version: 1,
+    rootTopic,
+    generatedAt: new Date().toISOString(),
+    topics: topics.slice(0, 10).map((t, i) => ({
+      id: `topic-${i}`,
+      title: String(t?.title || "").trim(),
+      conceptCount: Math.max(1, Math.min(20, Number(t?.conceptCount) || 3)),
+      importance: Math.max(1, Math.min(5, Number(t?.importance) || 3)),
+      expectedQuestions: Math.max(1, Math.min(30, Number(t?.expectedQuestions) || 3)),
+      keyConcepts: Array.isArray(t?.keyConcepts)
+        ? t.keyConcepts
+            .map((c) => String(c).trim())
+            .filter(Boolean)
+            .slice(0, 5)
+        : [],
+    })),
+  };
+}
