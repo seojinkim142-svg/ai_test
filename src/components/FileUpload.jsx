@@ -183,8 +183,8 @@ const FileUpload = memo(function FileUpload({
     [currentTier, maxPdfSizeBytes, copy]
   );
   const uploadGridClassName = isNativePlatform
-    ? `relative mt-1 grid gap-2 sm:mt-2 ${sidebarOpen ? "grid-cols-5" : "grid-cols-6"}`
-    : `relative mt-1 grid gap-2 sm:mt-2 ${sidebarOpen ? "grid-cols-1 [grid-template-columns:repeat(auto-fill,minmax(160px,1fr))]" : "grid-cols-2 sm:[grid-template-columns:repeat(auto-fill,minmax(160px,1fr))]"}`;
+    ? `relative mt-1 grid gap-1 sm:mt-2 ${sidebarOpen ? "grid-cols-5" : "grid-cols-6"}`
+    : `relative mt-1 grid gap-1 sm:mt-2 ${sidebarOpen ? "grid-cols-1 [grid-template-columns:repeat(auto-fill,minmax(160px,1fr))]" : "grid-cols-2 sm:[grid-template-columns:repeat(auto-fill,minmax(160px,1fr))]"}`;
   const emptyStateClassName = isNativePlatform
     ? "col-span-full flex min-h-[170px] w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 text-center text-sm text-slate-300 ring-1 ring-white/5"
     : "col-span-2 flex min-h-[170px] w-full items-center justify-center rounded-2xl border border-white/10 bg-white/5 px-4 text-center text-sm text-slate-300 ring-1 ring-white/5 sm:w-[260px] sm:flex-shrink-0";
