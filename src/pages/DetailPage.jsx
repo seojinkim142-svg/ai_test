@@ -1049,12 +1049,16 @@ export default function DetailPage({
                           type="button"
                           onClick={async () => {
                             if (!mindmapContainerRef.current) return;
-                            const { default: html2canvas } = await import("html2canvas");
-                            const canvas = await html2canvas(mindmapContainerRef.current, { useCORS: true, scale: 2 });
-                            const link = document.createElement("a");
-                            link.download = "mindmap.png";
-                            link.href = canvas.toDataURL("image/png");
-                            link.click();
+                            const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+                              import("html2canvas"),
+                              import("jspdf"),
+                            ]);
+                            const el = mindmapContainerRef.current;
+                            const canvas = await html2canvas(el, { useCORS: true, scale: 4, logging: false });
+                            const imgData = canvas.toDataURL("image/png");
+                            const pdf = new jsPDF({ orientation: "landscape", unit: "px", format: [canvas.width / 4, canvas.height / 4] });
+                            pdf.addImage(imgData, "PNG", 0, 0, canvas.width / 4, canvas.height / 4);
+                            pdf.save("mindmap.pdf");
                           }}
                           className="ghost-button text-[11px] text-slate-400"
                           data-ghost-size="sm"

@@ -806,12 +806,11 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage, contai
 
   return (
     <div
-      ref={containerRef}
       className={`w-full overflow-hidden rounded-2xl border ${borderCls}`}
       style={{ height: isMobile ? 480 : 680, background: canvasBg, display: "flex", position: "relative" }}
     >
       {/* mindmap canvas — full width on mobile */}
-      <div style={{ flex: 1, position: "relative", minWidth: 0 }}>
+      <div ref={containerRef} style={{ flex: 1, position: "relative", minWidth: 0 }}>
         <ReactFlowProvider>
           <MindMapFlow result={result} dark={dark} />
         </ReactFlowProvider>
