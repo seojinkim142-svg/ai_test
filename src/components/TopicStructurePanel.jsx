@@ -1,4 +1,5 @@
 import { useState } from "react";
+import MathMarkdown from "./MathMarkdown";
 
 export default function TopicStructurePanel({
   topicStructure,
@@ -212,7 +213,10 @@ export default function TopicStructurePanel({
                             ) : conceptExpl.error ? (
                               <p className="text-red-400 text-xs">{conceptExpl.error}</p>
                             ) : (
-                              <p className="text-slate-200 text-xs leading-relaxed whitespace-pre-wrap">{conceptExpl.text}</p>
+                              <MathMarkdown
+                                content={conceptExpl.text}
+                                className="summary-prose max-w-none text-xs text-slate-200 [&_.katex-display]:my-1 [&_.katex-display]:overflow-x-auto"
+                              />
                             )}
                           </div>
                         )}
