@@ -448,6 +448,7 @@ export default function DetailPage({
       };
     });
   }, [activeMockExam?.payload?.answerSheet, mockExamOrderedItems]);
+  const mindmapContainerRef = useRef(null);
   const emphasisTextareaRef = useRef(null);
   const savedInstructorScrollRef = useRef(null);
   const savedInstructorScrollTimerRef = useRef(null);
@@ -1038,11 +1039,29 @@ export default function DetailPage({
                       <MindMapView
                         mindmapData={mindmapData}
                         summary={summary}
+                        containerRef={mindmapContainerRef}
                         onJumpToPage={typeof onJumpToSummaryPage === "function"
                           ? (pageNumber, ...rest) => { onJumpToSummaryPage(pageNumber, ...rest); }
                           : undefined}
                       />
-                      <div className="mt-2 flex justify-end">
+                      <div className="mt-2 flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!mindmapContainerRef.current) return;
+                            const { default: html2canvas } = await import("html2canvas");
+                            const canvas = await html2canvas(mindmapContainerRef.current, { useCORS: true, scale: 2 });
+                            const link = document.createElement("a");
+                            link.download = "mindmap.png";
+                            link.href = canvas.toDataURL("image/png");
+                            link.click();
+                          }}
+                          className="ghost-button text-[11px] text-slate-400"
+                          data-ghost-size="sm"
+                          style={{ "--ghost-color": "148, 163, 184" }}
+                        >
+                          ↓ 저장
+                        </button>
                         <button
                           type="button"
                           onClick={() => requestMindMap?.({ force: true })}

@@ -769,7 +769,7 @@ function useIsMobile(breakpoint = 640) {
   return isMobile;
 }
 
-export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
+export default function MindMapView({ summary, mindmapData, onJumpToPage, containerRef }) {
   const [activeNode, setActiveNode] = useState(null);
   const dark = useAppDark();
   const isMobile = useIsMobile();
@@ -806,6 +806,7 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
 
   return (
     <div
+      ref={containerRef}
       className={`w-full overflow-hidden rounded-2xl border ${borderCls}`}
       style={{ height: isMobile ? 480 : 680, background: canvasBg, display: "flex", position: "relative" }}
     >
