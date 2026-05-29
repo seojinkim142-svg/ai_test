@@ -1,4 +1,7 @@
 {
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": null,
   "crons": [
     {
       "path": "/api/nicepayments/subscription/charge",
