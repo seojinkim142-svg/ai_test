@@ -693,9 +693,9 @@ export default function DetailPage({
         <div className="flex-1 overflow-auto pr-1 pb-1">
           {panelTab === "summary" && (
             <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
                 <p className="text-sm font-semibold text-emerald-200">{copy.summary.title}</p>
-                <div className="flex flex-wrap justify-end gap-2">
+                <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:justify-end">
                   <button
                     type="button"
                     onClick={handleRequestSummary}
