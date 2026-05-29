@@ -447,7 +447,7 @@ async function generateWonderQuestions(label, content) {
   return raw.split("\n").map((l) => l.replace(/^\d+\.\s*/, "").trim()).filter(Boolean).slice(0, 5);
 }
 
-function NodeAIPanel({ activeNode, onJumpToPage, dark, panelBg, panelBorder }) {
+function NodeAIPanel({ activeNode, onJumpToPage, dark, panelBg, panelBorder, fullWidth = false }) {
   const [messages, setMessages]       = useState([]);
   const [input, setInput]             = useState("");
   const [loading, setLoading]         = useState(false);
@@ -509,11 +509,11 @@ function NodeAIPanel({ activeNode, onJumpToPage, dark, panelBg, panelBorder }) {
 
   return (
     <div style={{
-      width: 288,
+      width: fullWidth ? "100%" : 288,
       flexShrink: 0,
       display: "flex",
       flexDirection: "column",
-      borderLeft: `1px solid ${panelBorder || "#e2e8f0"}`,
+      borderLeft: fullWidth ? "none" : `1px solid ${panelBorder || "#e2e8f0"}`,
       background: panelBg || "#fff",
       height: "100%",
       overflow: "hidden",
@@ -846,7 +846,7 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage }) {
               >
                 <div style={{ width: 36, height: 4, borderRadius: 2, background: dark ? "#334155" : "#cbd5e1" }} />
               </div>
-              <NodeAIPanel activeNode={activeNode} onJumpToPage={onJumpToPage} dark={dark} panelBg={panelBg} panelBorder={panelBorder} />
+              <NodeAIPanel activeNode={activeNode} onJumpToPage={onJumpToPage} dark={dark} panelBg={panelBg} panelBorder={panelBorder} fullWidth />
             </div>
           </>
         )
