@@ -1876,10 +1876,12 @@ function App() {
       setActivePremiumProfileId(selected.id);
       setShowPremiumProfilePicker(false);
       premiumProfileSessionUserIdRef.current = user?.id ?? null;
+      setSidebarOpen(true);
+      try { localStorage.setItem("sidebarOpen", "true"); } catch {}
       setStatus(`${selected.name} 프로필이 선택되었습니다.`);
       return { ok: true };
     },
-    [premiumProfiles, resetActiveDocumentState, user?.id]
+    [premiumProfiles, resetActiveDocumentState, setSidebarOpen, user?.id]
   );
 
   const handleDisableProfilePin = useCallback(
