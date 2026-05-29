@@ -200,7 +200,7 @@ export default function TopicStructurePanel({
 
                         {/* 인라인 설명 박스 */}
                         {conceptExpl.key?.startsWith(topic.id) && (
-                          <div className="rounded-xl bg-slate-800/60 border border-white/8 px-3.5 py-3">
+                          <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 px-3.5 py-3">
                             {conceptExpl.loading ? (
                               <div className="flex items-center gap-2 text-slate-400 text-xs">
                                 <svg className="animate-spin h-3.5 w-3.5 text-emerald-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
