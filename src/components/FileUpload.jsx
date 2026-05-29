@@ -296,6 +296,7 @@ const FileUpload = memo(function FileUpload({
             onOpenMenu={handleOpenAddMenu}
             inputRef={fileInputRef}
             compactGrid={isNativePlatform}
+            fullWidth={!isNativePlatform}
             rowLayout={isNativePlatform && sidebarOpen}
             title={copy.upload.addDocument}
             description={copy.upload.uploadPrompt}
@@ -341,6 +342,7 @@ const FileUpload = memo(function FileUpload({
                 countLabel={copy.upload.filesCount(folderCounts.get(folder.id) || 0)}
                 active={active}
                 compactGrid={isNativePlatform}
+                fullWidth={!isNativePlatform}
                 canDrop={false}
                 onClick={() => !isFolderLoading && handleOpenFolderModal(folder.id)}
                 onDelete={() => !isFolderLoading && setPendingDeleteFolderId(folder.id)}

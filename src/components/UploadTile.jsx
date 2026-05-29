@@ -6,6 +6,7 @@ function UploadTile({
   onOpenMenu,
   inputRef,
   compactGrid = false,
+  fullWidth = false,
   rowLayout = false,
   title = "문서 추가",
   description = "PDF, DOCX, PPTX 파일을 업로드하세요",
@@ -44,7 +45,7 @@ function UploadTile({
   return (
     <div
       className={`relative flex h-full min-h-[208px] w-full min-w-0 aspect-[4/5] sm:min-h-[170px] sm:max-w-none sm:aspect-auto ${
-        compactGrid ? "sm:w-full" : "sm:w-[260px] sm:flex-shrink-0"
+        compactGrid || fullWidth ? "sm:w-full" : "sm:w-[260px] sm:flex-shrink-0"
       }`}
     >
       <button
