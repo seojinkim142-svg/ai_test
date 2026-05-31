@@ -70,10 +70,10 @@ function PdfTile({
               e.stopPropagation();
               onToggleVocabulary();
             }}
-            className={`shrink-0 flex h-7 items-center justify-center rounded-full px-2 text-[10px] font-semibold transition ${
+            className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold transition ${
               isVocabulary
-                ? "bg-violet-500/80 text-white hover:bg-violet-500"
-                : "bg-black/40 text-white/50 hover:bg-violet-500/50 hover:text-white"
+                ? "bg-violet-500 text-white shadow-sm"
+                : "border border-white/20 bg-black/40 text-white/60 hover:bg-violet-500/70 hover:text-white"
             }`}
             title={isVocabulary ? "단어장 해제" : "단어장으로 표시"}
           >
@@ -129,6 +129,23 @@ function PdfTile({
             추출 중...
           </span>
         )}
+        {onToggleVocabulary && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleVocabulary();
+            }}
+            className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-[11px] font-bold transition ${
+              isVocabulary
+                ? "bg-violet-500 text-white shadow-md"
+                : "bg-black/50 text-white/60 border border-white/20 hover:bg-violet-500/70 hover:text-white"
+            }`}
+            title={isVocabulary ? "단어장 해제" : "단어장으로 표시"}
+          >
+            단어장
+          </button>
+        )}
         {onDelete && (
           <button
             type="button"
@@ -168,23 +185,6 @@ function PdfTile({
           <p className="text-xs text-emerald-200">
             {pageInfo.used} / {pageInfo.total} 페이지 사용
           </p>
-        )}
-        {onToggleVocabulary && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleVocabulary();
-            }}
-            className={`mt-1 self-start rounded-full px-2.5 py-0.5 text-[10px] font-semibold transition ${
-              isVocabulary
-                ? "bg-violet-500/80 text-white hover:bg-violet-500"
-                : "bg-white/10 text-white/40 hover:bg-violet-500/40 hover:text-white"
-            }`}
-            title={isVocabulary ? "단어장 해제" : "단어장으로 표시"}
-          >
-            단어장
-          </button>
         )}
       </div>
     </div>
