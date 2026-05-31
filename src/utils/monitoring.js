@@ -418,45 +418,45 @@ class ErrorMonitor {
   
   // 콘솔 에러 캡처
   setupConsoleCapture() {
-    const originalConsole = {
+    this.originalConsole = {
       error: console.error,
       warn: console.warn,
       log: console.log,
       info: console.info,
       debug: console.debug,
     };
-    
+
     // 에러 레벨
     console.error = (...args) => {
       this.captureConsoleError('error', args);
-      originalConsole.error.apply(console, args);
+      this.originalConsole.error.apply(console, args);
     };
-    
+
     console.warn = (...args) => {
       this.captureConsoleError('warn', args);
-      originalConsole.warn.apply(console, args);
+      this.originalConsole.warn.apply(console, args);
     };
-    
+
     // 다른 레벨은 그대로 유지
-    console.log = originalConsole.log;
-    console.info = originalConsole.info;
-    console.debug = originalConsole.debug;
+    console.log = this.originalConsole.log;
+    console.info = this.originalConsole.info;
+    console.debug = this.originalConsole.debug;
   }
   
   // 네트워크 에러 캡처
   setupNetworkErrorCapture() {
-    const originalFetch = window.fetch;
-    
+    this.originalFetch = window.fetch;
+
     window.fetch = async (...args) => {
       const startTime = Date.now();
-      
+
       try {
-        const response = await originalFetch.apply(window, args);
-        
+        const response = await this.originalFetch.apply(window, args);
+
         if (!response.ok) {
           this.captureNetworkError(response, args, startTime);
         }
-        
+
         return response;
       } catch (error) {
         this.captureNetworkError(error, args, startTime);
@@ -465,32 +465,11 @@ class ErrorMonitor {
     };
   }
   
-  // Promise 에러 캡처
+  // Promise 에러 캡처 (unhandledrejection 이벤트 활용)
+  // window.Promise를 직접 교체하면 async/await가 깨질 수 있으므로
+  // setupGlobalErrorHandlers의 unhandledrejection 리스너로 처리
   setupPromiseErrorCapture() {
-    const originalPromise = window.Promise;
-    
-    window.Promise = class MonitoringPromise extends originalPromise {
-      constructor(executor) {
-        super((resolve, reject) => {
-          executor(
-            (value) => resolve(value),
-            (reason) => {
-              this.capturePromiseError(reason);
-              reject(reason);
-            }
-          );
-        });
-      }
-    };
-    
-    // 정적 메서드 복사
-    Object.setPrototypeOf(window.Promise, originalPromise);
-    window.Promise.all = originalPromise.all;
-    window.Promise.race = originalPromise.race;
-    window.Promise.resolve = originalPromise.resolve;
-    window.Promise.reject = originalPromise.reject;
-    window.Promise.allSettled = originalPromise.allSettled;
-    window.Promise.any = originalPromise.any;
+    // unhandledrejection은 setupGlobalErrorHandlers에서 이미 처리됨
   }
   
   // 콘솔 에러 캡처
@@ -542,16 +521,6 @@ class ErrorMonitor {
     this.captureError(error, {
       severity: ErrorSeverity.MEDIUM,
       context,
-    });
-  }
-  
-  // Promise 에러 캡처
-  capturePromiseError(reason) {
-    this.captureError(reason, {
-      severity: ErrorSeverity.MEDIUM,
-      context: {
-        type: 'promise',
-      },
     });
   }
   
@@ -682,18 +651,15 @@ class ErrorMonitor {
     // 원래 콘솔 함수 복원
     if (this.originalConsole) {
       Object.assign(console, this.originalConsole);
+      this.originalConsole = null;
     }
-    
+
     // 원래 fetch 함수 복원
     if (this.originalFetch) {
       window.fetch = this.originalFetch;
+      this.originalFetch = null;
     }
-    
-    // 원래 Promise 복원
-    if (this.originalPromise) {
-      window.Promise = this.originalPromise;
-    }
-    
+
     this.observers = [];
     this.isInitialized = false;
   }

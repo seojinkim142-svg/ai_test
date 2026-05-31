@@ -37,7 +37,8 @@ export function useUserTier(user) {
               : null
           );
         }
-      } catch {
+      } catch (err) {
+        console.warn("[useUserTier] 티어 조회 실패, 기본값 사용:", err);
         if (mounted) {
           setTier(DEFAULT_TIER);
           setTierExpiresAt(null);
