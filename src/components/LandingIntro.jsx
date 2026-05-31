@@ -1,4 +1,4 @@
-﻿import { Fragment, memo, useCallback, useEffect, useRef, useState } from "react";
+﻿import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { COMPANY_INFO_ITEMS, LEGAL_LINKS } from "../legal/companyInfo";
 
 const FOOTER_COMPANY_INFO = COMPANY_INFO_ITEMS.find((item) => item.label === "상호") ?? COMPANY_INFO_ITEMS[0];
@@ -1400,9 +1400,9 @@ function FeatureVisual({ feature, isActive }) {
 }
 
 const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko", setOutputLanguage }) {
-  const copy = getLandingCopy(outputLanguage);
-  const FEATURE_ITEMS = getFeatureItems(copy);
-  const NAV_ITEMS = getNavItems(copy);
+  const copy = useMemo(() => getLandingCopy(outputLanguage), [outputLanguage]);
+  const FEATURE_ITEMS = useMemo(() => getFeatureItems(copy), [copy]);
+  const NAV_ITEMS = useMemo(() => getNavItems(copy), [copy]);
   const STEP_ITEMS = copy.workflow.steps;
   const STATS = copy.workflow.stats;
   const PLAN_ITEMS = copy.pricing.plans;
@@ -1612,12 +1612,11 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
     }
   }, []);
 
-  const forceRevealAll =
-    typeof window !== "undefined" &&
-    (() => {
-      const params = new URLSearchParams(window.location.search);
-      return params.get("revealAll") === "1" || params.get("previewLanding") === "1";
-    })();
+  const forceRevealAll = useMemo(() => {
+    if (typeof window === "undefined") return false;
+    const params = new URLSearchParams(window.location.search);
+    return params.get("revealAll") === "1" || params.get("previewLanding") === "1";
+  }, []);
 
   const isVisible = useCallback((key) => forceRevealAll || Boolean(visibleSections[key]), [forceRevealAll, visibleSections]);
 
@@ -1651,7 +1650,6 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
   return (
     <div className="zeus-landing relative overflow-x-hidden bg-[#f5f7fb] text-slate-900">
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Sora:wght@400;500;600;700;800&display=swap');
         .zeus-landing {
           --zeus-border: rgba(255, 255, 255, 0.72);
           --zeus-panel: rgba(255, 255, 255, 0.8);

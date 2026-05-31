@@ -40,9 +40,10 @@ function getMemoryInfo() {
       usedJSHeapSize: window.performance.memory.usedJSHeapSize,
       totalJSHeapSize: window.performance.memory.totalJSHeapSize,
       jsHeapSizeLimit: window.performance.memory.jsHeapSizeLimit,
+      available: true,
     };
   }
-  
+
   // 기본값 반환
   return {
     usedJSHeapSize: 0,

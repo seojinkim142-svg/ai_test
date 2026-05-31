@@ -78,13 +78,6 @@ export function handleError(error, context = {}) {
     console.groupEnd();
   }
 
-  // 프로덕션 환경에서는 에러 모니터링 서비스로 전송
-  if (import.meta.env.PROD) {
-    // Sentry나 LogRocket 통합 가능
-    // window.Sentry?.captureException(errorObj);
-    // window.LogRocket?.captureException(errorObj);
-  }
-
   return errorObj;
 }
 
