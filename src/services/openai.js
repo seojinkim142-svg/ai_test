@@ -3096,6 +3096,45 @@ export async function generateExamCramSheet({
   return sanitizeMarkdown(content);
 }
 
+export async function generateVocabularyFlashcards(extractedText, { outputLanguage = "ko" } = {}) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
+  const MAX_CHARS = 12000;
+  const contextText = String(extractedText || "").trim().slice(0, MAX_CHARS);
+  if (!contextText) {
+    throw new Error("No text available. Extract PDF text first.");
+  }
+
+  const data = await postChatRequest(
+    {
+      model: MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            `You are a vocabulary extractor. The user will paste text from a vocabulary list or glossary (단어장). ` +
+            `Extract every word-definition pair you can find. ` +
+            `"front" = the term or word (원어 그대로). ` +
+            `"back" = its meaning/definition in ${outputLanguageLabel} — keep it short and clear. ` +
+            `"hint" = a usage example sentence if present in the source, otherwise empty string. ` +
+            `Do NOT generate pairs that aren't in the source text. ` +
+            `Return JSON only: { "cards": [ { "front": "...", "back": "...", "hint": "..." } ] }`,
+        },
+        {
+          role: "user",
+          content: `다음 단어장 텍스트에서 모든 단어-뜻 쌍을 추출해줘:\n\n${contextText}`,
+        },
+      ],
+      temperature: 0.2,
+      response_format: { type: "json_object" },
+    },
+    { retries: 1 }
+  );
+
+  const content = data.choices?.[0]?.message?.content?.trim() || "";
+  const sanitized = sanitizeJson(content);
+  return parseJsonSafe(sanitized, "vocabulary flashcards JSON");
+}
+
 export async function generateFlashcards(extractedText, { count = 8, outputLanguage = "ko" } = {}) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const contextText = buildFlashcardsContext(extractedText, count);

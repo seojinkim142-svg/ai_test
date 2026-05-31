@@ -6824,6 +6824,74 @@ function App() {
     persistArtifacts,
   ]);
 
+  const handleGenerateVocabularyFlashcards = useCallback(async () => {
+    if (isGeneratingFlashcards) return;
+    if (AUTH_ENABLED && !user) {
+      setFlashcardError("먼저 로그인해 주세요.");
+      return;
+    }
+    if (!file || !selectedFileId) {
+      setFlashcardError("먼저 파일을 열어 주세요.");
+      return;
+    }
+    if (isLoadingText) {
+      setFlashcardError("텍스트 추출이 아직 진행 중입니다. 잠시만 기다려 주세요.");
+      return;
+    }
+    const sourceText = String(extractedText || "").trim();
+    if (sourceText.length < 30) {
+      setFlashcardError("단어장에서 텍스트를 추출하기가 부족합니다. PDF 텍스트가 로드됐는지 확인해 주세요.");
+      return;
+    }
+
+    setFlashcardError("");
+    setIsGeneratingFlashcards(true);
+    setFlashcardStatus("단어장에서 단어 추출 중...");
+    try {
+      const { generateVocabularyFlashcards } = await getOpenAiService();
+      const result = await generateVocabularyFlashcards(sourceText, { outputLanguage });
+      const rawCards = Array.isArray(result?.cards) ? result.cards : Array.isArray(result) ? result : [];
+      const cleaned = rawCards
+        .map((card) => ({
+          front: String(card?.front || "").trim(),
+          back: String(card?.back || "").trim(),
+          hint: String(card?.hint || "").trim(),
+        }))
+        .filter((card) => card.front && card.back);
+      if (cleaned.length === 0) {
+        throw new Error("단어장에서 단어-뜻 쌍을 찾지 못했습니다. PDF 텍스트가 올바른지 확인해 주세요.");
+      }
+      const deckId = selectedFileId || "default";
+      const saved = user
+        ? await addFlashcards({ userId: user.id, deckId, cards: cleaned })
+        : cleaned.map((card) => ({
+            id: createLocalEntityId("flashcard"),
+            deck_id: deckId,
+            front: card.front,
+            back: card.back,
+            hint: card.hint || "",
+            created_at: new Date().toISOString(),
+          }));
+      if (!saved.length) throw new Error("단어 카드 저장에 실패했습니다.");
+      setFlashcards((prev) => [...saved, ...prev]);
+      setFlashcardStatus(`${saved.length}개의 단어를 추출했습니다.`);
+    } catch (err) {
+      setFlashcardError(`단어 추출에 실패했습니다: ${err.message}`);
+      setFlashcardStatus("");
+    } finally {
+      setIsGeneratingFlashcards(false);
+    }
+  }, [
+    isGeneratingFlashcards,
+    user,
+    file,
+    selectedFileId,
+    isLoadingText,
+    extractedText,
+    getOpenAiService,
+    outputLanguage,
+  ]);
+
   const handleResetTutor = useCallback(() => {
     setTutorMessages([]);
     persistTutorHistory(selectedFileId, []);
@@ -8222,6 +8290,8 @@ function App() {
     handleAddFlashcard,
     handleDeleteFlashcard,
     handleGenerateFlashcards,
+    handleGenerateVocabularyFlashcards,
+    isVocabularyFile: Boolean(activeUploadItem?.isVocabulary),
     flashcardChapterSelectionInput,
     setFlashcardChapterSelectionInput,
     isGeneratingFlashcards,

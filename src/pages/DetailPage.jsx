@@ -298,6 +298,8 @@ export default function DetailPage({
   handleAddFlashcard,
   handleDeleteFlashcard,
   handleGenerateFlashcards,
+  handleGenerateVocabularyFlashcards,
+  isVocabularyFile = false,
   flashcardChapterSelectionInput,
   setFlashcardChapterSelectionInput,
   isGeneratingFlashcards,
@@ -2134,38 +2136,58 @@ export default function DetailPage({
 
           {panelTab === "flashcards" && (
             <div className="space-y-4">
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <input
-                    type="text"
-                    value={flashcardChapterSelectionInput}
-                    onChange={(event) =>
-                      setFlashcardChapterSelectionInput(
-                        normalizeChapterSelectionInput(event.target.value)
-                      )
-                    }
-                    placeholder="챕터 범위 (예: 1-3,5)"
-                    className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
-                  />
+              {isVocabularyFile ? (
+                <div className="rounded-2xl border border-violet-500/30 bg-violet-500/10 p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="rounded-full bg-violet-500 px-2.5 py-0.5 text-[11px] font-bold text-white">단어장</span>
+                    <p className="text-sm text-slate-300">단어-뜻 쌍을 자동으로 추출해 플래시카드를 만들어요</p>
+                  </div>
                   <button
                     type="button"
-                    onClick={handleGenerateFlashcards}
-                    disabled={
-                      isGeneratingFlashcards ||
-                      isLoadingText ||
-                      !file ||
-                      !selectedFileId ||
-                      hasReachedFlashcardLimit
-                    }
-                    title={flashcardLimitTitle}
-                    className="ghost-button text-xs text-emerald-100"
+                    onClick={handleGenerateVocabularyFlashcards}
+                    disabled={isGeneratingFlashcards || isLoadingText || !file || !selectedFileId}
+                    className="ghost-button w-full text-sm text-violet-200"
                     data-ghost-size="sm"
-                    style={{ "--ghost-color": "52, 211, 153" }}
+                    style={{ "--ghost-color": "167, 139, 250" }}
                   >
-                    확인
+                    {isGeneratingFlashcards ? "단어 추출 중..." : "단어 자동 추출"}
                   </button>
+                  <p className="mt-2 text-xs text-slate-400">일반 AI 플래시카드 생성도 아래에서 계속 사용할 수 있어요</p>
                 </div>
-              </div>
+              ) : (
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <input
+                      type="text"
+                      value={flashcardChapterSelectionInput}
+                      onChange={(event) =>
+                        setFlashcardChapterSelectionInput(
+                          normalizeChapterSelectionInput(event.target.value)
+                        )
+                      }
+                      placeholder="챕터 범위 (예: 1-3,5)"
+                      className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleGenerateFlashcards}
+                      disabled={
+                        isGeneratingFlashcards ||
+                        isLoadingText ||
+                        !file ||
+                        !selectedFileId ||
+                        hasReachedFlashcardLimit
+                      }
+                      title={flashcardLimitTitle}
+                      className="ghost-button text-xs text-emerald-100"
+                      data-ghost-size="sm"
+                      style={{ "--ghost-color": "52, 211, 153" }}
+                    >
+                      확인
+                    </button>
+                  </div>
+                </div>
+              )}
               <FlashcardsPanel
                 cards={flashcards}
                 isLoading={isLoadingFlashcards}
@@ -2177,6 +2199,7 @@ export default function DetailPage({
                 generateButtonTitle={flashcardLimitTitle}
                 status={flashcardStatus}
                 error={flashcardError}
+                isVocabularyMode={isVocabularyFile}
               />
             </div>
           )}

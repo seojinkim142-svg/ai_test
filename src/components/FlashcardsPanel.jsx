@@ -25,6 +25,7 @@ function FlashcardsPanel({
   generateButtonTitle,
   status,
   error,
+  isVocabularyMode = false,
 }) {
   const [front, setFront] = useState("");
   const [back, setBack] = useState("");
@@ -207,7 +208,12 @@ function FlashcardsPanel({
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm text-slate-300">암기 카드</p>
-          <h3 className="text-lg font-semibold text-white">플래시카드</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-lg font-semibold text-white">플래시카드</h3>
+            {isVocabularyMode && (
+              <span className="rounded-full bg-violet-500 px-2 py-0.5 text-[11px] font-bold text-white">단어장</span>
+            )}
+          </div>
         </div>
         <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200 ring-1 ring-white/15">
           {cards.length}개
