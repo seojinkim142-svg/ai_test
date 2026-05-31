@@ -1,9 +1,11 @@
 import chargeHandler from "../../../lib/payments/kakaopay/subscription/charge.js";
+import currentHandler from "../../../lib/payments/kakaopay/subscription/current.js";
 import inactiveHandler from "../../../lib/payments/kakaopay/subscription/inactive.js";
 import statusHandler from "../../../lib/payments/kakaopay/subscription/status.js";
 
 const ROUTE_HANDLERS = {
   charge: chargeHandler,
+  current: currentHandler,
   inactive: inactiveHandler,
   status: statusHandler,
 };
