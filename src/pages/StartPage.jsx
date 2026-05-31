@@ -26,6 +26,7 @@ const StartPage = memo(function StartPage({
   isFolderFeatureEnabled,
   isFolderLoading = false,
   onDeleteUpload,
+  onToggleVocabulary,
   isGuest = false,
   showIntro = false,
   skipPromoSplash = false,
@@ -98,6 +99,7 @@ const StartPage = memo(function StartPage({
               isFolderFeatureEnabled={isFolderFeatureEnabled}
               isFolderLoading={isFolderLoading}
               onDeleteUpload={onDeleteUpload}
+              onToggleVocabulary={onToggleVocabulary}
               isGuest={isGuest}
               onRequireAuth={onRequireAuth}
               currentTier={currentTier}
