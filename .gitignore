@@ -36,3 +36,4 @@ tmp_*.txt
 *.sln
 *.sw?
 .vercel
+.gradle-user-home/

@@ -1,0 +1,287 @@
+diff --git a/src/components/LandingIntro.jsx b/src/components/LandingIntro.jsx
+index 9f2064b..2897b74 100644
+--- a/src/components/LandingIntro.jsx
++++ b/src/components/LandingIntro.jsx
+@@ -1156,16 +1156,18 @@ const getFeatureItems = (copy) => [
+ 
+ const getNavItems = (copy) => [
+   { id: "features", label: copy.nav.features },
+   { id: "workflow", label: copy.nav.workflow },
+   { id: "pricing", label: copy.nav.pricing },
+ ];
+ 
+ const DEFAULT_ACTIVE_PLAN = "pro";
++const DEFAULT_LANDING_NAV_HEIGHT = 104;
++const LANDING_SECTION_GAP = 20;
+ 
+ function getRevealStyle(isVisible, { y = 36, x = 0, scale = 0.97, delay = 0 } = {}) {
+   return {
+     opacity: isVisible ? 1 : 0,
+     transform: isVisible ? "translate3d(0, 0, 0) scale(1)" : `translate3d(${x}px, ${y}px, 0) scale(${scale})`,
+     filter: isVisible ? "blur(0px)" : "blur(10px)",
+     transition: `opacity 760ms cubic-bezier(0.22, 1, 0.36, 1) ${delay}ms, transform 920ms cubic-bezier(0.22, 1, 0.36, 1) ${delay}ms, filter 920ms cubic-bezier(0.22, 1, 0.36, 1) ${delay}ms`,
+   };
+@@ -1382,22 +1384,27 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
+   const STATS = copy.workflow.stats;
+   const PLAN_ITEMS = copy.pricing.plans;
+   const PLAN_COMPARISON_ROWS = copy.pricing.rows;
+   const FOOTER_LINK_GROUPS = copy.footer.groups;
+   const [scrollY, setScrollY] = useState(0);
+   const [activeFeatureId, setActiveFeatureId] = useState(FEATURE_ITEMS[0]?.id || "summary");
+   const [activePlanId, setActivePlanId] = useState(DEFAULT_ACTIVE_PLAN);
+   const [menuOpen, setMenuOpen] = useState(false);
++  const [navHeight, setNavHeight] = useState(DEFAULT_LANDING_NAV_HEIGHT);
+   const [visibleSections, setVisibleSections] = useState({});
+   const scrollRafRef = useRef(null);
++  const navRef = useRef(null);
+   const revealNodesRef = useRef(new Map());
+   const featureNodesRef = useRef(new Map());
+   const featureRatiosRef = useRef(new Map());
+ 
++  const sectionScrollOffset = navHeight + LANDING_SECTION_GAP;
++  const mobileMenuTop = navHeight + 12;
++
+   useEffect(() => {
+     if (typeof window === "undefined") return undefined;
+ 
+     const handleScroll = () => {
+       if (scrollRafRef.current != null) return;
+       scrollRafRef.current = window.requestAnimationFrame(() => {
+         setScrollY(window.scrollY || 0);
+         scrollRafRef.current = null;
+@@ -1410,16 +1417,48 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
+     return () => {
+       window.removeEventListener("scroll", handleScroll);
+       if (scrollRafRef.current != null) {
+         window.cancelAnimationFrame(scrollRafRef.current);
+       }
+     };
+   }, []);
+ 
++  useEffect(() => {
++    if (typeof window === "undefined") return undefined;
++    const nav = navRef.current;
++    if (!nav) return undefined;
++
++    const syncNavHeight = () => {
++      const nextHeight = Math.ceil(nav.getBoundingClientRect().height || 0);
++      if (nextHeight > 0) {
++        setNavHeight((previous) => (previous === nextHeight ? previous : nextHeight));
++      }
++    };
++
++    syncNavHeight();
++
++    let resizeObserver;
++    if (typeof ResizeObserver !== "undefined") {
++      resizeObserver = new ResizeObserver(() => {
++        syncNavHeight();
++      });
++      resizeObserver.observe(nav);
++    }
++
++    window.addEventListener("resize", syncNavHeight, { passive: true });
++    window.visualViewport?.addEventListener("resize", syncNavHeight, { passive: true });
++
++    return () => {
++      resizeObserver?.disconnect();
++      window.removeEventListener("resize", syncNavHeight);
++      window.visualViewport?.removeEventListener("resize", syncNavHeight);
++    };
++  }, []);
++
+   useEffect(() => {
+     if (typeof document === "undefined") return undefined;
+     const previousOverflow = document.body.style.overflow;
+     if (menuOpen) {
+       document.body.style.overflow = "hidden";
+     } else {
+       document.body.style.overflow = previousOverflow;
+     }
+@@ -1513,16 +1552,32 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
+     });
+ 
+     return () => {
+       observer.disconnect();
+       ratios.clear();
+     };
+   }, []);
+ 
++  useEffect(() => {
++    if (typeof window === "undefined") return undefined;
++    const hash = window.location.hash;
++    if (!hash) return undefined;
++
++    const section = document.getElementById(hash.slice(1));
++    if (!section) return undefined;
++
++    const frame = window.requestAnimationFrame(() => {
++      const top = section.getBoundingClientRect().top + window.scrollY - sectionScrollOffset;
++      window.scrollTo({ top: Math.max(0, top) });
++    });
++
++    return () => window.cancelAnimationFrame(frame);
++  }, [sectionScrollOffset]);
++
+   const registerRevealNode = useCallback((key, node) => {
+     if (node) {
+       revealNodesRef.current.set(key, node);
+     } else {
+       revealNodesRef.current.delete(key);
+     }
+   }, []);
+ 
+@@ -1548,19 +1603,19 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
+     onStart?.();
+   }, [onStart]);
+ 
+   const handleJump = useCallback((id) => {
+     if (typeof window === "undefined") return;
+     const section = document.getElementById(id);
+     setMenuOpen(false);
+     if (!section) return;
+-    const top = section.getBoundingClientRect().top + window.scrollY - 88;
++    const top = section.getBoundingClientRect().top + window.scrollY - sectionScrollOffset;
+     window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+-  }, []);
++  }, [sectionScrollOffset]);
+ 
+   const handlePlanInteract = useCallback((planId) => {
+     setActivePlanId(planId);
+   }, []);
+ 
+   const navSolid = scrollY > 24;
+   const heroOpacity = Math.max(0.52, 1 - scrollY / 1100);
+   const heroTranslate = Math.min(scrollY * 0.145, 168);
+@@ -1646,16 +1701,17 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
+             backgroundImage: "linear-gradient(rgba(15,23,42,0.85) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.85) 1px, transparent 1px)",
+             backgroundSize: "44px 44px",
+             backgroundPosition: `0 ${heroGridShift}px, 0 ${heroGridShift}px`,
+           }}
+         />
+       </div>
+ 
+       <nav
++        ref={navRef}
+         className={`fixed inset-x-0 top-0 z-50 border-b transition-all duration-300 ${
+           navSolid
+             ? "border-slate-200/80 bg-white/[0.84] shadow-[0_20px_40px_-34px_rgba(15,23,42,0.34)] backdrop-blur-2xl"
+             : "border-white/70 bg-white/55 backdrop-blur-xl"
+         }`}
+       >
+         <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-6 lg:px-8">
+           <button type="button" onClick={() => handleJump("hero")} className="flex items-center gap-3 text-left">
+@@ -1722,17 +1778,20 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
+             className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white/80 text-slate-700 shadow-sm lg:hidden"
+           >
+             {menuOpen ? <CloseIcon /> : <MenuIcon />}
+           </button>
+         </div>
+       </nav>
+ 
+       {menuOpen ? (
+-        <div className="fixed inset-x-5 top-[5.35rem] z-40 rounded-[1.8rem] border border-white/80 bg-white/90 p-5 shadow-[0_32px_80px_-46px_rgba(15,23,42,0.32)] backdrop-blur-2xl lg:hidden">
++        <div
++          className="fixed inset-x-5 z-40 rounded-[1.8rem] border border-white/80 bg-white/90 p-5 shadow-[0_32px_80px_-46px_rgba(15,23,42,0.32)] backdrop-blur-2xl lg:hidden"
++          style={{ top: `${mobileMenuTop}px` }}
++        >
+           <label className="mb-4 block">
+             <span className="mb-2 block text-xs font-semibold tracking-[0.16em] text-slate-500">{copy.languageLabel}</span>
+             <div className="relative">
+               <select
+                 value={outputLanguage}
+                 onChange={(event) => setOutputLanguage?.(event.target.value)}
+                 className="w-full appearance-none rounded-2xl border border-slate-200/80 bg-slate-50/90 px-4 py-3 pr-10 text-sm font-semibold text-slate-700 outline-none transition focus:border-slate-300"
+               >
+@@ -1768,17 +1827,21 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
+             className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-600 to-violet-500 px-5 py-3.5 text-sm font-semibold text-white shadow-[0_18px_34px_-18px_rgba(99,102,241,0.55)]"
+           >
+             <span>{copy.startZeusian}</span>
+             <ArrowRightIcon className="h-4 w-4" />
+           </button>
+         </div>
+       ) : null}
+ 
+-      <section id="hero" className="relative px-5 pb-24 pt-28 sm:px-6 lg:px-8 lg:pb-32 lg:pt-32">
++      <section
++        id="hero"
++        className="relative px-5 pb-24 pt-28 sm:px-6 lg:px-8 lg:pb-32 lg:pt-32"
++        style={{ scrollMarginTop: `${sectionScrollOffset}px` }}
++      >
+         <div className="mx-auto max-w-7xl">
+           <div
+             className="zeus-hero-enter mx-auto flex max-w-5xl flex-col items-center text-center"
+             style={{
+               opacity: heroOpacity,
+               transform: `translateY(${heroTranslate}px) scale(${heroScale})`,
+               transformOrigin: "top center",
+             }}
+@@ -1810,17 +1873,21 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
+                 <ArrowRightIcon className="h-4 w-4" />
+               </button>
+             </div>
+ 
+           </div>
+ 
+         </div>
+       </section>
+-      <section id="features" className="relative px-5 py-24 sm:px-6 lg:px-8 lg:py-32">
++      <section
++        id="features"
++        className="relative px-5 py-24 sm:px-6 lg:px-8 lg:py-32"
++        style={{ scrollMarginTop: `${sectionScrollOffset}px` }}
++      >
+         <div className="mx-auto max-w-7xl">
+           <div
+             ref={(node) => registerRevealNode("features-heading", node)}
+             data-reveal-key="features-heading"
+             className="mx-auto max-w-3xl text-center"
+             style={getRevealStyle(isVisible("features-heading"), { y: 28 })}
+           >
+             <h2 className="landing-title text-4xl font-bold leading-tight text-slate-950 sm:text-5xl lg:text-6xl">
+@@ -1957,17 +2024,21 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
+                   </div>
+                 </article>
+               );
+             })}
+           </div>
+         </div>
+       </section>
+ 
+-      <section id="workflow" className="relative px-5 py-24 sm:px-6 lg:px-8 lg:py-32">
++      <section
++        id="workflow"
++        className="relative px-5 py-24 sm:px-6 lg:px-8 lg:py-32"
++        style={{ scrollMarginTop: `${sectionScrollOffset}px` }}
++      >
+         <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:gap-16">
+           <div
+             ref={(node) => registerRevealNode("workflow-copy", node)}
+             data-reveal-key="workflow-copy"
+             style={getRevealStyle(isVisible("workflow-copy"), { y: 32 })}
+           >
+             <h2 className="landing-title text-4xl font-bold leading-tight text-slate-950 sm:text-5xl lg:text-6xl">
+               {copy.sections.workflowLead}
+@@ -2019,17 +2090,21 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
+                   </div>
+                 </div>
+               </article>
+             ))}
+           </div>
+         </div>
+       </section>
+ 
+-      <section id="pricing" className="relative scroll-mt-28 px-5 py-24 sm:px-6 lg:px-8 lg:py-32">
++      <section
++        id="pricing"
++        className="relative px-5 py-24 sm:px-6 lg:px-8 lg:py-32"
++        style={{ scrollMarginTop: `${sectionScrollOffset}px` }}
++      >
+         <div
+           ref={(node) => registerRevealNode("pricing-stage", node)}
+           data-reveal-key="pricing-stage"
+           className="mx-auto max-w-7xl"
+         >
+           <div
+             className="mx-auto max-w-3xl text-center"
+             style={getRevealStyle(pricingSectionVisible, { y: 28 })}

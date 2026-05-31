@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -m ' *)",
+      "Bash(npx vercel *)",
+      "Bash(git commit *)",
+      "Bash(git revert *)",
+      "Bash(git ls-files *)",
+      "Bash(git lfs *)",
+      "Bash(xxd)",
+      "Bash(npx supabase *)",
+      "Bash(curl -s -X POST https://abafcnpyewguywopbszu.supabase.co/storage/v1/bucket -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFiYWZjbnB5ZXdndXl3b3Bic3p1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NjY0MzA1NSwiZXhwIjoyMDgyMjE5MDU1fQ.H7y-dYmLFynWC3B-mi6kmIGP-8dUYeFiCmvX1IBbfTk' -H 'Content-Type: application/json' -d '{\"id\":\"videos\",\"name\":\"videos\",\"public\":true}')",
+      "Bash(curl -s -X POST https://abafcnpyewguywopbszu.supabase.co/storage/v1/object/videos/__TRACKED_VAR__.mp4 -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFiYWZjbnB5ZXdndXl3b3Bic3p1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NjY0MzA1NSwiZXhwIjoyMDgyMjE5MDU1fQ.H7y-dYmLFynWC3B-mi6kmIGP-8dUYeFiCmvX1IBbfTk' -H 'Content-Type: video/mp4' --data-binary @public/__TRACKED_VAR__.mp4)",
+      "Bash(grep -n \"function UploadTile\\\\|export default\\\\|{ compactGrid\\\\|compactGrid,\" src/components/UploadTile.jsx)",
+      "WebSearch",
+      "Bash(Get-ChildItem -Path \"c:\\\\시험공부ai\" -Recurse -Depth 2 -Directory)",
+      "Bash(Select-Object FullName)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\tjwls\\.claude"
+    ]
+  }
+}
