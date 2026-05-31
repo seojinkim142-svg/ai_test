@@ -21,6 +21,12 @@
   color: #0f172a !important;
 }
 
+/* 어두운 배경 섹션에서는 text-white 복원 */
+:root.theme-light .bg-\[\#0A0A0A\] .text-white,
+:root.theme-light [data-dark] .text-white {
+  color: #ffffff !important;
+}
+
 :root.theme-light .text-slate-300 {
   color: #1f2937 !important;
 }

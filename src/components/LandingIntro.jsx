@@ -1,4 +1,7 @@
 ﻿import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { gsap } from "gsap";
+import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { COMPANY_INFO_ITEMS, LEGAL_LINKS } from "../legal/companyInfo";
 
 const FOOTER_COMPANY_INFO = COMPANY_INFO_ITEMS.find((item) => item.label === "상호") ?? COMPANY_INFO_ITEMS[0];
@@ -104,43 +107,7 @@ function ZeusianLogo({ className = "h-11 w-11 rounded-2xl" }) {
   );
 }
 
-const FEATURE_THEMES = {
-  summary: {
-    accent: "linear-gradient(135deg, #2563eb 0%, #8b5cf6 100%)",
-    glow: "rgba(99, 102, 241, 0.24)",
-    halo: "radial-gradient(circle at center, rgba(129, 140, 248, 0.28) 0%, rgba(129, 140, 248, 0) 68%)",
-    tint: "rgba(99, 102, 241, 0.08)",
-    border: "rgba(99, 102, 241, 0.14)",
-  },
-  quiz: {
-    accent: "linear-gradient(135deg, #0f766e 0%, #06b6d4 100%)",
-    glow: "rgba(13, 148, 136, 0.23)",
-    halo: "radial-gradient(circle at center, rgba(45, 212, 191, 0.28) 0%, rgba(45, 212, 191, 0) 68%)",
-    tint: "rgba(13, 148, 136, 0.08)",
-    border: "rgba(13, 148, 136, 0.14)",
-  },
-  flashcards: {
-    accent: "linear-gradient(135deg, #f97316 0%, #ec4899 100%)",
-    glow: "rgba(244, 114, 182, 0.22)",
-    halo: "radial-gradient(circle at center, rgba(251, 146, 60, 0.24) 0%, rgba(251, 146, 60, 0) 68%)",
-    tint: "rgba(249, 115, 22, 0.08)",
-    border: "rgba(249, 115, 22, 0.14)",
-  },
-  tutor: {
-    accent: "linear-gradient(135deg, #4f46e5 0%, #ec4899 100%)",
-    glow: "rgba(129, 140, 248, 0.24)",
-    halo: "radial-gradient(circle at center, rgba(167, 139, 250, 0.28) 0%, rgba(167, 139, 250, 0) 68%)",
-    tint: "rgba(129, 140, 248, 0.08)",
-    border: "rgba(129, 140, 248, 0.14)",
-  },
-  mockExam: {
-    accent: "linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)",
-    glow: "rgba(59, 130, 246, 0.23)",
-    halo: "radial-gradient(circle at center, rgba(56, 189, 248, 0.26) 0%, rgba(56, 189, 248, 0) 68%)",
-    tint: "rgba(14, 165, 233, 0.08)",
-    border: "rgba(14, 165, 233, 0.14)",
-  },
-};
+const FEATURE_ACCENT = "#006FEE";
 
 const LANDING_COPY = {
   ko: {
@@ -264,7 +231,7 @@ const LANDING_COPY = {
           description: "혼자 꾸준히 공부하는 사용자용",
           features: ["업로드 무제한", "요약/퀴즈/OX/카드 전체 제공", "AI 튜터"],
           ctaLabel: "프로 선택",
-          accent: "linear-gradient(135deg, #2563eb 0%, #8b5cf6 100%)",
+          accent: "linear-gradient(135deg, #006FEE 0%, #8b5cf6 100%)",
           glow: "rgba(99, 102, 241, 0.26)",
         },
         {
@@ -454,7 +421,7 @@ const LANDING_COPY = {
           description: "适合稳定的个人学习",
           features: ["无限上传", "完整提供摘要 / 测验 / OX / 卡片", "AI 导师"],
           ctaLabel: "选择 Pro",
-          accent: "linear-gradient(135deg, #2563eb 0%, #8b5cf6 100%)",
+          accent: "linear-gradient(135deg, #006FEE 0%, #8b5cf6 100%)",
           glow: "rgba(99, 102, 241, 0.26)",
         },
         {
@@ -644,7 +611,7 @@ const LANDING_COPY = {
           description: "一人で継続学習する人向け",
           features: ["アップロード無制限", "要約 / クイズ / OX / カードをフル提供", "AIチューター"],
           ctaLabel: "Proを選ぶ",
-          accent: "linear-gradient(135deg, #2563eb 0%, #8b5cf6 100%)",
+          accent: "linear-gradient(135deg, #006FEE 0%, #8b5cf6 100%)",
           glow: "rgba(99, 102, 241, 0.26)",
         },
         {
@@ -834,7 +801,7 @@ const LANDING_COPY = {
           description: "लगातार अकेले पढ़ने वालों के लिए",
           features: ["अनलिमिटेड अपलोड", "सारांश / क्विज़ / OX / कार्ड पूरे", "AI ट्यूटर"],
           ctaLabel: "Pro चुनें",
-          accent: "linear-gradient(135deg, #2563eb 0%, #8b5cf6 100%)",
+          accent: "linear-gradient(135deg, #006FEE 0%, #8b5cf6 100%)",
           glow: "rgba(99, 102, 241, 0.26)",
         },
         {
@@ -1024,7 +991,7 @@ const LANDING_COPY = {
           description: "Recommended for steady solo study",
           features: ["Unlimited uploads", "Unlimited summary / quiz / OX / cards", "Priority processing"],
           ctaLabel: "Choose Pro",
-          accent: "linear-gradient(135deg, #2563eb 0%, #8b5cf6 100%)",
+          accent: "linear-gradient(135deg, #006FEE 0%, #8b5cf6 100%)",
           glow: "rgba(99, 102, 241, 0.26)",
         },
         {
@@ -1119,7 +1086,6 @@ const getFeatureItems = (copy) => [
     previewMeta: copy.features.summary.bullets,
     stepLabel: copy.featureVisualStep,
     Icon: SummaryIcon,
-    theme: FEATURE_THEMES.summary,
   },
   {
     id: "quiz",
@@ -1127,7 +1093,6 @@ const getFeatureItems = (copy) => [
     previewMeta: copy.features.quiz.bullets,
     stepLabel: copy.featureVisualStep,
     Icon: QuizIcon,
-    theme: FEATURE_THEMES.quiz,
   },
   {
     id: "flashcards",
@@ -1135,7 +1100,6 @@ const getFeatureItems = (copy) => [
     previewMeta: copy.features.flashcards.bullets,
     stepLabel: copy.featureVisualStep,
     Icon: CardsIcon,
-    theme: FEATURE_THEMES.flashcards,
   },
   {
     id: "tutor",
@@ -1143,7 +1107,6 @@ const getFeatureItems = (copy) => [
     previewMeta: copy.features.tutor.bullets,
     stepLabel: copy.featureVisualStep,
     Icon: TutorIcon,
-    theme: FEATURE_THEMES.tutor,
   },
   {
     id: "mockExam",
@@ -1151,7 +1114,6 @@ const getFeatureItems = (copy) => [
     previewMeta: copy.features.mockExam.bullets,
     stepLabel: copy.featureVisualStep,
     Icon: ExamIcon,
-    theme: FEATURE_THEMES.mockExam,
   },
 ];
 
@@ -1330,72 +1292,257 @@ function ScrollMorphStage({
 
 function FeatureVisual({ feature, isActive }) {
   return (
-    <div className="relative">
-      <div
-        className="pointer-events-none absolute inset-[-12%] rounded-[3rem] blur-3xl transition duration-500"
-        style={{
-          background: feature.theme.halo,
-          opacity: isActive ? 1 : 0.5,
-        }}
-      />
-      <div
-        className="relative overflow-hidden rounded-[2rem] border bg-white/85 p-5 shadow-[0_30px_80px_-42px_rgba(15,23,42,0.22)] backdrop-blur-xl sm:p-6"
-        style={{
-          borderColor: feature.theme.border,
-          boxShadow: isActive
-            ? `0 38px 90px -46px ${feature.theme.glow}, inset 0 1px 0 rgba(255,255,255,0.72)`
-            : "0 28px 70px -54px rgba(15, 23, 42, 0.22), inset 0 1px 0 rgba(255,255,255,0.72)",
-          transform: `translateY(${isActive ? 0 : 12}px) scale(${isActive ? 1 : 0.985})`,
-          transition: "transform 480ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 480ms ease, border-color 480ms ease",
-        }}
-      >
-        <div className="absolute inset-0 opacity-90" style={{ background: feature.theme.tint }} />
-        <div className="absolute inset-x-0 top-0 h-24 opacity-80" style={{ background: feature.theme.accent, filter: "blur(88px)" }} />
-        <div className="relative">
-          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_240px]">
-            <div className="rounded-[1.6rem] border border-white/70 bg-white/[0.82] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.86)]">
-              <p className="text-2xl font-bold leading-tight text-slate-900">{feature.previewTitle}</p>
-              <div className="mt-5 space-y-3">
-                {feature.previewMeta.map((item, index) => (
-                  <div
-                    key={`${feature.id}-preview-${item}`}
-                    className="flex items-center gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3.5"
-                  >
-                    <div
-                      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-sm font-bold text-white"
-                      style={{
-                        background: feature.theme.accent,
-                      }}
-                    >
-                      {index + 1}
-                    </div>
-                    <p className="min-w-0 text-sm font-semibold leading-6 text-slate-800">{item}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="grid gap-4">
-              <div className="rounded-[1.6rem] border border-white/70 bg-slate-950 p-5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-                <p className="text-3xl font-bold">{feature.bullets.length} step</p>
-                <p className="mt-2 text-sm text-slate-300">{feature.stepLabel}</p>
-              </div>
-
-              <div className="rounded-[1.6rem] border border-slate-200/80 bg-white/90 p-5">
-                <div className="space-y-3 text-sm leading-6 text-slate-600">
-                  {feature.bullets.map((bullet) => (
-                    <div key={`${feature.id}-point-${bullet}`} className="flex items-start gap-3">
-                      <span className="mt-2 h-2.5 w-2.5 rounded-full" style={{ background: feature.theme.accent }} />
-                      <span>{bullet}</span>
-                    </div>
-                  ))}
+    <div
+      className="overflow-hidden rounded-[18px] border border-[#E5E5E0] bg-white p-5 sm:p-6"
+      style={{
+        boxShadow: "0 4px 24px rgba(0,0,0,0.10)",
+        transform: `translateY(${isActive ? 0 : 8}px) scale(${isActive ? 1 : 0.99})`,
+        transition: "transform 480ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 480ms ease",
+      }}
+    >
+      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_240px]">
+        <div className="rounded-[12px] border border-[#E5E5E0] bg-[#FBFBF9] p-5">
+          <p className="text-xl font-semibold leading-tight text-[#0A0A0A]">{feature.previewTitle}</p>
+          <div className="mt-5 space-y-3">
+            {feature.previewMeta.map((item, index) => (
+              <div
+                key={`${feature.id}-preview-${item}`}
+                className="flex items-center gap-3 rounded-[8px] border border-[#E5E5E0] bg-white px-4 py-3"
+              >
+                <div
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[8px] text-sm font-semibold text-white"
+                  style={{ background: FEATURE_ACCENT }}
+                >
+                  {index + 1}
                 </div>
+                <p className="min-w-0 text-sm font-medium leading-6 text-[#0A0A0A]">{item}</p>
               </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid gap-4">
+          <div data-dark className="rounded-[12px] border border-white/10 bg-[#0A0A0A] p-5 text-white">
+            <p className="text-3xl font-semibold">{feature.bullets.length} step</p>
+            <p className="mt-2 text-sm text-white/50">{feature.stepLabel}</p>
+          </div>
+
+          <div className="rounded-[12px] border border-[#E5E5E0] bg-[#FBFBF9] p-5">
+            <div className="space-y-3 text-sm leading-6 text-[#0A0A0A]">
+              {feature.bullets.map((bullet) => (
+                <div key={`${feature.id}-point-${bullet}`} className="flex items-start gap-3">
+                  <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: FEATURE_ACCENT }} />
+                  <span>{bullet}</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+const VIDEO_SRCS = [
+  SUMMARY_DEMO_VIDEO_SRC,
+  QUIZ_DEMO_VIDEO_SRC,
+  FLASHCARD_DEMO_VIDEO_SRC,
+  TUTOR_DEMO_VIDEO_SRC,
+  MOCK_EXAM_DEMO_VIDEO_SRC,
+];
+
+function PinnedFeaturesSection({ FEATURE_ITEMS, copy, sectionScrollOffset }) {
+  const sectionRef = useRef(null);
+  const panelRef = useRef(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [segmentProgress, setSegmentProgress] = useState(0);
+  const [pinState, setPinState] = useState("before"); // "before" | "pinned" | "after"
+  const n = FEATURE_ITEMS.length;
+
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section) return;
+
+    let rafId = null;
+    const update = () => {
+      const rect = section.getBoundingClientRect();
+      const scrollable = section.offsetHeight - window.innerHeight;
+      const scrolled = Math.max(0, -rect.top);
+      const p = Math.min(1, scrolled / scrollable);
+
+      if (rect.top > 1) {
+        setPinState("before");
+      } else if (scrolled >= scrollable - 1) {
+        setPinState("after");
+      } else {
+        setPinState("pinned");
+      }
+
+      const idx = Math.min(Math.floor(p * n * 0.9999), n - 1);
+      const segSize = 1 / n;
+      const segProg = (p % segSize) / segSize;
+      setActiveIndex(idx);
+      setSegmentProgress(segProg);
+    };
+
+    const onScroll = () => {
+      if (rafId) return;
+      rafId = requestAnimationFrame(() => { update(); rafId = null; });
+    };
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+    update();
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (rafId) cancelAnimationFrame(rafId);
+    };
+  }, [n]);
+
+  const panelStyle = useMemo(() => {
+    if (pinState === "pinned") return { position: "fixed", top: 0, left: 0, right: 0, zIndex: 10 };
+    if (pinState === "after") return { position: "absolute", bottom: 0, left: 0, right: 0 };
+    return { position: "absolute", top: 0, left: 0, right: 0 };
+  }, [pinState]);
+
+  const feature = FEATURE_ITEMS[activeIndex];
+  const Icon = feature?.Icon;
+
+  const scrollToFeature = useCallback((i) => {
+    const section = sectionRef.current;
+    if (!section) return;
+    const sectionTop = section.getBoundingClientRect().top + window.scrollY;
+    const scrollable = section.offsetHeight - window.innerHeight;
+    const target = sectionTop + (i / n) * scrollable + 10;
+    window.scrollTo({ top: target, behavior: "smooth" });
+  }, [n]);
+
+  return (
+    <section
+      id="features"
+      ref={sectionRef}
+      style={{ height: `${n * 100}vh`, position: "relative", scrollMarginTop: `${sectionScrollOffset}px` }}
+    >
+      <div
+        ref={panelRef}
+        className="flex h-screen flex-col overflow-hidden bg-[#FBFBF9] px-5 pb-6 pt-20 sm:px-6 lg:px-8"
+        style={panelStyle}
+      >
+        {/* 섹션 헤더 */}
+        <div className="mb-5 text-center">
+          <h2 className="zeus-display text-3xl font-semibold tracking-[-0.02em] text-[#0A0A0A] sm:text-4xl">
+            {copy.sections.featuresLead}
+            <span className="text-[#006FEE]"> {copy.sections.featuresAccent}</span>
+          </h2>
+        </div>
+
+        {/* 탭 네비게이션 */}
+        <div className="mb-5 flex flex-wrap justify-center gap-2">
+          {FEATURE_ITEMS.map((f, i) => (
+            <button
+              key={f.id}
+              type="button"
+              onClick={() => scrollToFeature(i)}
+              className="rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-300"
+              style={{
+                background: i === activeIndex ? FEATURE_ACCENT : "transparent",
+                color: i === activeIndex ? "#ffffff" : "#999999",
+                border: i === activeIndex ? "none" : "1px solid #E5E5E0",
+              }}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        {/* 메인 콘텐츠 */}
+        <div className="grid min-h-0 flex-1 items-center gap-8 lg:grid-cols-[1fr_1fr] lg:gap-14">
+
+          {/* 왼쪽: 기능 설명 */}
+          <div className="flex flex-col justify-center">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={activeIndex}
+                initial={{ opacity: 0, y: 36, filter: "blur(8px)" }}
+                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                exit={{ opacity: 0, y: -20, filter: "blur(4px)" }}
+                transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+              >
+                {Icon && (
+                  <div className="mb-4 inline-flex rounded-[8px] p-3 text-white" style={{ background: FEATURE_ACCENT }}>
+                    <Icon className="h-7 w-7" />
+                  </div>
+                )}
+                <div className="mb-2 text-xs font-semibold tracking-widest text-[#999999]">
+                  {String(activeIndex + 1).padStart(2, "0")} / {String(n).padStart(2, "0")}
+                </div>
+                <h3 className="zeus-display text-4xl font-semibold leading-tight tracking-[-0.02em] text-[#0A0A0A] sm:text-5xl">
+                  {feature?.label}
+                </h3>
+                <p className="mt-4 max-w-md text-[17px] leading-[1.47] text-[#666666]">
+                  {feature?.description}
+                </p>
+                <div className="mt-5 space-y-3">
+                  {feature?.previewMeta?.map((item, i) => (
+                    <motion.div
+                      key={item}
+                      className="flex items-start gap-3"
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.35, delay: 0.12 + i * 0.07, ease: [0.22, 1, 0.36, 1] }}
+                    >
+                      <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-white" style={{ background: FEATURE_ACCENT }}>
+                        <CheckIcon className="h-3 w-3" />
+                      </span>
+                      <span className="text-[17px] leading-[1.47] text-[#0A0A0A]">{item}</span>
+                    </motion.div>
+                  ))}
+                </div>
+              </motion.div>
+            </AnimatePresence>
+          </div>
+
+          {/* 오른쪽: 비디오 */}
+          <div className="flex items-center justify-center">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={`video-${activeIndex}`}
+                className="w-full overflow-hidden rounded-[18px] bg-[#0A0A0A]"
+                style={{ aspectRatio: "16/10", willChange: "transform, opacity" }}
+                initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.97, y: -12 }}
+                transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <video
+                  key={VIDEO_SRCS[activeIndex]}
+                  className="h-full w-full object-cover"
+                  src={VIDEO_SRCS[activeIndex]}
+                  autoPlay muted loop playsInline preload="metadata"
+                />
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        </div>
+
+        {/* 하단 진행 표시 */}
+        <div className="mt-5 flex items-center justify-center gap-2">
+          {FEATURE_ITEMS.map((f, i) => (
+            <div
+              key={f.id}
+              className="h-[3px] overflow-hidden rounded-full bg-[#E5E5E0] transition-all duration-300"
+              style={{ width: i === activeIndex ? 48 : 14 }}
+            >
+              {i === activeIndex && (
+                <div
+                  className="h-full rounded-full"
+                  style={{ background: FEATURE_ACCENT, width: `${segmentProgress * 100}%`, transition: "width 0.05s linear" }}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1419,6 +1566,9 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
   const revealNodesRef = useRef(new Map());
   const featureNodesRef = useRef(new Map());
   const featureRatiosRef = useRef(new Map());
+  const heroTitleRef = useRef(null);
+
+  useSmoothScroll();
 
   const sectionScrollOffset = navHeight + LANDING_SECTION_GAP;
   const mobileMenuTop = navHeight + 12;
@@ -1596,6 +1746,29 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
     return () => window.cancelAnimationFrame(frame);
   }, [sectionScrollOffset]);
 
+  useEffect(() => {
+    const el = heroTitleRef.current;
+    if (!el || typeof window === "undefined") return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
+    const words = el.querySelectorAll(".gsap-word");
+    if (!words.length) return;
+
+    gsap.fromTo(
+      words,
+      { y: "110%", opacity: 0, rotateX: -40 },
+      {
+        y: "0%",
+        opacity: 1,
+        rotateX: 0,
+        duration: 0.9,
+        ease: "power4.out",
+        stagger: 0.055,
+        delay: 0.1,
+      }
+    );
+  }, []);
+
   const registerRevealNode = useCallback((key, node) => {
     if (node) {
       revealNodesRef.current.set(key, node);
@@ -1643,24 +1816,15 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
   const heroTranslate = Math.min(scrollY * 0.145, 168);
   const pricingSectionVisible = isVisible("pricing-stage");
   const heroScale = Math.max(0.88, 1 - scrollY / 2100);
-  const heroGlowShift = Math.min(scrollY * 0.18, 180);
-  const heroGlowSpread = Math.min(scrollY * 0.065, 56);
-  const heroGridShift = Math.min(scrollY * 0.24, 240);
 
   return (
-    <div className="zeus-landing relative overflow-x-hidden bg-[#f5f7fb] text-slate-900">
+    <div className="zeus-landing relative overflow-x-hidden bg-[#FBFBF9] text-[#0A0A0A]">
       <style>{`
         .zeus-landing {
-          --zeus-border: rgba(255, 255, 255, 0.72);
-          --zeus-panel: rgba(255, 255, 255, 0.8);
-          font-family: "Sora", "Pretendard Variable", "Noto Sans KR", sans-serif;
-          background:
-            radial-gradient(circle at top left, rgba(96, 165, 250, 0.22), transparent 24%),
-            radial-gradient(circle at top right, rgba(167, 139, 250, 0.24), transparent 25%),
-            linear-gradient(180deg, #f8fbff 0%, #f3f6fb 50%, #eef2ff 100%);
+          font-family: "Geist", "Inter", "Pretendard Variable", "Noto Sans KR", sans-serif;
         }
         .zeus-display {
-          font-family: "Fraunces", "Times New Roman", serif;
+          font-family: "Manrope", "Geist", sans-serif;
         }
         .zeus-landing .landing-title,
         .zeus-landing .landing-subtitle {
@@ -1702,54 +1866,24 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
         }
       `}</style>
 
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div
-          className="absolute left-[-10%] top-24 h-64 w-64 rounded-full bg-sky-300/25 blur-3xl sm:h-80 sm:w-80"
-          style={{ transform: `translate3d(${-heroGlowSpread}px, ${heroGlowShift * 0.48}px, 0)` }}
-        />
-        <div
-          className="absolute right-[-12%] top-10 h-72 w-72 rounded-full bg-violet-300/25 blur-3xl sm:h-[26rem] sm:w-[26rem]"
-          style={{ transform: `translate3d(${heroGlowSpread}px, ${heroGlowShift * 0.34}px, 0)` }}
-        />
-        <div
-          className="absolute bottom-[-10rem] left-1/2 h-[24rem] w-[24rem] rounded-full bg-cyan-200/40 blur-[140px]"
-          style={{ transform: `translate3d(-50%, ${heroGlowShift * 0.26}px, 0) scale(${1 + Math.min(scrollY / 3200, 0.12)})` }}
-        />
-        <div
-          className="absolute inset-0"
-          style={{
-            opacity: 0.05,
-            backgroundImage: "linear-gradient(rgba(15,23,42,0.85) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.85) 1px, transparent 1px)",
-            backgroundSize: "44px 44px",
-            backgroundPosition: `0 ${heroGridShift}px, 0 ${heroGridShift}px`,
-          }}
-        />
-      </div>
-
       <nav
         ref={navRef}
-        className={`fixed inset-x-0 top-0 z-50 border-b transition-all duration-300 ${
-          navSolid
-            ? "border-slate-200/80 bg-white/[0.84] shadow-[0_20px_40px_-34px_rgba(15,23,42,0.34)] backdrop-blur-2xl"
-            : "border-white/70 bg-white/55 backdrop-blur-xl"
-        }`}
+        className="fixed inset-x-0 top-0 z-50 border-b border-[#E5E5E0] bg-white/90 backdrop-blur-md transition-all duration-300"
         style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
       >
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-3.5 sm:px-6 lg:px-8">
           <button type="button" onClick={() => handleJump("hero")} className="flex items-center gap-3 text-left">
-            <ZeusianLogo className="h-11 w-11 rounded-2xl object-cover shadow-[0_18px_34px_-18px_rgba(15,23,42,0.3)]" />
-            <div>
-              <p className="text-lg font-bold text-slate-900">Zeusian.ai</p>
-            </div>
+            <ZeusianLogo className="h-10 w-10 rounded-[8px] object-cover" />
+            <p className="text-base font-semibold text-[#0A0A0A]">Zeusian.ai</p>
           </button>
 
-          <div className="hidden items-center gap-8 lg:flex">
+          <div className="hidden items-center gap-7 lg:flex">
             {NAV_ITEMS.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => handleJump(item.id)}
-                className="text-sm font-semibold text-slate-600 transition hover:text-slate-950"
+                className="text-sm text-[#0A0A0A] transition hover:text-[#006FEE]"
               >
                 {item.label}
               </button>
@@ -1757,18 +1891,12 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
           </div>
 
           <div className="hidden items-center gap-3 lg:flex">
-            <a
-              href="/study-ai"
-              className="hidden rounded-full px-4 py-2 text-sm font-semibold text-slate-600 transition hover:text-slate-950"
-            >
-              소개 문서
-            </a>
             <label className="relative">
               <span className="sr-only">{copy.languageLabel}</span>
               <select
                 value={outputLanguage}
                 onChange={(event) => setOutputLanguage?.(event.target.value)}
-                className="appearance-none rounded-full border border-slate-200 bg-white/80 px-4 py-2 pr-10 text-sm font-semibold text-slate-700 shadow-sm outline-none transition hover:border-slate-300 focus:border-slate-400"
+                className="appearance-none rounded-full border border-[#E5E5E0] bg-white px-4 py-2 pr-8 text-sm text-[#0A0A0A] outline-none transition hover:border-[#006FEE]"
               >
                 {OUTPUT_LANGUAGE_OPTIONS.map((option) => (
                   <option key={option.code} value={option.code}>
@@ -1776,7 +1904,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                   </option>
                 ))}
               </select>
-              <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-slate-400">
+              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[#666666]">
                 <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
                   <path d="m5 7.5 5 5 5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
@@ -1785,7 +1913,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
             <button
               type="button"
               onClick={handleStart}
-              className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-blue-600 to-violet-500 px-5 py-3 text-sm font-semibold text-white shadow-[0_18px_34px_-18px_rgba(99,102,241,0.55)] transition hover:translate-y-[-1px] hover:shadow-[0_24px_38px_-18px_rgba(99,102,241,0.55)]"
+              className="inline-flex items-center gap-2 rounded-full bg-[#006FEE] px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-[#0059c7]"
             >
               <span>{copy.startNow}</span>
               <ArrowRightIcon className="h-4 w-4" />
@@ -1797,7 +1925,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
             onClick={() => setMenuOpen((previous) => !previous)}
             aria-expanded={menuOpen}
             aria-label={menuOpen ? copy.closeMenu : copy.openMenu}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-white/80 text-slate-700 shadow-sm lg:hidden"
+            className="inline-flex h-10 w-10 items-center justify-center rounded-[8px] border border-[#E5E5E0] bg-white text-[#0A0A0A] lg:hidden"
           >
             {menuOpen ? <CloseIcon /> : <MenuIcon />}
           </button>
@@ -1806,16 +1934,16 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
 
       {menuOpen ? (
         <div
-          className="fixed inset-x-5 z-40 rounded-[1.8rem] border border-white/80 bg-white/90 p-5 shadow-[0_32px_80px_-46px_rgba(15,23,42,0.32)] backdrop-blur-2xl lg:hidden"
+          className="fixed inset-x-4 z-40 rounded-[18px] border border-[#E5E5E0] bg-white p-5 shadow-[0_8px_32px_rgba(0,0,0,0.12)] lg:hidden"
           style={{ top: `${mobileMenuTop}px` }}
         >
           <label className="mb-4 block">
-            <span className="mb-2 block text-xs font-semibold tracking-[0.16em] text-slate-500">{copy.languageLabel}</span>
+            <span className="mb-2 block text-xs font-semibold tracking-wide text-[#666666]">{copy.languageLabel}</span>
             <div className="relative">
               <select
                 value={outputLanguage}
                 onChange={(event) => setOutputLanguage?.(event.target.value)}
-                className="w-full appearance-none rounded-2xl border border-slate-200/80 bg-slate-50/90 px-4 py-3 pr-10 text-sm font-semibold text-slate-700 outline-none transition focus:border-slate-300"
+                className="w-full appearance-none rounded-[8px] border border-[#E5E5E0] bg-[#FBFBF9] px-4 py-3 pr-10 text-sm text-[#0A0A0A] outline-none"
               >
                 {OUTPUT_LANGUAGE_OPTIONS.map((option) => (
                   <option key={option.code} value={option.code}>
@@ -1823,7 +1951,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                   </option>
                 ))}
               </select>
-              <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-slate-400">
+              <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-[#666666]">
                 <svg viewBox="0 0 20 20" fill="none" className="h-4 w-4" aria-hidden="true">
                   <path d="m5 7.5 5 5 5-5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
@@ -1836,7 +1964,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                 key={item.id}
                 type="button"
                 onClick={() => handleJump(item.id)}
-                className="flex w-full items-center justify-between rounded-2xl border border-slate-200/80 bg-slate-50/80 px-4 py-3 text-left text-sm font-semibold text-slate-700"
+                className="flex w-full items-center justify-between rounded-[8px] border border-[#E5E5E0] bg-[#FBFBF9] px-4 py-3 text-left text-sm text-[#0A0A0A]"
               >
                 <span>{item.label}</span>
                 <ArrowRightIcon className="h-4 w-4" />
@@ -1846,7 +1974,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
           <button
             type="button"
             onClick={handleStart}
-            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-600 to-violet-500 px-5 py-3.5 text-sm font-semibold text-white shadow-[0_18px_34px_-18px_rgba(99,102,241,0.55)]"
+            className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#006FEE] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#0059c7]"
           >
             <span>{copy.startZeusian}</span>
             <ArrowRightIcon className="h-4 w-4" />
@@ -1856,216 +1984,92 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
 
       <section
         id="hero"
-        className="relative px-5 pb-24 pt-28 sm:px-6 lg:px-8 lg:pb-32 lg:pt-32"
+        className="bg-white px-5 pb-24 pt-28 sm:px-6 lg:px-8 lg:pb-32 lg:pt-36"
         style={{ scrollMarginTop: `${sectionScrollOffset}px` }}
       >
         <div className="mx-auto max-w-7xl">
           <div
-            className="zeus-hero-enter mx-auto flex max-w-5xl flex-col items-center text-center"
+            className="zeus-hero-enter mx-auto flex max-w-4xl flex-col items-center text-center"
             style={{
               opacity: heroOpacity,
               transform: `translateY(${heroTranslate}px) scale(${heroScale})`,
               transformOrigin: "top center",
             }}
           >
-            <h1 className="landing-title max-w-5xl text-[2.9rem] font-bold leading-[0.96] text-slate-950 sm:text-[4.35rem] lg:text-[6.2rem]">
-              {copy.hero.line1}
+            <h1
+              ref={heroTitleRef}
+              className="zeus-display landing-title overflow-hidden text-[2.8rem] font-semibold leading-[1.05] tracking-[-0.02em] text-[#0A0A0A] sm:text-[4rem] lg:text-[5.6rem]"
+              style={{ perspective: "800px" }}
+            >
+              {copy.hero.line1.split(" ").map((word, i) => (
+                <span key={`l1-${i}`} className="inline-block overflow-hidden">
+                  <span className="gsap-word inline-block" style={{ willChange: "transform, opacity" }}>
+                    {word}&nbsp;
+                  </span>
+                </span>
+              ))}
               <br />
-              <span className="bg-gradient-to-r from-blue-600 via-sky-500 to-violet-500 bg-clip-text text-transparent">
-                {copy.hero.line2}
+              <span className="text-[#006FEE]">
+                {copy.hero.line2.split(" ").map((word, i) => (
+                  <span key={`l2-${i}`} className="inline-block overflow-hidden">
+                    <span className="gsap-word inline-block" style={{ willChange: "transform, opacity" }}>
+                      {word}&nbsp;
+                    </span>
+                  </span>
+                ))}
               </span>
             </h1>
-            <p className="landing-subtitle mt-7 max-w-3xl text-base leading-8 text-slate-600 sm:text-lg">{copy.hero.description}</p>
+            <motion.p
+              className="landing-subtitle mt-7 max-w-2xl text-[17px] leading-[1.47] tracking-[-0.02em] text-[#666666]"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.8, delay: 0.65, ease: [0.22, 1, 0.36, 1] }}
+            >
+              {copy.hero.description}
+            </motion.p>
 
-            <div className="mt-9 flex flex-col items-center gap-3 sm:flex-row">
-              <button
+            <motion.div
+              className="mt-9 flex flex-col items-center gap-3 sm:flex-row"
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.7, delay: 0.85, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <motion.button
                 type="button"
                 onClick={handleStart}
-                className="inline-flex min-w-[11rem] items-center justify-center gap-2 rounded-full bg-gradient-to-r from-blue-600 to-violet-500 px-7 py-3.5 text-sm font-semibold text-white shadow-[0_22px_40px_-20px_rgba(99,102,241,0.58)] transition hover:translate-y-[-1px] hover:shadow-[0_28px_44px_-20px_rgba(99,102,241,0.58)]"
+                className="inline-flex min-w-[11rem] items-center justify-center gap-2 rounded-full bg-[#006FEE] px-7 py-3.5 text-sm font-semibold text-white"
+                whileHover={{ scale: 1.04, backgroundColor: "#0059c7" }}
+                whileTap={{ scale: 0.97 }}
+                transition={{ type: "spring", stiffness: 300, damping: 20 }}
               >
                 <span>{copy.hero.primary}</span>
                 <ArrowRightIcon className="h-4 w-4" />
-              </button>
-              <button
+              </motion.button>
+              <motion.button
                 type="button"
                 onClick={() => handleJump("features")}
-                className="inline-flex min-w-[11rem] items-center justify-center gap-2 rounded-full border border-slate-300 bg-white/[0.72] px-7 py-3.5 text-sm font-semibold text-slate-700 shadow-[0_16px_32px_-24px_rgba(15,23,42,0.3)] backdrop-blur transition hover:border-slate-400 hover:text-slate-950"
+                className="inline-flex min-w-[11rem] items-center justify-center gap-2 rounded-full border border-[#E5E5E0] bg-white px-7 py-3.5 text-sm font-semibold text-[#006FEE]"
+                whileHover={{ scale: 1.04, borderColor: "#006FEE" }}
+                whileTap={{ scale: 0.97 }}
+                transition={{ type: "spring", stiffness: 300, damping: 20 }}
               >
                 <span>{copy.hero.secondary}</span>
                 <ArrowRightIcon className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-
-        </div>
-      </section>
-      <section
-        id="features"
-        className="relative px-5 py-24 sm:px-6 lg:px-8 lg:py-32"
-        style={{ scrollMarginTop: `${sectionScrollOffset}px` }}
-      >
-        <div className="mx-auto max-w-7xl">
-          <div
-            ref={(node) => registerRevealNode("features-heading", node)}
-            data-reveal-key="features-heading"
-            className="mx-auto max-w-3xl text-center"
-            style={getRevealStyle(isVisible("features-heading"), { y: 28 })}
-          >
-            <h2 className="landing-title text-4xl font-bold leading-tight text-slate-950 sm:text-5xl lg:text-6xl">
-              {copy.sections.featuresLead}
-              <br />
-              <span className="bg-gradient-to-r from-blue-600 to-violet-500 bg-clip-text text-transparent">{copy.sections.featuresAccent}</span>
-            </h2>
-            <p className="landing-subtitle mt-6 text-base leading-8 text-slate-600 sm:text-lg">{copy.sections.featuresDescription}</p>
-          </div>
-
-          <div className="mt-16 space-y-20 lg:mt-24 lg:space-y-28">
-            {FEATURE_ITEMS.map((feature, index) => {
-              const isActive = activeFeatureId === feature.id;
-              const sectionVisible = isVisible(`feature-${feature.id}`);
-              const Icon = feature.Icon;
-
-              return (
-                <article
-                  key={feature.id}
-                  ref={(node) => {
-                    registerRevealNode(`feature-${feature.id}`, node);
-                    registerFeatureNode(feature.id, node);
-                  }}
-                  data-reveal-key={`feature-${feature.id}`}
-                  data-feature-id={feature.id}
-                  onPointerEnter={(event) => {
-                    if (event.pointerType === "mouse") {
-                      setActiveFeatureId(feature.id);
-                    }
-                  }}
-                  className="grid items-center gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.92fr)] lg:gap-16"
-                  style={getRevealStyle(sectionVisible, {
-                    y: 44,
-                    x: index % 2 === 0 ? -14 : 14,
-                    scale: 0.955,
-                    rotateX: 14,
-                    rotateY: index % 2 === 0 ? -8 : 8,
-                    blur: 12,
-                    delay: Math.min(index * 60, 220),
-                  })}
-                >
-                  <div className={index % 2 === 0 ? "lg:order-2" : ""}>
-                    <ScrollMorphStage
-                      config={{
-                        ...FEATURE_SCROLL_MORPH_CONFIG,
-                        translateX: index % 2 === 0 ? 18 : -18,
-                        rotateYFrom: index % 2 === 0 ? -8 : 8,
-                        origin: index % 2 === 0 ? "right center" : "left center",
-                      }}
-                    >
-                      <div className="relative">
-                        <div
-                          className="pointer-events-none absolute inset-[-9%] rounded-[3rem] blur-3xl transition duration-500"
-                          style={{
-                            background: feature.theme.halo,
-                            opacity: isActive ? 1 : 0.5,
-                          }}
-                        />
-                        <div
-                          className="relative aspect-[1.18/0.82] overflow-hidden rounded-[2.2rem] border border-white/80 bg-white/80 shadow-[0_30px_80px_-42px_rgba(15,23,42,0.22)] backdrop-blur-xl"
-                          style={{
-                            boxShadow: isActive
-                              ? `0 38px 90px -46px ${feature.theme.glow}, inset 0 1px 0 rgba(255,255,255,0.72)`
-                              : "0 28px 70px -54px rgba(15,23,42,0.22), inset 0 1px 0 rgba(255,255,255,0.72)",
-                          }}
-                        >
-                          {feature.id === "summary" ||
-                          feature.id === "quiz" ||
-                          feature.id === "flashcards" ||
-                          feature.id === "tutor" ||
-                          feature.id === "mockExam" ? (
-                            <>
-                              <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.55),rgba(255,255,255,0.12))]" />
-                              <div className="absolute inset-[3.5%] overflow-hidden rounded-[1.9rem] border border-white/70 bg-slate-950 shadow-[0_32px_70px_-40px_rgba(15,23,42,0.42)]">
-                                <video
-                                  className="h-full w-full object-cover object-center"
-                                  src={
-                                    feature.id === "summary"
-                                      ? SUMMARY_DEMO_VIDEO_SRC
-                                      : feature.id === "quiz"
-                                        ? QUIZ_DEMO_VIDEO_SRC
-                                        : feature.id === "flashcards"
-                                          ? FLASHCARD_DEMO_VIDEO_SRC
-                                          : feature.id === "tutor"
-                                            ? TUTOR_DEMO_VIDEO_SRC
-                                            : MOCK_EXAM_DEMO_VIDEO_SRC
-                                  }
-                                  autoPlay
-                                  muted
-                                  loop
-                                  playsInline
-                                  preload="metadata"
-                                />
-                              </div>
-                              <div className="pointer-events-none absolute inset-[3.5%] rounded-[1.9rem] bg-[linear-gradient(180deg,rgba(255,255,255,0.12),transparent_20%,transparent_80%,rgba(15,23,42,0.08))]" />
-                            </>
-                          ) : (
-                            <>
-                              <div className="absolute inset-0 opacity-90" style={{ background: feature.theme.tint }} />
-                              <div className="absolute inset-0 bg-[linear-gradient(120deg,rgba(255,255,255,0.82),rgba(255,255,255,0.16))]" />
-                              <div
-                                className="absolute inset-0 opacity-[0.2]"
-                                style={{
-                                  backgroundImage: "linear-gradient(rgba(15,23,42,0.18) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.18) 1px, transparent 1px)",
-                                  backgroundSize: "34px 34px",
-                                }}
-                              />
-                              <div className="absolute -left-8 top-10 h-28 w-28 rounded-full blur-3xl" style={{ background: feature.theme.accent, opacity: 0.3 }} />
-                              <div className="absolute -right-12 bottom-0 h-40 w-40 rounded-full blur-3xl" style={{ background: feature.theme.accent, opacity: 0.22 }} />
-                              <div className="absolute left-[14%] top-[22%] h-px w-[44%] bg-slate-900/16" />
-                              <div className="absolute left-[26%] top-[46%] h-px w-[50%] bg-slate-900/12" />
-                              <div className="absolute left-[18%] top-[68%] h-px w-[36%] bg-slate-900/14" />
-                              <div className="relative flex h-full items-center justify-center p-8 sm:p-10">
-                                <div className="flex h-28 w-28 items-center justify-center rounded-[2rem] border border-white/70 bg-white/85 text-slate-950 shadow-[0_28px_60px_-28px_rgba(15,23,42,0.35)] sm:h-32 sm:w-32">
-                                  <Icon className="h-14 w-14 sm:h-16 sm:w-16" />
-                                </div>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </ScrollMorphStage>
-                  </div>
-
-                  <div className={index % 2 === 0 ? "lg:order-1" : ""}>
-                    <div
-                      className="inline-flex rounded-[1.4rem] p-4 text-white shadow-[0_24px_40px_-24px_rgba(99,102,241,0.6)]"
-                      style={{ background: feature.theme.accent }}
-                    >
-                      <Icon className="h-8 w-8 sm:h-10 sm:w-10" />
-                    </div>
-                    <h3 className="mt-6 text-3xl font-bold leading-tight text-slate-950 sm:text-4xl lg:text-5xl">{feature.label}</h3>
-                    <p className="mt-5 max-w-xl text-base leading-8 text-slate-600 sm:text-lg">{feature.description}</p>
-                    <div className="mt-7 space-y-3">
-                      {feature.previewMeta.map((item) => (
-                        <div key={`${feature.id}-copy-${item}`} className="flex items-start gap-3">
-                          <span
-                            className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-white"
-                            style={{ background: feature.theme.accent }}
-                          >
-                            <CheckIcon className="h-3 w-3" />
-                          </span>
-                          <span className="text-sm leading-7 text-slate-600 sm:text-base">{item}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </article>
-              );
-            })}
+              </motion.button>
+            </motion.div>
           </div>
         </div>
       </section>
+      <PinnedFeaturesSection
+        FEATURE_ITEMS={FEATURE_ITEMS}
+        copy={copy}
+        sectionScrollOffset={sectionScrollOffset}
+      />
 
       <section
         id="workflow"
-        className="relative px-5 py-24 sm:px-6 lg:px-8 lg:py-32"
+        data-dark
+        className="bg-[#0A0A0A] px-5 py-24 sm:px-6 lg:px-8 lg:py-32"
         style={{ scrollMarginTop: `${sectionScrollOffset}px` }}
       >
         <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:gap-16">
@@ -2074,25 +2078,24 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
             data-reveal-key="workflow-copy"
             style={getRevealStyle(isVisible("workflow-copy"), { y: 32 })}
           >
-            <h2 className="landing-title text-4xl font-bold leading-tight text-slate-950 sm:text-5xl lg:text-6xl">
+            <h2 className="zeus-display landing-title text-4xl font-semibold leading-tight tracking-[-0.02em] text-white sm:text-5xl">
               {copy.sections.workflowLead}
               <br />
-              <span className="bg-gradient-to-r from-cyan-500 to-blue-600 bg-clip-text text-transparent">{copy.sections.workflowAccent}</span>
+              <span className="text-[#006FEE]">{copy.sections.workflowAccent}</span>
             </h2>
-            <p className="landing-subtitle mt-6 text-base leading-8 text-slate-600 sm:text-lg">{copy.sections.workflowDescription}</p>
+            <p className="landing-subtitle mt-6 text-[17px] leading-[1.47] text-white/60">{copy.sections.workflowDescription}</p>
 
-            <div className="mt-10 grid gap-4 sm:grid-cols-3">
+            <div className="mt-10 grid gap-6 sm:grid-cols-3">
               {STATS.map((stat, index) => (
                 <div
                   key={stat.label}
-                  className="rounded-[1.8rem] border border-white/80 bg-white/80 px-5 py-6 shadow-[0_22px_40px_-34px_rgba(15,23,42,0.25)] backdrop-blur"
                   style={getRevealStyle(isVisible("workflow-copy"), { y: 24, delay: 120 + index * 70 })}
                 >
-                  <p className="text-4xl font-bold text-slate-950 sm:text-5xl">
+                  <p className="text-4xl font-semibold text-white sm:text-5xl">
                     {stat.value}
-                    <span className="zeus-display ml-2 text-2xl text-slate-500">{stat.unit}</span>
+                    <span className="zeus-display ml-2 text-2xl text-white/50">{stat.unit}</span>
                   </p>
-                  <p className="mt-3 text-sm leading-6 text-slate-500">{stat.label}</p>
+                  <p className="mt-2 text-sm leading-6 text-white/40">{stat.label}</p>
                 </div>
               ))}
             </div>
@@ -2107,20 +2110,20 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
             {STEP_ITEMS.map((step, index) => (
               <article
                 key={step.step}
-                className="relative overflow-hidden rounded-[2rem] border border-white/80 bg-white/[0.82] p-6 shadow-[0_28px_70px_-46px_rgba(15,23,42,0.24)] backdrop-blur sm:p-7"
+                className="rounded-[18px] border border-white/[0.12] bg-white/[0.06] p-6 sm:p-7"
                 style={getRevealStyle(isVisible("workflow-steps"), { y: 24, delay: index * 90 })}
               >
-                <div className="absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-blue-600 via-sky-500 to-violet-500" />
-                <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
-                  <div className="flex items-start gap-4">
-                    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-[1.3rem] bg-gradient-to-br from-blue-600 to-violet-500 text-lg font-bold text-white shadow-[0_18px_30px_-18px_rgba(99,102,241,0.55)]">
-                      {step.step}
-                    </div>
-                    <div>
-                      <h3 className="text-2xl font-bold text-slate-950">{step.title}</h3>
-                      <p className="mt-3 text-base leading-7 text-slate-600">{step.description}</p>
-                      <p className="mt-3 text-sm leading-6 text-slate-500">{step.note}</p>
-                    </div>
+                <div className="flex items-start gap-5">
+                  <div
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-[8px] text-base font-semibold text-white"
+                    style={{ background: FEATURE_ACCENT }}
+                  >
+                    {step.step}
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-semibold text-white">{step.title}</h3>
+                    <p className="mt-2 text-[17px] leading-[1.47] text-white/60">{step.description}</p>
+                    <p className="mt-2 text-sm leading-6 text-white/35">{step.note}</p>
                   </div>
                 </div>
               </article>
@@ -2131,7 +2134,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
 
       <section
         id="pricing"
-        className="relative px-5 py-24 sm:px-6 lg:px-8 lg:py-32"
+        className="bg-white px-5 py-24 sm:px-6 lg:px-8 lg:py-32"
         style={{ scrollMarginTop: `${sectionScrollOffset}px` }}
       >
         <div
@@ -2143,12 +2146,12 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
             className="mx-auto max-w-3xl text-center"
             style={getRevealStyle(pricingSectionVisible, { y: 28 })}
           >
-            <h2 className="landing-title text-4xl font-bold leading-tight text-slate-950 sm:text-5xl lg:text-6xl">
+            <h2 className="zeus-display landing-title text-4xl font-semibold leading-tight tracking-[-0.02em] text-[#0A0A0A] sm:text-5xl">
               {copy.sections.pricingLead}
               <br />
-              <span className="bg-gradient-to-r from-blue-600 to-violet-500 bg-clip-text text-transparent">{copy.sections.pricingAccent}</span>
+              <span className="text-[#006FEE]">{copy.sections.pricingAccent}</span>
             </h2>
-            <p className="landing-subtitle mt-6 text-base leading-8 text-slate-600 sm:text-lg">{copy.sections.pricingDescription}</p>
+            <p className="landing-subtitle mt-6 text-[17px] leading-[1.47] text-[#666666]">{copy.sections.pricingDescription}</p>
           </div>
 
           <div className="mobile-card-rail mt-16 flex gap-5 md:grid md:grid-cols-2 lg:grid-cols-3">
@@ -2160,7 +2163,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                   ? [plan.originalPrice]
                   : [];
               return (
-                <article
+                <motion.article
                   key={plan.name}
                   role="button"
                   tabIndex={0}
@@ -2178,40 +2181,40 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                       handlePlanInteract(plan.id);
                     }
                   }}
-                  className="relative min-w-[280px] flex-1 overflow-hidden rounded-[2rem] border bg-white/[0.82] p-6 shadow-[0_28px_70px_-48px_rgba(15,23,42,0.24)] backdrop-blur transition-all duration-300 sm:min-w-[320px] sm:p-7 md:min-w-0"
+                  className="relative min-w-[280px] flex-1 overflow-hidden rounded-[18px] border p-6 sm:min-w-[320px] sm:p-7 md:min-w-0"
                   style={{
                     ...getRevealStyle(pricingSectionVisible, { y: 28, delay: 120 + index * 80 }),
-                    borderColor: isActive ? "rgba(99, 102, 241, 0.28)" : "rgba(255, 255, 255, 0.78)",
-                    boxShadow: isActive
-                      ? `0 34px 84px -44px ${plan.glow}, inset 0 1px 0 rgba(255,255,255,0.72)`
-                      : "0 28px 70px -48px rgba(15,23,42,0.24), inset 0 1px 0 rgba(255,255,255,0.72)",
-                    transform: isActive ? "translateY(-6px)" : "translateY(0)",
+                    borderColor: isActive ? "#006FEE" : "#E5E5E0",
+                    backgroundColor: isActive ? "#ffffff" : "#FBFBF9",
+                    boxShadow: isActive ? "0 4px 24px rgba(37,99,235,0.14)" : "none",
+                    willChange: "transform",
                   }}
+                  whileHover={{ y: -6, boxShadow: "0 12px 32px rgba(37,99,235,0.16)" }}
+                  whileTap={{ scale: 0.98 }}
+                  transition={{ type: "spring", stiffness: 300, damping: 20 }}
                 >
-                  <div className="absolute inset-x-0 top-0 h-1.5" style={{ background: plan.accent }} />
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h3 className="text-2xl font-bold text-slate-950">{plan.name}</h3>
-                      <p className="mt-3 text-sm leading-6 text-slate-500">{plan.description}</p>
-                    </div>
+                  {isActive && <div className="absolute inset-x-0 top-0 h-1" style={{ background: FEATURE_ACCENT }} />}
+                  <div>
+                    <h3 className="text-2xl font-semibold text-[#0A0A0A]">{plan.name}</h3>
+                    <p className="mt-2 text-sm leading-6 text-[#666666]">{plan.description}</p>
                   </div>
 
-                  <div className="mt-8 flex flex-wrap items-end gap-3">
+                  <div className="mt-7 flex flex-wrap items-end gap-2">
                     {originalPrices.map((originalPrice) => (
-                      <span key={`${plan.id}-${originalPrice}`} className="text-base font-semibold text-slate-400 line-through">
+                      <span key={`${plan.id}-${originalPrice}`} className="text-sm font-semibold text-[#999999] line-through">
                         {originalPrice}
                       </span>
                     ))}
-                    <p className="text-4xl font-bold text-slate-950">{plan.price}</p>
+                    <p className="text-4xl font-semibold text-[#0A0A0A]">{plan.price}</p>
                   </div>
-                  <ul className="mt-7 space-y-3 text-sm text-slate-600">
+                  <ul className="mt-7 space-y-3 text-sm text-[#0A0A0A]">
                     {plan.features.map((feature) => (
                       <li key={`${plan.name}-${feature}`} className="flex items-start gap-3">
                         <span
-                          className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-white"
-                          style={{ background: plan.accent }}
+                          className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-white"
+                          style={{ background: FEATURE_ACCENT }}
                         >
-                          <CheckIcon className="h-3.5 w-3.5" />
+                          <CheckIcon className="h-3 w-3" />
                         </span>
                         <span className="leading-6">{feature}</span>
                       </li>
@@ -2221,27 +2224,29 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                   <button
                     type="button"
                     onClick={() => handlePlanInteract(plan.id)}
-                    className={`mt-8 inline-flex w-full items-center justify-center gap-2 rounded-full border px-5 py-3 text-sm font-semibold transition ${
-                      isActive ? "border-transparent text-white" : "border-slate-300 bg-white/[0.82] text-slate-700 hover:border-slate-400 hover:text-slate-950"
-                    }`}
-                    style={isActive ? { background: plan.accent, boxShadow: `0 18px 34px -18px ${plan.glow}` } : undefined}
+                    className="mt-8 inline-flex w-full items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-semibold transition active:scale-95"
+                    style={
+                      isActive
+                        ? { background: FEATURE_ACCENT, color: "#ffffff" }
+                        : { border: "1px solid #E5E5E0", background: "#ffffff", color: "#006FEE" }
+                    }
                   >
                     <span>{isActive ? copy.pricing.current : plan.ctaLabel}</span>
                     <ArrowRightIcon className="h-4 w-4" />
                   </button>
-                </article>
+                </motion.article>
               );
             })}
           </div>
 
           <div
-            className="mt-8 rounded-[2rem] border border-white/80 bg-white/[0.82] shadow-[0_34px_90px_-54px_rgba(15,23,42,0.28)] backdrop-blur"
+            className="mt-8 overflow-hidden rounded-[18px] border border-[#E5E5E0] bg-white"
             style={getRevealStyle(pricingSectionVisible, { y: 28, delay: 180 })}
           >
             <div className="show-scrollbar overflow-x-auto overflow-y-visible pb-3">
               <div className="min-w-[720px]">
-                <div className="grid grid-cols-[160px_repeat(3,minmax(180px,1fr))] border-b border-slate-200/80 md:grid-cols-[180px_repeat(3,minmax(0,1fr))]">
-                  <div className="sticky left-0 z-20 bg-white/[0.96] px-4 py-5 text-sm font-semibold uppercase tracking-[0.22em] text-slate-400 backdrop-blur md:px-5">
+                <div className="grid grid-cols-[160px_repeat(3,minmax(180px,1fr))] border-b border-[#E5E5E0] md:grid-cols-[180px_repeat(3,minmax(0,1fr))]">
+                  <div className="sticky left-0 z-20 bg-white px-4 py-5 text-xs font-semibold uppercase tracking-widest text-[#999999] md:px-5">
                     {copy.pricing.compare}
                   </div>
                   {PLAN_ITEMS.map((plan) => {
@@ -2256,22 +2261,22 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                         key={`${plan.name}-header`}
                         type="button"
                         onClick={() => handlePlanInteract(plan.id)}
-                        className={`border-l px-4 py-5 text-left transition md:px-5 ${
-                          isActive ? "bg-slate-950 text-white" : "bg-white/75 text-slate-900 hover:bg-slate-50"
+                        className={`border-l border-[#E5E5E0] px-4 py-5 text-left transition md:px-5 ${
+                          isActive ? "bg-[#0A0A0A] text-white" : "bg-white text-[#0A0A0A] hover:bg-[#FBFBF9]"
                         }`}
                       >
-                        <p className="text-xl font-bold md:text-2xl">{plan.name}</p>
-                        <p className={`mt-2 text-sm ${isActive ? "text-slate-300" : "text-slate-500"}`}>{plan.description}</p>
-                        <div className="mt-4 flex flex-wrap items-end gap-2">
+                        <p className="text-lg font-semibold md:text-xl">{plan.name}</p>
+                        <p className={`mt-1 text-sm ${isActive ? "text-white/50" : "text-[#666666]"}`}>{plan.description}</p>
+                        <div className="mt-3 flex flex-wrap items-end gap-2">
                           {originalPrices.map((originalPrice) => (
                             <span
                               key={`${plan.id}-comparison-${originalPrice}`}
-                              className={`text-sm font-semibold line-through ${isActive ? "text-slate-400" : "text-slate-400"}`}
+                              className={`text-sm line-through ${isActive ? "text-white/40" : "text-[#999999]"}`}
                             >
                               {originalPrice}
                             </span>
                           ))}
-                          <p className={`text-xl font-bold md:text-2xl ${isActive ? "text-white" : "text-slate-900"}`}>{plan.price}</p>
+                          <p className={`text-xl font-semibold md:text-2xl ${isActive ? "text-white" : "text-[#0A0A0A]"}`}>{plan.price}</p>
                         </div>
                       </button>
                     );
@@ -2280,8 +2285,8 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
 
                 {PLAN_COMPARISON_ROWS.map((row) => (
                   <Fragment key={row.label}>
-                    <div className="grid grid-cols-[160px_repeat(3,minmax(180px,1fr))] border-b border-slate-200/80 last:border-b-0 md:grid-cols-[180px_repeat(3,minmax(0,1fr))]">
-                      <div className="sticky left-0 z-10 bg-slate-50/95 px-4 py-4 text-sm font-semibold text-slate-500 backdrop-blur md:px-5">
+                    <div className="grid grid-cols-[160px_repeat(3,minmax(180px,1fr))] border-b border-[#E5E5E0] last:border-b-0 md:grid-cols-[180px_repeat(3,minmax(0,1fr))]">
+                      <div className="sticky left-0 z-10 bg-[#FBFBF9] px-4 py-4 text-sm font-semibold text-[#666666] md:px-5">
                         {row.label}
                       </div>
                       {PLAN_ITEMS.map((plan) => {
@@ -2289,8 +2294,8 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                         return (
                           <div
                             key={`${row.label}-${plan.id}`}
-                            className={`border-l px-4 py-4 text-sm leading-7 md:px-5 ${
-                              isActive ? "bg-violet-50/70 text-slate-900" : "bg-white/70 text-slate-600"
+                            className={`border-l border-[#E5E5E0] px-4 py-4 text-sm leading-7 md:px-5 ${
+                              isActive ? "bg-blue-50 text-[#0A0A0A]" : "bg-white text-[#666666]"
                             }`}
                           >
                             {row.values[plan.id]}
@@ -2307,75 +2312,64 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
         </div>
       </section>
 
-      <section className="relative px-5 py-24 sm:px-6 lg:px-8 lg:py-32">
+      <section data-dark className="bg-[#0A0A0A] px-5 py-24 sm:px-6 lg:px-8 lg:py-32">
         <div className="mx-auto max-w-7xl">
           <div
             ref={(node) => registerRevealNode("cta", node)}
             data-reveal-key="cta"
-            className="landing-cta relative overflow-hidden rounded-[2.4rem] border border-slate-900/10 bg-slate-950 px-6 py-8 text-white shadow-[0_36px_90px_-52px_rgba(15,23,42,0.45)] sm:px-8 sm:py-10 lg:px-12 lg:py-12"
+            className="grid gap-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)] lg:items-center"
             style={getRevealStyle(isVisible("cta"), { y: 32 })}
           >
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(96,165,250,0.28),transparent_28%),radial-gradient(circle_at_bottom_left,rgba(167,139,250,0.24),transparent_34%),linear-gradient(180deg,#020617_0%,#0f172a_100%)]" />
-            <div className="absolute inset-0 opacity-[0.08]" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.8) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.8) 1px, transparent 1px)", backgroundSize: "38px 38px" }} />
-
-            <div className="relative grid gap-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(320px,0.9fr)] lg:items-center">
-              <div>
-                <h2 className="landing-title text-4xl font-bold leading-tight text-white sm:text-5xl lg:text-6xl">
-                  {copy.sections.ctaLead}
-                  <br />
-                  <span className="bg-gradient-to-r from-sky-300 to-violet-300 bg-clip-text text-transparent">{copy.sections.ctaAccent}</span>
-                </h2>
-                <p className="landing-subtitle mt-6 max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">{copy.sections.ctaDescription}</p>
-                <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-                  <button
-                    type="button"
-                    onClick={handleStart}
-                    className="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-r from-blue-600 to-violet-500 px-7 py-3.5 text-sm font-semibold text-white shadow-[0_18px_36px_-18px_rgba(99,102,241,0.58)] transition hover:translate-y-[-1px]"
-                  >
-                    <span>{copy.cta.primary}</span>
-                    <ArrowRightIcon className="h-4 w-4" />
-                  </button>
-                  <a
-                    href="/study-ai"
-                    className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 bg-white/5 px-7 py-3.5 text-sm font-semibold text-white/90 transition hover:bg-white/10"
-                  >
-                    <span>{copy.cta.secondary}</span>
-                  </a>
-                </div>
+            <div>
+              <h2 className="zeus-display landing-title text-4xl font-semibold leading-tight tracking-[-0.02em] text-white sm:text-5xl">
+                {copy.sections.ctaLead}
+                <br />
+                <span className="text-[#006FEE]">{copy.sections.ctaAccent}</span>
+              </h2>
+              <p className="landing-subtitle mt-6 max-w-2xl text-[17px] leading-[1.47] text-white/60">{copy.sections.ctaDescription}</p>
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={handleStart}
+                  className="inline-flex items-center justify-center gap-2 rounded-full bg-[#006FEE] px-7 py-3.5 text-sm font-semibold text-white transition hover:bg-[#0059c7] active:scale-95"
+                >
+                  <span>{copy.cta.primary}</span>
+                  <ArrowRightIcon className="h-4 w-4" />
+                </button>
+                <a
+                  href="/study-ai"
+                  className="inline-flex items-center justify-center gap-2 rounded-full border border-white/20 bg-transparent px-7 py-3.5 text-sm font-semibold text-white transition hover:border-white/40"
+                >
+                  <span>{copy.cta.secondary}</span>
+                </a>
               </div>
+            </div>
 
-              <div className="landing-cta-card rounded-[2rem] border border-white/10 bg-white/[0.08] p-5 backdrop-blur-xl sm:p-6">
-                <div className="landing-cta-card-inner rounded-[1.7rem] border border-white/10 bg-white/5 p-5">
-                  <div className="space-y-4">
-                    {copy.cta.bullets.map((item, index) => (
-                      <div key={item} className="flex items-start gap-3">
-                        <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-400 to-violet-400 text-sm font-bold text-slate-950">
-                          {index + 1}
-                        </div>
-                        <p className="text-sm leading-7 text-slate-200">{item}</p>
-                      </div>
-                    ))}
+            <div className="rounded-[18px] border border-white/10 bg-white/[0.05] p-6 sm:p-7">
+              <div className="space-y-5">
+                {copy.cta.bullets.map((item, index) => (
+                  <div key={item} className="flex items-start gap-4">
+                    <div
+                      className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-[8px] text-sm font-semibold text-white"
+                      style={{ background: FEATURE_ACCENT }}
+                    >
+                      {index + 1}
+                    </div>
+                    <p className="text-[17px] leading-[1.47] text-white/60">{item}</p>
                   </div>
-                </div>
+                ))}
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      <footer className="landing-footer relative overflow-hidden border-t border-white/6 bg-[#171a21] px-5 py-10 text-slate-300 sm:px-6 lg:px-8 lg:py-12">
-        <div className="pointer-events-none absolute inset-0 opacity-[0.07]" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.82) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.82) 1px, transparent 1px)", backgroundSize: "44px 44px" }} />
-        <div className="pointer-events-none absolute -left-24 top-0 h-56 w-56 rounded-full bg-emerald-400/10 blur-[120px]" />
-        <div className="pointer-events-none absolute right-0 top-10 h-64 w-64 rounded-full bg-blue-400/8 blur-[140px]" />
-
-        <div className="relative mx-auto max-w-7xl">
-          <div className="landing-footer-shell rounded-[2rem] border border-white/8 bg-white/[0.03] p-6 shadow-[0_28px_80px_-48px_rgba(0,0,0,0.45)] backdrop-blur-xl sm:p-7 lg:p-8">
-            <div className="flex flex-col gap-5 border-b border-white/8 pb-6 lg:flex-row lg:items-center lg:justify-between">
+      <footer className="border-t border-[#E5E5E0] bg-[#FBFBF9] px-5 py-10 text-[#0A0A0A] sm:px-6 lg:px-8 lg:py-12">
+        <div className="mx-auto max-w-7xl">
+            <div className="flex flex-col gap-5 border-b border-[#E5E5E0] pb-6 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex items-center gap-3">
-                <ZeusianLogo className="h-12 w-12 rounded-2xl object-cover shadow-[0_20px_36px_-24px_rgba(16,185,129,0.4)]" />
-                <div>
-                  <p className="text-[1.65rem] font-bold tracking-[-0.03em] text-white">Zeusian.ai</p>
-                </div>
+                <ZeusianLogo className="h-10 w-10 rounded-[8px] object-cover" />
+                <p className="text-lg font-semibold text-[#0A0A0A]">Zeusian.ai</p>
               </div>
 
               <div className="flex flex-wrap gap-3">
@@ -2383,7 +2377,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                   <a
                     key={link.href}
                     href={link.href}
-                    className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-2.5 text-sm font-semibold text-slate-100 transition hover:border-white/20 hover:bg-white/[0.08]"
+                    className="rounded-full border border-[#E5E5E0] bg-white px-4 py-2 text-sm text-[#0A0A0A] transition hover:border-[#006FEE] hover:text-[#006FEE]"
                   >
                     {link.href.includes("privacy") ? copy.footer.legalLinks.privacy : copy.footer.legalLinks.terms}
                   </a>
@@ -2394,7 +2388,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
             <div className="grid gap-10 pt-6 lg:grid-cols-[minmax(260px,1.05fr)_minmax(0,1fr)] lg:pt-8">
               <div className="space-y-5">
                 {FOOTER_COMPANY_INFO ? (
-                  <div className="text-sm leading-7 text-slate-400">
+                  <div className="text-sm leading-7 text-[#666666]">
                     <p>
                       {copy.footer.companyLabel}: {FOOTER_COMPANY_INFO.value}
                     </p>
@@ -2403,25 +2397,25 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                 ) : null}
 
                 <div className="max-w-sm">
-                  <p className="zeus-display text-3xl leading-tight text-white sm:text-[2.4rem]">
+                  <p className="zeus-display text-3xl font-semibold leading-tight tracking-[-0.02em] text-[#0A0A0A] sm:text-[2.2rem]">
                     {copy.footer.titleLine1}
                     <br />
                     {copy.footer.titleLine2}
                   </p>
-                  <p className="mt-4 text-sm leading-7 text-slate-400 sm:text-base">{copy.footer.description}</p>
+                  <p className="mt-4 text-sm leading-7 text-[#666666]">{copy.footer.description}</p>
                 </div>
               </div>
 
               <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
                 {FOOTER_LINK_GROUPS.map((group) => (
                   <div key={group.title}>
-                    <p className="text-sm font-semibold text-white">{group.title}</p>
+                    <p className="text-sm font-semibold text-[#0A0A0A]">{group.title}</p>
                     <div className="mt-4 space-y-3">
                       {group.links.map((link) => (
                         <a
                           key={`${group.title}-${link.href}-${link.label}`}
                           href={link.href}
-                          className="block text-sm text-slate-400 transition hover:text-white"
+                          className="block text-sm text-[#666666] transition hover:text-[#006FEE]"
                         >
                           {link.label}
                         </a>
@@ -2431,13 +2425,13 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                 ))}
 
                 <div>
-                  <p className="text-sm font-semibold text-white">{copy.footer.legal}</p>
+                  <p className="text-sm font-semibold text-[#0A0A0A]">{copy.footer.legal}</p>
                   <div className="mt-4 space-y-3">
                     {LEGAL_LINKS.map((link) => (
                       <a
                         key={`legal-column-${link.href}`}
                         href={link.href}
-                        className="block text-sm text-slate-400 transition hover:text-white"
+                        className="block text-sm text-[#666666] transition hover:text-[#006FEE]"
                       >
                         {link.href.includes("privacy") ? copy.footer.legalLinks.privacy : copy.footer.legalLinks.terms}
                       </a>
@@ -2446,7 +2440,6 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                 </div>
               </div>
             </div>
-          </div>
         </div>
       </footer>
     </div>
