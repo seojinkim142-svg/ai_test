@@ -1574,7 +1574,7 @@ export default function DetailPage({
                   })}
                 </div>
 
-                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-100 overflow-auto">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-100">
                   {!activeMockExam && <p className="text-sm text-slate-400">선택된 모의고사가 없습니다.</p>}
                   {activeMockExam && (
                     <div className="space-y-6">
@@ -1582,15 +1582,38 @@ export default function DetailPage({
                         <p className="text-sm text-slate-400">모의고사 문항이 없습니다.</p>
                       )}
                       {mockExamOrderedItems.length > 0 && (
-                        isBuildingMockExamPdf ? (
-                          <div className="flex h-48 items-center justify-center text-sm text-slate-400">
-                            모의고사 PDF 생성 중...
+                        <div className="overflow-x-auto">
+                          <div className="flex flex-col items-center gap-10" style={{ minWidth: "794px" }}>
+                            {mockExamPages.map((pageItems, pageIndex) => {
+                              const isFourGrid = pageItems.length === 4;
+                              const pageStart = pageIndex === 0 ? 1 : pageIndex === 1 ? 5 : 9;
+                              return (
+                                <section
+                                  key={`mock-exam-page-${pageIndex}`}
+                                  className="mock-exam-page relative bg-white text-black shadow-sm"
+                                  style={{ width: "794px", minHeight: "1123px", padding: "44px 52px 48px", boxSizing: "border-box" }}
+                                >
+                                  <div className="relative flex items-start justify-center">
+                                    <h4 style={{ fontSize: "18px", fontWeight: 600 }}>{activeMockExamTitle}</h4>
+                                    <span style={{ position: "absolute", right: 0, top: 0, fontSize: "18px", fontWeight: 600 }}>{pageIndex + 1}</span>
+                                  </div>
+                                  <div style={{ marginTop: "12px", borderTop: "1px solid black" }} />
+                                  <div style={{ position: "relative", marginTop: "24px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "32px", ...(isFourGrid ? { gridTemplateRows: "1fr 1fr", gridAutoFlow: "column" } : { gridAutoFlow: "row" }) }}>
+                                    <div style={{ position: "absolute", left: "50%", top: 0, height: "100%", width: "1px", transform: "translateX(-50%)", background: "rgba(0,0,0,0.8)" }} />
+                                    {pageItems.map((item, idx) => {
+                                      const colIdx = isFourGrid ? Math.floor(idx / 2) : idx % 2;
+                                      return (
+                                        <div key={`mock-exam-cell-${pageIndex}-${idx}`} style={colIdx === 0 ? { paddingRight: "24px" } : { paddingLeft: "24px" }}>
+                                          {renderMockExamItem(item, pageStart + idx)}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </section>
+                              );
+                            })}
                           </div>
-                        ) : mockExamPdfUrl ? (
-                          <div style={{ height: "600px" }}>
-                            <PdfPreview pdfUrl={mockExamPdfUrl} />
-                          </div>
-                        ) : null
+                        </div>
                       )}
 
                       {showMockExamAnswers && (
