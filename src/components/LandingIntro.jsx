@@ -639,8 +639,8 @@ const LANDING_COPY = {
         {
           id: "pro",
           name: "Pro",
-          originalPrices: ["KRW 9,900 / month", "KRW 6,900 / month"],
-          price: "KRW 0",
+          originalPrices: ["¥1,280 / 月", "¥980 / 月"],
+          price: "¥0",
           description: "一人で継続学習する人向け",
           features: ["アップロード無制限", "要約 / クイズ / OX / カードをフル提供", "AIチューター"],
           ctaLabel: "Proを選ぶ",
@@ -650,8 +650,8 @@ const LANDING_COPY = {
         {
           id: "premium",
           name: "Family",
-          originalPrice: "₩36,000 / 月",
-          price: "₩18,900 / 月",
+          originalPrice: "¥2,480 / 月",
+          price: "¥1,980 / 月",
           description: "最大4人の共有学習",
           features: ["共有スペースで一緒に学習", "メンバー別の進捗確認", "プレミアム資料管理機能"],
           ctaLabel: "Familyを選ぶ",
@@ -661,7 +661,7 @@ const LANDING_COPY = {
       ],
       rows: [
         { label: "利用スタイル", values: { free: "はじめて使う人", pro: "個人学習", premium: "共有学習" } },
-        { label: "月額", values: { free: "無料", pro: "KRW 0", premium: "KRW 18,900 / month" } },
+        { label: "月額", values: { free: "無料", pro: "¥980 / 月", premium: "¥1,980 / 月" } },
         { label: "PDFアップロード", values: { free: "最大4件", pro: "無制限", premium: "無制限" } },
         { label: "学習ツール", values: { free: "要約 / クイズ / OXの一部", pro: "要約 / クイズ / OX / カード", premium: "全機能 + チーム学習" } },
         { label: "AIチューター", values: { free: "基本回答", pro: "文書ベース回答", premium: "チーム文脈を含む回答" } },
