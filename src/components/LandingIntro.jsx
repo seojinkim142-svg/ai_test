@@ -1351,12 +1351,21 @@ const VIDEO_SRCS = [
   MOCK_EXAM_DEMO_VIDEO_SRC,
 ];
 
+const FRAME_BASE = "https://abafcnpyewguywopbszu.supabase.co/storage/v1/object/public/videos/frames";
+const FRAME_COUNT = 60;
+const FEATURE_FRAME_KEYS = ["summary", "quiz", "flashcards", "tutor", "mockExam"];
+
 function PinnedFeaturesSection({ FEATURE_ITEMS, copy, sectionScrollOffset }) {
   const sectionRef = useRef(null);
   const panelRef = useRef(null);
+  const canvasRef = useRef(null);
+  // 5개 기능 × 60프레임 캐시
+  const framesCache = useRef(Array.from({ length: FEATURE_ITEMS.length }, () => new Array(FRAME_COUNT).fill(null)));
+  const currentFrameRef = useRef(0);
+  const targetFrameRef = useRef(0);
   const [activeIndex, setActiveIndex] = useState(0);
   const [segmentProgress, setSegmentProgress] = useState(0);
-  const [pinState, setPinState] = useState("before"); // "before" | "pinned" | "after"
+  const [pinState, setPinState] = useState("before");
   const n = FEATURE_ITEMS.length;
 
   useEffect(() => {
@@ -1397,6 +1406,56 @@ function PinnedFeaturesSection({ FEATURE_ITEMS, copy, sectionScrollOffset }) {
       if (rafId) cancelAnimationFrame(rafId);
     };
   }, [n]);
+
+  // 프레임 이미지 프리로드 (활성 기능 우선, 나머지 백그라운드)
+  useEffect(() => {
+    const cache = framesCache.current;
+    function loadFeature(fi) {
+      const key = FEATURE_FRAME_KEYS[fi];
+      if (!key) return;
+      for (let i = 0; i < FRAME_COUNT; i++) {
+        if (cache[fi][i]) continue;
+        const img = new Image();
+        img.src = `${FRAME_BASE}/${key}/${String(i + 1).padStart(3, "0")}.jpg`;
+        img.onload = () => { cache[fi][i] = img; };
+      }
+    }
+    // 현재 기능 먼저 로드, 나머지는 setTimeout으로 순차 로드
+    loadFeature(activeIndex);
+    FEATURE_FRAME_KEYS.forEach((_, fi) => {
+      if (fi !== activeIndex) setTimeout(() => loadFeature(fi), fi * 400);
+    });
+  }, [activeIndex]);
+
+  // segmentProgress → target 프레임 인덱스 업데이트
+  useEffect(() => {
+    targetFrameRef.current = Math.min(Math.floor(segmentProgress * FRAME_COUNT * 0.9999), FRAME_COUNT - 1);
+  }, [segmentProgress]);
+
+  // RAF 루프: canvas에 현재 프레임 그리기 (lerp로 부드럽게)
+  useEffect(() => {
+    let rafId;
+    const tick = () => {
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext("2d");
+      const target = targetFrameRef.current;
+      const current = currentFrameRef.current;
+
+      // lerp로 프레임 부드럽게 추적
+      const next = current + (target - current) * 0.14;
+      currentFrameRef.current = Math.abs(target - next) < 0.1 ? target : next;
+
+      const frameIdx = Math.round(currentFrameRef.current);
+      const img = framesCache.current[activeIndex]?.[frameIdx];
+
+      if (ctx && img && canvas) {
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafId);
+  }, [activeIndex]);
 
   const panelStyle = useMemo(() => {
     if (pinState === "pinned") return { position: "fixed", top: 0, left: 0, right: 0, zIndex: 10 };
@@ -1501,26 +1560,20 @@ function PinnedFeaturesSection({ FEATURE_ITEMS, copy, sectionScrollOffset }) {
             </AnimatePresence>
           </div>
 
-          {/* 오른쪽: 비디오 */}
+          {/* 오른쪽: Canvas 스크러빙 */}
           <div className="flex items-center justify-center">
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={`video-${activeIndex}`}
-                className="w-full overflow-hidden rounded-[18px] bg-[#0A0A0A]"
-                style={{ aspectRatio: "16/10", willChange: "transform, opacity" }}
-                initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.97, y: -12 }}
-                transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-              >
-                <video
-                  key={VIDEO_SRCS[activeIndex]}
-                  className="h-full w-full object-cover"
-                  src={VIDEO_SRCS[activeIndex]}
-                  autoPlay muted loop playsInline preload="metadata"
-                />
-              </motion.div>
-            </AnimatePresence>
+            <div
+              className="w-full overflow-hidden rounded-[18px] bg-[#0A0A0A]"
+              style={{ aspectRatio: "16/10" }}
+            >
+              <canvas
+                ref={canvasRef}
+                width={1280}
+                height={800}
+                className="h-full w-full object-cover"
+                style={{ willChange: "transform" }}
+              />
+            </div>
           </div>
         </div>
 
