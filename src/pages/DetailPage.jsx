@@ -1551,19 +1551,31 @@ export default function DetailPage({
                       <section
                         key={`mock-exam-page-print-${pageIndex}`}
                         className="mock-exam-page"
-                        style={{ position: "relative", background: "white", color: "black", width: "794px", minHeight: "1123px", padding: "44px 52px 48px", boxSizing: "border-box" }}
+                        style={{ display: "flex", flexDirection: "column", background: "white", color: "black", width: "794px", minHeight: "1123px", padding: "44px 52px 48px", boxSizing: "border-box" }}
                       >
                         <div style={{ position: "relative", display: "flex", alignItems: "flex-start", justifyContent: "center" }}>
                           <h4 style={{ fontSize: "18px", fontWeight: 600 }}>{activeMockExamTitle}</h4>
                           <span style={{ position: "absolute", right: 0, top: 0, fontSize: "18px", fontWeight: 600 }}>{pageIndex + 1}</span>
                         </div>
                         <div style={{ marginTop: "12px", borderTop: "1px solid black" }} />
-                        <div style={{ position: "relative", marginTop: "24px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "32px", ...(isFourGrid ? { gridTemplateRows: "1fr 1fr", gridAutoFlow: "column" } : { gridAutoFlow: "row" }) }}>
-                          <div style={{ position: "absolute", left: "50%", top: 0, height: "100%", width: "1px", transform: "translateX(-50%)", background: "rgba(0,0,0,0.8)" }} />
+                        <div style={{ position: "relative", flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, ...(isFourGrid ? { gridTemplateRows: "1fr 1fr", gridAutoFlow: "column" } : { gridAutoFlow: "row" }) }}>
+                          <div style={{ position: "absolute", left: "50%", top: 0, height: "100%", width: "1px", background: "rgba(0,0,0,0.8)" }} />
+                          {isFourGrid && (
+                            <div style={{ position: "absolute", top: "50%", left: 0, width: "100%", height: "1px", background: "rgba(0,0,0,0.8)" }} />
+                          )}
                           {pageItems.map((item, idx) => {
                             const colIdx = isFourGrid ? Math.floor(idx / 2) : idx % 2;
+                            const rowIdx = isFourGrid ? idx % 2 : 0;
                             return (
-                              <div key={`mock-exam-cell-print-${pageIndex}-${idx}`} style={colIdx === 0 ? { paddingRight: "24px" } : { paddingLeft: "24px" }}>
+                              <div
+                                key={`mock-exam-cell-print-${pageIndex}-${idx}`}
+                                style={{
+                                  paddingLeft: colIdx === 0 ? "0" : "24px",
+                                  paddingRight: colIdx === 0 ? "24px" : "0",
+                                  paddingTop: "24px",
+                                  paddingBottom: "24px",
+                                }}
+                              >
                                 {renderMockExamItem(item, pageStart + idx)}
                               </div>
                             );
@@ -1590,20 +1602,33 @@ export default function DetailPage({
                               return (
                                 <section
                                   key={`mock-exam-page-${pageIndex}`}
-                                  className="mock-exam-page relative bg-white text-black shadow-sm"
-                                  style={{ width: "794px", minHeight: "1123px", padding: "44px 52px 48px", boxSizing: "border-box" }}
+                                  className="mock-exam-page bg-white text-black shadow-sm"
+                                  style={{ display: "flex", flexDirection: "column", width: "794px", minHeight: "1123px", padding: "44px 52px 48px", boxSizing: "border-box" }}
                                 >
-                                  <div className="relative flex items-start justify-center">
+                                  <div style={{ position: "relative", display: "flex", alignItems: "flex-start", justifyContent: "center" }}>
                                     <h4 style={{ fontSize: "18px", fontWeight: 600 }}>{activeMockExamTitle}</h4>
                                     <span style={{ position: "absolute", right: 0, top: 0, fontSize: "18px", fontWeight: 600 }}>{pageIndex + 1}</span>
                                   </div>
                                   <div style={{ marginTop: "12px", borderTop: "1px solid black" }} />
-                                  <div style={{ position: "relative", marginTop: "24px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "32px", ...(isFourGrid ? { gridTemplateRows: "1fr 1fr", gridAutoFlow: "column" } : { gridAutoFlow: "row" }) }}>
-                                    <div style={{ position: "absolute", left: "50%", top: 0, height: "100%", width: "1px", transform: "translateX(-50%)", background: "rgba(0,0,0,0.8)" }} />
+                                  <div style={{ position: "relative", flex: 1, marginTop: "0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, ...(isFourGrid ? { gridTemplateRows: "1fr 1fr", gridAutoFlow: "column" } : { gridAutoFlow: "row" }) }}>
+                                    {/* 세로 중앙선 */}
+                                    <div style={{ position: "absolute", left: "50%", top: 0, height: "100%", width: "1px", background: "rgba(0,0,0,0.8)" }} />
+                                    {/* 가로 중앙선 (4문항일 때) */}
+                                    {isFourGrid && (
+                                      <div style={{ position: "absolute", top: "50%", left: 0, width: "100%", height: "1px", background: "rgba(0,0,0,0.8)" }} />
+                                    )}
                                     {pageItems.map((item, idx) => {
                                       const colIdx = isFourGrid ? Math.floor(idx / 2) : idx % 2;
                                       return (
-                                        <div key={`mock-exam-cell-${pageIndex}-${idx}`} style={colIdx === 0 ? { paddingRight: "24px" } : { paddingLeft: "24px" }}>
+                                        <div
+                                          key={`mock-exam-cell-${pageIndex}-${idx}`}
+                                          style={{
+                                            paddingLeft: colIdx === 0 ? "0" : "24px",
+                                            paddingRight: colIdx === 0 ? "24px" : "0",
+                                            paddingTop: "24px",
+                                            paddingBottom: "24px",
+                                          }}
+                                        >
                                           {renderMockExamItem(item, pageStart + idx)}
                                         </div>
                                       );
