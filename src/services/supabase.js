@@ -473,6 +473,18 @@ export async function updateUploadThumbnail({ id, userId, thumbnail }) {
   return null;
 }
 
+export async function updateUploadVocabulary({ userId, uploadId, isVocabulary }) {
+  const client = requireSupabase();
+  if (!uploadId || !userId) throw new Error("Upload ID and userId are required.");
+  const { error } = await client
+    .from(UPLOADS_TABLE)
+    .update({ is_vocabulary: Boolean(isVocabulary) })
+    .eq("id", uploadId)
+    .eq("user_id", userId);
+  if (error) throw error;
+  return null;
+}
+
 export async function updateUploadFolder({ userId, uploadIds = [], folderId = null, storagePaths = [] }) {
   const client = requireSupabase();
   requireUser(userId);

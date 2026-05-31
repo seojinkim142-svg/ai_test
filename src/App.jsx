@@ -32,6 +32,7 @@ import {
   fetchMultipleDocArtifacts,
   saveDocArtifacts,
   updateUploadFolder,
+  updateUploadVocabulary,
   saveUserFeedback,
   getPremiumProfileStateFromUser,
   savePremiumProfileState,
@@ -2520,6 +2521,28 @@ function App() {
     [persistChapterRangeInput, uploadedFiles, user]
   );
 
+  const handleToggleVocabulary = useCallback(
+    async (upload) => {
+      const uploadId = upload?.id || null;
+      if (!uploadId) return;
+      const next = !upload.isVocabulary;
+      setUploadedFiles((prev) =>
+        prev.map((u) => (u.id === uploadId ? { ...u, isVocabulary: next } : u))
+      );
+      if (user) {
+        try {
+          await updateUploadVocabulary({ userId: user.id, uploadId, isVocabulary: next });
+        } catch (err) {
+          setUploadedFiles((prev) =>
+            prev.map((u) => (u.id === uploadId ? { ...u, isVocabulary: !next } : u))
+          );
+          setError(`단어장 설정 실패: ${err.message}`);
+        }
+      }
+    },
+    [user]
+  );
+
   const uploadedFilesRef = useRef(uploadedFiles);
 
   const handleMoveUploadsToFolder = useCallback(
@@ -2858,6 +2881,7 @@ function App() {
             hash: u.file_hash || null,
             folderId: u.folder_id || null,
             infolder: Number(u.infolder ?? (u.folder_id ? 1 : 0)) || 0,
+            isVocabulary: Boolean(u.is_vocabulary),
             ownerProfileId,
           };
         });
@@ -8017,6 +8041,7 @@ function App() {
     onClearSelection: handleClearSelection,
     isFolderFeatureEnabled,
     onDeleteUpload: handleDeleteUpload,
+    onToggleVocabulary: handleToggleVocabulary,
     isGuest: AUTH_ENABLED && !user,
     showIntro: !AUTH_ENABLED && !user && showGuestIntro,
     skipPromoSplash,

@@ -19,6 +19,8 @@ function PdfTile({
   rowLayout = false,
   onDelete,
   onContextMenu,
+  isVocabulary = false,
+  onToggleVocabulary,
 }) {
   if (rowLayout) {
     return (
@@ -60,6 +62,24 @@ function PdfTile({
             </p>
           )}
         </div>
+        {/* 단어장 버튼 */}
+        {onToggleVocabulary && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleVocabulary();
+            }}
+            className={`shrink-0 flex h-7 items-center justify-center rounded-full px-2 text-[10px] font-semibold transition ${
+              isVocabulary
+                ? "bg-violet-500/80 text-white hover:bg-violet-500"
+                : "bg-black/40 text-white/50 hover:bg-violet-500/50 hover:text-white"
+            }`}
+            title={isVocabulary ? "단어장 해제" : "단어장으로 표시"}
+          >
+            단어장
+          </button>
+        )}
         {/* 삭제 버튼 */}
         {onDelete && (
           <button
@@ -149,6 +169,23 @@ function PdfTile({
             {pageInfo.used} / {pageInfo.total} 페이지 사용
           </p>
         )}
+        {onToggleVocabulary && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleVocabulary();
+            }}
+            className={`mt-1 self-start rounded-full px-2.5 py-0.5 text-[10px] font-semibold transition ${
+              isVocabulary
+                ? "bg-violet-500/80 text-white hover:bg-violet-500"
+                : "bg-white/10 text-white/40 hover:bg-violet-500/40 hover:text-white"
+            }`}
+            title={isVocabulary ? "단어장 해제" : "단어장으로 표시"}
+          >
+            단어장
+          </button>
+        )}
       </div>
     </div>
   );
@@ -180,6 +217,8 @@ PdfTile.propTypes = {
   rowLayout: PropTypes.bool,
   onDelete: PropTypes.func,
   onContextMenu: PropTypes.func,
+  isVocabulary: PropTypes.bool,
+  onToggleVocabulary: PropTypes.func,
 };
 
 export default PdfTile;

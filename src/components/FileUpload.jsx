@@ -47,6 +47,7 @@ const FileUpload = memo(function FileUpload({
   isFolderFeatureEnabled = false,
   isFolderLoading = false,
   onDeleteUpload,
+  onToggleVocabulary,
   isGuest = false,
   onRequireAuth,
   currentTier = "free",
@@ -383,6 +384,8 @@ const FileUpload = memo(function FileUpload({
               compactGrid={isNativePlatform}
               fullWidth={!isNativePlatform}
               rowLayout={isNativePlatform && sidebarOpen}
+              isVocabulary={Boolean(item.isVocabulary)}
+              onToggleVocabulary={() => onToggleVocabulary?.(item)}
               onProceed={() => onSelectFile?.(item)}
               onContextMenu={(e) => handleContextMenuUpload(e, item)}
               onDelete={() => onDeleteUpload?.(item)}
@@ -566,6 +569,8 @@ const FileUpload = memo(function FileUpload({
                         onDragStart={undefined}
                         onDragEnd={undefined}
                         compactGrid={isNativePlatform}
+                      isVocabulary={Boolean(item.isVocabulary)}
+                      onToggleVocabulary={() => onToggleVocabulary?.(item)}
                       onProceed={() => {
                         handleCloseFolderModal();
                         onSelectFile?.(item);
