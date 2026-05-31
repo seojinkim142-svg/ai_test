@@ -1560,9 +1560,6 @@ export default function DetailPage({
                         <div style={{ marginTop: "12px", borderTop: "1px solid black" }} />
                         <div style={{ position: "relative", flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, ...(isFourGrid ? { gridTemplateRows: "1fr 1fr", gridAutoFlow: "column" } : { gridAutoFlow: "row" }) }}>
                           <div style={{ position: "absolute", left: "50%", top: 0, height: "100%", width: "1px", background: "rgba(0,0,0,0.8)" }} />
-                          {isFourGrid && (
-                            <div style={{ position: "absolute", top: "50%", left: 0, width: "100%", height: "1px", background: "rgba(0,0,0,0.8)" }} />
-                          )}
                           {pageItems.map((item, idx) => {
                             const colIdx = isFourGrid ? Math.floor(idx / 2) : idx % 2;
                             const rowIdx = isFourGrid ? idx % 2 : 0;
@@ -1613,10 +1610,6 @@ export default function DetailPage({
                                   <div style={{ position: "relative", flex: 1, marginTop: "0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, ...(isFourGrid ? { gridTemplateRows: "1fr 1fr", gridAutoFlow: "column" } : { gridAutoFlow: "row" }) }}>
                                     {/* 세로 중앙선 */}
                                     <div style={{ position: "absolute", left: "50%", top: 0, height: "100%", width: "1px", background: "rgba(0,0,0,0.8)" }} />
-                                    {/* 가로 중앙선 (4문항일 때) */}
-                                    {isFourGrid && (
-                                      <div style={{ position: "absolute", top: "50%", left: 0, width: "100%", height: "1px", background: "rgba(0,0,0,0.8)" }} />
-                                    )}
                                     {pageItems.map((item, idx) => {
                                       const colIdx = isFourGrid ? Math.floor(idx / 2) : idx % 2;
                                       return (
