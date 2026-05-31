@@ -1167,7 +1167,10 @@ function App() {
     const stored = String(window.localStorage.getItem(OUTPUT_LANGUAGE_STORAGE_KEY) || "")
       .trim()
       .toLowerCase();
-    return AVAILABLE_OUTPUT_LANGUAGES.includes(stored) ? stored : DEFAULT_OUTPUT_LANGUAGE;
+    if (AVAILABLE_OUTPUT_LANGUAGES.includes(stored)) return stored;
+    // 저장값 없으면 브라우저 언어 자동 감지
+    const browserLang = (navigator.language || "").slice(0, 2).toLowerCase();
+    return AVAILABLE_OUTPUT_LANGUAGES.includes(browserLang) ? browserLang : DEFAULT_OUTPUT_LANGUAGE;
   });
   const [summary, setSummary] = useState("");
 

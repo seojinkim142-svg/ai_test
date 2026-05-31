@@ -18,4 +18,5 @@ export const COMPANY_INFO_ITEMS = [
 export const LEGAL_LINKS = [
   { href: "/terms", label: "이용약관" },
   { href: "/privacy", label: "개인정보처리방침" },
+  { href: "/legal/japan-transactions", label: "特定商取引法" },
 ];

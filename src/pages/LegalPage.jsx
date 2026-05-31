@@ -2,10 +2,12 @@ import { memo } from "react";
 import { COMPANY_INFO_ITEMS, LEGAL_LINKS } from "../legal/companyInfo";
 import { TERMS_CONTENT } from "../legal/termsContent";
 import { PRIVACY_CONTENT } from "../legal/privacyContent";
+import { JAPAN_TRANSACTIONS_CONTENT } from "../legal/japanTransactionsContent";
 
 const DOCUMENTS = {
   terms: TERMS_CONTENT,
   privacy: PRIVACY_CONTENT,
+  "japan-transactions": JAPAN_TRANSACTIONS_CONTENT,
 };
 
 function renderBlock(block, index) {

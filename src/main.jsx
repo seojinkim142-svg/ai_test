@@ -15,6 +15,7 @@ const legalPages = {
   "/legal/terms": <LegalPage documentType="terms" />,
   "/privacy": <LegalPage documentType="privacy" />,
   "/legal/privacy": <LegalPage documentType="privacy" />,
+  "/legal/japan-transactions": <LegalPage documentType="japan-transactions" />,
 };
 
 const rootElement = legalPages[normalizedPath] ?? (promoOnlyPaths.has(normalizedPath) ? <PromoPage /> : <App />);
