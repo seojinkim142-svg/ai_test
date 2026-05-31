@@ -443,6 +443,37 @@ export async function exportMockAnswerSheetToPdf(
   await saveBlobAsFile(file, ensurePdfFilename(filename));
 }
 
+export async function buildMockExamQuestionPdfBlob(
+  container,
+  { pageSelector = ".mock-exam-page", background = "#ffffff" } = {}
+) {
+  if (!container) throw new Error("Element not found.");
+  const { html2canvas, jsPDF } = await loadExportRuntime();
+
+  const questionEls = Array.from(container.querySelectorAll(pageSelector));
+  if (questionEls.length === 0) throw new Error("No mock exam pages found.");
+
+  const pdf = new jsPDF("p", "mm", "a4");
+  const pdfW = pdf.internal.pageSize.getWidth();
+  const pdfH = pdf.internal.pageSize.getHeight();
+
+  for (let i = 0; i < questionEls.length; i++) {
+    const c = await html2canvas(questionEls[i], {
+      scale: 2,
+      backgroundColor: background,
+      useCORS: true,
+    });
+    const imgData = c.toDataURL("image/png");
+    const scale = Math.min(pdfW / c.width, pdfH / c.height);
+    const iw = c.width * scale;
+    const ih = c.height * scale;
+    if (i > 0) pdf.addPage();
+    pdf.addImage(imgData, "PNG", (pdfW - iw) / 2, (pdfH - ih) / 2, iw, ih);
+  }
+
+  return pdf.output("blob");
+}
+
 export async function exportMockExamCombinedPdf(
   container,
   {

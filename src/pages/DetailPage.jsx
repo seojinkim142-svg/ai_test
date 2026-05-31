@@ -18,6 +18,7 @@ import TopicStructurePanel from "../components/TopicStructurePanel";
 import { useQuizMixCarousel } from "../hooks/useQuizMixCarousel";
 import { LETTERS } from "../constants";
 import { getDetailCopy } from "../utils/detailCopy";
+import { buildMockExamQuestionPdfBlob } from "../utils/pdfExport";
 
 const MOCK_BARE_LATEX_RE =
   /\\(?:frac|dfrac|tfrac|sum|prod|int|sqrt|left|right|cdot|times|to|infty|leq?|geq?|neq?|approx|mathbb|mathbf|mathrm|text|lim)\b/;
@@ -469,6 +470,52 @@ export default function DetailPage({
       };
     });
   }, [activeMockExam?.payload?.answerSheet, mockExamOrderedItems]);
+  const [mockExamPdfUrl, setMockExamPdfUrl] = useState(null);
+  const [isBuildingMockExamPdf, setIsBuildingMockExamPdf] = useState(false);
+  const mockExamPdfUrlRef = useRef(null);
+
+  const setAndRevokeMockExamPdfUrl = useCallback((url) => {
+    if (mockExamPdfUrlRef.current) {
+      URL.revokeObjectURL(mockExamPdfUrlRef.current);
+    }
+    mockExamPdfUrlRef.current = url ?? null;
+    setMockExamPdfUrl(url ?? null);
+  }, []);
+
+  useEffect(() => {
+    if (!activeMockExam || mockExamOrderedItems.length === 0) {
+      setAndRevokeMockExamPdfUrl(null);
+      setIsBuildingMockExamPdf(false);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setIsBuildingMockExamPdf(true);
+    setAndRevokeMockExamPdfUrl(null);
+
+    (async () => {
+      try {
+        await new Promise((r) => setTimeout(r, 150));
+        if (cancelled) return;
+        const container = mockExamPrintRef.current;
+        if (!container) return;
+        const blob = await buildMockExamQuestionPdfBlob(container);
+        if (cancelled) return;
+        setAndRevokeMockExamPdfUrl(URL.createObjectURL(blob));
+      } catch (err) {
+        if (!cancelled) console.error("Mock exam PDF build failed:", err);
+      } finally {
+        if (!cancelled) setIsBuildingMockExamPdf(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      setAndRevokeMockExamPdfUrl(null);
+      setIsBuildingMockExamPdf(false);
+    };
+  }, [activeMockExam?.id, mockExamOrderedItems.length, mockExamPrintRef, setAndRevokeMockExamPdfUrl]);
+
   const mindmapContainerRef = useRef(null);
   const emphasisTextareaRef = useRef(null);
   const savedInstructorScrollRef = useRef(null);
@@ -1491,6 +1538,42 @@ export default function DetailPage({
                   </p>
                 )}
 
+                {/* 오프스크린: A4 고정 크기로 렌더 → PDF 캡처 소스 */}
+                <div
+                  ref={mockExamPrintRef}
+                  aria-hidden="true"
+                  style={{ position: "fixed", left: "-9999px", top: 0, pointerEvents: "none", opacity: 0, zIndex: -1 }}
+                >
+                  {activeMockExam && mockExamPages.map((pageItems, pageIndex) => {
+                    const isFourGrid = pageItems.length === 4;
+                    const pageStart = pageIndex === 0 ? 1 : pageIndex === 1 ? 5 : 9;
+                    return (
+                      <section
+                        key={`mock-exam-page-print-${pageIndex}`}
+                        className="mock-exam-page"
+                        style={{ position: "relative", background: "white", color: "black", width: "794px", minHeight: "1123px", padding: "44px 52px 48px", boxSizing: "border-box" }}
+                      >
+                        <div style={{ position: "relative", display: "flex", alignItems: "flex-start", justifyContent: "center" }}>
+                          <h4 style={{ fontSize: "18px", fontWeight: 600 }}>{activeMockExamTitle}</h4>
+                          <span style={{ position: "absolute", right: 0, top: 0, fontSize: "18px", fontWeight: 600 }}>{pageIndex + 1}</span>
+                        </div>
+                        <div style={{ marginTop: "12px", borderTop: "1px solid black" }} />
+                        <div style={{ position: "relative", marginTop: "24px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "32px", ...(isFourGrid ? { gridTemplateRows: "1fr 1fr", gridAutoFlow: "column" } : { gridAutoFlow: "row" }) }}>
+                          <div style={{ position: "absolute", left: "50%", top: 0, height: "100%", width: "1px", transform: "translateX(-50%)", background: "rgba(0,0,0,0.8)" }} />
+                          {pageItems.map((item, idx) => {
+                            const colIdx = isFourGrid ? Math.floor(idx / 2) : idx % 2;
+                            return (
+                              <div key={`mock-exam-cell-print-${pageIndex}-${idx}`} style={colIdx === 0 ? { paddingRight: "24px" } : { paddingLeft: "24px" }}>
+                                {renderMockExamItem(item, pageStart + idx)}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    );
+                  })}
+                </div>
+
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-100 overflow-auto">
                   {!activeMockExam && <p className="text-sm text-slate-400">선택된 모의고사가 없습니다.</p>}
                   {activeMockExam && (
@@ -1499,47 +1582,15 @@ export default function DetailPage({
                         <p className="text-sm text-slate-400">모의고사 문항이 없습니다.</p>
                       )}
                       {mockExamOrderedItems.length > 0 && (
-                        <div ref={mockExamPrintRef} className="space-y-10 flex flex-col items-center">
-                          {mockExamPages.map((pageItems, pageIndex) => {
-                            const isFourGrid = pageItems.length === 4;
-                            const pageStart = pageIndex === 0 ? 1 : pageIndex === 1 ? 5 : 9;
-                            return (
-                              <section
-                                key={`mock-exam-page-${pageIndex}`}
-                                className="mock-exam-page relative mx-auto bg-white text-black shadow-sm p-5 sm:px-[52px] sm:py-[44px] sm:pb-[48px]"
-                                style={{
-                                  width: "min(100%, 794px)",
-                                }}
-                              >
-                                <div className="relative flex items-start justify-center">
-                                  <h4 className="text-[15px] font-semibold sm:text-[18px]">{activeMockExamTitle}</h4>
-                                  <span className="absolute right-0 top-0 text-[15px] font-semibold sm:text-[18px]">
-                                    {pageIndex + 1}
-                                  </span>
-                                </div>
-                                <div className="mt-3 border-t border-black" />
-                                <div
-                                  className={`relative mt-6 grid gap-6 sm:gap-8 ${
-                                    isFourGrid
-                                      ? "grid-cols-1 grid-flow-row sm:grid-cols-2 sm:grid-rows-2 sm:grid-flow-col"
-                                      : "grid-cols-1 grid-flow-row sm:grid-cols-2"
-                                  }`}
-                                >
-                                  <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-black/80 hidden sm:block" />
-                                  {pageItems.map((item, idx) => {
-                                    const columnIndex = isFourGrid ? Math.floor(idx / 2) : idx % 2;
-                                    const paddingClass = columnIndex === 0 ? "sm:pr-6" : "sm:pl-6";
-                                    return (
-                                      <div key={`mock-exam-cell-${pageIndex}-${idx}`} className={paddingClass}>
-                                        {renderMockExamItem(item, pageStart + idx)}
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              </section>
-                            );
-                          })}
-                        </div>
+                        isBuildingMockExamPdf ? (
+                          <div className="flex h-48 items-center justify-center text-sm text-slate-400">
+                            모의고사 PDF 생성 중...
+                          </div>
+                        ) : mockExamPdfUrl ? (
+                          <div style={{ height: "600px" }}>
+                            <PdfPreview pdfUrl={mockExamPdfUrl} />
+                          </div>
+                        ) : null
                       )}
 
                       {showMockExamAnswers && (
