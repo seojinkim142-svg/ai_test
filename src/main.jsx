@@ -1,3 +1,10 @@
+// URL.parse polyfill — pdfjs-dist v5+ uses URL.parse() which requires Chrome 120+ / iOS 17.4+
+if (typeof URL.parse === "undefined") {
+  URL.parse = function (url, base) {
+    try { return new URL(url, base); } catch { return null; }
+  };
+}
+
 import { Capacitor } from "@capacitor/core";
 import { createRoot } from "react-dom/client";
 import "./index.css";
