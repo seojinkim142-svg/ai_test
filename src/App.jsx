@@ -3205,13 +3205,15 @@ function App() {
       let headerType = "";
 
       for (const candidatePath of pathCandidates) {
+        const fetchAbort = new AbortController();
+        const fetchTimeout = setTimeout(() => fetchAbort.abort(), 60_000);
         try {
           const signedUrl = await getSignedStorageUrl({
             bucket,
             path: candidatePath,
             expiresIn: 60 * 60 * 24,
           });
-          const response = await fetch(signedUrl);
+          const response = await fetch(signedUrl, { signal: fetchAbort.signal });
           if (!response.ok) {
             lastFetchStatus = response.status;
             continue;
@@ -3222,15 +3224,19 @@ function App() {
           resolvedStoragePath = candidatePath;
           break;
         } catch (err) {
-          lastErr = err;
+          lastErr = err.name === "AbortError" ? new Error("파일 다운로드 시간이 초과되었습니다. 네트워크 상태를 확인해주세요.") : err;
+        } finally {
+          clearTimeout(fetchTimeout);
         }
       }
 
       // Fallback to authenticated storage download when signed URL fetch fails.
       if (!blob && supabase) {
         for (const candidatePath of pathCandidates) {
+          const dlAbort = new AbortController();
+          const dlTimeout = setTimeout(() => dlAbort.abort(), 60_000);
           try {
-            const { data, error } = await supabase.storage.from(bucket).download(candidatePath);
+            const { data, error } = await supabase.storage.from(bucket).download(candidatePath, { signal: dlAbort.signal });
             if (error || !data) {
               if (error) lastErr = error;
               continue;
@@ -3241,7 +3247,9 @@ function App() {
             resolvedStoragePath = candidatePath;
             break;
           } catch (err) {
-            lastErr = err;
+            lastErr = err.name === "AbortError" ? new Error("파일 다운로드 시간이 초과되었습니다. 네트워크 상태를 확인해주세요.") : err;
+          } finally {
+            clearTimeout(dlTimeout);
           }
         }
       }
