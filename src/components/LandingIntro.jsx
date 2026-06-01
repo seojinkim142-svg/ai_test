@@ -2234,7 +2234,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                       handlePlanInteract(plan.id);
                     }
                   }}
-                  className="relative min-w-[280px] flex-1 overflow-hidden rounded-[18px] border p-6 sm:min-w-[320px] sm:p-7 md:min-w-0"
+                  className="relative min-w-[calc(85vw-1.25rem)] flex-1 overflow-hidden rounded-[18px] border p-6 sm:min-w-[320px] sm:p-7 md:min-w-0"
                   style={{
                     ...getRevealStyle(pricingSectionVisible, { y: 28, delay: 120 + index * 80 }),
                     borderColor: isActive ? "#006FEE" : "#E5E5E0",
@@ -2293,7 +2293,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
           </div>
 
           <div
-            className="mt-8 overflow-hidden rounded-[18px] border border-[#E5E5E0] bg-white"
+            className="mt-8 hidden overflow-hidden rounded-[18px] border border-[#E5E5E0] bg-white md:block"
             style={getRevealStyle(pricingSectionVisible, { y: 28, delay: 180 })}
           >
             <div className="show-scrollbar overflow-x-auto overflow-y-visible pb-3">
