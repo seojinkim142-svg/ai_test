@@ -5,6 +5,15 @@ if (typeof URL.parse === "undefined") {
   };
 }
 
+// Promise.withResolvers polyfill — pdfjs-dist v5+ uses this, requires Chrome 119+ / iOS 17.4+
+if (typeof Promise.withResolvers === "undefined") {
+  Promise.withResolvers = function () {
+    let resolve, reject;
+    const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+  };
+}
+
 import { Capacitor } from "@capacitor/core";
 import { createRoot } from "react-dom/client";
 import "./index.css";
