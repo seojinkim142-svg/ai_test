@@ -2417,15 +2417,15 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
         </div>
       </section>
 
-      <footer className="border-t border-[#E5E5E0] bg-[#FBFBF9] px-5 py-10 text-[#0A0A0A] sm:px-6 lg:px-8 lg:py-12">
+      <footer className="border-t border-[#E5E5E0] bg-[#FBFBF9] px-5 py-8 text-[#0A0A0A] sm:px-6 sm:py-10 lg:px-8 lg:py-12">
         <div className="mx-auto max-w-7xl">
-            <div className="flex flex-col gap-5 border-b border-[#E5E5E0] pb-6 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center justify-between border-b border-[#E5E5E0] pb-5 lg:pb-6">
               <div className="flex items-center gap-3">
-                <ZeusianLogo className="h-10 w-10 rounded-[8px] object-cover" />
-                <p className="text-lg font-semibold text-[#0A0A0A]">Zeusian.ai</p>
+                <ZeusianLogo className="h-9 w-9 rounded-[8px] object-cover" />
+                <p className="text-base font-semibold text-[#0A0A0A]">Zeusian.ai</p>
               </div>
 
-              <div className="flex flex-wrap gap-3">
+              <div className="hidden flex-wrap gap-3 lg:flex">
                 {LEGAL_LINKS.map((link) => (
                   <a
                     key={link.href}
@@ -2438,32 +2438,29 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
               </div>
             </div>
 
-            <div className="grid gap-10 pt-6 lg:grid-cols-[minmax(260px,1.05fr)_minmax(0,1fr)] lg:pt-8">
-              <div className="space-y-5">
-                {FOOTER_COMPANY_INFO ? (
-                  <div className="text-sm leading-7 text-[#666666]">
-                    <p>
-                      {copy.footer.companyLabel}: {FOOTER_COMPANY_INFO.value}
-                    </p>
-                    <p>contact:hestra.co@gmail.com</p>
-                  </div>
-                ) : null}
-
+            <div className="grid gap-8 pt-6 lg:grid-cols-[minmax(260px,1.05fr)_minmax(0,1fr)] lg:gap-10 lg:pt-8">
+              <div className="space-y-3">
                 <div className="max-w-sm">
-                  <p className="zeus-display text-3xl font-semibold leading-tight tracking-[-0.02em] text-[#0A0A0A] sm:text-[2.2rem]">
+                  <p className="zeus-display text-2xl font-semibold leading-tight tracking-[-0.02em] text-[#0A0A0A] sm:text-3xl">
                     {copy.footer.titleLine1}
                     <br />
                     {copy.footer.titleLine2}
                   </p>
-                  <p className="mt-4 text-sm leading-7 text-[#666666]">{copy.footer.description}</p>
+                  <p className="mt-3 text-sm leading-6 text-[#666666]">{copy.footer.description}</p>
                 </div>
+                {FOOTER_COMPANY_INFO ? (
+                  <div className="text-xs leading-6 text-[#999999]">
+                    <p>{copy.footer.companyLabel}: {FOOTER_COMPANY_INFO.value}</p>
+                    <p>contact: hestra.co@gmail.com</p>
+                  </div>
+                ) : null}
               </div>
 
-              <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid grid-cols-2 gap-6 sm:grid-cols-4 lg:grid-cols-4">
                 {FOOTER_LINK_GROUPS.map((group) => (
                   <div key={group.title}>
-                    <p className="text-sm font-semibold text-[#0A0A0A]">{group.title}</p>
-                    <div className="mt-4 space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-[#0A0A0A]">{group.title}</p>
+                    <div className="mt-3 space-y-2.5">
                       {group.links.map((link) => (
                         <a
                           key={`${group.title}-${link.href}-${link.label}`}
@@ -2478,8 +2475,8 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                 ))}
 
                 <div>
-                  <p className="text-sm font-semibold text-[#0A0A0A]">{copy.footer.legal}</p>
-                  <div className="mt-4 space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-[#0A0A0A]">{copy.footer.legal}</p>
+                  <div className="mt-3 space-y-2.5">
                     {LEGAL_LINKS.map((link) => (
                       <a
                         key={`legal-column-${link.href}`}
