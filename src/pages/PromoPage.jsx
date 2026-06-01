@@ -5,13 +5,23 @@ const OUTPUT_LANGUAGE_STORAGE_KEY = "zeusian-output-language";
 const DEFAULT_OUTPUT_LANGUAGE = "ko";
 const AVAILABLE_OUTPUT_LANGUAGES = ["en", "zh", "ja", "hi", "ko"];
 
+function detectBrowserLanguage() {
+  if (typeof navigator === "undefined") return DEFAULT_OUTPUT_LANGUAGE;
+  const langs = navigator.languages?.length ? [...navigator.languages] : [navigator.language || ""];
+  for (const lang of langs) {
+    const base = lang.split("-")[0].toLowerCase();
+    if (AVAILABLE_OUTPUT_LANGUAGES.includes(base)) return base;
+  }
+  return "en";
+}
+
 const PromoPage = memo(function PromoPage() {
   const [outputLanguage, setOutputLanguage] = useState(() => {
     if (typeof window === "undefined") return DEFAULT_OUTPUT_LANGUAGE;
     const stored = String(window.localStorage.getItem(OUTPUT_LANGUAGE_STORAGE_KEY) || "")
       .trim()
       .toLowerCase();
-    return AVAILABLE_OUTPUT_LANGUAGES.includes(stored) ? stored : DEFAULT_OUTPUT_LANGUAGE;
+    return AVAILABLE_OUTPUT_LANGUAGES.includes(stored) ? stored : detectBrowserLanguage();
   });
 
   useEffect(() => {
