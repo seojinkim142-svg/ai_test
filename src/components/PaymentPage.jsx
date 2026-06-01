@@ -980,7 +980,9 @@ function PaymentPage({
           </button>
         </div>
 
-        <div className={`grid gap-4 px-6 py-5 md:grid-cols-2 xl:grid-cols-3 ${planSectionClass}`}>
+        <div
+          className={`flex snap-x snap-mandatory gap-3 overflow-x-auto px-5 pb-4 pt-4 [-webkit-overflow-scrolling:touch] sm:px-6 md:grid md:grid-cols-2 md:snap-none md:overflow-x-visible md:py-5 xl:grid-cols-3 ${planSectionClass}`}
+        >
           {PLAN_OPTIONS.map((plan) => {
             const isProPlan = plan.name === "Pro";
             const showProTrialBadge = isProPlan && isFreeCurrentTier;
@@ -1010,181 +1012,136 @@ function PaymentPage({
                 : isProPlan && hasProTrialAccess
                   ? "무료체험 시작"
                   : plan.cta;
+            const isSelected = selectedPlan === plan.name;
+            const isCurrent = currentPlan === plan.name;
 
             return (
               <div
                 key={plan.name}
                 onClick={() => setSelectedPlan(plan.name)}
-                className={`flex h-full cursor-pointer flex-col rounded-2xl border px-4 py-5 shadow-lg shadow-black/30 ring-1 ${
-                  selectedPlan === plan.name
+                className={`flex w-[72vw] flex-none snap-start cursor-pointer flex-col rounded-2xl border p-4 transition-all duration-200 md:w-auto ${
+                  isSelected
                     ? isLight
-                      ? "border-emerald-400/70 ring-emerald-300/50 bg-emerald-50"
-                      : "border-emerald-400/60 ring-emerald-300/50 bg-emerald-500/5"
+                      ? "border-emerald-400/80 bg-emerald-50"
+                      : "border-emerald-400/60 bg-emerald-500/5"
                     : isLight
-                      ? "border-slate-200 ring-slate-200/60 bg-white"
-                      : "border-white/10 ring-white/10 bg-white/5"
+                      ? "border-slate-200 bg-white"
+                      : "border-white/10 bg-white/5"
                 }`}
               >
-                <div className="flex items-baseline justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-lg font-semibold">{plan.label}</h3>
-                    {showProTrialBadge ? (
-                      <span
-                        className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                          hasProTrialAccess
-                            ? isLight
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-emerald-500/15 text-emerald-200"
-                            : isLight
-                              ? "bg-slate-100 text-slate-500"
-                              : "bg-white/10 text-slate-300"
-                        }`}
-                      >
-                        {PRO_TRIAL_BADGE_LABEL}
-                      </span>
-                    ) : null}
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <h3 className="text-base font-semibold">{plan.label}</h3>
+                      {showProTrialBadge ? (
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                            hasProTrialAccess
+                              ? isLight
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-emerald-500/15 text-emerald-200"
+                              : isLight
+                                ? "bg-slate-100 text-slate-500"
+                                : "bg-white/10 text-slate-300"
+                          }`}
+                        >
+                          {PRO_TRIAL_BADGE_LABEL}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-end gap-1.5">
+                      {displayedOriginalPrices.map((originalPrice) => (
+                        <span
+                          key={`${plan.name}-${originalPrice}`}
+                          className={`text-xs font-medium line-through ${isLight ? "text-slate-400" : "text-slate-500"}`}
+                        >
+                          {originalPrice}
+                        </span>
+                      ))}
+                      <p className="text-xl font-bold leading-none">{displayedPrice}</p>
+                    </div>
                   </div>
-                  <span className={`rounded-full px-3 py-1 text-xs font-semibold ${pillClass}`}>
+                  <span className={`mt-0.5 shrink-0 rounded-full px-2.5 py-1 text-[10px] font-semibold ${pillClass}`}>
                     {plan.desc}
                   </span>
                 </div>
-                <div className="mt-2 flex flex-wrap items-end gap-2">
-                  {displayedOriginalPrices.map((originalPrice) => (
-                    <span
-                      key={`${plan.name}-${originalPrice}`}
-                      className={`text-sm font-semibold line-through ${isLight ? "text-slate-400" : "text-slate-500"}`}
-                    >
-                      {originalPrice}
-                    </span>
-                  ))}
-                  <p className="text-2xl font-bold">{displayedPrice}</p>
-                </div>
                 {showProTrialBadge ? (
-                  <p className={`mt-2 text-xs ${isLight ? "text-slate-500" : "text-slate-300"}`}>{proTrialCardText}</p>
+                  <p className={`mt-2 text-[11px] leading-5 ${isLight ? "text-slate-500" : "text-slate-300"}`}>{proTrialCardText}</p>
                 ) : null}
-                <ul className={`mt-3 flex-1 space-y-2 text-sm ${isLight ? "text-slate-700" : "text-slate-200"}`}>
+                <ul className={`mt-3 flex-1 space-y-2 text-sm ${isLight ? "text-slate-600" : "text-slate-200"}`}>
                   {plan.features.map((feature) => (
                     <li key={feature} className="flex items-start gap-2">
                       <span
-                        className="mt-0.5 h-2 w-2 rounded-full"
+                        className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full"
                         style={{ backgroundColor: "rgba(52,211,153,0.9)" }}
                       />
-                      <span>{feature}</span>
+                      <span className="leading-5">{feature}</span>
                     </li>
                   ))}
                 </ul>
-                <button
-                  type="button"
-                  className="ghost-button mt-4 text-sm text-emerald-100"
-                  style={{ "--ghost-color": plan.accent }}
-                  disabled={currentPlan === plan.name}
+                <div
+                  className={`mt-4 rounded-xl py-2 text-center text-sm font-semibold transition-all ${
+                    isCurrent
+                      ? isLight ? "bg-slate-100 text-slate-400" : "bg-white/5 text-slate-500"
+                      : isSelected
+                        ? "bg-emerald-500 text-white"
+                        : isLight
+                          ? "border border-slate-200 bg-white text-slate-600"
+                          : "border border-white/10 bg-white/5 text-slate-300"
+                  }`}
                 >
                   {planButtonLabel}
-                </button>
+                </div>
               </div>
             );
           })}
         </div>
 
         <div
-          className={`flex flex-col gap-2 border-t px-6 py-4 text-sm md:flex-row md:items-center md:justify-between ${
+          className={`border-t px-5 py-4 text-sm sm:px-6 ${
             isLight ? "border-slate-200/80 bg-slate-50 text-slate-700" : "border-white/5 bg-white/5 text-slate-200"
           }`}
         >
-          <div>
-            <p className="font-semibold">결제 안내</p>
-            <p className={isLight ? "text-slate-600" : "text-slate-300"}>
-              결제 서버 검증 후 요금제가 자동 반영됩니다. 결제 완료 후 현재 페이지에서 바로 갱신됩니다.
+          {selectedPlan !== "Free" && (
+            <div className={`mb-3 rounded-xl px-3 py-2.5 text-xs ${isLight ? "bg-white text-slate-600" : "bg-white/5 text-slate-300"}`}>
+              {isUsingProTrialFlow ? (
+                <span>오늘 결제 <strong className={isLight ? "text-slate-800" : "text-white"}>0 KRW</strong> · 무료체험 종료 후 매월 6,900 KRW 자동 결제</span>
+              ) : (
+                <span>첫 결제 <strong className={isLight ? "text-slate-800" : "text-white"}>{selectedKakaoAmount.toLocaleString()} KRW</strong> · 이후 매월 동일 금액 자동 결제</span>
+              )}
+            </div>
+          )}
+          {isFreeCurrentTier && (
+            <p className={`mb-3 text-xs ${isLight ? "text-slate-500" : "text-slate-400"}`}>
+              {proTrialHintText}
             </p>
-          </div>
-          <div className="flex flex-col items-start gap-2 text-xs md:items-end">
-            {selectedPlan !== "Free" && (
-              <>
-                {isUsingProTrialFlow ? (
-                  <>
-                    <span className={isLight ? "text-slate-700" : "text-slate-100"}>
-                      오늘 결제 0 KRW
-                    </span>
-                    <span className={isLight ? "text-slate-500" : "text-slate-300"}>
-                      {`결제수단 등록 후 ${PRO_TRIAL_DAYS}일 뒤부터 매월 6,900 KRW가 자동 결제됩니다.`}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <span className={isLight ? "text-slate-700" : "text-slate-100"}>
-                      첫 결제금액 {selectedKakaoAmount.toLocaleString()} KRW
-                    </span>
-                    <span className={isLight ? "text-slate-500" : "text-slate-300"}>
-                      이후 매월 {selectedKakaoAmount.toLocaleString()} KRW가 자동 결제됩니다.
-                    </span>
-                  </>
-                )}
-              </>
-            )}
-          </div>
-          <div className="flex flex-col gap-2">
-            {isFreeCurrentTier && (
-              <p className={`max-w-xs text-xs ${isLight ? "text-slate-500" : "text-slate-300"}`}>
-                {proTrialHintText}
-              </p>
-            )}
-          </div>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 [&>*:nth-child(2)]:hidden [&>*:nth-child(4)]:hidden [&>*:nth-child(5)]:hidden">
+          )}
+          <div className="flex gap-2">
             <button
               type="button"
               onClick={isUsingProTrialFlow ? handleKakaoProTrial : handleKakaoPay}
               disabled={isUsingProTrialFlow ? !canStartKakaoProTrial : !canProceedWithKakao}
-              className={`ghost-button text-sm ${isLight ? "text-amber-700" : "text-amber-100"}`}
+              className={`ghost-button flex-1 text-sm ${isLight ? "text-amber-700" : "text-amber-100"}`}
               style={{ "--ghost-color": "234, 179, 8" }}
             >
               {paying
-                ? isUsingProTrialFlow
-                  ? "무료체험 처리 중..."
-                  : "카카오페이 처리 중..."
+                ? "처리 중..."
                 : isUsingProTrialFlow
                   ? "카카오페이 무료체험"
                   : "카카오페이"}
-            </button>
-            <button hidden
-              type="button"
-              onClick={handleKakaoPay}
-              disabled={!canStartSubscriptionWithKakao}
-              className={`ghost-button text-sm ${isLight ? "text-sky-700" : "text-sky-100"}`}
-              style={{ "--ghost-color": "56, 189, 248" }}
-            >
-              {paying ? "정기결제 처리 중.." : "정기결제"}
             </button>
             <button
               type="button"
               onClick={isUsingProTrialFlow ? () => startNiceSubscription({ proTrial: true }) : () => startNiceSubscription()}
               disabled={isUsingProTrialFlow ? !canStartNiceSubscription : !canProceedWithCard}
-              className={`ghost-button text-sm ${isLight ? "text-emerald-700" : "text-emerald-100"}`}
+              className={`ghost-button flex-1 text-sm ${isLight ? "text-emerald-700" : "text-emerald-100"}`}
               style={{ "--ghost-color": "16, 185, 129" }}
             >
               {isStartingNiceSubscription
-                ? isUsingProTrialFlow
-                  ? "무료체험 처리 중..."
-                  : "신용카드 처리 중..."
+                ? "처리 중..."
                 : isUsingProTrialFlow
                   ? "신용카드 무료체험"
                   : "신용카드"}
-            </button>
-            <button hidden
-              type="button"
-              onClick={() => startNiceSubscription()}
-              disabled={!canStartNiceSubscription}
-              className={`ghost-button text-sm ${isLight ? "text-cyan-700" : "text-cyan-100"}`}
-              style={{ "--ghost-color": "6, 182, 212" }}
-            >
-              {isStartingNiceSubscription ? "카드 정기 처리 중.." : "카드 정기"}
-            </button>
-            <button hidden
-              type="button"
-              onClick={() => {}}
-              className={`ghost-button text-sm ${isLight ? "text-slate-600" : "text-slate-200"}`}
-              style={{ "--ghost-color": isLight ? "100, 116, 139" : "148, 163, 184" }}
-            >
-              {showSubscriptionSettings ? "설정 닫기" : "정기결제 설정"}
             </button>
           </div>
         </div>
