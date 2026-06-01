@@ -1495,13 +1495,13 @@ function PinnedFeaturesSection({ FEATURE_ITEMS, copy, sectionScrollOffset }) {
         </div>
 
         {/* 탭 네비게이션 */}
-        <div className="mb-5 flex flex-wrap justify-center gap-2">
+        <div className="mb-5 grid grid-cols-5 gap-1.5">
           {FEATURE_ITEMS.map((f, i) => (
             <button
               key={f.id}
               type="button"
               onClick={() => scrollToFeature(i)}
-              className="rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-300"
+              className="rounded-full px-1.5 py-1.5 text-xs font-semibold transition-all duration-300 w-full text-center"
               style={{
                 background: i === activeIndex ? FEATURE_ACCENT : "transparent",
                 color: i === activeIndex ? "#ffffff" : "#999999",
