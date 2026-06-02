@@ -20,6 +20,7 @@ import {
   listFlashcards,
   deleteFlashcard,
   updateFlashcard,
+  deleteFlashcards,
   saveFlashcardScore,
   listFlashcardScores,
   createFolder,
@@ -6762,6 +6763,37 @@ function App() {
     [user]
   );
 
+  const handleDeduplicateFlashcards = useCallback(async () => {
+    // front 기준으로 중복 카드 찾기 (가장 오래된 것 남기고 나머지 삭제)
+    const seen = new Map();
+    const toDelete = [];
+    // created_at 오름차순으로 정렬 (오래된 것 우선)
+    const sorted = [...flashcards].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    for (const card of sorted) {
+      const key = String(card.front || "").trim().toLowerCase();
+      if (!key) continue;
+      if (seen.has(key)) {
+        toDelete.push(card.id);
+      } else {
+        seen.set(key, card.id);
+      }
+    }
+    if (toDelete.length === 0) {
+      setFlashcardStatus("중복 카드가 없습니다.");
+      return;
+    }
+    setFlashcardError("");
+    try {
+      if (user) {
+        await deleteFlashcards({ userId: user.id, cardIds: toDelete });
+      }
+      setFlashcards((prev) => prev.filter((c) => !toDelete.includes(c.id)));
+      setFlashcardStatus(`중복 카드 ${toDelete.length}개를 제거했습니다.`);
+    } catch (err) {
+      setFlashcardError(`중복 제거에 실패했습니다: ${err.message}`);
+    }
+  }, [user, flashcards]);
+
   const handleSaveFlashcardScore = useCallback(
     async ({ total, known, unknown, accuracy }) => {
       const deckId = selectedFileId || "default";
@@ -6923,6 +6955,8 @@ function App() {
         },
       });
       const rawCards = Array.isArray(result?.cards) ? result.cards : Array.isArray(result) ? result : [];
+      // 기존 카드와 중복 스킵
+      const existingFronts = new Set(flashcards.map((c) => String(c.front || "").trim().toLowerCase()));
       const cleaned = rawCards
         .map((card) => ({
           front: String(card?.front || "").trim(),
@@ -6930,9 +6964,9 @@ function App() {
           hint: String(card?.hint || "").trim(),
           category: String(card?.category || "").trim() || null,
         }))
-        .filter((card) => card.front && card.back);
+        .filter((card) => card.front && card.back && !existingFronts.has(card.front.toLowerCase()));
       if (cleaned.length === 0) {
-        throw new Error("단어장에서 단어-뜻 쌍을 찾지 못했습니다. PDF 텍스트가 올바른지 확인해 주세요.");
+        throw new Error("추출된 단어가 모두 이미 존재합니다. 중복 단어는 추가되지 않습니다.");
       }
       const deckId = selectedFileId || "default";
       const saved = user
@@ -8370,6 +8404,7 @@ function App() {
     handleAddFlashcard,
     handleDeleteFlashcard,
     handleUpdateFlashcard,
+    handleDeduplicateFlashcards,
     handleSaveFlashcardScore,
     flashcardScores,
     handleGenerateFlashcards,

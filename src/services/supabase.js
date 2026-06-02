@@ -333,6 +333,13 @@ export async function deleteFlashcard({ userId, cardId }) {
   if (error) throw error;
 }
 
+export async function deleteFlashcards({ userId, cardIds }) {
+  const client = requireSupabase();
+  if (!userId || !cardIds?.length) return;
+  const { error } = await client.from(FLASHCARDS_TABLE).delete().in("id", cardIds).eq("user_id", userId);
+  if (error) throw error;
+}
+
 export async function updateFlashcard({ userId, cardId, front, back, hint }) {
   const client = requireSupabase();
   requireUser(userId);

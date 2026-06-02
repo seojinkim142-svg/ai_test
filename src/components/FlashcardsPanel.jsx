@@ -29,6 +29,7 @@ function FlashcardsPanel({
   onAdd,
   onDelete,
   onUpdate,
+  onDeduplicate,
   onSaveScore,
   savedScores,
   isLoading,
@@ -78,6 +79,19 @@ function FlashcardsPanel({
 
   // savedScores(Supabase) 있으면 우선, 없으면 localStorage fallback
   const scoreHistory = (savedScores && savedScores.length > 0) ? savedScores : localScoreHistory;
+
+  // 중복 카드 수 계산
+  const duplicateCount = (() => {
+    const seen = new Set();
+    let count = 0;
+    for (const card of (cards || [])) {
+      const key = String(card.front || "").trim().toLowerCase();
+      if (!key) continue;
+      if (seen.has(key)) count++;
+      else seen.add(key);
+    }
+    return count;
+  })();
 
   // 카테고리 목록 도출
   const categories = Array.from(
@@ -345,6 +359,18 @@ function FlashcardsPanel({
         >
           {isExamMode ? "시험 종료" : "시험치기"}
         </button>
+        {onDeduplicate && duplicateCount > 0 && (
+          <button
+            type="button"
+            onClick={onDeduplicate}
+            disabled={isLoading || isGenerating || isExamMode}
+            className="ghost-button text-sm text-amber-200"
+            data-ghost-size="sm"
+            style={{ "--ghost-color": "251, 191, 36" }}
+          >
+            중복 제거 ({duplicateCount}개)
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setShowScoreHistory((prev) => !prev)}
