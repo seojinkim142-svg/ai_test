@@ -7007,6 +7007,36 @@ function App() {
     topicStructure,
   ]);
 
+  const handleReextractVocabulary = useCallback(async () => {
+    if (isGeneratingFlashcards) return;
+    // 기존 카드 전체 삭제 후 재추출
+    const allIds = flashcards.map((c) => c.id);
+    if (allIds.length > 0) {
+      try {
+        if (user) await deleteFlashcards({ userId: user.id, cardIds: allIds });
+        setFlashcards([]);
+      } catch {
+        // 삭제 실패해도 계속 진행
+      }
+    }
+    await handleGenerateVocabularyFlashcards();
+  }, [isGeneratingFlashcards, flashcards, user, handleGenerateVocabularyFlashcards]);
+
+  const handleRegenerateFlashcards = useCallback(async () => {
+    if (isGeneratingFlashcards) return;
+    // 기존 카드 전체 삭제 후 재생성
+    const allIds = flashcards.map((c) => c.id);
+    if (allIds.length > 0) {
+      try {
+        if (user) await deleteFlashcards({ userId: user.id, cardIds: allIds });
+        setFlashcards([]);
+      } catch {
+        // 삭제 실패해도 계속 진행
+      }
+    }
+    await handleGenerateFlashcards();
+  }, [isGeneratingFlashcards, flashcards, user, handleGenerateFlashcards]);
+
   const handleResetTutor = useCallback(() => {
     setTutorMessages([]);
     persistTutorHistory(selectedFileId, []);
@@ -8410,6 +8440,8 @@ function App() {
     flashcardScores,
     handleGenerateFlashcards,
     handleGenerateVocabularyFlashcards,
+    handleReextractVocabulary,
+    handleRegenerateFlashcards,
     isVocabularyFile: Boolean(activeUploadItem?.isVocabulary),
     flashcardChapterSelectionInput,
     setFlashcardChapterSelectionInput,
