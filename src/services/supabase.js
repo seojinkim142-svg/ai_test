@@ -280,7 +280,7 @@ export async function deleteMockExam({ userId, examId }) {
   if (error) throw error;
 }
 
-export async function addFlashcard({ userId, deckId, front, back, hint }) {
+export async function addFlashcard({ userId, deckId, front, back, hint, category }) {
   const client = requireSupabase();
   requireUser(userId);
   const payload = {
@@ -289,6 +289,7 @@ export async function addFlashcard({ userId, deckId, front, back, hint }) {
     front: front || "",
     back: back || "",
     hint: hint || "",
+    category: category || null,
   };
   const { data, error } = await client.from(FLASHCARDS_TABLE).insert(payload).select().single();
   if (error) throw error;
@@ -306,6 +307,7 @@ export async function addFlashcards({ userId, deckId, cards }) {
           front: card?.front || "",
           back: card?.back || "",
           hint: card?.hint || "",
+          category: card?.category || null,
         }))
         .filter((card) => card.front && card.back)
     : [];
