@@ -3096,20 +3096,22 @@ export async function generateExamCramSheet({
   return sanitizeMarkdown(content);
 }
 
-function splitTextIntoChunks(text, chunkSize) {
+function splitTextIntoChunks(text, chunkSize, overlap = 300) {
   const chunks = [];
   let start = 0;
   while (start < text.length) {
     let end = start + chunkSize;
     if (end < text.length) {
-      // 단어/줄 경계에서 자르기
+      // 줄 경계에서 자르기
       const newline = text.lastIndexOf("\n", end);
-      const space = text.lastIndexOf(" ", end);
-      const boundary = newline > start + chunkSize * 0.5 ? newline : space > start + chunkSize * 0.5 ? space : end;
-      end = boundary > start ? boundary : end;
+      const boundary = newline > start + chunkSize * 0.5 ? newline : end;
+      end = boundary;
     }
     chunks.push(text.slice(start, end).trim());
-    start = end;
+    if (end >= text.length) break;
+    // 다음 청크는 overlap만큼 앞에서 시작 (경계 단어 누락 방지)
+    const overlapStart = text.lastIndexOf("\n", end - overlap);
+    start = overlapStart > start ? overlapStart : end;
   }
   return chunks.filter(Boolean);
 }
