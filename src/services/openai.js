@@ -3114,9 +3114,29 @@ function splitTextIntoChunks(text, chunkSize) {
   return chunks.filter(Boolean);
 }
 
+// 잘린 JSON에서 완성된 카드 객체만 복구
+function recoverCardsFromTruncatedJson(raw) {
+  try {
+    // 마지막 완성된 } 위치를 찾아서 배열을 억지로 닫음
+    const lastBrace = raw.lastIndexOf("}");
+    if (lastBrace === -1) return [];
+    const recovered = raw.slice(0, lastBrace + 1) + "]}";
+    // cards 배열 시작점 찾기
+    const cardsStart = recovered.indexOf('"cards"');
+    if (cardsStart === -1) return [];
+    const arrStart = recovered.indexOf("[", cardsStart);
+    if (arrStart === -1) return [];
+    const partial = '{"cards":' + recovered.slice(arrStart);
+    const parsed = JSON.parse(partial);
+    return Array.isArray(parsed?.cards) ? parsed.cards : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function generateVocabularyFlashcards(extractedText, { outputLanguage = "ko", topicStructure = null, onProgress } = {}) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
-  const CHUNK_SIZE = 10000;
+  const CHUNK_SIZE = 4000; // 청크 크기 축소 → JSON 출력 토큰 한도 초과 방지
   const fullText = String(extractedText || "").trim();
   if (!fullText) {
     throw new Error("No text available. Extract PDF text first.");
@@ -3157,13 +3177,20 @@ export async function generateVocabularyFlashcards(extractedText, { outputLangua
         ],
         temperature: 0.2,
         response_format: { type: "json_object" },
+        max_tokens: 4096,
       },
       { retries: 1 }
     );
     const content = data.choices?.[0]?.message?.content?.trim() || "";
     const sanitized = sanitizeJson(content);
-    const parsed = parseJsonSafe(sanitized, `vocabulary flashcards chunk ${i + 1}`);
-    const cards = Array.isArray(parsed?.cards) ? parsed.cards : [];
+    let cards = [];
+    try {
+      const parsed = parseJsonSafe(sanitized, `vocabulary flashcards chunk ${i + 1}`);
+      cards = Array.isArray(parsed?.cards) ? parsed.cards : [];
+    } catch {
+      // JSON이 잘렸을 경우 복구 시도
+      cards = recoverCardsFromTruncatedJson(sanitized);
+    }
     for (const card of cards) {
       const front = String(card?.front || "").trim();
       if (front && !seenFronts.has(front.toLowerCase())) {
