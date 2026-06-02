@@ -3156,11 +3156,13 @@ export async function generateVocabularyFlashcards(extractedText, { outputLangua
 
   const systemPrompt =
     `You are a vocabulary extractor. The user will paste text from a vocabulary list or glossary (단어장). ` +
-    `Extract every word-definition pair you can find. ` +
-    `"front" = the term or word (원어 그대로). ` +
-    `"back" = its meaning/definition in ${outputLanguageLabel} — keep it short and clear. ` +
-    `"hint" = a usage example sentence if present in the source, otherwise empty string. ` +
-    `Do NOT generate pairs that aren't in the source text.` +
+    `Your ONLY job is to extract (word → meaning) pairs for language learning. ` +
+    `"front" = the word or term exactly as written (원어 그대로). Must be a real word or phrase, NOT a question or sentence. ` +
+    `"back" = the linguistic meaning/translation of that word in ${outputLanguageLabel}. Must be a definition or translation — NEVER a number, score, rank, or O/X flag. ` +
+    `"hint" = a short usage example sentence if present in the source, otherwise empty string. ` +
+    `SKIP entirely: quiz questions, fill-in-the-blank exercises, frequency ranks, Oxford/BBC scores, O/X membership flags, page numbers, metadata. ` +
+    `SKIP any card where "back" would be just a number, just "O", just "X", or any non-linguistic value. ` +
+    `Do NOT invent or generate content not in the source text.` +
     categoryInstruction +
     ` Return JSON only: ${schemaExample}`;
 
@@ -3175,7 +3177,7 @@ export async function generateVocabularyFlashcards(extractedText, { outputLangua
         model: MODEL,
         messages: [
           { role: "system", content: systemPrompt },
-          { role: "user", content: `다음 단어장 텍스트에서 모든 단어-뜻 쌍을 추출해줘:\n\n${chunks[i]}` },
+          { role: "user", content: `다음 단어장 텍스트에서 단어-뜻 쌍만 추출해줘 (퀴즈/문제/순위/점수는 제외):\n\n${chunks[i]}` },
         ],
         temperature: 0.2,
         response_format: { type: "json_object" },
@@ -3190,12 +3192,17 @@ export async function generateVocabularyFlashcards(extractedText, { outputLangua
       const parsed = parseJsonSafe(sanitized, `vocabulary flashcards chunk ${i + 1}`);
       cards = Array.isArray(parsed?.cards) ? parsed.cards : [];
     } catch {
-      // JSON이 잘렸을 경우 복구 시도
       cards = recoverCardsFromTruncatedJson(sanitized);
     }
     for (const card of cards) {
       const front = String(card?.front || "").trim();
-      if (front && !seenFronts.has(front.toLowerCase())) {
+      const back = String(card?.back || "").trim();
+
+      // 앞면이 질문문이거나 뒷면이 숫자/O/X만인 카드 제거
+      const frontIsQuestion = front.endsWith("?") || front.includes("은?") || front.includes("는?") || front.includes("을?") || front.includes("를?");
+      const backIsTrivial = /^[\dO\-X]+$/.test(back) || /^\d[\d,\s]+$/.test(back);
+
+      if (front && back && !frontIsQuestion && !backIsTrivial && !seenFronts.has(front.toLowerCase())) {
         seenFronts.add(front.toLowerCase());
         allCards.push(card);
       }
