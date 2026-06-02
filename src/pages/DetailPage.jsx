@@ -214,13 +214,15 @@ export default function DetailPage({
     () => [
       { id: "topicStructure", label: copy.tabs.topicStructure },
       { id: "summary", label: copy.tabs.summary },
-      { id: "quiz", label: copy.tabs.quiz },
-      { id: "reviewNotes", label: copy.tabs.reviewNotes },
-      { id: "mockExam", label: copy.tabs.mockExam },
+      ...(!isVocabularyFile ? [
+        { id: "quiz", label: copy.tabs.quiz },
+        { id: "reviewNotes", label: copy.tabs.reviewNotes },
+        { id: "mockExam", label: copy.tabs.mockExam },
+      ] : []),
       { id: "flashcards", label: copy.tabs.flashcards },
       { id: "tutor", label: copy.tabs.tutor },
     ],
-    [copy]
+    [copy, isVocabularyFile]
   );
   const normalizeChapterSelectionInput = (value) => String(value || "").replace(/\s+/g, "");
   const truncateText = (value, maxLength = 30) => {
