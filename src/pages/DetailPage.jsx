@@ -569,7 +569,7 @@ export default function DetailPage({
                 topicStructure={topicStructure}
                 isLoading={isLoadingTopicStructure}
                 error={topicStructureError}
-                onRequestGenerate={onRequestTopicStructure}
+                onRequestGenerate={() => onRequestTopicStructure({ force: true })}
                 onExplainConcept={onExplainConcept}
                 isVocabularyMode={isVocabularyFile}
                 onStartQuiz={(topic) => {
