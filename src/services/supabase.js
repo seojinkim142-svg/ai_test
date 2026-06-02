@@ -331,6 +331,48 @@ export async function deleteFlashcard({ userId, cardId }) {
   if (error) throw error;
 }
 
+export async function updateFlashcard({ userId, cardId, front, back, hint }) {
+  const client = requireSupabase();
+  requireUser(userId);
+  if (!cardId) throw new Error("cardId is required");
+  const { data, error } = await client
+    .from(FLASHCARDS_TABLE)
+    .update({ front: front || "", back: back || "", hint: hint || "" })
+    .eq("id", cardId)
+    .eq("user_id", userId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+const FLASHCARD_SCORES_TABLE = "flashcard_scores";
+
+export async function saveFlashcardScore({ userId, deckId, total, known, unknown, accuracy }) {
+  if (!supabase || !userId) return null;
+  const { data, error } = await supabase
+    .from(FLASHCARD_SCORES_TABLE)
+    .insert({ user_id: userId, deck_id: deckId || "default", total, known, unknown, accuracy })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function listFlashcardScores({ userId, deckId }) {
+  if (!supabase || !userId) return [];
+  const query = supabase
+    .from(FLASHCARD_SCORES_TABLE)
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (deckId) query.eq("deck_id", deckId);
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+}
+
 export async function deleteUpload({ userId, uploadId, bucket, path, previewPdfBucket, previewPdfPath }) {
   const client = requireSupabase();
   requireUser(userId);

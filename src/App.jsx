@@ -19,6 +19,9 @@ import {
   addFlashcards,
   listFlashcards,
   deleteFlashcard,
+  updateFlashcard,
+  saveFlashcardScore,
+  listFlashcardScores,
   createFolder,
   renameFolder,
   listFolders,
@@ -1214,6 +1217,7 @@ function App() {
   const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false);
   const [flashcardStatus, setFlashcardStatus] = useState("");
   const [flashcardError, setFlashcardError] = useState("");
+  const [flashcardScores, setFlashcardScores] = useState([]);
   const [tutorMessages, setTutorMessages] = useState([]);
   const [isTutorLoading, setIsTutorLoading] = useState(false);
   const [tutorError, setTutorError] = useState("");
@@ -2827,12 +2831,17 @@ function App() {
     async (deckId) => {
       if (!supabase || !user) {
         setFlashcards([]);
+        setFlashcardScores([]);
         return;
       }
       setIsLoadingFlashcards(true);
       try {
-        const list = await listFlashcards({ userId: user.id, deckId });
+        const [list, scores] = await Promise.all([
+          listFlashcards({ userId: user.id, deckId }),
+          listFlashcardScores({ userId: user.id, deckId }).catch(() => []),
+        ]);
         setFlashcards(list);
+        setFlashcardScores(scores);
       } catch (err) {
         setError(`플래시카드를 불러오지 못했습니다: ${err.message}`);
       } finally {
@@ -6727,6 +6736,49 @@ function App() {
     [user]
   );
 
+  const handleUpdateFlashcard = useCallback(
+    async (cardId, front, back, hint) => {
+      if (!user) {
+        if (!AUTH_ENABLED) {
+          setFlashcardError("");
+          setFlashcards((prev) =>
+            prev.map((c) => (c.id === cardId ? { ...c, front, back, hint: hint || "" } : c))
+          );
+          setFlashcardStatus("플래시카드를 수정했습니다.");
+          return;
+        }
+        setFlashcardError("먼저 로그인해 주세요.");
+        return;
+      }
+      setFlashcardError("");
+      try {
+        const updated = await updateFlashcard({ userId: user.id, cardId, front, back, hint });
+        setFlashcards((prev) => prev.map((c) => (c.id === cardId ? updated : c)));
+        setFlashcardStatus("플래시카드를 수정했습니다.");
+      } catch (err) {
+        setFlashcardError(`플래시카드 수정에 실패했습니다: ${err.message}`);
+      }
+    },
+    [user]
+  );
+
+  const handleSaveFlashcardScore = useCallback(
+    async ({ total, known, unknown, accuracy }) => {
+      const deckId = selectedFileId || "default";
+      if (user) {
+        try {
+          const saved = await saveFlashcardScore({ userId: user.id, deckId, total, known, unknown, accuracy });
+          if (saved) {
+            setFlashcardScores((prev) => [saved, ...prev].slice(0, 50));
+          }
+        } catch {
+          // 저장 실패 시 무시 (localStorage fallback 있음)
+        }
+      }
+    },
+    [user, selectedFileId]
+  );
+
   const handleGenerateFlashcards = useCallback(async () => {
     if (isGeneratingFlashcards) return;
     if (AUTH_ENABLED && !user) {
@@ -8297,6 +8349,9 @@ function App() {
     isLoadingFlashcards,
     handleAddFlashcard,
     handleDeleteFlashcard,
+    handleUpdateFlashcard,
+    handleSaveFlashcardScore,
+    flashcardScores,
     handleGenerateFlashcards,
     handleGenerateVocabularyFlashcards,
     isVocabularyFile: Boolean(activeUploadItem?.isVocabulary),
