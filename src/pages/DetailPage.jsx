@@ -1221,7 +1221,6 @@ export default function DetailPage({
                   >
                     {isGeneratingFlashcards ? "단어 추출 중..." : "단어 자동 추출"}
                   </button>
-                  <p className="mt-2 text-xs text-slate-400">일반 AI 플래시카드 생성도 아래에서 계속 사용할 수 있어요</p>
                 </div>
               ) : (
                 <div className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">

@@ -339,18 +339,22 @@ function FlashcardsPanel({
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={onGenerate}
-          disabled={!canGenerate || isGenerating || isLoading || isExamMode}
-          title={generateButtonTitle}
-          className="ghost-button text-sm text-emerald-100"
-          data-ghost-size="sm"
-          style={{ "--ghost-color": "52, 211, 153" }}
-        >
-          {isGenerating ? "AI 플래시카드 생성 중..." : "AI 플래시카드 생성"}
-        </button>
-        <p className="text-xs text-slate-400">PDF 기반 자동 생성</p>
+        {!isVocabularyMode && (
+          <>
+            <button
+              type="button"
+              onClick={onGenerate}
+              disabled={!canGenerate || isGenerating || isLoading || isExamMode}
+              title={generateButtonTitle}
+              className="ghost-button text-sm text-emerald-100"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "52, 211, 153" }}
+            >
+              {isGenerating ? "AI 플래시카드 생성 중..." : "AI 플래시카드 생성"}
+            </button>
+            <p className="text-xs text-slate-400">PDF 기반 자동 생성</p>
+          </>
+        )}
         <button
           type="button"
           onClick={isExamMode ? endExam : () => startExam(filteredCards)}
