@@ -6906,7 +6906,9 @@ function App() {
 
     setFlashcardError("");
     setIsGeneratingFlashcards(true);
-    setFlashcardStatus("단어장에서 단어 추출 중...");
+    const CHUNK_SIZE = 4000;
+    const totalChunks = Math.ceil(sourceText.length / CHUNK_SIZE);
+    setFlashcardStatus(`텍스트 길이: ${sourceText.length.toLocaleString()}자 / 총 ${totalChunks}개 구간으로 처리`);
     try {
       const { generateVocabularyFlashcards } = await getOpenAiService();
       const result = await generateVocabularyFlashcards(sourceText, {
