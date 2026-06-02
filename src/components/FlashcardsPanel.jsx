@@ -359,19 +359,7 @@ function FlashcardsPanel({
         >
           {isExamMode ? "시험 종료" : "시험치기"}
         </button>
-        {onDeduplicate && duplicateCount > 0 && (
-          <button
-            type="button"
-            onClick={onDeduplicate}
-            disabled={isLoading || isGenerating || isExamMode}
-            className="ghost-button text-sm text-amber-200"
-            data-ghost-size="sm"
-            style={{ "--ghost-color": "251, 191, 36" }}
-          >
-            중복 제거 ({duplicateCount}개)
-          </button>
-        )}
-        <button
+<button
           type="button"
           onClick={() => setShowScoreHistory((prev) => !prev)}
           className="ghost-button text-sm text-slate-200"
