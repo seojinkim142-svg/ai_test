@@ -6909,13 +6909,14 @@ function App() {
     setFlashcardStatus("단어장에서 단어 추출 중...");
     try {
       const { generateVocabularyFlashcards } = await getOpenAiService();
-      const result = await generateVocabularyFlashcards(sourceText, { outputLanguage });
+      const result = await generateVocabularyFlashcards(sourceText, { outputLanguage, topicStructure });
       const rawCards = Array.isArray(result?.cards) ? result.cards : Array.isArray(result) ? result : [];
       const cleaned = rawCards
         .map((card) => ({
           front: String(card?.front || "").trim(),
           back: String(card?.back || "").trim(),
           hint: String(card?.hint || "").trim(),
+          category: String(card?.category || "").trim() || null,
         }))
         .filter((card) => card.front && card.back);
       if (cleaned.length === 0) {
@@ -6930,11 +6931,17 @@ function App() {
             front: card.front,
             back: card.back,
             hint: card.hint || "",
+            category: card.category || null,
             created_at: new Date().toISOString(),
           }));
       if (!saved.length) throw new Error("단어 카드 저장에 실패했습니다.");
+      const categoryCount = cleaned.filter((c) => c.category).length;
       setFlashcards((prev) => [...saved, ...prev]);
-      setFlashcardStatus(`${saved.length}개의 단어를 추출했습니다.`);
+      setFlashcardStatus(
+        categoryCount > 0
+          ? `${saved.length}개의 단어를 추출했습니다. (${categoryCount}개 카테고리 분류됨)`
+          : `${saved.length}개의 단어를 추출했습니다.`
+      );
     } catch (err) {
       setFlashcardError(`단어 추출에 실패했습니다: ${err.message}`);
       setFlashcardStatus("");
@@ -6950,6 +6957,7 @@ function App() {
     extractedText,
     getOpenAiService,
     outputLanguage,
+    topicStructure,
   ]);
 
   const handleResetTutor = useCallback(() => {

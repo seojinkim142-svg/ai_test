@@ -39,6 +39,8 @@ function FlashcardsPanel({
   status,
   error,
   isVocabularyMode = false,
+  pendingTopicExam = null,
+  onPendingTopicExamConsumed,
 }) {
   const [front, setFront] = useState("");
   const [back, setBack] = useState("");
@@ -60,6 +62,10 @@ function FlashcardsPanel({
   const [unknownCount, setUnknownCount] = useState(0);
   const [unknownCards, setUnknownCards] = useState([]);
   const [isRetryMode, setIsRetryMode] = useState(false);
+  const [topicExamLabel, setTopicExamLabel] = useState("");
+
+  // 카테고리 필터
+  const [activeCategory, setActiveCategory] = useState(null); // null = 전체
 
   // 점수 히스토리
   const [showScoreHistory, setShowScoreHistory] = useState(false);
@@ -72,6 +78,16 @@ function FlashcardsPanel({
 
   // savedScores(Supabase) 있으면 우선, 없으면 localStorage fallback
   const scoreHistory = (savedScores && savedScores.length > 0) ? savedScores : localScoreHistory;
+
+  // 카테고리 목록 도출
+  const categories = Array.from(
+    new Set((cards || []).map((c) => c.category).filter(Boolean))
+  ).sort();
+
+  // 카테고리 필터 적용
+  const filteredCards = activeCategory
+    ? (cards || []).filter((c) => c.category === activeCategory)
+    : (cards || []);
 
   const shuffleCards = useCallback((list) => {
     const shuffled = [...list];
@@ -106,6 +122,7 @@ function FlashcardsPanel({
     setUnknownCount(0);
     setUnknownCards([]);
     setIsRetryMode(false);
+    setTopicExamLabel("");
     setExamSessionId(null);
     setHasSavedScore(false);
   }, []);
@@ -238,6 +255,17 @@ function FlashcardsPanel({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [advanceCard, isExamComplete, isExamMode]);
 
+  // 학습구조에서 주제별 단어 시험 진입
+  useEffect(() => {
+    if (!pendingTopicExam) return;
+    const { cards: examCards, topicTitle } = pendingTopicExam;
+    if (examCards && examCards.length > 0) {
+      setTopicExamLabel(topicTitle || "");
+      startExam(examCards, true);
+    }
+    onPendingTopicExamConsumed?.();
+  }, [pendingTopicExam]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // 편집 시작
   const startEdit = useCallback((card) => {
     setEditingCardId(card.id);
@@ -263,7 +291,7 @@ function FlashcardsPanel({
     setEditingCardId(null);
   }, []);
 
-  const canStartExam = Boolean(cards?.length) && !isLoading && !isGenerating;
+  const canStartExam = Boolean(filteredCards.length) && !isLoading && !isGenerating;
 
   const containerClassName = `rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30${
     isExamMode ? " flex min-h-[60vh] flex-col lg:min-h-[70vh]" : ""
@@ -279,13 +307,18 @@ function FlashcardsPanel({
             {isVocabularyMode && (
               <span className="rounded-full bg-violet-500 px-2 py-0.5 text-[11px] font-bold text-white">단어장</span>
             )}
-            {isRetryMode && isExamMode && (
+            {isRetryMode && isExamMode && !topicExamLabel && (
               <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-bold text-white">복습</span>
+            )}
+            {topicExamLabel && isExamMode && (
+              <span className="max-w-[120px] truncate rounded-full bg-violet-500 px-2 py-0.5 text-[11px] font-bold text-white" title={topicExamLabel}>
+                {topicExamLabel}
+              </span>
             )}
           </div>
         </div>
         <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-slate-200 ring-1 ring-white/15">
-          {cards.length}개
+          {activeCategory ? `${filteredCards.length} / ${cards.length}개` : `${cards.length}개`}
         </span>
       </div>
 
@@ -304,7 +337,7 @@ function FlashcardsPanel({
         <p className="text-xs text-slate-400">PDF 기반 자동 생성</p>
         <button
           type="button"
-          onClick={isExamMode ? endExam : () => startExam()}
+          onClick={isExamMode ? endExam : () => startExam(filteredCards)}
           disabled={!isExamMode && !canStartExam}
           className="ghost-button text-sm text-emerald-100"
           data-ghost-size="sm"
@@ -322,6 +355,36 @@ function FlashcardsPanel({
           역대점수확인
         </button>
       </div>
+
+      {categories.length > 0 && !isExamMode && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          <button
+            type="button"
+            onClick={() => setActiveCategory(null)}
+            className={`rounded-full px-2.5 py-0.5 text-xs border transition-colors ${
+              activeCategory === null
+                ? "bg-emerald-500/30 text-emerald-200 border-emerald-400/50"
+                : "bg-white/5 text-slate-400 border-white/10 hover:bg-white/10"
+            }`}
+          >
+            전체
+          </button>
+          {categories.map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => setActiveCategory(activeCategory === cat ? null : cat)}
+              className={`rounded-full px-2.5 py-0.5 text-xs border transition-colors ${
+                activeCategory === cat
+                  ? "bg-violet-500/30 text-violet-200 border-violet-400/50"
+                  : "bg-white/5 text-slate-400 border-white/10 hover:bg-white/10"
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      )}
 
       {status && <p className="mt-3 text-sm text-emerald-200">{status}</p>}
       {error && (
@@ -514,8 +577,11 @@ function FlashcardsPanel({
             {!isLoading && cards.length === 0 && (
               <p className="text-sm text-slate-400">저장된 카드가 없습니다.</p>
             )}
+            {!isLoading && cards.length > 0 && filteredCards.length === 0 && (
+              <p className="text-sm text-slate-400">선택한 카테고리에 카드가 없습니다.</p>
+            )}
             {!isLoading &&
-              cards.map((card) => {
+              filteredCards.map((card) => {
                 const isEditing = editingCardId === card.id;
                 return (
                   <div
@@ -570,7 +636,14 @@ function FlashcardsPanel({
                       </>
                     ) : (
                       <>
-                        <p className="text-xs uppercase tracking-[0.15em] text-emerald-200">앞면</p>
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-xs uppercase tracking-[0.15em] text-emerald-200">앞면</p>
+                          {card.category && (
+                            <span className="rounded-full bg-violet-500/20 px-2 py-0.5 text-[10px] text-violet-300 border border-violet-400/30 shrink-0">
+                              {card.category}
+                            </span>
+                          )}
+                        </div>
                         <p className="mt-1 font-semibold text-white">{card.front}</p>
                         <p className="mt-2 text-xs uppercase tracking-[0.15em] text-cyan-200">뒷면</p>
                         <p className="mt-1 text-slate-100">{card.back}</p>

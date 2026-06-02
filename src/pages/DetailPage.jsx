@@ -209,6 +209,7 @@ export default function DetailPage({
   const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
   const copy = useMemo(() => getDetailCopy(outputLanguage), [outputLanguage]);
   const [summaryViewMode, setSummaryViewMode] = useState("text"); // "text" | "mindmap"
+  const [pendingTopicExamCards, setPendingTopicExamCards] = useState(null);
   const detailTabs = useMemo(
     () => [
       { id: "topicStructure", label: copy.tabs.topicStructure },
@@ -570,9 +571,20 @@ export default function DetailPage({
                 error={topicStructureError}
                 onRequestGenerate={onRequestTopicStructure}
                 onExplainConcept={onExplainConcept}
+                isVocabularyMode={isVocabularyFile}
                 onStartQuiz={(topic) => {
                   if (topic?.title) setQuizPromptAddonInput(topic.title + " 위주로");
                   setPanelTab("quiz");
+                }}
+                onStartVocabExam={(topic) => {
+                  const concepts = (topic?.keyConcepts || []).map((c) => c.toLowerCase());
+                  const matched = (flashcards || []).filter((card) => {
+                    const front = String(card.front || "").toLowerCase();
+                    return concepts.some((c) => front.includes(c) || c.includes(front));
+                  });
+                  const examCards = matched.length > 0 ? matched : flashcards || [];
+                  setPendingTopicExamCards({ cards: examCards, topicTitle: topic?.title || "" });
+                  setPanelTab("flashcards");
                 }}
               />
             </div>
@@ -1257,6 +1269,8 @@ export default function DetailPage({
                 status={flashcardStatus}
                 error={flashcardError}
                 isVocabularyMode={isVocabularyFile}
+                pendingTopicExam={pendingTopicExamCards}
+                onPendingTopicExamConsumed={() => setPendingTopicExamCards(null)}
               />
             </div>
           )}

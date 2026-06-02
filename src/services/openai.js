@@ -3096,13 +3096,23 @@ export async function generateExamCramSheet({
   return sanitizeMarkdown(content);
 }
 
-export async function generateVocabularyFlashcards(extractedText, { outputLanguage = "ko" } = {}) {
+export async function generateVocabularyFlashcards(extractedText, { outputLanguage = "ko", topicStructure = null } = {}) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const MAX_CHARS = 12000;
   const contextText = String(extractedText || "").trim().slice(0, MAX_CHARS);
   if (!contextText) {
     throw new Error("No text available. Extract PDF text first.");
   }
+
+  const categories = Array.isArray(topicStructure?.topics)
+    ? topicStructure.topics.map((t) => String(t.title || "").trim()).filter(Boolean)
+    : [];
+
+  const categoryInstruction = categories.length > 0
+    ? `\nAlso assign a "category" field to each card — pick the best matching category from this list: ${JSON.stringify(categories)}. If none fits, use empty string "".`
+    : `\n"category" field should always be empty string "".`;
+
+  const schemaExample = `{ "cards": [ { "front": "...", "back": "...", "hint": "...", "category": "..." } ] }`;
 
   const data = await postChatRequest(
     {
@@ -3116,8 +3126,9 @@ export async function generateVocabularyFlashcards(extractedText, { outputLangua
             `"front" = the term or word (원어 그대로). ` +
             `"back" = its meaning/definition in ${outputLanguageLabel} — keep it short and clear. ` +
             `"hint" = a usage example sentence if present in the source, otherwise empty string. ` +
-            `Do NOT generate pairs that aren't in the source text. ` +
-            `Return JSON only: { "cards": [ { "front": "...", "back": "...", "hint": "..." } ] }`,
+            `Do NOT generate pairs that aren't in the source text.` +
+            categoryInstruction +
+            ` Return JSON only: ${schemaExample}`,
         },
         {
           role: "user",
