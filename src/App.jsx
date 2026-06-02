@@ -6909,7 +6909,17 @@ function App() {
     setFlashcardStatus("단어장에서 단어 추출 중...");
     try {
       const { generateVocabularyFlashcards } = await getOpenAiService();
-      const result = await generateVocabularyFlashcards(sourceText, { outputLanguage, topicStructure });
+      const result = await generateVocabularyFlashcards(sourceText, {
+        outputLanguage,
+        topicStructure,
+        onProgress: ({ current, total }) => {
+          setFlashcardStatus(
+            total > 1
+              ? `단어 추출 중... (${current} / ${total} 구간)`
+              : "단어장에서 단어 추출 중..."
+          );
+        },
+      });
       const rawCards = Array.isArray(result?.cards) ? result.cards : Array.isArray(result) ? result : [];
       const cleaned = rawCards
         .map((card) => ({
