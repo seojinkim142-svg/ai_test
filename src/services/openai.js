@@ -3096,11 +3096,29 @@ export async function generateExamCramSheet({
   return sanitizeMarkdown(content);
 }
 
-export async function generateVocabularyFlashcards(extractedText, { outputLanguage = "ko", topicStructure = null } = {}) {
+function splitTextIntoChunks(text, chunkSize) {
+  const chunks = [];
+  let start = 0;
+  while (start < text.length) {
+    let end = start + chunkSize;
+    if (end < text.length) {
+      // 단어/줄 경계에서 자르기
+      const newline = text.lastIndexOf("\n", end);
+      const space = text.lastIndexOf(" ", end);
+      const boundary = newline > start + chunkSize * 0.5 ? newline : space > start + chunkSize * 0.5 ? space : end;
+      end = boundary > start ? boundary : end;
+    }
+    chunks.push(text.slice(start, end).trim());
+    start = end;
+  }
+  return chunks.filter(Boolean);
+}
+
+export async function generateVocabularyFlashcards(extractedText, { outputLanguage = "ko", topicStructure = null, onProgress } = {}) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
-  const MAX_CHARS = 12000;
-  const contextText = String(extractedText || "").trim().slice(0, MAX_CHARS);
-  if (!contextText) {
+  const CHUNK_SIZE = 10000;
+  const fullText = String(extractedText || "").trim();
+  if (!fullText) {
     throw new Error("No text available. Extract PDF text first.");
   }
 
@@ -3114,36 +3132,48 @@ export async function generateVocabularyFlashcards(extractedText, { outputLangua
 
   const schemaExample = `{ "cards": [ { "front": "...", "back": "...", "hint": "...", "category": "..." } ] }`;
 
-  const data = await postChatRequest(
-    {
-      model: MODEL,
-      messages: [
-        {
-          role: "system",
-          content:
-            `You are a vocabulary extractor. The user will paste text from a vocabulary list or glossary (단어장). ` +
-            `Extract every word-definition pair you can find. ` +
-            `"front" = the term or word (원어 그대로). ` +
-            `"back" = its meaning/definition in ${outputLanguageLabel} — keep it short and clear. ` +
-            `"hint" = a usage example sentence if present in the source, otherwise empty string. ` +
-            `Do NOT generate pairs that aren't in the source text.` +
-            categoryInstruction +
-            ` Return JSON only: ${schemaExample}`,
-        },
-        {
-          role: "user",
-          content: `다음 단어장 텍스트에서 모든 단어-뜻 쌍을 추출해줘:\n\n${contextText}`,
-        },
-      ],
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-    },
-    { retries: 1 }
-  );
+  const systemPrompt =
+    `You are a vocabulary extractor. The user will paste text from a vocabulary list or glossary (단어장). ` +
+    `Extract every word-definition pair you can find. ` +
+    `"front" = the term or word (원어 그대로). ` +
+    `"back" = its meaning/definition in ${outputLanguageLabel} — keep it short and clear. ` +
+    `"hint" = a usage example sentence if present in the source, otherwise empty string. ` +
+    `Do NOT generate pairs that aren't in the source text.` +
+    categoryInstruction +
+    ` Return JSON only: ${schemaExample}`;
 
-  const content = data.choices?.[0]?.message?.content?.trim() || "";
-  const sanitized = sanitizeJson(content);
-  return parseJsonSafe(sanitized, "vocabulary flashcards JSON");
+  const chunks = splitTextIntoChunks(fullText, CHUNK_SIZE);
+  const allCards = [];
+  const seenFronts = new Set();
+
+  for (let i = 0; i < chunks.length; i++) {
+    onProgress?.({ current: i + 1, total: chunks.length });
+    const data = await postChatRequest(
+      {
+        model: MODEL,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: `다음 단어장 텍스트에서 모든 단어-뜻 쌍을 추출해줘:\n\n${chunks[i]}` },
+        ],
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+      },
+      { retries: 1 }
+    );
+    const content = data.choices?.[0]?.message?.content?.trim() || "";
+    const sanitized = sanitizeJson(content);
+    const parsed = parseJsonSafe(sanitized, `vocabulary flashcards chunk ${i + 1}`);
+    const cards = Array.isArray(parsed?.cards) ? parsed.cards : [];
+    for (const card of cards) {
+      const front = String(card?.front || "").trim();
+      if (front && !seenFronts.has(front.toLowerCase())) {
+        seenFronts.add(front.toLowerCase());
+        allCards.push(card);
+      }
+    }
+  }
+
+  return { cards: allCards };
 }
 
 export async function generateFlashcards(extractedText, { count = 8, outputLanguage = "ko" } = {}) {
