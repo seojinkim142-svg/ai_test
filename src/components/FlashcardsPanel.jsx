@@ -76,6 +76,7 @@ function FlashcardsPanel({
 
   const pointerStartRef = useRef(null);
   const suppressClickRef = useRef(false);
+  const panelTopRef = useRef(null);
 
   // savedScores(Supabase) 있으면 우선, 없으면 localStorage fallback
   const scoreHistory = (savedScores && savedScores.length > 0) ? savedScores : localScoreHistory;
@@ -139,6 +140,7 @@ function FlashcardsPanel({
     setTopicExamLabel("");
     setExamSessionId(null);
     setHasSavedScore(false);
+    setTimeout(() => panelTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   }, []);
 
   const isExamComplete = isExamMode && examIndex >= examCards.length;
@@ -312,7 +314,7 @@ function FlashcardsPanel({
   }`;
 
   return (
-    <div className={containerClassName}>
+    <div className={containerClassName} ref={panelTopRef}>
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm text-slate-300">암기 카드</p>
