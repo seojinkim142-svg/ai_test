@@ -6854,7 +6854,8 @@ function App() {
         scopeLabel ? `AI 플래시카드 생성 중 (${scopeLabel})...` : "AI 플래시카드 생성 중..."
       );
       const { generateFlashcards } = await getOpenAiService();
-      const result = await generateFlashcards(sourceText, { count: 8, outputLanguage });
+      const isVocabFile = Boolean(activeUploadItem?.isVocabulary);
+      const result = await generateFlashcards(sourceText, { count: 8, outputLanguage, isVocabulary: isVocabFile });
       const rawCards = Array.isArray(result?.cards)
         ? result.cards
         : Array.isArray(result)

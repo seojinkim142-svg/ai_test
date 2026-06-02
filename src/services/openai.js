@@ -3212,7 +3212,7 @@ export async function generateVocabularyFlashcards(extractedText, { outputLangua
   return { cards: allCards };
 }
 
-export async function generateFlashcards(extractedText, { count = 8, outputLanguage = "ko" } = {}) {
+export async function generateFlashcards(extractedText, { count = 8, outputLanguage = "ko", isVocabulary = false } = {}) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const contextText = buildFlashcardsContext(extractedText, count);
   if (!contextText) {
@@ -3220,18 +3220,23 @@ export async function generateFlashcards(extractedText, { count = 8, outputLangu
   }
   const prompt = buildFlashcardsPrompt(contextText, count, outputLanguage);
 
+  const systemContent = isVocabulary
+    ? `You are a vocabulary flashcard maker. Extract word-meaning pairs ONLY. ` +
+      `"front" = the word or phrase exactly as written. ` +
+      `"back" = its meaning or translation in ${outputLanguageLabel} — must be a real linguistic definition, NOT a number, score, rank, or list of words. ` +
+      `"hint" = short usage example if available, otherwise empty string. ` +
+      `SKIP: quiz questions, frequency ranks, rating scores (★ etc), Oxford/BBC/Naver flags, O/X values, lists of example words. ` +
+      `NEVER make the front a question sentence. Return JSON only with the provided schema.`
+    : `Create ${outputLanguageLabel} study flashcards from the user's text only. Front must be a focused question or cue (not just a term label) — any length is fine. Back must be a SHORT exact answer the student can memorize verbatim: a single term, formula, number, brief definition phrase, or short enumeration. NEVER write a full sentence on the back. Include hint only for common misconceptions or memorable tricks — empty string otherwise. Exclude metadata (author, publisher, TOC, page numbers). No near-duplicate cards. Translate all text to ${outputLanguageLabel}. Return JSON only with the provided schema.`;
+
   const data = await postChatRequest(
     {
       model: MODEL,
       messages: [
-        {
-          role: "system",
-          content:
-            `Create ${outputLanguageLabel} study flashcards from the user's text only. Front must be a focused question or cue (not just a term label) — any length is fine. Back must be a SHORT exact answer the student can memorize verbatim: a single term, formula, number, brief definition phrase, or short enumeration. NEVER write a full sentence on the back. Include hint only for common misconceptions or memorable tricks — empty string otherwise. Exclude metadata (author, publisher, TOC, page numbers). No near-duplicate cards. Translate all text to ${outputLanguageLabel}. Return JSON only with the provided schema.`,
-        },
+        { role: "system", content: systemContent },
         { role: "user", content: prompt },
       ],
-      temperature: 1,
+      temperature: isVocabulary ? 0.2 : 1,
       response_format: { type: "json_object" },
     },
     { retries: 0 }
