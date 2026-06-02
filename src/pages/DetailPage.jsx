@@ -1266,6 +1266,8 @@ export default function DetailPage({
                 onSaveScore={handleSaveFlashcardScore}
                 savedScores={flashcardScores}
                 onGenerate={handleGenerateFlashcards}
+                onRegenerate={handleRegenerateFlashcards}
+                onReextract={handleReextractVocabulary}
                 isGenerating={isGeneratingFlashcards}
                 canGenerate={Boolean(file && selectedFileId && !isLoadingText) && !hasReachedFlashcardLimit}
                 generateButtonTitle={flashcardLimitTitle}

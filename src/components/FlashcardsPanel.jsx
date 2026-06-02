@@ -34,6 +34,8 @@ function FlashcardsPanel({
   savedScores,
   isLoading,
   onGenerate,
+  onRegenerate,
+  onReextract,
   isGenerating = false,
   canGenerate = true,
   generateButtonTitle,
@@ -350,6 +352,34 @@ function FlashcardsPanel({
         >
           {isGenerating ? "AI 플래시카드 생성 중..." : "AI 플래시카드 생성"}
         </button>
+        {cards.length > 0 && !isExamMode && (
+          <>
+            {isVocabularyMode && onReextract && (
+              <button
+                type="button"
+                onClick={onReextract}
+                disabled={isGenerating || isLoading}
+                className="ghost-button text-sm text-violet-200"
+                data-ghost-size="sm"
+                style={{ "--ghost-color": "167, 139, 250" }}
+              >
+                {isGenerating ? "재추출 중..." : "단어 재추출"}
+              </button>
+            )}
+            {onRegenerate && (
+              <button
+                type="button"
+                onClick={onRegenerate}
+                disabled={isGenerating || isLoading}
+                className="ghost-button text-sm text-sky-200"
+                data-ghost-size="sm"
+                style={{ "--ghost-color": "125, 211, 252" }}
+              >
+                {isGenerating ? "재생성 중..." : "플래시카드 재생성"}
+              </button>
+            )}
+          </>
+        )}
         <p className="text-xs text-slate-400">PDF 기반 자동 생성</p>
         <button
           type="button"
