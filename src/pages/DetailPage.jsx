@@ -170,6 +170,8 @@ export default function DetailPage({
   flashcardScores,
   handleGenerateFlashcards,
   handleGenerateVocabularyFlashcards,
+  handleReextractVocabulary,
+  handleRegenerateFlashcards,
   isVocabularyFile = false,
   flashcardChapterSelectionInput,
   setFlashcardChapterSelectionInput,
