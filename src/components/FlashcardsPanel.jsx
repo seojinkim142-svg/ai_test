@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const SCORE_HISTORY_STORAGE_KEY = "flashcardExamHistory";
 
-function loadScoreHistory() {
+function loadLocalScoreHistory() {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(SCORE_HISTORY_STORAGE_KEY);
@@ -14,10 +14,23 @@ function loadScoreHistory() {
   }
 }
 
+function saveLocalScoreHistory(list) {
+  try {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(SCORE_HISTORY_STORAGE_KEY, JSON.stringify(list));
+    }
+  } catch {
+    // ignore
+  }
+}
+
 function FlashcardsPanel({
   cards,
   onAdd,
   onDelete,
+  onUpdate,
+  onSaveScore,
+  savedScores,
   isLoading,
   onGenerate,
   isGenerating = false,
@@ -30,18 +43,35 @@ function FlashcardsPanel({
   const [front, setFront] = useState("");
   const [back, setBack] = useState("");
   const [hint, setHint] = useState("");
+
+  // 편집 모드
+  const [editingCardId, setEditingCardId] = useState(null);
+  const [editFront, setEditFront] = useState("");
+  const [editBack, setEditBack] = useState("");
+  const [editHint, setEditHint] = useState("");
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  // 시험 모드
   const [isExamMode, setIsExamMode] = useState(false);
   const [examCards, setExamCards] = useState([]);
   const [examIndex, setExamIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [knownCount, setKnownCount] = useState(0);
   const [unknownCount, setUnknownCount] = useState(0);
+  const [unknownCards, setUnknownCards] = useState([]);
+  const [isRetryMode, setIsRetryMode] = useState(false);
+
+  // 점수 히스토리
   const [showScoreHistory, setShowScoreHistory] = useState(false);
-  const [scoreHistory, setScoreHistory] = useState(() => loadScoreHistory());
+  const [localScoreHistory, setLocalScoreHistory] = useState(() => loadLocalScoreHistory());
   const [examSessionId, setExamSessionId] = useState(null);
   const [hasSavedScore, setHasSavedScore] = useState(false);
+
   const pointerStartRef = useRef(null);
   const suppressClickRef = useRef(false);
+
+  // savedScores(Supabase) 있으면 우선, 없으면 localStorage fallback
+  const scoreHistory = (savedScores && savedScores.length > 0) ? savedScores : localScoreHistory;
 
   const shuffleCards = useCallback((list) => {
     const shuffled = [...list];
@@ -52,13 +82,16 @@ function FlashcardsPanel({
     return shuffled;
   }, []);
 
-  const startExam = useCallback(() => {
-    if (!cards?.length) return;
-    setExamCards(shuffleCards(cards));
+  const startExam = useCallback((targetCards, retryMode = false) => {
+    const source = targetCards || cards;
+    if (!source?.length) return;
+    setExamCards(shuffleCards(source));
     setExamIndex(0);
     setIsFlipped(false);
     setKnownCount(0);
     setUnknownCount(0);
+    setUnknownCards([]);
+    setIsRetryMode(retryMode);
     setExamSessionId(`${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     setHasSavedScore(false);
     setIsExamMode(true);
@@ -71,6 +104,8 @@ function FlashcardsPanel({
     setIsFlipped(false);
     setKnownCount(0);
     setUnknownCount(0);
+    setUnknownCards([]);
+    setIsRetryMode(false);
     setExamSessionId(null);
     setHasSavedScore(false);
   }, []);
@@ -85,28 +120,29 @@ function FlashcardsPanel({
       const safeTotal = Math.max(0, Number(total) || 0);
       const safeKnown = Math.max(0, Number(known) || 0);
       const safeUnknown = Math.max(0, Number(unknown) || 0);
+      const acc = safeTotal ? Math.round((safeKnown / safeTotal) * 100) : 0;
       const record = {
         id: examSessionId || `${Date.now()}`,
         createdAt: new Date().toISOString(),
+        created_at: new Date().toISOString(),
         total: safeTotal,
         known: safeKnown,
         unknown: safeUnknown,
-        accuracy: safeTotal ? Math.round((safeKnown / safeTotal) * 100) : 0,
+        accuracy: acc,
       };
-      setScoreHistory((prev) => {
+      // localStorage 저장
+      setLocalScoreHistory((prev) => {
         const next = [record, ...prev].slice(0, 50);
-        try {
-          if (typeof window !== "undefined") {
-            window.localStorage.setItem(SCORE_HISTORY_STORAGE_KEY, JSON.stringify(next));
-          }
-        } catch {
-          // ignore storage errors
-        }
+        saveLocalScoreHistory(next);
         return next;
       });
+      // Supabase 저장
+      if (onSaveScore) {
+        onSaveScore({ total: safeTotal, known: safeKnown, unknown: safeUnknown, accuracy: acc });
+      }
       setHasSavedScore(true);
     },
-    [examSessionId]
+    [examSessionId, onSaveScore]
   );
 
   const advanceCard = useCallback(
@@ -115,9 +151,13 @@ function FlashcardsPanel({
       const nextKnown = result === "known" ? knownCount + 1 : knownCount;
       const nextUnknown = result === "known" ? unknownCount : unknownCount + 1;
       const nextIndex = examIndex + 1;
+      const newUnknownCards = result === "unknown"
+        ? [...unknownCards, examCards[examIndex]]
+        : unknownCards;
 
       setKnownCount(nextKnown);
       setUnknownCount(nextUnknown);
+      setUnknownCards(newUnknownCards);
       setExamIndex(nextIndex);
       setIsFlipped(false);
 
@@ -130,13 +170,14 @@ function FlashcardsPanel({
       }
     },
     [
-      examCards.length,
+      examCards,
       examIndex,
       hasSavedScore,
       isExamComplete,
       knownCount,
       persistScoreRecord,
       unknownCount,
+      unknownCards,
     ]
   );
 
@@ -197,6 +238,31 @@ function FlashcardsPanel({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [advanceCard, isExamComplete, isExamMode]);
 
+  // 편집 시작
+  const startEdit = useCallback((card) => {
+    setEditingCardId(card.id);
+    setEditFront(card.front);
+    setEditBack(card.back);
+    setEditHint(card.hint || "");
+  }, []);
+
+  // 편집 저장
+  const saveEdit = useCallback(async () => {
+    if (!editFront.trim() || !editBack.trim() || !onUpdate) return;
+    setIsSavingEdit(true);
+    try {
+      await onUpdate(editingCardId, editFront.trim(), editBack.trim(), editHint.trim());
+      setEditingCardId(null);
+    } finally {
+      setIsSavingEdit(false);
+    }
+  }, [editingCardId, editFront, editBack, editHint, onUpdate]);
+
+  // 편집 취소
+  const cancelEdit = useCallback(() => {
+    setEditingCardId(null);
+  }, []);
+
   const canStartExam = Boolean(cards?.length) && !isLoading && !isGenerating;
 
   const containerClassName = `rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30${
@@ -212,6 +278,9 @@ function FlashcardsPanel({
             <h3 className="text-lg font-semibold text-white">플래시카드</h3>
             {isVocabularyMode && (
               <span className="rounded-full bg-violet-500 px-2 py-0.5 text-[11px] font-bold text-white">단어장</span>
+            )}
+            {isRetryMode && isExamMode && (
+              <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[11px] font-bold text-white">복습</span>
             )}
           </div>
         </div>
@@ -235,7 +304,7 @@ function FlashcardsPanel({
         <p className="text-xs text-slate-400">PDF 기반 자동 생성</p>
         <button
           type="button"
-          onClick={isExamMode ? endExam : startExam}
+          onClick={isExamMode ? endExam : () => startExam()}
           disabled={!isExamMode && !canStartExam}
           className="ghost-button text-sm text-emerald-100"
           data-ghost-size="sm"
@@ -268,6 +337,7 @@ function FlashcardsPanel({
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
                 <span>
                   {examIndex + 1} / {examCards.length}
+                  {isRetryMode && <span className="ml-1 text-amber-300">(복습)</span>}
                 </span>
                 <span>알고있음 {knownCount} / 모름 {unknownCount}</span>
               </div>
@@ -331,20 +401,31 @@ function FlashcardsPanel({
                 <span className="rounded-xl border border-white/10 bg-white/5 px-3 py-1">
                   알고있음 {knownCount}
                 </span>
-                <span className="rounded-xl border border-white/10 bg-white/5 px-3 py-1">
+                <span className="rounded-xl border border-white/10 bg-white/5 px-3 py-1 text-amber-200">
                   모름 {unknownCount}
                 </span>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-center gap-2">
                 <button
                   type="button"
-                  onClick={startExam}
+                  onClick={() => startExam()}
                   className="ghost-button text-sm text-emerald-100"
                   data-ghost-size="sm"
                   style={{ "--ghost-color": "52, 211, 153" }}
                 >
                   다시 시작
                 </button>
+                {unknownCards.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => startExam(unknownCards, true)}
+                    className="ghost-button text-sm text-amber-200"
+                    data-ghost-size="sm"
+                    style={{ "--ghost-color": "251, 191, 36" }}
+                  >
+                    틀린 카드만 복습 ({unknownCards.length}개)
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={endExam}
@@ -375,7 +456,7 @@ function FlashcardsPanel({
                   className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-slate-900/40 px-3 py-2 text-xs text-slate-200"
                 >
                   <span className="text-slate-300">
-                    {new Date(item.createdAt).toLocaleString("ko-KR")}
+                    {new Date(item.createdAt || item.created_at).toLocaleString("ko-KR")}
                   </span>
                   <span>{item.total}문항 / 알고있음 {item.known} / 모름 {item.unknown}</span>
                   <span className="font-semibold text-emerald-200">정답률 {item.accuracy}%</span>
@@ -434,33 +515,97 @@ function FlashcardsPanel({
               <p className="text-sm text-slate-400">저장된 카드가 없습니다.</p>
             )}
             {!isLoading &&
-              cards.map((card) => (
-                <div
-                  key={card.id}
-                  className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-100 shadow-inner shadow-black/20"
-                >
-                  <p className="text-xs uppercase tracking-[0.15em] text-emerald-200">앞면</p>
-                  <p className="mt-1 font-semibold text-white">{card.front}</p>
-                  <p className="mt-2 text-xs uppercase tracking-[0.15em] text-cyan-200">뒷면</p>
-                  <p className="mt-1 text-slate-100">{card.back}</p>
-                  {card.hint && (
-                    <p className="mt-2 text-xs text-slate-300">
-                      힌트: <span className="text-slate-100">{card.hint}</span>
-                    </p>
-                  )}
-                  <div className="mt-2 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => onDelete(card.id)}
-                      className="ghost-button text-xs text-slate-200"
-                      data-ghost-size="sm"
-                      style={{ "--ghost-color": "226, 232, 240" }}
-                    >
-                      삭제
-                    </button>
+              cards.map((card) => {
+                const isEditing = editingCardId === card.id;
+                return (
+                  <div
+                    key={card.id}
+                    className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-100 shadow-inner shadow-black/20"
+                  >
+                    {isEditing ? (
+                      <>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <textarea
+                            value={editFront}
+                            onChange={(e) => setEditFront(e.target.value)}
+                            className="min-h-[70px] rounded-xl border border-emerald-300/40 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                            placeholder="앞면"
+                          />
+                          <textarea
+                            value={editBack}
+                            onChange={(e) => setEditBack(e.target.value)}
+                            className="min-h-[70px] rounded-xl border border-emerald-300/40 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                            placeholder="뒷면"
+                          />
+                        </div>
+                        <input
+                          type="text"
+                          value={editHint}
+                          onChange={(e) => setEditHint(e.target.value)}
+                          className="mt-2 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none"
+                          placeholder="힌트/예문 (선택)"
+                        />
+                        <div className="mt-2 flex justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={cancelEdit}
+                            disabled={isSavingEdit}
+                            className="ghost-button text-xs text-slate-300"
+                            data-ghost-size="sm"
+                            style={{ "--ghost-color": "148, 163, 184" }}
+                          >
+                            취소
+                          </button>
+                          <button
+                            type="button"
+                            onClick={saveEdit}
+                            disabled={!editFront.trim() || !editBack.trim() || isSavingEdit}
+                            className="ghost-button text-xs text-emerald-100"
+                            data-ghost-size="sm"
+                            style={{ "--ghost-color": "52, 211, 153" }}
+                          >
+                            {isSavingEdit ? "저장 중..." : "저장"}
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs uppercase tracking-[0.15em] text-emerald-200">앞면</p>
+                        <p className="mt-1 font-semibold text-white">{card.front}</p>
+                        <p className="mt-2 text-xs uppercase tracking-[0.15em] text-cyan-200">뒷면</p>
+                        <p className="mt-1 text-slate-100">{card.back}</p>
+                        {card.hint && (
+                          <p className="mt-2 text-xs text-slate-300">
+                            힌트: <span className="text-slate-100">{card.hint}</span>
+                          </p>
+                        )}
+                        <div className="mt-2 flex justify-end gap-2">
+                          {onUpdate && (
+                            <button
+                              type="button"
+                              onClick={() => startEdit(card)}
+                              className="ghost-button text-xs text-slate-200"
+                              data-ghost-size="sm"
+                              style={{ "--ghost-color": "226, 232, 240" }}
+                            >
+                              편집
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => onDelete(card.id)}
+                            className="ghost-button text-xs text-slate-200"
+                            data-ghost-size="sm"
+                            style={{ "--ghost-color": "226, 232, 240" }}
+                          >
+                            삭제
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
           </div>
         </>
       )}

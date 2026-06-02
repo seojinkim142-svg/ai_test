@@ -164,6 +164,9 @@ export default function DetailPage({
   isLoadingFlashcards,
   handleAddFlashcard,
   handleDeleteFlashcard,
+  handleUpdateFlashcard,
+  handleSaveFlashcardScore,
+  flashcardScores,
   handleGenerateFlashcards,
   handleGenerateVocabularyFlashcards,
   isVocabularyFile = false,
@@ -1244,6 +1247,9 @@ export default function DetailPage({
                 isLoading={isLoadingFlashcards}
                 onAdd={handleAddFlashcard}
                 onDelete={handleDeleteFlashcard}
+                onUpdate={handleUpdateFlashcard}
+                onSaveScore={handleSaveFlashcardScore}
+                savedScores={flashcardScores}
                 onGenerate={handleGenerateFlashcards}
                 isGenerating={isGeneratingFlashcards}
                 canGenerate={Boolean(file && selectedFileId && !isLoadingText) && !hasReachedFlashcardLimit}
