@@ -227,15 +227,6 @@ export default function TopicStructurePanel({
 
                     {/* 버튼 영역 */}
                     <div className="flex flex-col gap-2">
-                      <button
-                        onClick={() => onStartQuiz(topic)}
-                        className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-sm font-medium px-4 py-2.5 transition-colors"
-                      >
-                        퀴즈 시작
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                      </button>
                       {isVocabularyMode && onStartVocabExam && (
                         <button
                           onClick={() => onStartVocabExam(topic)}
