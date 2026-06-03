@@ -343,6 +343,9 @@ function sanitizeUiText(value, fallback = "") {
   return text;
 }
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isDbId(id) { return UUID_REGEX.test(String(id || "")); }
+
 function createLocalEntityId(prefix) {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return `${prefix}-${crypto.randomUUID()}`;
@@ -2860,7 +2863,7 @@ function App() {
     const isNowLoggedIn = Boolean(user);
     prevUserRef.current = user;
     if (!wasLoggedOut || !isNowLoggedIn || !supabase) return;
-    const localCards = flashcards.filter((c) => String(c.id || "").startsWith("flashcard-"));
+    const localCards = flashcards.filter((c) => !isDbId(c.id));
     if (localCards.length === 0) return;
     const deckId = selectedFileId || "default";
     (async () => {
@@ -6759,7 +6762,7 @@ function App() {
       }
       setFlashcardError("");
       try {
-        if (!String(cardId).startsWith("flashcard-")) {
+        if (isDbId(cardId)) {
           await deleteFlashcard({ userId: user.id, cardId });
         }
         setFlashcards((prev) => prev.filter((c) => c.id !== cardId));
@@ -6818,7 +6821,7 @@ function App() {
     }
     setFlashcardError("");
     try {
-      const dbIds = toDelete.filter((id) => !String(id).startsWith("flashcard-"));
+      const dbIds = toDelete.filter((id) => isDbId(id));
       if (user && dbIds.length) {
         await deleteFlashcards({ userId: user.id, cardIds: dbIds });
       }
@@ -7060,7 +7063,7 @@ function App() {
 
   const handleDeleteAllFlashcards = useCallback(async () => {
     if (!flashcards.length) return;
-    const allIds = flashcards.map((c) => c.id).filter((id) => !String(id).startsWith("flashcard-"));
+    const allIds = flashcards.map((c) => c.id).filter((id) => isDbId(id));
     try {
       if (user && allIds.length) await deleteFlashcards({ userId: user.id, cardIds: allIds });
       setFlashcards([]);
@@ -7073,7 +7076,7 @@ function App() {
   const handleReextractVocabulary = useCallback(async () => {
     if (isGeneratingFlashcards) return;
     // 기존 카드 전체 삭제 후 재추출
-    const allIds = flashcards.map((c) => c.id).filter((id) => !String(id).startsWith("flashcard-"));
+    const allIds = flashcards.map((c) => c.id).filter((id) => isDbId(id));
     if (allIds.length > 0) {
       try {
         if (user) await deleteFlashcards({ userId: user.id, cardIds: allIds });
@@ -7090,7 +7093,7 @@ function App() {
   const handleRegenerateFlashcards = useCallback(async () => {
     if (isGeneratingFlashcards) return;
     // 기존 카드 전체 삭제 후 재생성
-    const allIds = flashcards.map((c) => c.id).filter((id) => !String(id).startsWith("flashcard-"));
+    const allIds = flashcards.map((c) => c.id).filter((id) => isDbId(id));
     if (allIds.length > 0) {
       try {
         if (user) await deleteFlashcards({ userId: user.id, cardIds: allIds });
