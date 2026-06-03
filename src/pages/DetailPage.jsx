@@ -164,6 +164,7 @@ export default function DetailPage({
   isLoadingFlashcards,
   handleAddFlashcard,
   handleDeleteFlashcard,
+  handleDeleteAllFlashcards,
   handleUpdateFlashcard,
   handleDeduplicateFlashcards,
   handleSaveFlashcardScore,
@@ -1277,6 +1278,7 @@ export default function DetailPage({
                 isLoading={isLoadingFlashcards}
                 onAdd={handleAddFlashcard}
                 onDelete={handleDeleteFlashcard}
+                onDeleteAll={handleDeleteAllFlashcards}
                 onUpdate={handleUpdateFlashcard}
                 onDeduplicate={handleDeduplicateFlashcards}
                 onSaveScore={handleSaveFlashcardScore}

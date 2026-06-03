@@ -28,6 +28,7 @@ function FlashcardsPanel({
   cards,
   onAdd,
   onDelete,
+  onDeleteAll,
   onUpdate,
   onDeduplicate,
   onSaveScore,
@@ -398,6 +399,22 @@ function FlashcardsPanel({
             style={{ "--ghost-color": "251, 191, 36" }}
           >
             중복 {duplicateCount}개 제거
+          </button>
+        )}
+        {cards.length > 0 && !isExamMode && onDeleteAll && (
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm(`카드 ${cards.length}개를 모두 삭제할까요?`)) {
+                onDeleteAll();
+              }
+            }}
+            disabled={isLoading || isGenerating}
+            className="ghost-button text-sm text-red-300"
+            data-ghost-size="sm"
+            style={{ "--ghost-color": "252, 165, 165" }}
+          >
+            전체 삭제
           </button>
         )}
       </div>

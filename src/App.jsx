@@ -7055,6 +7055,18 @@ function App() {
     topicStructure,
   ]);
 
+  const handleDeleteAllFlashcards = useCallback(async () => {
+    if (!flashcards.length) return;
+    const allIds = flashcards.map((c) => c.id);
+    try {
+      if (user) await deleteFlashcards({ userId: user.id, cardIds: allIds });
+      setFlashcards([]);
+      setFlashcardStatus("플래시카드를 모두 삭제했습니다.");
+    } catch (err) {
+      setFlashcardError(`전체 삭제에 실패했습니다: ${err.message}`);
+    }
+  }, [user, flashcards]);
+
   const handleReextractVocabulary = useCallback(async () => {
     if (isGeneratingFlashcards) return;
     // 기존 카드 전체 삭제 후 재추출
@@ -8482,6 +8494,7 @@ function App() {
     isLoadingFlashcards,
     handleAddFlashcard,
     handleDeleteFlashcard,
+    handleDeleteAllFlashcards,
     handleUpdateFlashcard,
     handleDeduplicateFlashcards,
     handleSaveFlashcardScore,
