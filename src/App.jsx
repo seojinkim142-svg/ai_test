@@ -6832,6 +6832,21 @@ function App() {
     }
   }, [user, flashcards]);
 
+  const handleDeleteAllFlashcards = useCallback(async () => {
+    if (!flashcards.length) return;
+    setFlashcardError("");
+    try {
+      const dbIds = flashcards.map((c) => c.id).filter((id) => isDbId(id));
+      if (user && dbIds.length) {
+        await deleteFlashcards({ userId: user.id, cardIds: dbIds });
+      }
+      setFlashcards([]);
+      setFlashcardStatus("전체 카드를 삭제했습니다.");
+    } catch (err) {
+      setFlashcardError(`전체 삭제에 실패했습니다: ${err.message}`);
+    }
+  }, [user, flashcards]);
+
   const handleSaveFlashcardScore = useCallback(
     async ({ total, known, unknown, accuracy }) => {
       const deckId = selectedFileId || "default";
