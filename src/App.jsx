@@ -2852,6 +2852,37 @@ function App() {
     },
     [user]
   );
+
+  // 로그인 전 로컬 카드 → Supabase 마이그레이션
+  const prevUserRef = useRef(null);
+  useEffect(() => {
+    const wasLoggedOut = !prevUserRef.current;
+    const isNowLoggedIn = Boolean(user);
+    prevUserRef.current = user;
+    if (!wasLoggedOut || !isNowLoggedIn || !supabase) return;
+    const localCards = flashcards.filter((c) => String(c.id || "").startsWith("flashcard-"));
+    if (localCards.length === 0) return;
+    const deckId = selectedFileId || "default";
+    (async () => {
+      try {
+        const saved = await addFlashcards({
+          userId: user.id,
+          deckId,
+          cards: localCards.map(({ front, back, hint }) => ({ front, back, hint: hint || "" })),
+        });
+        if (saved?.length) {
+          setFlashcards((prev) => {
+            const localIds = new Set(localCards.map((c) => c.id));
+            return [...saved, ...prev.filter((c) => !localIds.has(c.id))];
+          });
+          setFlashcardStatus(`로그인 후 로컬 카드 ${saved.length}개를 저장했습니다.`);
+        }
+      } catch {
+        // 마이그레이션 실패 시 무시 (로컬 카드는 그대로 유지)
+      }
+    })();
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const loadUploads = useCallback(
     async () => {
       const requestSeq = loadUploadsRequestSeqRef.current + 1;
