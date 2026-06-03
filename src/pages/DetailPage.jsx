@@ -175,6 +175,8 @@ export default function DetailPage({
   isVocabularyFile = false,
   flashcardChapterSelectionInput,
   setFlashcardChapterSelectionInput,
+  flashcardGenerateCount = 8,
+  setFlashcardGenerateCount,
   isGeneratingFlashcards,
   extractedText,
   flashcardStatus,
@@ -1238,6 +1240,18 @@ export default function DetailPage({
                       placeholder="챕터 범위 (예: 1-3,5)"
                       className="w-full rounded-xl border border-white/15 bg-slate-950/60 px-3 py-2 text-sm text-white outline-none ring-0 transition focus:border-emerald-300/60"
                     />
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-xs text-slate-400 whitespace-nowrap">개수</span>
+                      <select
+                        value={flashcardGenerateCount}
+                        onChange={(e) => setFlashcardGenerateCount?.(Number(e.target.value))}
+                        className="rounded-xl border border-white/15 bg-slate-950/60 px-2 py-2 text-sm text-white outline-none transition focus:border-emerald-300/60"
+                      >
+                        {[5, 8, 10, 15, 20].map((n) => (
+                          <option key={n} value={n}>{n}개</option>
+                        ))}
+                      </select>
+                    </div>
                     <button
                       type="button"
                       onClick={handleGenerateFlashcards}
@@ -1249,7 +1263,7 @@ export default function DetailPage({
                         hasReachedFlashcardLimit
                       }
                       title={flashcardLimitTitle}
-                      className="ghost-button text-xs text-emerald-100"
+                      className="ghost-button text-xs text-emerald-100 shrink-0"
                       data-ghost-size="sm"
                       style={{ "--ghost-color": "52, 211, 153" }}
                     >

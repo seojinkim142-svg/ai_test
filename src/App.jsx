@@ -1265,6 +1265,7 @@ function App() {
   };
   const [oxChapterSelectionInput, setOxChapterSelectionInput] = useState("");
   const [flashcardChapterSelectionInput, setFlashcardChapterSelectionInput] = useState("");
+  const [flashcardGenerateCount, setFlashcardGenerateCount] = useState(8);
   const [mockExamChapterSelectionInput, setMockExamChapterSelectionInput] = useState("");
   const [mockExamPromptAddonInput, setMockExamPromptAddonInput] = useState("");
   const [isChapterRangeOpen, setIsChapterRangeOpen] = useState(false);
@@ -6855,7 +6856,7 @@ function App() {
       );
       const { generateFlashcards } = await getOpenAiService();
       const isVocabFile = Boolean(activeUploadItem?.isVocabulary);
-      const result = await generateFlashcards(sourceText, { count: 8, outputLanguage, isVocabulary: isVocabFile });
+      const result = await generateFlashcards(sourceText, { count: flashcardGenerateCount, outputLanguage, isVocabulary: isVocabFile });
       const rawCards = Array.isArray(result?.cards)
         ? result.cards
         : Array.isArray(result)
@@ -6909,6 +6910,7 @@ function App() {
     isLoadingText,
     extractedText,
     flashcardChapterSelectionInput,
+    flashcardGenerateCount,
     getOpenAiService,
     outputLanguage,
     resolveQuestionSourceText,
@@ -8445,6 +8447,8 @@ function App() {
     isVocabularyFile: Boolean(activeUploadItem?.isVocabulary),
     flashcardChapterSelectionInput,
     setFlashcardChapterSelectionInput,
+    flashcardGenerateCount,
+    setFlashcardGenerateCount,
     isGeneratingFlashcards,
     extractedText,
     flashcardStatus: safeFlashcardStatus,
