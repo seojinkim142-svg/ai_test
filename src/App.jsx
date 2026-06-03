@@ -6759,7 +6759,9 @@ function App() {
       }
       setFlashcardError("");
       try {
-        await deleteFlashcard({ userId: user.id, cardId });
+        if (!String(cardId).startsWith("flashcard-")) {
+          await deleteFlashcard({ userId: user.id, cardId });
+        }
         setFlashcards((prev) => prev.filter((c) => c.id !== cardId));
         setFlashcardStatus("플래시카드를 삭제했습니다.");
       } catch (err) {
