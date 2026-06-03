@@ -3138,7 +3138,7 @@ function recoverCardsFromTruncatedJson(raw) {
 
 export async function generateVocabularyFlashcards(extractedText, { outputLanguage = "ko", topicStructure = null, onProgress } = {}) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
-  const CHUNK_SIZE = 4000; // 청크 크기 축소 → JSON 출력 토큰 한도 초과 방지
+  const CHUNK_SIZE = 5000; // 단어 밀도 높은 단어장 처리용으로 확대
   const fullText = String(extractedText || "").trim();
   if (!fullText) {
     throw new Error("No text available. Extract PDF text first.");
@@ -3181,7 +3181,7 @@ export async function generateVocabularyFlashcards(extractedText, { outputLangua
         ],
         temperature: 0.2,
         response_format: { type: "json_object" },
-        max_tokens: 4096,
+        max_tokens: 8192,
       },
       { retries: 1 }
     );

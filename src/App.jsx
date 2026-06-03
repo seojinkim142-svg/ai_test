@@ -6964,15 +6964,30 @@ function App() {
       setFlashcardError("텍스트 추출이 아직 진행 중입니다. 잠시만 기다려 주세요.");
       return;
     }
-    const sourceText = String(extractedText || "").trim();
-    if (sourceText.length < 30) {
-      setFlashcardError("단어장에서 텍스트를 추출하기가 부족합니다. PDF 텍스트가 로드됐는지 확인해 주세요.");
-      return;
-    }
 
     setFlashcardError("");
     setIsGeneratingFlashcards(true);
-    const CHUNK_SIZE = 4000;
+
+    // 단어장 모드: 기본 12,000자 제한 무시하고 전체 PDF 재추출
+    let sourceText = "";
+    try {
+      setFlashcardStatus("단어장 전체 텍스트 추출 중...");
+      const fullExtraction = await extractPdfTextWithCaching(file, selectedFileId, user?.id, {
+        pageLimit: 300,
+        maxLength: 80000,
+      });
+      sourceText = String(fullExtraction?.text || "").trim();
+    } catch {
+      sourceText = String(extractedText || "").trim();
+    }
+
+    if (sourceText.length < 30) {
+      setFlashcardError("단어장에서 텍스트를 추출하기가 부족합니다. PDF 텍스트가 로드됐는지 확인해 주세요.");
+      setIsGeneratingFlashcards(false);
+      return;
+    }
+
+    const CHUNK_SIZE = 5000;
     const totalChunks = Math.ceil(sourceText.length / CHUNK_SIZE);
     setFlashcardStatus(`텍스트 길이: ${sourceText.length.toLocaleString()}자 / 총 ${totalChunks}개 구간으로 처리`);
     try {
