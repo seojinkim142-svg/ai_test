@@ -6973,91 +6973,82 @@ function App() {
 
   const handleGenerateVocabularyFlashcards = useCallback(async () => {
     if (isGeneratingFlashcards) return;
-    if (AUTH_ENABLED && !user) {
-      setFlashcardError("먼저 로그인해 주세요.");
-      return;
-    }
-    if (!file || !selectedFileId) {
-      setFlashcardError("먼저 파일을 열어 주세요.");
-      return;
-    }
-    if (isLoadingText) {
-      setFlashcardError("텍스트 추출이 아직 진행 중입니다. 잠시만 기다려 주세요.");
-      return;
-    }
+    if (AUTH_ENABLED && !user) { setFlashcardError("먼저 로그인해 주세요."); return; }
+    if (!file || !selectedFileId) { setFlashcardError("먼저 파일을 열어 주세요."); return; }
+    if (isLoadingText) { setFlashcardError("텍스트 추출이 아직 진행 중입니다. 잠시만 기다려 주세요."); return; }
 
     setFlashcardError("");
     setIsGeneratingFlashcards(true);
 
-    // 단어장 모드: 기본 12,000자 제한 무시하고 전체 PDF 재추출
-    let sourceText = "";
     try {
-      setFlashcardStatus("단어장 전체 텍스트 추출 중...");
-      const fullExtraction = await extractPdfTextWithCaching(file, selectedFileId, user?.id, {
-        pageLimit: 300,
-        maxLength: 500000,
-      });
-      sourceText = String(fullExtraction?.text || "").trim();
-    } catch {
-      sourceText = String(extractedText || "").trim();
-    }
+      // 1단계: PDF 전체 페이지 수 파악
+      setFlashcardStatus("PDF 페이지 수 확인 중...");
+      const { pdfjsLib } = await import("./utils/pdf.js").then(m => ({ pdfjsLib: m }));
+      const { extractPdfPageTexts: getPageTexts } = await import("./utils/pdf.js");
 
-    if (sourceText.length < 30) {
-      setFlashcardError("단어장에서 텍스트를 추출하기가 부족합니다. PDF 텍스트가 로드됐는지 확인해 주세요.");
-      setIsGeneratingFlashcards(false);
-      return;
-    }
+      // PDF에서 총 페이지 수 가져오기
+      const { loadPdfDocument } = await import("./utils/pdf.js");
+      const { pdf } = await loadPdfDocument(file);
+      const totalPages = pdf.numPages;
 
-    const CHUNK_SIZE = 5000;
-    const totalChunks = Math.ceil(sourceText.length / CHUNK_SIZE);
-    setFlashcardStatus(`텍스트 길이: ${sourceText.length.toLocaleString()}자 / 총 ${totalChunks}개 구간으로 처리`);
-    try {
+      // 2단계: 페이지별로 텍스트 추출 → AI 처리
       const { generateVocabularyFlashcards } = await getOpenAiService();
-      const result = await generateVocabularyFlashcards(sourceText, {
-        outputLanguage,
-        topicStructure,
-        onProgress: ({ current, total }) => {
-          setFlashcardStatus(
-            total > 1
-              ? `단어 추출 중... (${current} / ${total} 구간)`
-              : "단어장에서 단어 추출 중..."
-          );
-        },
-      });
-      const rawCards = Array.isArray(result?.cards) ? result.cards : Array.isArray(result) ? result : [];
-      // 기존 카드와 중복 스킵
-      const existingFronts = new Set(flashcards.map((c) => String(c.front || "").trim().toLowerCase()));
-      const cleaned = rawCards
-        .map((card) => ({
-          front: String(card?.front || "").trim(),
-          back: String(card?.back || "").trim(),
-          hint: String(card?.hint || "").trim(),
-          category: String(card?.category || "").trim() || null,
-        }))
-        .filter((card) => card.front && card.back && !existingFronts.has(card.front.toLowerCase()));
-      if (cleaned.length === 0) {
-        throw new Error("추출된 단어가 모두 이미 존재합니다. 중복 단어는 추가되지 않습니다.");
-      }
+      const seenFronts = new Set(flashcards.map((c) => String(c.front || "").trim().toLowerCase()));
+      const allCards = [];
       const deckId = selectedFileId || "default";
-      const saved = user
-        ? await addFlashcards({ userId: user.id, deckId, cards: cleaned })
-        : cleaned.map((card) => ({
-            id: createLocalEntityId("flashcard"),
-            deck_id: deckId,
-            front: card.front,
-            back: card.back,
-            hint: card.hint || "",
-            category: card.category || null,
-            created_at: new Date().toISOString(),
-          }));
-      if (!saved.length) throw new Error("단어 카드 저장에 실패했습니다.");
-      const categoryCount = cleaned.filter((c) => c.category).length;
-      setFlashcards((prev) => [...saved, ...prev]);
-      setFlashcardStatus(
-        categoryCount > 0
-          ? `${saved.length}개의 단어를 추출했습니다. (${categoryCount}개 카테고리 분류됨)`
-          : `${saved.length}개의 단어를 추출했습니다.`
-      );
+
+      const PAGE_BATCH = 3; // 한 번에 3페이지씩 묶어서 처리
+      for (let startPage = 1; startPage <= totalPages; startPage += PAGE_BATCH) {
+        const endPage = Math.min(startPage + PAGE_BATCH - 1, totalPages);
+        const pageNumbers = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i);
+
+        setFlashcardStatus(`페이지 추출 중... (${startPage}–${endPage} / ${totalPages})`);
+
+        const pageResults = await getPageTexts(file, pageNumbers, { maxCharsPerPage: 8000 });
+        const batchText = pageResults.map(p => p.text).filter(Boolean).join("\n");
+
+        if (!batchText.trim()) continue;
+
+        const result = await generateVocabularyFlashcards(batchText, {
+          outputLanguage,
+          topicStructure,
+        });
+
+        const rawCards = Array.isArray(result?.cards) ? result.cards : [];
+        for (const card of rawCards) {
+          const front = String(card?.front || "").trim();
+          const back = String(card?.back || "").trim();
+          if (front && back && !seenFronts.has(front.toLowerCase())) {
+            seenFronts.add(front.toLowerCase());
+            allCards.push({
+              front,
+              back,
+              hint: String(card?.hint || "").trim(),
+              category: String(card?.category || "").trim() || null,
+            });
+          }
+        }
+
+        // 중간 저장 (50개 쌓이면 바로 DB에 저장해서 유실 방지)
+        if (allCards.length >= 50) {
+          const toSave = allCards.splice(0, allCards.length);
+          const saved = user
+            ? await addFlashcards({ userId: user.id, deckId, cards: toSave })
+            : toSave.map((c) => ({ id: createLocalEntityId("flashcard"), deck_id: deckId, ...c, created_at: new Date().toISOString() }));
+          setFlashcards((prev) => [...saved, ...prev]);
+          setFlashcardStatus(`${startPage}–${endPage} / ${totalPages} 페이지 처리 완료 (누적 저장 중...)`);
+        }
+      }
+
+      // 남은 카드 저장
+      if (allCards.length > 0) {
+        const saved = user
+          ? await addFlashcards({ userId: user.id, deckId, cards: allCards })
+          : allCards.map((c) => ({ id: createLocalEntityId("flashcard"), deck_id: deckId, ...c, created_at: new Date().toISOString() }));
+        setFlashcards((prev) => [...saved, ...prev]);
+      }
+
+      setFlashcardStatus(`전체 ${totalPages}페이지에서 단어 추출 완료.`);
     } catch (err) {
       setFlashcardError(`단어 추출에 실패했습니다: ${err.message}`);
       setFlashcardStatus("");
@@ -7070,7 +7061,7 @@ function App() {
     file,
     selectedFileId,
     isLoadingText,
-    extractedText,
+    flashcards,
     getOpenAiService,
     outputLanguage,
     topicStructure,
