@@ -6816,8 +6816,9 @@ function App() {
     }
     setFlashcardError("");
     try {
-      if (user) {
-        await deleteFlashcards({ userId: user.id, cardIds: toDelete });
+      const dbIds = toDelete.filter((id) => !String(id).startsWith("flashcard-"));
+      if (user && dbIds.length) {
+        await deleteFlashcards({ userId: user.id, cardIds: dbIds });
       }
       setFlashcards((prev) => prev.filter((c) => !toDelete.includes(c.id)));
       setFlashcardStatus(`중복 카드 ${toDelete.length}개를 제거했습니다.`);
@@ -7057,9 +7058,9 @@ function App() {
 
   const handleDeleteAllFlashcards = useCallback(async () => {
     if (!flashcards.length) return;
-    const allIds = flashcards.map((c) => c.id);
+    const allIds = flashcards.map((c) => c.id).filter((id) => !String(id).startsWith("flashcard-"));
     try {
-      if (user) await deleteFlashcards({ userId: user.id, cardIds: allIds });
+      if (user && allIds.length) await deleteFlashcards({ userId: user.id, cardIds: allIds });
       setFlashcards([]);
       setFlashcardStatus("플래시카드를 모두 삭제했습니다.");
     } catch (err) {
@@ -7070,7 +7071,7 @@ function App() {
   const handleReextractVocabulary = useCallback(async () => {
     if (isGeneratingFlashcards) return;
     // 기존 카드 전체 삭제 후 재추출
-    const allIds = flashcards.map((c) => c.id);
+    const allIds = flashcards.map((c) => c.id).filter((id) => !String(id).startsWith("flashcard-"));
     if (allIds.length > 0) {
       try {
         if (user) await deleteFlashcards({ userId: user.id, cardIds: allIds });
@@ -7078,6 +7079,8 @@ function App() {
       } catch {
         // 삭제 실패해도 계속 진행
       }
+    } else {
+      setFlashcards([]);
     }
     await handleGenerateVocabularyFlashcards();
   }, [isGeneratingFlashcards, flashcards, user, handleGenerateVocabularyFlashcards]);
@@ -7085,7 +7088,7 @@ function App() {
   const handleRegenerateFlashcards = useCallback(async () => {
     if (isGeneratingFlashcards) return;
     // 기존 카드 전체 삭제 후 재생성
-    const allIds = flashcards.map((c) => c.id);
+    const allIds = flashcards.map((c) => c.id).filter((id) => !String(id).startsWith("flashcard-"));
     if (allIds.length > 0) {
       try {
         if (user) await deleteFlashcards({ userId: user.id, cardIds: allIds });
@@ -7093,6 +7096,8 @@ function App() {
       } catch {
         // 삭제 실패해도 계속 진행
       }
+    } else {
+      setFlashcards([]);
     }
     await handleGenerateFlashcards();
   }, [isGeneratingFlashcards, flashcards, user, handleGenerateFlashcards]);
