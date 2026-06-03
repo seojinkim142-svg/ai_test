@@ -6995,7 +6995,7 @@ function App() {
       setFlashcardStatus("단어장 전체 텍스트 추출 중...");
       const fullExtraction = await extractPdfTextWithCaching(file, selectedFileId, user?.id, {
         pageLimit: 300,
-        maxLength: 80000,
+        maxLength: 500000,
       });
       sourceText = String(fullExtraction?.text || "").trim();
     } catch {
