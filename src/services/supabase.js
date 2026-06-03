@@ -2,6 +2,9 @@
 import { resolveAppRedirectUrl } from "../utils/appOrigin";
 import { Capacitor } from "@capacitor/core";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isValidUuid = (id) => UUID_RE.test(String(id || ""));
+
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const supabaseBucket = import.meta.env.VITE_SUPABASE_BUCKET || "pdf-uploads";
@@ -328,7 +331,7 @@ export async function listFlashcards({ userId, deckId }) {
 
 export async function deleteFlashcard({ userId, cardId }) {
   const client = requireSupabase();
-  if (!userId || !cardId) return;
+  if (!userId || !cardId || !isValidUuid(cardId)) return;
   const { error } = await client.from(FLASHCARDS_TABLE).delete().eq("id", cardId).eq("user_id", userId);
   if (error) throw error;
 }
@@ -336,7 +339,9 @@ export async function deleteFlashcard({ userId, cardId }) {
 export async function deleteFlashcards({ userId, cardIds }) {
   const client = requireSupabase();
   if (!userId || !cardIds?.length) return;
-  const { error } = await client.from(FLASHCARDS_TABLE).delete().in("id", cardIds).eq("user_id", userId);
+  const safeIds = cardIds.filter(isValidUuid);
+  if (!safeIds.length) return;
+  const { error } = await client.from(FLASHCARDS_TABLE).delete().in("id", safeIds).eq("user_id", userId);
   if (error) throw error;
 }
 
