@@ -341,7 +341,19 @@ export async function deleteFlashcards({ userId, cardIds }) {
   if (!userId || !cardIds?.length) return;
   const safeIds = cardIds.filter(isValidUuid);
   if (!safeIds.length) return;
-  const { error } = await client.from(FLASHCARDS_TABLE).delete().in("id", safeIds).eq("user_id", userId);
+  // 한 번에 너무 많은 ID를 보내면 URL 길이 초과 → 100개씩 청크 처리
+  const CHUNK_SIZE = 100;
+  for (let i = 0; i < safeIds.length; i += CHUNK_SIZE) {
+    const chunk = safeIds.slice(i, i + CHUNK_SIZE);
+    const { error } = await client.from(FLASHCARDS_TABLE).delete().in("id", chunk).eq("user_id", userId);
+    if (error) throw error;
+  }
+}
+
+export async function deleteAllFlashcardsForDeck({ userId, deckId }) {
+  const client = requireSupabase();
+  if (!userId || !deckId) return;
+  const { error } = await client.from(FLASHCARDS_TABLE).delete().eq("user_id", userId).eq("deck_id", deckId);
   if (error) throw error;
 }
 

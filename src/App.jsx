@@ -21,6 +21,7 @@ import {
   deleteFlashcard,
   updateFlashcard,
   deleteFlashcards,
+  deleteAllFlashcardsForDeck,
   saveFlashcardScore,
   listFlashcardScores,
   createFolder,
@@ -6836,16 +6837,15 @@ function App() {
     if (!flashcards.length) return;
     setFlashcardError("");
     try {
-      const dbIds = flashcards.map((c) => c.id).filter((id) => isDbId(id));
-      if (user && dbIds.length) {
-        await deleteFlashcards({ userId: user.id, cardIds: dbIds });
+      if (user && selectedFileId) {
+        await deleteAllFlashcardsForDeck({ userId: user.id, deckId: selectedFileId });
       }
       setFlashcards([]);
       setFlashcardStatus("전체 카드를 삭제했습니다.");
     } catch (err) {
       setFlashcardError(`전체 삭제에 실패했습니다: ${err.message}`);
     }
-  }, [user, flashcards]);
+  }, [user, flashcards, selectedFileId]);
 
   const handleSaveFlashcardScore = useCallback(
     async ({ total, known, unknown, accuracy }) => {
@@ -7075,18 +7075,6 @@ function App() {
     outputLanguage,
     topicStructure,
   ]);
-
-  const handleDeleteAllFlashcards = useCallback(async () => {
-    if (!flashcards.length) return;
-    const allIds = flashcards.map((c) => c.id).filter((id) => isDbId(id));
-    try {
-      if (user && allIds.length) await deleteFlashcards({ userId: user.id, cardIds: allIds });
-      setFlashcards([]);
-      setFlashcardStatus("플래시카드를 모두 삭제했습니다.");
-    } catch (err) {
-      setFlashcardError(`전체 삭제에 실패했습니다: ${err.message}`);
-    }
-  }, [user, flashcards]);
 
   const handleReextractVocabulary = useCallback(async () => {
     if (isGeneratingFlashcards) return;
