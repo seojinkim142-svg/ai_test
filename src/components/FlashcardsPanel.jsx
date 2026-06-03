@@ -388,6 +388,18 @@ function FlashcardsPanel({
         >
           역대점수확인
         </button>
+        {duplicateCount > 0 && !isExamMode && onDeduplicate && (
+          <button
+            type="button"
+            onClick={onDeduplicate}
+            disabled={isLoading || isGenerating}
+            className="ghost-button text-sm text-amber-200"
+            data-ghost-size="sm"
+            style={{ "--ghost-color": "251, 191, 36" }}
+          >
+            중복 {duplicateCount}개 제거
+          </button>
+        )}
       </div>
 
       {categories.length > 0 && !isExamMode && (
