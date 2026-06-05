@@ -6991,32 +6991,25 @@ function App() {
       const seenFronts = new Set(flashcards.map((c) => String(c.front || "").trim().toLowerCase()));
       const deckId = selectedFileId || "default";
 
-      const PAGE_BATCH = 3;
-      const PARALLEL = 2; // 2배치씩 병렬 처리
+      const PARALLEL = 3; // 3페이지 동시 병렬 처리
       let savedCards = [];
       let failedBatches = 0;
 
-      // 배치 인덱스 목록 생성
-      const batches = [];
-      for (let startPage = 1; startPage <= totalPages; startPage += PAGE_BATCH) {
-        batches.push(startPage);
-      }
-
-      for (let bi = 0; bi < batches.length; bi += PARALLEL) {
-        const parallelBatches = batches.slice(bi, bi + PARALLEL);
-        const firstPage = parallelBatches[0];
-        const lastPage = Math.min(parallelBatches[parallelBatches.length - 1] + PAGE_BATCH - 1, totalPages);
-        setFlashcardStatus(`페이지 추출 중... (${firstPage}–${lastPage} / ${totalPages})`);
+      for (let bi = 1; bi <= totalPages; bi += PARALLEL) {
+        const pageNums = Array.from(
+          { length: Math.min(PARALLEL, totalPages - bi + 1) },
+          (_, i) => bi + i
+        );
+        const lastPage = pageNums[pageNums.length - 1];
+        setFlashcardStatus(`페이지 추출 중... (${bi}–${lastPage} / ${totalPages})`);
 
         const batchResults = await Promise.all(
-          parallelBatches.map(async (startPage) => {
-            const endPage = Math.min(startPage + PAGE_BATCH - 1, totalPages);
-            const pageNumbers = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i);
+          pageNums.map(async (pageNum) => {
             try {
-              const pageResults = await getPageTexts(file, pageNumbers, { maxCharsPerPage: 20000 });
-              const batchText = pageResults.map((p) => p.text).filter(Boolean).join("\n");
-              if (!batchText.trim()) return [];
-              const result = await generateVocabularyFlashcards(batchText, { outputLanguage, topicStructure });
+              const pageResults = await getPageTexts(file, [pageNum], { maxCharsPerPage: 20000 });
+              const pageText = pageResults[0]?.text || "";
+              if (!pageText.trim()) return [];
+              const result = await generateVocabularyFlashcards(pageText, { outputLanguage, topicStructure });
               return Array.isArray(result?.cards) ? result.cards : [];
             } catch {
               failedBatches++;
