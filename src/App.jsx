@@ -7013,7 +7013,7 @@ function App() {
             const endPage = Math.min(startPage + PAGE_BATCH - 1, totalPages);
             const pageNumbers = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i);
             try {
-              const pageResults = await getPageTexts(file, pageNumbers, { maxCharsPerPage: 8000 });
+              const pageResults = await getPageTexts(file, pageNumbers, { maxCharsPerPage: 20000 });
               const batchText = pageResults.map((p) => p.text).filter(Boolean).join("\n");
               if (!batchText.trim()) return [];
               const result = await generateVocabularyFlashcards(batchText, { outputLanguage, topicStructure });
