@@ -3138,7 +3138,7 @@ function recoverCardsFromTruncatedJson(raw) {
 
 export async function generateVocabularyFlashcards(extractedText, { outputLanguage = "ko", topicStructure = null, onProgress } = {}) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
-  const CHUNK_SIZE = 12000; // 단어장 테이블 형식 최적화 — 청크당 API 호출 최소화
+  const CHUNK_SIZE = 5000; // 청크를 작게 유지해 AI가 모든 항목을 빠짐없이 추출하도록 강제
   const fullText = String(extractedText || "").trim();
   if (!fullText) {
     throw new Error("No text available. Extract PDF text first.");
@@ -3156,13 +3156,13 @@ export async function generateVocabularyFlashcards(extractedText, { outputLangua
 
   const systemPrompt =
     `You are a vocabulary extractor. The user will paste text from a vocabulary list or glossary (단어장). ` +
-    `Your ONLY job is to extract (word → meaning) pairs for language learning. ` +
+    `Your job is to extract EVERY SINGLE word-meaning pair found in the text — be completely exhaustive, do not skip or summarize. ` +
     `"front" = the word or term exactly as written (원어 그대로). Must be a real word or phrase, NOT a question or sentence. ` +
     `"back" = the linguistic meaning/translation of that word in ${outputLanguageLabel}. Must be a definition or translation — NEVER a number, score, rank, or O/X flag. ` +
     `"hint" = a short usage example sentence if present in the source, otherwise empty string. ` +
-    `SKIP entirely: quiz questions, fill-in-the-blank exercises, frequency ranks, Oxford/BBC scores, O/X membership flags, page numbers, metadata. ` +
+    `SKIP only: quiz questions, fill-in-the-blank exercises, frequency ranks, Oxford/BBC scores, O/X membership flags, page numbers, metadata. ` +
     `SKIP any card where "back" would be just a number, just "O", just "X", or any non-linguistic value. ` +
-    `Do NOT invent or generate content not in the source text.` +
+    `Do NOT invent or generate content not in the source text. Do NOT stop early — output every word you find.` +
     categoryInstruction +
     ` Return JSON only: ${schemaExample}`;
 
@@ -3181,7 +3181,7 @@ export async function generateVocabularyFlashcards(extractedText, { outputLangua
         ],
         temperature: 0.2,
         response_format: { type: "json_object" },
-        max_tokens: 8192,
+        max_tokens: 16384,
       },
       { retries: 1 }
     );
