@@ -322,8 +322,8 @@ export async function addFlashcards({ userId, deckId, cards }) {
 
 export async function listFlashcards({ userId, deckId }) {
   if (!supabase || !userId) return [];
-  const query = supabase.from(FLASHCARDS_TABLE).select("*").eq("user_id", userId).order("created_at", { ascending: false });
-  if (deckId) query.eq("deck_id", deckId);
+  let query = supabase.from(FLASHCARDS_TABLE).select("*").eq("user_id", userId).order("created_at", { ascending: false });
+  if (deckId) query = query.eq("deck_id", deckId);
   const { data, error } = await query;
   if (error) throw error;
   return data || [];
@@ -387,13 +387,13 @@ export async function saveFlashcardScore({ userId, deckId, total, known, unknown
 
 export async function listFlashcardScores({ userId, deckId }) {
   if (!supabase || !userId) return [];
-  const query = supabase
+  let query = supabase
     .from(FLASHCARD_SCORES_TABLE)
     .select("*")
     .eq("user_id", userId)
     .order("created_at", { ascending: false })
     .limit(50);
-  if (deckId) query.eq("deck_id", deckId);
+  if (deckId) query = query.eq("deck_id", deckId);
   const { data, error } = await query;
   if (error) throw error;
   return data || [];
