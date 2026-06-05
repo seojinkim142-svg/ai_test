@@ -449,7 +449,7 @@ function FlashcardsPanel({
         </div>
       )}
 
-      {status && <p className="mt-3 text-sm text-emerald-200">{status}</p>}
+      {status && !isExamMode && <p className="mt-3 text-sm text-emerald-200">{status}</p>}
       {error && (
         <p className="mt-3 rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-200 ring-1 ring-red-400/30">
           {error}
@@ -457,81 +457,84 @@ function FlashcardsPanel({
       )}
 
       {isExamMode && (
-        <div className="mt-4 flex flex-1 flex-col rounded-3xl border border-emerald-200/20 bg-slate-950/80 p-4 shadow-lg shadow-black/30">
+        <div className="mt-4 flex flex-1 flex-col gap-3">
           {!isExamComplete && currentCard && (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
-                <span>
-                  {examIndex + 1} / {examCards.length}
-                  {isRetryMode && <span className="ml-1 text-amber-300">(복습)</span>}
+              {/* 진행 상태 */}
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span className="font-medium text-slate-300">
+                  {examIndex + 1} <span className="text-slate-500">/ {examCards.length}</span>
+                  {isRetryMode && !topicExamLabel && <span className="ml-1.5 text-amber-300">복습</span>}
                 </span>
-                <span>알고있음 {knownCount} / 모름 {unknownCount}</span>
+                <div className="flex gap-3">
+                  <span className="text-emerald-400">○ {knownCount}</span>
+                  <span className="text-red-400">✕ {unknownCount}</span>
+                </div>
               </div>
-              <div className="mt-3 grid min-h-[40vh] w-full flex-1 grid-cols-[auto,1fr,auto] items-center gap-3">
+
+              {/* 진행 바 */}
+              <div className="h-1 w-full rounded-full bg-white/10">
+                <div
+                  className="h-1 rounded-full bg-emerald-400 transition-all duration-300"
+                  style={{ width: `${(examIndex / examCards.length) * 100}%` }}
+                />
+              </div>
+
+              {/* 카드 */}
+              <button
+                type="button"
+                onClick={handleCardClick}
+                onPointerDown={handlePointerDown}
+                onPointerUp={handlePointerUp}
+                onPointerCancel={handlePointerCancel}
+                className="relative flex min-h-[42vh] w-full flex-1 flex-col items-center justify-center rounded-3xl border border-white/10 bg-slate-800/60 px-8 py-10 shadow-xl shadow-black/30 transition hover:border-white/20 active:scale-[0.99] select-none"
+                style={{ touchAction: "pan-y" }}
+              >
+                {!isFlipped ? (
+                  <p className="text-center text-2xl font-bold tracking-wide text-white">
+                    {currentCard.front}
+                  </p>
+                ) : (
+                  <div className="flex flex-col items-center gap-3 text-center">
+                    <p className="text-lg font-semibold text-emerald-200">{currentCard.back}</p>
+                    {currentCard.hint && (
+                      <p className="mt-1 text-sm text-slate-400 italic">"{currentCard.hint}"</p>
+                    )}
+                  </div>
+                )}
+                <p className="absolute bottom-4 text-[11px] text-slate-600">
+                  {isFlipped ? "다시 앞면 보기" : "탭해서 뜻 보기"}
+                </p>
+              </button>
+
+              {/* X / O 버튼 */}
+              <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
                   onClick={() => advanceCard("unknown")}
-                  className="ghost-button h-12 w-12 rounded-full text-emerald-100"
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "52, 211, 153" }}
-                  aria-label="모름"
+                  className="flex items-center justify-center gap-2 rounded-2xl border border-red-500/30 bg-red-500/10 py-4 text-base font-semibold text-red-300 transition hover:bg-red-500/20 active:scale-95"
                 >
-                  <span className="text-xl">X</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleCardClick}
-                  onPointerDown={handlePointerDown}
-                  onPointerUp={handlePointerUp}
-                  onPointerCancel={handlePointerCancel}
-                  className="flex min-h-[40vh] w-full flex-1 items-center rounded-2xl border border-white/10 bg-white/5 px-6 py-8 text-left text-slate-100 shadow-inner shadow-black/20 transition hover:border-emerald-300/40 select-none"
-                  style={{ touchAction: "pan-y" }}
-                >
-                  <div className="flex w-full flex-col justify-center">
-                    <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">
-                      {isFlipped ? "뒷면" : "앞면"}
-                    </p>
-                    <p className="mt-3 font-semibold text-white" style={{ fontSize: "1.05rem" }}>
-                      {isFlipped ? currentCard.back : currentCard.front}
-                    </p>
-                    {isFlipped && currentCard.hint && (
-                      <p className="mt-4 text-sm text-slate-300">
-                        힌트: <span className="text-slate-100">{currentCard.hint}</span>
-                      </p>
-                    )}
-                  </div>
+                  <span className="text-lg">✕</span> 모름
                 </button>
                 <button
                   type="button"
                   onClick={() => advanceCard("known")}
-                  className="ghost-button h-12 w-12 rounded-full text-emerald-100"
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "52, 211, 153" }}
-                  aria-label="알고있음"
+                  className="flex items-center justify-center gap-2 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 py-4 text-base font-semibold text-emerald-300 transition hover:bg-emerald-500/20 active:scale-95"
                 >
-                  <span className="text-xl">O</span>
+                  <span className="text-lg">○</span> 알고있음
                 </button>
               </div>
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
-                <span>탭: 뒷면 보기</span>
-                <span>좌: 모름 / 우: 알고있음</span>
-              </div>
+
+              <p className="text-center text-[11px] text-slate-600">← 스와이프: 모름 · 알고있음 →</p>
             </>
           )}
+
           {isExamComplete && (
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
-              <p className="text-sm text-emerald-200">시험 완료</p>
-              <p className="text-2xl font-semibold text-white">{examCards.length}문항</p>
-              <p className="text-sm text-slate-200">정답률 {accuracy}%</p>
-              <div className="flex flex-wrap items-center justify-center gap-2 text-sm text-slate-200">
-                <span className="rounded-xl border border-white/10 bg-white/5 px-3 py-1">
-                  알고있음 {knownCount}
-                </span>
-                <span className="rounded-xl border border-white/10 bg-white/5 px-3 py-1 text-amber-200">
-                  모름 {unknownCount}
-                </span>
-              </div>
-              <div className="flex flex-wrap items-center justify-center gap-2">
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-3xl border border-white/10 bg-slate-800/60 px-6 py-10 text-center shadow-xl shadow-black/30">
+              <p className="text-xs font-semibold uppercase tracking-widest text-emerald-400">완료</p>
+              <p className="text-4xl font-bold text-white">{accuracy}%</p>
+              <p className="text-sm text-slate-400">{examCards.length}문항 · 알고있음 {knownCount} · 모름 {unknownCount}</p>
+              <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
                 <button
                   type="button"
                   onClick={() => startExam()}
@@ -549,7 +552,7 @@ function FlashcardsPanel({
                     data-ghost-size="sm"
                     style={{ "--ghost-color": "251, 191, 36" }}
                   >
-                    틀린 카드만 복습 ({unknownCards.length}개)
+                    틀린 카드 복습 ({unknownCards.length}개)
                   </button>
                 )}
                 <button
