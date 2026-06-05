@@ -487,22 +487,22 @@ function FlashcardsPanel({
                 onPointerDown={handlePointerDown}
                 onPointerUp={handlePointerUp}
                 onPointerCancel={handlePointerCancel}
-                className="relative flex min-h-[42vh] w-full flex-1 flex-col items-center justify-center rounded-3xl border border-white/10 bg-slate-800 px-8 py-10 shadow-xl shadow-black/40 transition hover:border-white/20 active:scale-[0.99] select-none"
+                className="relative flex min-h-[42vh] w-full flex-1 flex-col items-center justify-center rounded-3xl border border-black/5 bg-white px-8 py-10 shadow-lg shadow-black/10 transition hover:shadow-xl active:scale-[0.99] select-none"
                 style={{ touchAction: "pan-y" }}
               >
                 {!isFlipped ? (
-                  <p className="text-center text-2xl font-bold tracking-wide text-white">
+                  <p className="text-center text-2xl font-bold tracking-wide text-slate-800">
                     {currentCard.front}
                   </p>
                 ) : (
                   <div className="flex flex-col items-center gap-3 text-center">
-                    <p className="text-lg font-semibold text-emerald-200">{currentCard.back}</p>
+                    <p className="text-lg font-semibold text-emerald-600">{currentCard.back}</p>
                     {currentCard.hint && (
                       <p className="mt-1 text-sm text-slate-400 italic">"{currentCard.hint}"</p>
                     )}
                   </div>
                 )}
-                <p className="absolute bottom-4 text-[11px] text-slate-600">
+                <p className="absolute bottom-4 text-[11px] text-slate-400">
                   {isFlipped ? "다시 앞면 보기" : "탭해서 뜻 보기"}
                 </p>
               </button>
@@ -530,10 +530,10 @@ function FlashcardsPanel({
           )}
 
           {isExamComplete && (
-            <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-3xl border border-white/10 bg-slate-800 px-6 py-10 text-center shadow-xl shadow-black/40">
-              <p className="text-xs font-semibold uppercase tracking-widest text-emerald-400">완료</p>
-              <p className="text-4xl font-bold text-white">{accuracy}%</p>
-              <p className="text-sm text-slate-400">{examCards.length}문항 · 알고있음 {knownCount} · 모름 {unknownCount}</p>
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-3xl border border-black/5 bg-white px-6 py-10 text-center shadow-lg shadow-black/10">
+              <p className="text-xs font-semibold uppercase tracking-widest text-emerald-500">완료</p>
+              <p className="text-4xl font-bold text-slate-800">{accuracy}%</p>
+              <p className="text-sm text-slate-500">{examCards.length}문항 · 알고있음 {knownCount} · 모름 {unknownCount}</p>
               <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
                 <button
                   type="button"
