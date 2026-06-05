@@ -217,17 +217,17 @@ export default function DetailPage({
   const [summaryViewMode, setSummaryViewMode] = useState("text"); // "text" | "mindmap"
   const [pendingTopicExamCards, setPendingTopicExamCards] = useState(null);
   const detailTabs = useMemo(
-    () => [
-      { id: "topicStructure", label: copy.tabs.topicStructure },
-      { id: "summary", label: copy.tabs.summary },
-      ...(!isVocabularyFile ? [
-        { id: "quiz", label: copy.tabs.quiz },
-        { id: "reviewNotes", label: copy.tabs.reviewNotes },
-        { id: "mockExam", label: copy.tabs.mockExam },
-      ] : []),
-      { id: "flashcards", label: copy.tabs.flashcards },
-      { id: "tutor", label: copy.tabs.tutor },
-    ],
+    () => isVocabularyFile
+      ? [{ id: "flashcards", label: copy.tabs.flashcards }]
+      : [
+          { id: "topicStructure", label: copy.tabs.topicStructure },
+          { id: "summary", label: copy.tabs.summary },
+          { id: "quiz", label: copy.tabs.quiz },
+          { id: "reviewNotes", label: copy.tabs.reviewNotes },
+          { id: "mockExam", label: copy.tabs.mockExam },
+          { id: "flashcards", label: copy.tabs.flashcards },
+          { id: "tutor", label: copy.tabs.tutor },
+        ],
     [copy, isVocabularyFile]
   );
   const normalizeChapterSelectionInput = (value) => String(value || "").replace(/\s+/g, "");
@@ -293,6 +293,12 @@ export default function DetailPage({
       setPanelTab("quiz");
     }
   }, [panelTab, setPanelTab]);
+
+  useEffect(() => {
+    if (isVocabularyFile) {
+      setPanelTab("flashcards");
+    }
+  }, [isVocabularyFile]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const target = emphasisTextareaRef.current;
