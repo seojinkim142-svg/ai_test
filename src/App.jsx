@@ -6982,10 +6982,10 @@ function App() {
 
     try {
       setFlashcardStatus("PDF 페이지 수 확인 중...");
-      const { extractPdfPageTexts: getPageTexts, loadPdfDocument } = await import("./utils/pdf.js");
+      const { extractPdfPageTexts: getPageTexts } = await import("./utils/pdf.js");
 
-      const { pdf } = await loadPdfDocument(file);
-      const totalPages = pdf.numPages;
+      // 1페이지만 요청해 totalPages 확인
+      const { totalPages } = await getPageTexts(file, [1], { maxCharsPerPage: 1 });
 
       const { generateVocabularyFlashcards } = await getOpenAiService();
       const seenFronts = new Set(flashcards.map((c) => String(c.front || "").trim().toLowerCase()));
@@ -7006,8 +7006,8 @@ function App() {
         const batchResults = await Promise.all(
           pageNums.map(async (pageNum) => {
             try {
-              const pageResults = await getPageTexts(file, [pageNum], { maxCharsPerPage: 20000 });
-              const pageText = pageResults[0]?.text || "";
+              const { pages } = await getPageTexts(file, [pageNum], { maxCharsPerPage: 20000 });
+              const pageText = pages?.[0]?.text || "";
               if (!pageText.trim()) return [];
               const result = await generateVocabularyFlashcards(pageText, { outputLanguage, topicStructure });
               return Array.isArray(result?.cards) ? result.cards : [];
