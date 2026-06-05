@@ -487,7 +487,7 @@ function FlashcardsPanel({
                 onPointerDown={handlePointerDown}
                 onPointerUp={handlePointerUp}
                 onPointerCancel={handlePointerCancel}
-                className="relative flex min-h-[42vh] w-full flex-1 flex-col items-center justify-center rounded-3xl border border-white/10 bg-slate-800/60 px-8 py-10 shadow-xl shadow-black/30 transition hover:border-white/20 active:scale-[0.99] select-none"
+                className="relative flex min-h-[42vh] w-full flex-1 flex-col items-center justify-center rounded-3xl border border-white/10 bg-slate-800 px-8 py-10 shadow-xl shadow-black/40 transition hover:border-white/20 active:scale-[0.99] select-none"
                 style={{ touchAction: "pan-y" }}
               >
                 {!isFlipped ? (
@@ -512,14 +512,14 @@ function FlashcardsPanel({
                 <button
                   type="button"
                   onClick={() => advanceCard("unknown")}
-                  className="flex items-center justify-center gap-2 rounded-2xl border border-red-500/30 bg-red-500/10 py-4 text-base font-semibold text-red-300 transition hover:bg-red-500/20 active:scale-95"
+                  className="flex items-center justify-center gap-2 rounded-2xl border border-red-500/40 bg-red-500/20 py-4 text-base font-semibold text-red-300 transition hover:bg-red-500/30 active:scale-95"
                 >
                   <span className="text-lg">✕</span> 모름
                 </button>
                 <button
                   type="button"
                   onClick={() => advanceCard("known")}
-                  className="flex items-center justify-center gap-2 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 py-4 text-base font-semibold text-emerald-300 transition hover:bg-emerald-500/20 active:scale-95"
+                  className="flex items-center justify-center gap-2 rounded-2xl border border-emerald-500/40 bg-emerald-500/20 py-4 text-base font-semibold text-emerald-300 transition hover:bg-emerald-500/30 active:scale-95"
                 >
                   <span className="text-lg">○</span> 알고있음
                 </button>
@@ -530,7 +530,7 @@ function FlashcardsPanel({
           )}
 
           {isExamComplete && (
-            <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-3xl border border-white/10 bg-slate-800/60 px-6 py-10 text-center shadow-xl shadow-black/30">
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 rounded-3xl border border-white/10 bg-slate-800 px-6 py-10 text-center shadow-xl shadow-black/40">
               <p className="text-xs font-semibold uppercase tracking-widest text-emerald-400">완료</p>
               <p className="text-4xl font-bold text-white">{accuracy}%</p>
               <p className="text-sm text-slate-400">{examCards.length}문항 · 알고있음 {knownCount} · 모름 {unknownCount}</p>
