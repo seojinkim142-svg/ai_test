@@ -3138,7 +3138,7 @@ function recoverCardsFromTruncatedJson(raw) {
 
 export async function generateVocabularyFlashcards(extractedText, { outputLanguage = "ko", topicStructure = null, onProgress } = {}) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
-  const CHUNK_SIZE = 5000; // 청크를 작게 유지해 AI가 모든 항목을 빠짐없이 추출하도록 강제
+  const CHUNK_SIZE = 20000; // 1페이지 = 1청크 = 1 API 호출 (maxCharsPerPage와 동일)
   const fullText = String(extractedText || "").trim();
   if (!fullText) {
     throw new Error("No text available. Extract PDF text first.");
