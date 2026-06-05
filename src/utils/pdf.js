@@ -43,7 +43,7 @@ async function loadPdfRuntime() {
   return pdfRuntimePromise;
 }
 
-async function loadPdfDocument(file) {
+export async function loadPdfDocument(file) {
   if (!file || typeof file.arrayBuffer !== "function") {
     throw new Error("PDF file is unavailable.");
   }
