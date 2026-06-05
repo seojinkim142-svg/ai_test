@@ -6981,74 +6981,80 @@ function App() {
     setIsGeneratingFlashcards(true);
 
     try {
-      // 1단계: PDF 전체 페이지 수 파악
       setFlashcardStatus("PDF 페이지 수 확인 중...");
-      const { pdfjsLib } = await import("./utils/pdf.js").then(m => ({ pdfjsLib: m }));
-      const { extractPdfPageTexts: getPageTexts } = await import("./utils/pdf.js");
+      const { extractPdfPageTexts: getPageTexts, loadPdfDocument } = await import("./utils/pdf.js");
 
-      // PDF에서 총 페이지 수 가져오기
-      const { loadPdfDocument } = await import("./utils/pdf.js");
       const { pdf } = await loadPdfDocument(file);
       const totalPages = pdf.numPages;
 
-      // 2단계: 페이지별로 텍스트 추출 → AI 처리
       const { generateVocabularyFlashcards } = await getOpenAiService();
       const seenFronts = new Set(flashcards.map((c) => String(c.front || "").trim().toLowerCase()));
-      const allCards = [];
       const deckId = selectedFileId || "default";
 
-      const PAGE_BATCH = 3; // 한 번에 3페이지씩 묶어서 처리
+      const PAGE_BATCH = 3;
+      const PARALLEL = 2; // 2배치씩 병렬 처리
+      let savedCards = [];
+      let failedBatches = 0;
+
+      // 배치 인덱스 목록 생성
+      const batches = [];
       for (let startPage = 1; startPage <= totalPages; startPage += PAGE_BATCH) {
-        const endPage = Math.min(startPage + PAGE_BATCH - 1, totalPages);
-        const pageNumbers = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i);
+        batches.push(startPage);
+      }
 
-        setFlashcardStatus(`페이지 추출 중... (${startPage}–${endPage} / ${totalPages})`);
+      for (let bi = 0; bi < batches.length; bi += PARALLEL) {
+        const parallelBatches = batches.slice(bi, bi + PARALLEL);
+        const firstPage = parallelBatches[0];
+        const lastPage = Math.min(parallelBatches[parallelBatches.length - 1] + PAGE_BATCH - 1, totalPages);
+        setFlashcardStatus(`페이지 추출 중... (${firstPage}–${lastPage} / ${totalPages})`);
 
-        const pageResults = await getPageTexts(file, pageNumbers, { maxCharsPerPage: 8000 });
-        const batchText = pageResults.map(p => p.text).filter(Boolean).join("\n");
+        const batchResults = await Promise.all(
+          parallelBatches.map(async (startPage) => {
+            const endPage = Math.min(startPage + PAGE_BATCH - 1, totalPages);
+            const pageNumbers = Array.from({ length: endPage - startPage + 1 }, (_, i) => startPage + i);
+            try {
+              const pageResults = await getPageTexts(file, pageNumbers, { maxCharsPerPage: 8000 });
+              const batchText = pageResults.map((p) => p.text).filter(Boolean).join("\n");
+              if (!batchText.trim()) return [];
+              const result = await generateVocabularyFlashcards(batchText, { outputLanguage, topicStructure });
+              return Array.isArray(result?.cards) ? result.cards : [];
+            } catch {
+              failedBatches++;
+              return [];
+            }
+          })
+        );
 
-        if (!batchText.trim()) continue;
-
-        const result = await generateVocabularyFlashcards(batchText, {
-          outputLanguage,
-          topicStructure,
-        });
-
-        const rawCards = Array.isArray(result?.cards) ? result.cards : [];
-        for (const card of rawCards) {
-          const front = String(card?.front || "").trim();
-          const back = String(card?.back || "").trim();
-          if (front && back && !seenFronts.has(front.toLowerCase())) {
-            seenFronts.add(front.toLowerCase());
-            allCards.push({
-              front,
-              back,
-              hint: String(card?.hint || "").trim(),
-              category: String(card?.category || "").trim() || null,
-            });
+        // 병렬 결과를 페이지 순서대로 병합
+        const newCards = [];
+        for (const cards of batchResults) {
+          for (const card of cards) {
+            const front = String(card?.front || "").trim();
+            const back = String(card?.back || "").trim();
+            if (front && back && !seenFronts.has(front.toLowerCase())) {
+              seenFronts.add(front.toLowerCase());
+              newCards.push({
+                front,
+                back,
+                hint: String(card?.hint || "").trim(),
+                category: String(card?.category || "").trim() || null,
+              });
+            }
           }
         }
 
-        // 중간 저장 (50개 쌓이면 바로 DB에 저장해서 유실 방지)
-        if (allCards.length >= 50) {
-          const toSave = allCards.splice(0, allCards.length);
-          const saved = user
-            ? await addFlashcards({ userId: user.id, deckId, cards: toSave })
-            : toSave.map((c) => ({ id: createLocalEntityId("flashcard"), deck_id: deckId, ...c, created_at: new Date().toISOString() }));
-          setFlashcards((prev) => [...saved, ...prev]);
-          setFlashcardStatus(`${startPage}–${endPage} / ${totalPages} 페이지 처리 완료 (누적 저장 중...)`);
-        }
-      }
+        if (newCards.length === 0) continue;
 
-      // 남은 카드 저장
-      if (allCards.length > 0) {
+        // 중간 저장 (버퍼 없이 바로 저장 — 순서 보장)
         const saved = user
-          ? await addFlashcards({ userId: user.id, deckId, cards: allCards })
-          : allCards.map((c) => ({ id: createLocalEntityId("flashcard"), deck_id: deckId, ...c, created_at: new Date().toISOString() }));
-        setFlashcards((prev) => [...saved, ...prev]);
+          ? await addFlashcards({ userId: user.id, deckId, cards: newCards })
+          : newCards.map((c) => ({ id: createLocalEntityId("flashcard"), deck_id: deckId, ...c, created_at: new Date().toISOString() }));
+        savedCards = [...savedCards, ...saved];
+        setFlashcards((prev) => [...prev, ...saved]);
       }
 
-      setFlashcardStatus(`전체 ${totalPages}페이지에서 단어 추출 완료.`);
+      const failNote = failedBatches > 0 ? ` (${failedBatches}개 배치 실패 — 부분 추출됨)` : "";
+      setFlashcardStatus(`전체 ${totalPages}페이지에서 단어 추출 완료. 총 ${savedCards.length}개${failNote}`);
     } catch (err) {
       setFlashcardError(`단어 추출에 실패했습니다: ${err.message}`);
       setFlashcardStatus("");
