@@ -7,6 +7,7 @@ const DETAIL_COPY = {
       reviewNotes: "오답노트",
       mockExam: "모의고사",
       flashcards: "카드",
+      vocabQuiz: "퀴즈",
       tutor: "AI 튜터",
     },
     summary: {
