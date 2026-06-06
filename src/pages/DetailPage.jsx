@@ -170,6 +170,8 @@ export default function DetailPage({
   handleDeduplicateFlashcards,
   handleSaveFlashcardScore,
   flashcardScores,
+  vocabQuizScores,
+  handleSaveVocabQuizScore,
   handleGenerateFlashcards,
   handleGenerateVocabularyFlashcards,
   handleReextractVocabulary,
@@ -1307,7 +1309,11 @@ export default function DetailPage({
             </div>
           )}
           {panelTab === "vocabQuiz" && (
-            <VocabQuizPanel cards={flashcards} />
+            <VocabQuizPanel
+              cards={flashcards}
+              savedScores={vocabQuizScores}
+              onSaveScore={handleSaveVocabQuizScore}
+            />
           )}
           {panelTab === "tutor" && (
             <AiTutorPanel
