@@ -3,6 +3,7 @@ import { Capacitor } from "@capacitor/core";
 import ActionsPanel from "../components/ActionsPanel";
 import AiTutorPanel from "../components/AiTutorPanel";
 import FlashcardsPanel from "../components/FlashcardsPanel";
+import VocabQuizPanel from "../components/VocabQuizPanel";
 import MockExamPanel from "../components/MockExamPanel";
 import PdfPreview from "../components/PdfPreview";
 import QuizPanel from "../components/QuizPanel";
@@ -218,7 +219,10 @@ export default function DetailPage({
   const [pendingTopicExamCards, setPendingTopicExamCards] = useState(null);
   const detailTabs = useMemo(
     () => isVocabularyFile
-      ? [{ id: "flashcards", label: copy.tabs.flashcards }]
+      ? [
+          { id: "flashcards", label: copy.tabs.flashcards },
+          { id: "vocabQuiz", label: copy.tabs.vocabQuiz },
+        ]
       : [
           { id: "topicStructure", label: copy.tabs.topicStructure },
           { id: "summary", label: copy.tabs.summary },
@@ -1301,6 +1305,9 @@ export default function DetailPage({
                 onPendingTopicExamConsumed={() => setPendingTopicExamCards(null)}
               />
             </div>
+          )}
+          {panelTab === "vocabQuiz" && (
+            <VocabQuizPanel cards={flashcards} />
           )}
           {panelTab === "tutor" && (
             <AiTutorPanel
