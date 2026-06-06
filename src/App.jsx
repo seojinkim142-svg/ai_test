@@ -2,6 +2,8 @@
 import { Capacitor } from "@capacitor/core";
 import { useLayoutEffect } from "react";
 import StartPage from "./pages/StartPage";
+import ProfilePinDialog from "./components/ProfilePinDialog";
+import FeedbackDialog from "./components/FeedbackDialog";
 import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
 import { useAdMobBanner } from "./hooks/useAdMobBanner";
 import { useUserTier } from "./hooks/useUserTier";
@@ -481,10 +483,6 @@ function App() {
     () => sanitizeUiText(tutorError, "튜터 응답 처리 중 오류가 발생했습니다."),
     [tutorError]
   );
-  const safeProfilePinError = useMemo(
-    () => sanitizeUiText(profilePinError, "PIN 입력을 다시 확인해주세요."),
-    [profilePinError]
-  );
   const isNativePlatform = Capacitor.isNativePlatform();
   const shouldForceNativeAuthEntry =
     AUTH_ENABLED && isNativePlatform && authReady && !user && !allowGuestLandingAfterSignOut;
@@ -932,12 +930,6 @@ function App() {
     setProfilePinError("");
   }, []);
 
-  const handleChangeProfilePinInput = useCallback((field, value) => {
-    const sanitized = String(value || "").replace(/\D/g, "").slice(0, 4);
-    setProfilePinInputs((prev) => ({ ...prev, [field]: sanitized }));
-    setProfilePinError("");
-  }, []);
-
   const handleCloseProfilePicker = useCallback(() => {
     if (!activePremiumProfileId) return;
     setShowPremiumProfilePicker(false);
@@ -988,79 +980,6 @@ function App() {
       return { ok: true };
     },
     [premiumProfiles, resetActiveDocumentState, setSidebarOpen, user?.id]
-  );
-
-  const handleDisableProfilePin = useCallback(
-    (profileId) => {
-      setPremiumProfiles((prev) =>
-        prev.map((p) => (p.id === profileId ? { ...p, pinDisabled: true } : p))
-      );
-    },
-    []
-  );
-
-  const handleDisablePinWithAuth = useCallback(() => {
-    if (!activePremiumProfileId) return;
-    const currentProfile = premiumProfiles.find((p) => p.id === activePremiumProfileId);
-    if (!currentProfile) return;
-    const inputPin = normalizePremiumProfilePinInput(profilePinInputs.currentPin);
-    if (!inputPin) {
-      setProfilePinError("현재 PIN 4자리를 입력해주세요.");
-      return;
-    }
-    if (inputPin !== sanitizePremiumProfilePin(currentProfile.pin)) {
-      setProfilePinError("현재 PIN이 올바르지 않습니다.");
-      return;
-    }
-    handleDisableProfilePin(activePremiumProfileId);
-    handleCloseProfilePinDialog();
-    setStatus("PIN 보호가 해제되었습니다.");
-  }, [activePremiumProfileId, handleCloseProfilePinDialog, handleDisableProfilePin, premiumProfiles, profilePinInputs.currentPin]);
-
-  const handleSubmitProfilePinChange = useCallback(
-    (event) => {
-      event.preventDefault();
-      if (!activePremiumProfileId) {
-        setProfilePinError("선택한 프로필이 없습니다.");
-        return;
-      }
-      const currentProfile = premiumProfiles.find((profile) => profile.id === activePremiumProfileId);
-      if (!currentProfile) {
-        setProfilePinError("선택한 프로필을 열 수 없습니다.");
-        return;
-      }
-      const currentPin = normalizePremiumProfilePinInput(profilePinInputs.currentPin);
-      const nextPin = normalizePremiumProfilePinInput(profilePinInputs.nextPin);
-      const confirmPin = normalizePremiumProfilePinInput(profilePinInputs.confirmPin);
-
-      if (!currentPin || !nextPin || !confirmPin) {
-        setProfilePinError("모든 PIN은 4자리 숫자여야 합니다.");
-        return;
-      }
-      if (currentPin !== sanitizePremiumProfilePin(currentProfile.pin)) {
-        setProfilePinError("현재 PIN이 올바르지 않습니다.");
-        return;
-      }
-      if (nextPin !== confirmPin) {
-        setProfilePinError("새 PIN과 확인 PIN이 올바르지 않습니다.");
-        return;
-      }
-      if (nextPin === currentPin) {
-        setProfilePinError("새 PIN은 현재 PIN과 달라야 합니다.");
-        return;
-      }
-
-      setPremiumProfiles((prev) =>
-        prev.map((profile) =>
-          profile.id === activePremiumProfileId ? { ...profile, pin: nextPin } : profile
-        )
-      );
-      setShowProfilePinDialog(false);
-      setProfilePinInputs({ currentPin: "", nextPin: "", confirmPin: "" });
-      setStatus("프로필 PIN이 변경됐습니다.");
-      setStatus("프로필 PIN이 변경됐습니다.");
-    },
-    [activePremiumProfileId, premiumProfiles, profilePinInputs]
   );
 
   const handleRenamePremiumProfile = useCallback(
@@ -1348,22 +1267,6 @@ function App() {
       setAllowGuestLandingAfterSignOut(false);
     }
   }, [user]);
-
-  useEffect(() => {
-    if (!showProfilePinDialog) return undefined;
-    const prevOverflow = document.body.style.overflow;
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape") {
-        handleCloseProfilePinDialog();
-      }
-    };
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.body.style.overflow = prevOverflow;
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [handleCloseProfilePinDialog, showProfilePinDialog]);
 
   const loadFolders = useCallback(
     async () => {
@@ -7643,184 +7546,24 @@ function App() {
           />
         </Suspense>
       )}
-      {showProfilePinDialog && activePremiumProfile && (
-        <div className="fixed inset-0 z-[155] flex items-center justify-center px-4">
-          <button
-            type="button"
-            aria-label="PIN 변경 창 닫기"
-            onClick={handleCloseProfilePinDialog}
-            className={`absolute inset-0 ${theme === "light" ? "bg-slate-900/25" : "bg-black/75"} backdrop-blur-[2px]`}
-          />
-          <form
-            onSubmit={handleSubmitProfilePinChange}
-            className={`relative z-[156] w-full max-w-md rounded-2xl border p-5 ${
-              theme === "light"
-                ? "border-slate-200 bg-white text-slate-900 shadow-[0_20px_80px_rgba(15,23,42,0.2)]"
-                : "border-white/10 bg-slate-950/[0.97] text-slate-100 shadow-[0_20px_80px_rgba(0,0,0,0.72)]"
-            }`}
-          >
-            <p className="text-sm font-semibold">{activePremiumProfile.name} PIN 변경</p>
-            <p className={`mt-1 text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
-              현재 PIN을 입력하고 새 4자리 PIN을 설정해주세요.
-            </p>
-            <div className="mt-4 space-y-2">
-              <input
-                name="current-pin"
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                value={profilePinInputs.currentPin}
-                onChange={(event) => handleChangeProfilePinInput("currentPin", event.target.value)}
-                placeholder="현재 PIN"
-                className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                  theme === "light" ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
-                }`}
-              />
-              <input
-                name="new-pin"
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                value={profilePinInputs.nextPin}
-                onChange={(event) => handleChangeProfilePinInput("nextPin", event.target.value)}
-                placeholder="새 PIN"
-                className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                  theme === "light" ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
-                }`}
-              />
-              <input
-                name="confirm-new-pin"
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                value={profilePinInputs.confirmPin}
-                onChange={(event) => handleChangeProfilePinInput("confirmPin", event.target.value)}
-                placeholder="새 PIN 확인"
-                className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                  theme === "light" ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
-                }`}
-              />
-            </div>
-            {safeProfilePinError && <p className="mt-2 text-xs text-rose-300">{safeProfilePinError}</p>}
-            <div className="mt-4 flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={handleDisablePinWithAuth}
-                className={`ghost-button text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}
-                data-ghost-size="sm"
-                style={{ "--ghost-color": "148, 163, 184" }}
-                title="현재 PIN 인증 후 이 프로필의 PIN을 해제합니다"
-              >
-                PIN 없이 사용
-              </button>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleCloseProfilePinDialog}
-                  className={`ghost-button text-xs ${theme === "light" ? "text-slate-700" : "text-slate-200"}`}
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "148, 163, 184" }}
-                >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  className="ghost-button text-xs text-emerald-100"
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "52, 211, 153" }}
-                >
-                  변경
-                </button>
-              </div>
-            </div>
-          </form>
-        </div>
-      )}
-      {isFeedbackDialogOpen && (
-        <div className="fixed inset-0 z-[165] flex items-center justify-center px-4">
-          <button
-            type="button"
-            aria-label="\uD53C\uB4DC\uBC31 \uCC3D \uB2EB\uAE30"
-            onClick={handleCloseFeedbackDialog}
-            className={`absolute inset-0 ${
-              theme === "light" ? "bg-slate-900/25" : "bg-black/75"
-            } backdrop-blur-[2px]`}
-          />
-          <form
-            onSubmit={handleSubmitFeedback}
-            className={`relative z-[166] w-full max-w-lg rounded-2xl border p-5 ${
-              theme === "light"
-                ? "border-slate-200 bg-white text-slate-900 shadow-[0_20px_80px_rgba(15,23,42,0.2)]"
-                : "border-white/10 bg-slate-950/[0.97] text-slate-100 shadow-[0_20px_80px_rgba(0,0,0,0.72)]"
-            }`}
-          >
-            <p className="text-sm font-semibold">{"\uD53C\uB4DC\uBC31 \uBCF4\uB0B4\uAE30"}</p>
-            <p className={`mt-1 text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
-              {"\uBC84\uADF8, \uAE30\uB2A5 \uC81C\uC548, \uC0AC\uC6A9\uC131 \uAC1C\uC120 \uC758\uACAC\uC744 \uC790\uC720\uB86D\uAC8C \uB0A8\uACA8 \uC8FC\uC138\uC694."}
-            </p>
-            <div className="mt-4 space-y-3">
-              <select
-                name="feedback-category"
-                value={feedbackCategory}
-                onChange={(event) => setFeedbackCategory(event.target.value)}
-                className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                  theme === "light"
-                    ? "border-slate-300 bg-white text-slate-900"
-                    : "border-white/15 bg-white/5 text-slate-100"
-                }`}
-              >
-                <option value="general">{"\uC77C\uBC18"}</option>
-                <option value="bug">{"\uBC84\uADF8 \uC81C\uBCF4"}</option>
-                <option value="feature">{"\uAE30\uB2A5 \uC81C\uC548"}</option>
-                <option value="ux">{"\uC0AC\uC6A9\uC131 \uC758\uACAC"}</option>
-              </select>
-              <textarea
-                name="feedback-message"
-                value={feedbackInput}
-                onChange={(event) => setFeedbackInput(event.target.value)}
-                rows={7}
-                maxLength={2000}
-                placeholder={"\uC5B4\uB5A4 \uBB38\uC81C\uB97C \uACAA\uC73C\uC168\uB294\uC9C0, \uC5B4\uB5BB\uAC8C \uAC1C\uC120\uD558\uBA74 \uC88B\uC744\uC9C0 \uC791\uC131\uD574 \uC8FC\uC138\uC694."}
-                className={`w-full resize-y rounded-xl border px-3 py-2 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                  theme === "light"
-                    ? "border-slate-300 bg-white text-slate-900"
-                    : "border-white/15 bg-white/5 text-slate-100"
-                }`}
-              />
-              <div className="flex items-center justify-between text-[11px]">
-                <span className={theme === "light" ? "text-slate-500" : "text-slate-400"}>
-                  {"\uBB38\uB9E5: "}{file?.name || "\uC120\uD0DD\uB41C \uBB38\uC11C \uC5C6\uC74C"}
-                </span>
-                <span className={theme === "light" ? "text-slate-500" : "text-slate-400"}>
-                  {feedbackInput.length}/2000
-                </span>
-              </div>
-            </div>
-            {feedbackError && <p className="mt-2 text-xs text-rose-300">{feedbackError}</p>}
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={handleCloseFeedbackDialog}
-                disabled={isSubmittingFeedback}
-                className={`ghost-button text-xs ${theme === "light" ? "text-slate-700" : "text-slate-200"}`}
-                data-ghost-size="sm"
-                style={{ "--ghost-color": "148, 163, 184" }}
-              >
-                {"\uCDE8\uC18C"}
-              </button>
-              <button
-                type="submit"
-                disabled={isSubmittingFeedback}
-                className="ghost-button text-xs text-emerald-100"
-                data-ghost-size="sm"
-                style={{ "--ghost-color": "52, 211, 153" }}
-              >
-                {isSubmittingFeedback ? "\uC804\uC1A1 \uC911..." : "\uC804\uC1A1"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+      <ProfilePinDialog
+        onChangePin={(profileId, newPin) => {
+          setPremiumProfiles((prev) =>
+            prev.map((p) => (p.id === profileId ? { ...p, pin: newPin } : p))
+          );
+          setStatus("프로필 PIN이 변경됐습니다.");
+        }}
+        onDisablePin={(profileId) => {
+          setPremiumProfiles((prev) =>
+            prev.map((p) => (p.id === profileId ? { ...p, pinDisabled: true } : p))
+          );
+          setStatus("PIN 보호가 해제되었습니다.");
+        }}
+      />
+      <FeedbackDialog
+        onSubmitFeedback={handleSubmitFeedback}
+        fileName={file?.name}
+      />
       {isResizingSplit && showDetail && (
         <div className="pointer-events-none fixed inset-0 z-[160] cursor-col-resize" aria-hidden="true" />
       )}
