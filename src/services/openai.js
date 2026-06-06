@@ -1,6 +1,7 @@
 import { Capacitor } from "@capacitor/core";
 import { MODEL } from "../constants";
 import { resolvePublicAppOrigin } from "../utils/appOrigin";
+import { getAccessToken } from "./supabase";
 
 const DIRECT_DEEPSEEK_BASE_RE = /^https:\/\/api\.deepseek\.com(?:$|\/)/i;
 const DIRECT_OPENAI_BASE_RE = /^https:\/\/api\.openai\.com(?:$|\/)/i;
@@ -2483,6 +2484,19 @@ async function postChatRequest(
   const headers = {
     "Content-Type": "application/json",
   };
+
+  // 앱 프록시 경유 시 Supabase 세션 토큰을 Authorization 헤더에 추가
+  if (target.usesAppProxy) {
+    try {
+      const accessToken = await getAccessToken();
+      if (accessToken) {
+        headers["Authorization"] = `Bearer ${accessToken}`;
+      }
+    } catch {
+      // 토큰 취득 실패 시 무시 (서버에서 인증 미설정이면 통과됨)
+    }
+  }
+
   const requestBody = target.usesAppProxy ? { ...(body || {}), provider: target.provider } : body;
 
   let response;
