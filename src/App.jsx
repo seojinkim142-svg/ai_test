@@ -1,4 +1,4 @@
-﻿import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { Suspense, lazy, useCallback, useEffect, useMemo, useRef } from "react";
 import { Capacitor } from "@capacitor/core";
 import { useLayoutEffect } from "react";
 import StartPage from "./pages/StartPage";
@@ -136,6 +136,17 @@ import {
 } from "./utils/paymentReturn";
 import { getTutorCopy } from "./utils/tutorCopy";
 import {
+  useAuthStore,
+  useUiStore,
+  useDocumentStore,
+  useSummaryStore,
+  useQuizStore,
+  useFlashcardStore,
+  useMockExamStore,
+  usePremiumStore,
+  useTutorStore,
+} from "./stores";
+import {
   buildFolderAggregateDocId,
   isFolderAggregateDocId,
   parseFolderAggregateDocId,
@@ -218,143 +229,162 @@ const toPreviewPdfFileName = (fileName) => {
 const NATIVE_PAYMENT_RETURN_SCHEME = trimSchemeSeparators(
   import.meta.env.VITE_NATIVE_APP_SCHEME || "com.tjwls.examstudyai"
 );
-const OUTPUT_LANGUAGE_STORAGE_KEY = "zeusian-output-language";
-const DEFAULT_OUTPUT_LANGUAGE = "ko";
-const AVAILABLE_OUTPUT_LANGUAGES = ["en", "zh", "ja", "hi", "ko"];
-
 function App() {
-  const [file, setFile] = useState(null);
-  const [extractedText, setExtractedText] = useState("");
-  const [previewText, setPreviewText] = useState("");
-  const [pageInfo, setPageInfo] = useState({ used: 0, total: 0 });
-  const [pdfUrl, setPdfUrl] = useState(null);
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
-  const [isLoadingText, setIsLoadingText] = useState(false);
-  const [isLoadingQuiz, setIsLoadingQuiz] = useState(false);
-  const [isLoadingSummary, setIsLoadingSummary] = useState(false);
-  const [isExportingSummary, setIsExportingSummary] = useState(false);
-  const [theme, setTheme] = useState("light");
-  const [outputLanguage, setOutputLanguage] = useState(() => {
-    if (typeof window === "undefined") return DEFAULT_OUTPUT_LANGUAGE;
-    const stored = String(window.localStorage.getItem(OUTPUT_LANGUAGE_STORAGE_KEY) || "")
-      .trim()
-      .toLowerCase();
-    if (AVAILABLE_OUTPUT_LANGUAGES.includes(stored)) return stored;
-    // 저장값 없으면 브라우저 언어 자동 감지
-    const browserLang = (navigator.language || "").slice(0, 2).toLowerCase();
-    return AVAILABLE_OUTPUT_LANGUAGES.includes(browserLang) ? browserLang : DEFAULT_OUTPUT_LANGUAGE;
-  });
-  const [summary, setSummary] = useState("");
+  // ─── Store subscriptions ────────────────────────────────────────────────────
+  const {
+    isSigningOut, setIsSigningOut,
+    showPayment, setShowPayment,
+    paymentReturnSignal, setPaymentReturnSignal,
+    showSettings, setShowSettings,
+    showAuth, setShowAuth,
+    showGuestIntro, setShowGuestIntro,
+    skipPromoSplash, setSkipPromoSplash,
+    allowGuestLandingAfterSignOut, setAllowGuestLandingAfterSignOut,
+    setUser, setAuthReady, setTierInfo,
+  } = useAuthStore();
 
-  const [questionStyleProfileContent, setQuestionStyleProfileContent] = useState("");
-  const [questionStyleProfileScopeLabel, setQuestionStyleProfileScopeLabel] = useState("");
-  const [quizSets, setQuizSets] = useState([]);
-  const [quizMixInput, setQuizMixInput] = useState(DEFAULT_QUIZ_MIX_INPUT);
-  const [oxItems, setOxItems] = useState(null);
-  const [oxSelections, setOxSelections] = useState({});
-  const [oxExplanationOpen, setOxExplanationOpen] = useState({});
-  const [isLoadingOx, setIsLoadingOx] = useState(false);
-  const [thumbnailUrl, setThumbnailUrl] = useState(null);
-  const [uploadedFiles, setUploadedFiles] = useState([]);
-  const [selectedFileId, setSelectedFileId] = useState(null);
-  const [pendingDocumentOpen, setPendingDocumentOpen] = useState(null);
-  const [panelTab, setPanelTab] = useState("summary");
-  const [splitPercent, setSplitPercent] = useState(50);
-  const [isResizingSplit, setIsResizingSplit] = useState(false);
-  const [isSigningOut, setIsSigningOut] = useState(false);
-  const [showPayment, setShowPayment] = useState(false);
-  const [paymentReturnSignal, setPaymentReturnSignal] = useState(0);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showAuth, setShowAuth] = useState(false);
-  const [showGuestIntro, setShowGuestIntro] = useState(() => !AUTH_ENABLED);
-  const [skipPromoSplash, setSkipPromoSplash] = useState(false);
-  const [allowGuestLandingAfterSignOut, setAllowGuestLandingAfterSignOut] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [visitedPages, setVisitedPages] = useState(() => new Set());
-  const [mockExams, setMockExams] = useState([]);
-  const [isLoadingMockExams, setIsLoadingMockExams] = useState(false);
-  const [isGeneratingMockExam, setIsGeneratingMockExam] = useState(false);
-  const [mockExamStatus, setMockExamStatus] = useState("");
-  const [mockExamError, setMockExamError] = useState("");
-  const paymentAbortFallbackTimerRef = useRef(null);
-  const [activeMockExamId, setActiveMockExamId] = useState(null);
-  const [showMockExamAnswers, setShowMockExamAnswers] = useState(false);
-  const [isMockExamMenuOpen, setIsMockExamMenuOpen] = useState(false);
-  const [flashcards, setFlashcards] = useState([]);
-  const [isLoadingFlashcards, setIsLoadingFlashcards] = useState(false);
-  const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false);
-  const [flashcardStatus, setFlashcardStatus] = useState("");
-  const [flashcardError, setFlashcardError] = useState("");
-  const [flashcardScores, setFlashcardScores] = useState([]);
-  const [vocabQuizScores, setVocabQuizScores] = useState([]);
-  const [tutorMessages, setTutorMessages] = useState([]);
-  const [isTutorLoading, setIsTutorLoading] = useState(false);
-  const [tutorError, setTutorError] = useState("");
-  const tutorRequestInFlightRef = useRef(false);
-  const [isFeedbackDialogOpen, setIsFeedbackDialogOpen] = useState(false);
-  const [feedbackCategory, setFeedbackCategory] = useState("general");
-  const [feedbackInput, setFeedbackInput] = useState("");
-  const [feedbackError, setFeedbackError] = useState("");
-  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
-  const [isManualSyncing, setIsManualSyncing] = useState(false);
-  const [isPageSummaryOpen, setIsPageSummaryOpen] = useState(false);
-  const [pageSummaryInput, setPageSummaryInput] = useState("");
-  const [pageSummaryError, setPageSummaryError] = useState("");
-  const [isPageSummaryLoading, setIsPageSummaryLoading] = useState(false);
-  const [partialSummary, setPartialSummary] = useState("");
-  const [partialSummaryRange, setPartialSummaryRange] = useState("");
-  const [savedPartialSummaries, setSavedPartialSummaries] = useState([]);
-  const [reviewNotes, setReviewNotes] = useState([]);
-  const [instructorEmphasisInput, setInstructorEmphasisInput] = useState("");
-  const [savedInstructorEmphases, setSavedInstructorEmphases] = useState([]);
-  const [activeInstructorEmphasisId, setActiveInstructorEmphasisId] = useState("");
-  const [isSavedPartialSummaryOpen, setIsSavedPartialSummaryOpen] = useState(false);
-  const [reviewNotesChapterSelectionInput, setReviewNotesChapterSelectionInput] = useState("");
-  const [examCramContent, setExamCramContent] = useState("");
-  const [examCramUpdatedAt, setExamCramUpdatedAt] = useState("");
-  const [examCramScopeLabel, setExamCramScopeLabel] = useState("");
-  const [isGeneratingExamCram, setIsGeneratingExamCram] = useState(false);
-  const [examCramStatus, setExamCramStatus] = useState("");
-  const [examCramError, setExamCramError] = useState("");
-  const [quizChapterSelectionInput, setQuizChapterSelectionInput] = useState("");
-  const [quizPromptAddonInput, setQuizPromptAddonInput] = useState("");
-  const [quizDifficulty, setQuizDifficultyRaw] = useState(() => {
-    const saved = localStorage.getItem("quizDifficulty");
-    return ["하", "중", "상"].includes(saved) ? saved : null;
-  });
-  const setQuizDifficulty = (value) => {
-    const normalized = ["하", "중", "상"].includes(value) ? value : null;
-    setQuizDifficultyRaw(normalized);
-    if (normalized) {
-      localStorage.setItem("quizDifficulty", normalized);
-    } else {
-      localStorage.removeItem("quizDifficulty");
-    }
-  };
-  const [oxChapterSelectionInput, setOxChapterSelectionInput] = useState("");
-  const [flashcardChapterSelectionInput, setFlashcardChapterSelectionInput] = useState("");
-  const [flashcardGenerateCount, setFlashcardGenerateCount] = useState(8);
-  const [mockExamChapterSelectionInput, setMockExamChapterSelectionInput] = useState("");
-  const [mockExamPromptAddonInput, setMockExamPromptAddonInput] = useState("");
-  const [isChapterRangeOpen, setIsChapterRangeOpen] = useState(false);
-  const [chapterRangeInput, setChapterRangeInput] = useState("");
-  const [autoChapterRangeInput, setAutoChapterRangeInput] = useState("");
-  const [chapterRangeError, setChapterRangeError] = useState("");
-  const [chapterRangeNotice, setChapterRangeNotice] = useState("");
-  const [isDetectingChapterRanges, setIsDetectingChapterRanges] = useState(false);
-  // ─── 폴더 통합 퀴즈 state ────────────────────────────────────────────────────
-  const [folderQuizQuestions, setFolderQuizQuestions] = useState(null); // { multipleChoice: [], shortAnswer: [] }
-  const [isLoadingFolderQuiz, setIsLoadingFolderQuiz] = useState(false);
-  const [folderQuizError, setFolderQuizError] = useState("");
-  const [folderSelectedChoices, setFolderSelectedChoices] = useState({});
-  const [folderRevealedChoices, setFolderRevealedChoices] = useState({});
-  const [folderShortAnswerInput, setFolderShortAnswerInput] = useState({});
-  const [folderShortAnswerResult, setFolderShortAnswerResult] = useState({});
-  const [artifacts, setArtifacts] = useState(null);
-  const [topicStructure, setTopicStructure] = useState(null);
-  const [isLoadingTopicStructure, setIsLoadingTopicStructure] = useState(false);
-  const [topicStructureError, setTopicStructureError] = useState("");
+  const {
+    theme, setTheme,
+    outputLanguage, setOutputLanguage,
+    panelTab, setPanelTab,
+    splitPercent, setSplitPercent,
+    isResizingSplit, setIsResizingSplit,
+    isFeedbackDialogOpen, setIsFeedbackDialogOpen,
+    feedbackCategory, setFeedbackCategory,
+    feedbackInput, setFeedbackInput,
+    feedbackError, setFeedbackError,
+    isSubmittingFeedback, setIsSubmittingFeedback,
+    isManualSyncing, setIsManualSyncing,
+    usageCounts, setUsageCounts,
+    folderTutorMode, setFolderTutorMode,
+    semanticSearchResults, setSemanticSearchResults,
+    isSemanticSearching, setIsSemanticSearching,
+    compareResult, setCompareResult,
+    isComparing, setIsComparing,
+    compareError, setCompareError,
+    folderQuizQuestions, setFolderQuizQuestions,
+    isLoadingFolderQuiz, setIsLoadingFolderQuiz,
+    folderQuizError, setFolderQuizError,
+    folderSelectedChoices, setFolderSelectedChoices,
+    folderRevealedChoices, setFolderRevealedChoices,
+    folderShortAnswerInput, setFolderShortAnswerInput,
+    folderShortAnswerResult, setFolderShortAnswerResult,
+    sidebarOpen, setSidebarOpen,
+    showPremiumProfilePicker, setShowPremiumProfilePicker,
+    showProfilePinDialog, setShowProfilePinDialog,
+    profilePinInputs, setProfilePinInputs,
+    profilePinError, setProfilePinError,
+  } = useUiStore();
+
+  const {
+    file, setFile,
+    extractedText, setExtractedText,
+    previewText, setPreviewText,
+    pageInfo, setPageInfo,
+    pdfUrl, setPdfUrl,
+    status, setStatus,
+    error, setError,
+    isLoadingText, setIsLoadingText,
+    thumbnailUrl, setThumbnailUrl,
+    currentPage, setCurrentPage,
+    visitedPages, setVisitedPages,
+    uploadedFiles, setUploadedFiles,
+    selectedFileId, setSelectedFileId,
+    pendingDocumentOpen, setPendingDocumentOpen,
+    folders, setFolders,
+    selectedFolderId, setSelectedFolderId,
+    selectedUploadIds, setSelectedUploadIds,
+    isFolderLoading, setIsFolderLoading,
+    artifacts, setArtifacts,
+    allArtifacts, setAllArtifacts,
+  } = useDocumentStore();
+
+  const {
+    summary, setSummary,
+    isLoadingSummary, setIsLoadingSummary,
+    isExportingSummary, setIsExportingSummary,
+    partialSummary, setPartialSummary,
+    partialSummaryRange, setPartialSummaryRange,
+    savedPartialSummaries, setSavedPartialSummaries,
+    isSavedPartialSummaryOpen, setIsSavedPartialSummaryOpen,
+    isPageSummaryOpen, setIsPageSummaryOpen,
+    pageSummaryInput, setPageSummaryInput,
+    pageSummaryError, setPageSummaryError,
+    isPageSummaryLoading, setIsPageSummaryLoading,
+    instructorEmphasisInput, setInstructorEmphasisInput,
+    savedInstructorEmphases, setSavedInstructorEmphases,
+    activeInstructorEmphasisId, setActiveInstructorEmphasisId,
+    chapterRangeInput, setChapterRangeInput,
+    autoChapterRangeInput, setAutoChapterRangeInput,
+    chapterRangeError, setChapterRangeError,
+    chapterRangeNotice, setChapterRangeNotice,
+    isChapterRangeOpen, setIsChapterRangeOpen,
+    isDetectingChapterRanges, setIsDetectingChapterRanges,
+    topicStructure, setTopicStructure,
+    isLoadingTopicStructure, setIsLoadingTopicStructure,
+    topicStructureError, setTopicStructureError,
+  } = useSummaryStore();
+
+  const {
+    questionStyleProfileContent, setQuestionStyleProfileContent,
+    questionStyleProfileScopeLabel, setQuestionStyleProfileScopeLabel,
+    quizSets, setQuizSets,
+    isLoadingQuiz, setIsLoadingQuiz,
+    quizMixInput, setQuizMixInput,
+    oxItems, setOxItems,
+    oxSelections, setOxSelections,
+    oxExplanationOpen, setOxExplanationOpen,
+    isLoadingOx, setIsLoadingOx,
+    quizChapterSelectionInput, setQuizChapterSelectionInput,
+    quizPromptAddonInput, setQuizPromptAddonInput,
+    quizDifficulty, setQuizDifficulty,
+    oxChapterSelectionInput, setOxChapterSelectionInput,
+  } = useQuizStore();
+
+  const {
+    flashcards, setFlashcards,
+    isLoadingFlashcards, setIsLoadingFlashcards,
+    isGeneratingFlashcards, setIsGeneratingFlashcards,
+    flashcardStatus, setFlashcardStatus,
+    flashcardError, setFlashcardError,
+    flashcardScores, setFlashcardScores,
+    vocabQuizScores, setVocabQuizScores,
+    flashcardChapterSelectionInput, setFlashcardChapterSelectionInput,
+    flashcardGenerateCount, setFlashcardGenerateCount,
+  } = useFlashcardStore();
+
+  const {
+    mockExams, setMockExams,
+    isLoadingMockExams, setIsLoadingMockExams,
+    isGeneratingMockExam, setIsGeneratingMockExam,
+    mockExamStatus, setMockExamStatus,
+    mockExamError, setMockExamError,
+    activeMockExamId, setActiveMockExamId,
+    showMockExamAnswers, setShowMockExamAnswers,
+    isMockExamMenuOpen, setIsMockExamMenuOpen,
+    mockExamChapterSelectionInput, setMockExamChapterSelectionInput,
+    mockExamPromptAddonInput, setMockExamPromptAddonInput,
+    examCramContent, setExamCramContent,
+    examCramUpdatedAt, setExamCramUpdatedAt,
+    examCramScopeLabel, setExamCramScopeLabel,
+    isGeneratingExamCram, setIsGeneratingExamCram,
+    examCramStatus, setExamCramStatus,
+    examCramError, setExamCramError,
+    reviewNotes, setReviewNotes,
+    reviewNotesChapterSelectionInput, setReviewNotesChapterSelectionInput,
+  } = useMockExamStore();
+
+  const {
+    premiumProfiles, setPremiumProfiles,
+    activePremiumProfileId, setActivePremiumProfileId,
+    premiumSpaceMode, setPremiumSpaceMode,
+  } = usePremiumStore();
+
+  const {
+    tutorMessages, setTutorMessages,
+    isTutorLoading, setIsTutorLoading,
+    tutorError, setTutorError,
+  } = useTutorStore();
   const downloadCacheRef = useRef(new Map()); // storagePath -> { file, thumbnail, remoteUrl, bucket }
   const backfillInProgressRef = useRef(false);
   const summaryRequestedRef = useRef(false);
@@ -387,39 +417,21 @@ function App() {
   const isFreeTier = tier === "free";
   const isPremiumTier = tier === "premium";
   const isFolderFeatureEnabled = !isFreeTier;
-  const [usageCounts, setUsageCounts] = useState({ summary: 0, quiz: 0, ox: 0, flashcards: 0 });
   const usageCountsByDocRef = useRef(new Map());
-  const [folders, setFolders] = useState([]);
-  const [selectedFolderId, setSelectedFolderId] = useState("all");
-  const [selectedUploadIds, setSelectedUploadIds] = useState([]);
-  const [isFolderLoading, setIsFolderLoading] = useState(false);
-  // ─── Ponder-style features ───────────────────────────────────────────────
-  const [allArtifacts, setAllArtifacts] = useState([]);
-  const [semanticSearchResults, setSemanticSearchResults] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(() => {
-    try {
-      const saved = localStorage.getItem("sidebarOpen");
-      return saved === null ? true : saved === "true";
-    } catch {
-      return true;
-    }
-  });
-  const [isSemanticSearching, setIsSemanticSearching] = useState(false);
-  const [compareResult, setCompareResult] = useState("");
-  const [isComparing, setIsComparing] = useState(false);
-  const [compareError, setCompareError] = useState("");
-  const [folderTutorMode, setFolderTutorMode] = useState(false);
-  const [premiumProfiles, setPremiumProfiles] = useState([]);
-  const [activePremiumProfileId, setActivePremiumProfileId] = useState(null);
-  const [showPremiumProfilePicker, setShowPremiumProfilePicker] = useState(false);
-  const [showProfilePinDialog, setShowProfilePinDialog] = useState(false);
-  const [profilePinInputs, setProfilePinInputs] = useState({
-    currentPin: "",
-    nextPin: "",
-    confirmPin: "",
-  });
-  const [profilePinError, setProfilePinError] = useState("");
-  const [premiumSpaceMode, setPremiumSpaceMode] = useState(PREMIUM_SPACE_MODE_PROFILE);
+
+  // ─── Sync hooks → stores ────────────────────────────────────────────────────
+  // showGuestIntro 초기화 (AUTH_ENABLED=false 이면 true)
+  useEffect(() => {
+    if (!AUTH_ENABLED) setShowGuestIntro(true);
+  }, []);
+  // useSupabaseAuth → authStore sync
+  useEffect(() => { setUser(user); }, [user, setUser]);
+  useEffect(() => { setAuthReady(authReady); }, [authReady, setAuthReady]);
+  // useUserTier → authStore sync
+  useEffect(() => {
+    setTierInfo({ tier, tierExpiresAt, tierRemainingDays, loadingTier });
+  }, [tier, tierExpiresAt, tierRemainingDays, loadingTier, setTierInfo]);
+
   const premiumProfileHydratedRef = useRef(false);
   const premiumProfileSyncSignatureRef = useRef("");
   const premiumProfileSessionUserIdRef = useRef(null); // tracks which user has authenticated via PIN
@@ -524,10 +536,6 @@ function App() {
     }
     return openAiModulePromiseRef.current;
   }, []);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(OUTPUT_LANGUAGE_STORAGE_KEY, outputLanguage);
-  }, [outputLanguage]);
   const requestPreviewPdfConversion = useCallback(
     async (item, { force = false } = {}) => {
       const uploadId = item?.id;
