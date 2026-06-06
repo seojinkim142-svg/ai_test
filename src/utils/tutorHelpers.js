@@ -172,18 +172,29 @@ export function detectTutorSectionPageRange(pageEntries, sectionToken) {
   };
 }
 
-function extractTutorEvidenceEntries(rawEvidenceText) {
+export function extractTutorEvidenceEntries(rawEvidenceText) {
   const source = String(rawEvidenceText || "");
   if (!source) return [];
   const entries = [];
-  const re = /\[p\.(\d+)\]\s*\n([\s\S]*?)(?=\n\s*\[p\.\d+\]\s*\n|$)/gi;
+  const re = /\[(p\.\d+|img(?:\.\d+)?)\]\s*\n([\s\S]*?)(?=\n\s*\[(?:p\.\d+|img(?:\.\d+)?)\]\s*\n|$)/gi;
   for (const match of source.matchAll(re)) {
-    const pageNumber = Number.parseInt(match?.[1], 10);
+    const rawLabel = String(match?.[1] || "").trim().toLowerCase();
+    const pageNumber = Number.parseInt(rawLabel.match(/^p\.(\d+)$/i)?.[1] || "", 10);
     const text = String(match?.[2] || "").replace(/\s+/g, " ").trim();
-    if (!Number.isFinite(pageNumber) || !text) continue;
-    entries.push({ pageNumber, text });
+    if (!rawLabel || !text) continue;
+    entries.push({ label: rawLabel, pageNumber, text });
   }
   return entries;
+}
+
+export function formatTutorEvidenceLabel(entry) {
+  if (Number.isFinite(entry?.pageNumber)) {
+    return `p.${entry.pageNumber}`;
+  }
+  if (/^img(?:\.\d+)?$/i.test(String(entry?.label || ""))) {
+    return "screenshot";
+  }
+  return "evidence";
 }
 
 function buildTutorForcedFallbackAnswer(question, rawEvidenceText) {
@@ -214,7 +225,7 @@ function buildTutorForcedFallbackAnswer(question, rawEvidenceText) {
   ];
   for (const item of selected) {
     const snippet = item.text.length > 280 ? `${item.text.slice(0, 280)}...` : item.text;
-    lines.push(`- p.${item.pageNumber}: ${snippet}`);
+    lines.push(`- ${formatTutorEvidenceLabel(item)}: ${snippet}`);
   }
   lines.push("원하시면 위 근거 페이지를 기준으로 질문하신 항목을 단계별로 이어서 자세히 설명하겠습니다.");
   return lines.join("\n");
@@ -308,4 +319,86 @@ function parseNormalizedChapterNumberSelectionInput(rawInput, chapters) {
 
 export function parseChapterNumberSelectionInput(rawInput, chapters) {
   return parseNormalizedChapterNumberSelectionInput(rawInput, chapters);
+}
+
+export function normalizeTutorRequestPayload(rawInput) {
+  if (typeof rawInput === "string") {
+    const prompt = String(rawInput || "").trim();
+    return {
+      prompt,
+      displayPrompt: prompt,
+      attachmentFile: null,
+    };
+  }
+
+  const prompt = String(rawInput?.prompt || rawInput?.text || "").trim();
+  const displayPrompt = String(rawInput?.displayPrompt || prompt).trim();
+  const attachmentFile =
+    rawInput?.attachmentFile instanceof File
+      ? rawInput.attachmentFile
+      : rawInput?.attachment?.file instanceof File
+        ? rawInput.attachment.file
+        : null;
+
+  return {
+    prompt,
+    displayPrompt: displayPrompt || prompt,
+    attachmentFile,
+  };
+}
+
+export function buildTutorHistoryMessageContent(message) {
+  const baseContent = String(message?.content || "").trim();
+  const attachmentName = String(message?.attachmentName || "").trim();
+  const attachmentText = String(message?.attachmentText || "").trim();
+  const parts = [];
+
+  if (baseContent) parts.push(baseContent);
+  if (attachmentName) parts.push(`[Attached image: ${attachmentName}]`);
+  if (attachmentText) parts.push(`[Screenshot OCR]\n${attachmentText}`);
+
+  return parts.join("\n\n").trim();
+}
+
+export function buildTutorImageEvidenceBlock({ attachmentName, attachmentType, dimensions, ocrText }) {
+  const safeText = String(ocrText || "").trim();
+  if (!safeText) return "";
+
+  const width = Number.parseInt(dimensions?.width, 10);
+  const height = Number.parseInt(dimensions?.height, 10);
+  const sizeLabel =
+    Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
+      ? `${width}x${height}`
+      : "";
+
+  return [
+    "[img.1]",
+    `Attached screenshot: ${String(attachmentName || "image").trim() || "image"}`,
+    attachmentType ? `Type: ${attachmentType}` : "",
+    sizeLabel ? `Rendered size: ${sizeLabel}` : "",
+    "",
+    safeText,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+export const TUTOR_HISTORY_STORAGE_PREFIX = "zeusian:tutor-history:v1";
+export const TUTOR_HISTORY_MAX_MESSAGES = 60;
+
+export function buildTutorHistoryStorageKey({ userId, docId }) {
+  const normalizedDocId = String(docId || "").trim();
+  if (!normalizedDocId) return "";
+  const normalizedUserId = String(userId || "guest").trim() || "guest";
+  return `${TUTOR_HISTORY_STORAGE_PREFIX}:${normalizedUserId}:${normalizedDocId}`;
+}
+
+export const CHAPTER_RANGE_STORAGE_PREFIX = "zeusian:chapter-ranges:v1";
+
+export function buildChapterRangeStorageKey({ userId, scopeId, docId }) {
+  const normalizedDocId = String(docId || "").trim();
+  if (!normalizedDocId) return "";
+  const normalizedUserId = String(userId || "guest").trim() || "guest";
+  const normalizedScopeId = String(scopeId || "default").trim() || "default";
+  return `${CHAPTER_RANGE_STORAGE_PREFIX}:${normalizedUserId}:${normalizedScopeId}:${normalizedDocId}`;
 }
