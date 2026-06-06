@@ -142,6 +142,14 @@ const STORAGE_CONTENT_TYPE_BY_EXT = {
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 };
 
+const ALLOWED_UPLOAD_MIME_TYPES = new Set([
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+]);
+
+const ALLOWED_UPLOAD_EXTENSIONS = new Set(["pdf", "docx", "pptx"]);
+
 const getLowerFileExtension = (fileName) => {
   const normalized = String(fileName || "").trim().toLowerCase();
   if (!normalized) return "";
@@ -225,6 +233,16 @@ export async function uploadPdfToStorage(userId, file) {
   const client = requireSupabase();
   requireUser(userId);
   if (!file) throw new Error("File is required.");
+
+  // MIME 타입 및 확장자 검증
+  const uploadExt = getLowerFileExtension(file.name);
+  const uploadMime = String(file.type || "").trim().toLowerCase();
+  if (!ALLOWED_UPLOAD_EXTENSIONS.has(uploadExt)) {
+    throw new Error(`허용되지 않는 파일 형식입니다. PDF, DOCX, PPTX 파일만 업로드 가능합니다.`);
+  }
+  if (uploadMime && !ALLOWED_UPLOAD_MIME_TYPES.has(uploadMime)) {
+    throw new Error(`허용되지 않는 파일 형식입니다. PDF, DOCX, PPTX 파일만 업로드 가능합니다.`);
+  }
 
   const safeName = toSafeStorageFileName(file.name);
   const uniqueSuffix =
