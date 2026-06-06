@@ -68,6 +68,16 @@ function FlashcardsPanel({
   const [isRetryMode, setIsRetryMode] = useState(false);
   const [topicExamLabel, setTopicExamLabel] = useState("");
 
+  // 단어장 뷰 탭
+  const [vocabView, setVocabView] = useState("cards"); // "cards" | "quiz"
+
+  // 퀴즈 상태
+  const [quizQuestions, setQuizQuestions] = useState([]);
+  const [quizIndex, setQuizIndex] = useState(0);
+  const [quizSelected, setQuizSelected] = useState(null);
+  const [quizScore, setQuizScore] = useState(0);
+  const [quizDone, setQuizDone] = useState(false);
+
   // 카테고리 필터
   const [activeCategory, setActiveCategory] = useState(null); // null = 전체
 
@@ -310,6 +320,28 @@ function FlashcardsPanel({
     setEditingCardId(null);
   }, []);
 
+  // 퀴즈 문제 생성
+  const startQuiz = useCallback((cardList) => {
+    const pool = (cardList || cards || []).filter((c) => c.front && c.back);
+    if (pool.length < 2) return;
+    const shuffled = [...pool].sort(() => Math.random() - 0.5);
+    const questions = shuffled.map((card) => {
+      const wrongPool = pool.filter((c) => c.id !== card.id);
+      const wrongs = wrongPool
+        .sort(() => Math.random() - 0.5)
+        .slice(0, 3)
+        .map((c) => c.back);
+      const options = [...wrongs, card.back].sort(() => Math.random() - 0.5);
+      return { front: card.front, back: card.back, options, correctIndex: options.indexOf(card.back) };
+    });
+    setQuizQuestions(questions);
+    setQuizIndex(0);
+    setQuizSelected(null);
+    setQuizScore(0);
+    setQuizDone(false);
+    setVocabView("quiz");
+  }, [cards]);
+
   const canStartExam = Boolean(filteredCards.length) && !isLoading && !isGenerating;
 
   const containerClassName = `rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30${
@@ -341,11 +373,39 @@ function FlashcardsPanel({
         </span>
       </div>
 
+      {isVocabularyMode && (
+        <div className="mt-3 flex gap-1 rounded-xl bg-white/5 p-1 ring-1 ring-white/10">
+          <button
+            type="button"
+            onClick={() => setVocabView("cards")}
+            className={`flex-1 rounded-lg py-1.5 text-sm font-medium transition ${
+              vocabView === "cards"
+                ? "bg-violet-500 text-white shadow"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            카드
+          </button>
+          <button
+            type="button"
+            onClick={() => startQuiz(filteredCards)}
+            disabled={cards.length < 2}
+            className={`flex-1 rounded-lg py-1.5 text-sm font-medium transition ${
+              vocabView === "quiz"
+                ? "bg-violet-500 text-white shadow"
+                : "text-slate-400 hover:text-slate-200 disabled:opacity-40"
+            }`}
+          >
+            퀴즈
+          </button>
+        </div>
+      )}
+
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={onGenerate}
-          disabled={!canGenerate || isGenerating || isLoading || isExamMode}
+          disabled={!canGenerate || isGenerating || isLoading || isExamMode || vocabView === "quiz"}
           title={generateButtonTitle}
           className="ghost-button text-sm text-emerald-100"
           data-ghost-size="sm"
@@ -596,7 +656,118 @@ function FlashcardsPanel({
         </div>
       )}
 
-      {!isExamMode && (
+      {/* ───── 퀴즈 뷰 ───── */}
+      {vocabView === "quiz" && !isExamMode && (() => {
+        const q = quizQuestions[quizIndex];
+        if (quizDone || !quizQuestions.length) {
+          const pct = quizQuestions.length ? Math.round((quizScore / quizQuestions.length) * 100) : 0;
+          return (
+            <div className="mt-4 flex flex-col items-center gap-4 rounded-3xl border border-white/10 bg-white px-6 py-10 text-center shadow-lg shadow-black/10">
+              <p className="text-xs font-semibold uppercase tracking-widest text-violet-500">완료</p>
+              <p className="text-4xl font-bold text-slate-800">{pct}%</p>
+              <p className="text-sm text-slate-500">{quizQuestions.length}문항 · 정답 {quizScore}개</p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => startQuiz(filteredCards)}
+                  className="ghost-button text-sm text-violet-200"
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": "167, 139, 250" }}
+                >
+                  다시 풀기
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVocabView("cards")}
+                  className="ghost-button text-sm text-slate-300"
+                  data-ghost-size="sm"
+                  style={{ "--ghost-color": "148, 163, 184" }}
+                >
+                  카드로 돌아가기
+                </button>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div className="mt-4 flex flex-col gap-3">
+            {/* 진행 상태 */}
+            <div className="flex items-center justify-between text-xs text-slate-400">
+              <span className="font-medium text-slate-300">
+                {quizIndex + 1} <span className="text-slate-500">/ {quizQuestions.length}</span>
+              </span>
+              <span className="text-violet-400">정답 {quizScore}</span>
+            </div>
+            <div className="h-1 w-full rounded-full bg-white/10">
+              <div
+                className="h-1 rounded-full bg-violet-400 transition-all duration-300"
+                style={{ width: `${(quizIndex / quizQuestions.length) * 100}%` }}
+              />
+            </div>
+
+            {/* 문제 카드 */}
+            <div className="flex flex-col items-center justify-center rounded-3xl border border-black/5 bg-white px-8 py-8 shadow-lg shadow-black/10 text-center">
+              <p className="text-xs text-slate-400 mb-2">아래 단어의 뜻은?</p>
+              <p className="text-2xl font-bold text-slate-800">{q.front}</p>
+            </div>
+
+            {/* 선택지 */}
+            <div className="grid grid-cols-1 gap-2">
+              {q.options.map((option, idx) => {
+                const isSelected = quizSelected === idx;
+                const isCorrect = idx === q.correctIndex;
+                let cls = "w-full rounded-2xl border px-4 py-3.5 text-sm font-medium text-left transition ";
+                if (quizSelected === null) {
+                  cls += "border-white/10 bg-white/5 text-slate-200 hover:bg-white/10";
+                } else if (isCorrect) {
+                  cls += "border-emerald-500/50 bg-emerald-500/20 text-emerald-200";
+                } else if (isSelected) {
+                  cls += "border-red-500/50 bg-red-500/20 text-red-300";
+                } else {
+                  cls += "border-white/5 bg-white/3 text-slate-500";
+                }
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    disabled={quizSelected !== null}
+                    onClick={() => {
+                      setQuizSelected(idx);
+                      if (idx === q.correctIndex) setQuizScore((s) => s + 1);
+                    }}
+                    className={cls}
+                  >
+                    <span className="mr-2 text-slate-500">{["①","②","③","④"][idx]}</span>
+                    {option}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* 다음 버튼 */}
+            {quizSelected !== null && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (quizIndex + 1 >= quizQuestions.length) {
+                    setQuizDone(true);
+                  } else {
+                    setQuizIndex((i) => i + 1);
+                    setQuizSelected(null);
+                  }
+                }}
+                className="ghost-button w-full text-sm text-violet-200"
+                data-ghost-size="sm"
+                style={{ "--ghost-color": "167, 139, 250" }}
+              >
+                {quizIndex + 1 >= quizQuestions.length ? "결과 보기" : "다음 →"}
+              </button>
+            )}
+          </div>
+        );
+      })()}
+
+      {!isExamMode && vocabView !== "quiz" && (
         <>
           <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
             <textarea
