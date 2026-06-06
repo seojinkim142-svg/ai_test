@@ -1223,6 +1223,7 @@ function App() {
   const [flashcardStatus, setFlashcardStatus] = useState("");
   const [flashcardError, setFlashcardError] = useState("");
   const [flashcardScores, setFlashcardScores] = useState([]);
+  const [vocabQuizScores, setVocabQuizScores] = useState([]);
   const [tutorMessages, setTutorMessages] = useState([]);
   const [isTutorLoading, setIsTutorLoading] = useState(false);
   const [tutorError, setTutorError] = useState("");
@@ -2838,16 +2839,19 @@ function App() {
       if (!supabase || !user) {
         setFlashcards([]);
         setFlashcardScores([]);
+        setVocabQuizScores([]);
         return;
       }
       setIsLoadingFlashcards(true);
       try {
-        const [list, scores] = await Promise.all([
+        const [list, scores, quizScores] = await Promise.all([
           listFlashcards({ userId: user.id, deckId }),
           listFlashcardScores({ userId: user.id, deckId }).catch(() => []),
+          listFlashcardScores({ userId: user.id, deckId: deckId + "_vq" }).catch(() => []),
         ]);
         setFlashcards(list);
         setFlashcardScores(scores);
+        setVocabQuizScores(quizScores);
       } catch (err) {
         setError(`플래시카드를 불러오지 못했습니다: ${err.message}`);
       } finally {
@@ -6864,6 +6868,24 @@ function App() {
     [user, selectedFileId]
   );
 
+  const handleSaveVocabQuizScore = useCallback(
+    async ({ total, score, accuracy, category }) => {
+      const deckId = (selectedFileId || "default") + "_vq";
+      if (user) {
+        try {
+          const saved = await saveFlashcardScore({
+            userId: user.id, deckId,
+            total, known: score, unknown: total - score, accuracy,
+          });
+          if (saved) {
+            setVocabQuizScores((prev) => [{ ...saved, category }, ...prev].slice(0, 100));
+          }
+        } catch {}
+      }
+    },
+    [user, selectedFileId]
+  );
+
   const handleGenerateFlashcards = useCallback(async () => {
     if (isGeneratingFlashcards) return;
     if (AUTH_ENABLED && !user) {
@@ -8502,6 +8524,8 @@ function App() {
     handleDeduplicateFlashcards,
     handleSaveFlashcardScore,
     flashcardScores,
+    vocabQuizScores,
+    handleSaveVocabQuizScore,
     handleGenerateFlashcards,
     handleGenerateVocabularyFlashcards,
     handleReextractVocabulary,
