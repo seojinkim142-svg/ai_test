@@ -40,6 +40,7 @@ function VocabQuizPanel({ cards = [] }) {
   const [view, setView] = useState("home"); // "home" | "quiz" | "scores"
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [questions, setQuestions] = useState([]);
+  const [questionCount, setQuestionCount] = useState(20);
   const [index, setIndex] = useState(0);
   const [selected, setSelected] = useState(null);
   const [score, setScore] = useState(0);
@@ -56,9 +57,20 @@ function VocabQuizPanel({ cards = [] }) {
     [cards, selectedCategory]
   );
 
+  // 카테고리 바뀌면 문항 수가 가용 카드보다 많을 경우 조정
+  const adjustedCount = Math.min(questionCount, filteredCards.length);
+
+  const countOptions = useMemo(() => {
+    const len = filteredCards.length;
+    const presets = [10, 20, 50, 100].filter((n) => n <= len);
+    if (!presets.includes(len)) presets.push(len);
+    return presets;
+  }, [filteredCards.length]);
+
   const startQuiz = useCallback(() => {
-    const q = buildQuestions(filteredCards);
-    if (!q.length) return;
+    const all = buildQuestions(filteredCards);
+    if (!all.length) return;
+    const q = adjustedCount >= filteredCards.length ? all : all.slice(0, adjustedCount);
     setQuestions(q);
     setIndex(0);
     setSelected(null);
@@ -124,6 +136,27 @@ function VocabQuizPanel({ cards = [] }) {
             })}
           </div>
         )}
+
+        {/* 문항 수 선택 */}
+        <div>
+          <p className="mb-2 text-xs text-slate-400">문항 수</p>
+          <div className="flex flex-wrap gap-1.5">
+            {countOptions.map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setQuestionCount(n)}
+                className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
+                  questionCount === n
+                    ? "bg-emerald-500/30 text-emerald-200 border-emerald-400/50"
+                    : "bg-white/5 text-slate-400 border-white/10 hover:bg-white/10"
+                }`}
+              >
+                {n === filteredCards.length ? `전체 (${n})` : `${n}개`}
+              </button>
+            ))}
+          </div>
+        </div>
 
         <p className="text-xs text-slate-500">
           {selectedCategory
