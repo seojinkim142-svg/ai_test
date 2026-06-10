@@ -142,14 +142,6 @@ const STORAGE_CONTENT_TYPE_BY_EXT = {
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 };
 
-const ALLOWED_UPLOAD_MIME_TYPES = new Set([
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-]);
-
-const ALLOWED_UPLOAD_EXTENSIONS = new Set(["pdf", "docx", "pptx"]);
-
 const getLowerFileExtension = (fileName) => {
   const normalized = String(fileName || "").trim().toLowerCase();
   if (!normalized) return "";
@@ -233,16 +225,6 @@ export async function uploadPdfToStorage(userId, file) {
   const client = requireSupabase();
   requireUser(userId);
   if (!file) throw new Error("File is required.");
-
-  // MIME 타입 및 확장자 검증
-  const uploadExt = getLowerFileExtension(file.name);
-  const uploadMime = String(file.type || "").trim().toLowerCase();
-  if (!ALLOWED_UPLOAD_EXTENSIONS.has(uploadExt)) {
-    throw new Error(`허용되지 않는 파일 형식입니다. PDF, DOCX, PPTX 파일만 업로드 가능합니다.`);
-  }
-  if (uploadMime && !ALLOWED_UPLOAD_MIME_TYPES.has(uploadMime)) {
-    throw new Error(`허용되지 않는 파일 형식입니다. PDF, DOCX, PPTX 파일만 업로드 가능합니다.`);
-  }
 
   const safeName = toSafeStorageFileName(file.name);
   const uniqueSuffix =
@@ -415,47 +397,6 @@ export async function listFlashcardScores({ userId, deckId }) {
   const { data, error } = await query;
   if (error) throw error;
   return data || [];
-}
-
-const DIAGNOSTIC_RESULTS_TABLE = "diagnostic_results";
-
-export async function saveDiagnosticResult({
-  userId,
-  docId,
-  totalQuestions,
-  correctCount,
-  predictedScore,
-  topicBreakdown,
-}) {
-  if (!supabase || !userId || !docId) return null;
-  const { data, error } = await supabase
-    .from(DIAGNOSTIC_RESULTS_TABLE)
-    .insert({
-      user_id: userId,
-      doc_id: String(docId),
-      total_questions: totalQuestions,
-      correct_count: correctCount,
-      predicted_score: predictedScore,
-      topic_breakdown: topicBreakdown || [],
-    })
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
-
-export async function fetchLatestDiagnosticResult({ userId, docId }) {
-  if (!supabase || !userId || !docId) return null;
-  const { data, error } = await supabase
-    .from(DIAGNOSTIC_RESULTS_TABLE)
-    .select("*")
-    .eq("user_id", userId)
-    .eq("doc_id", String(docId))
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  return data || null;
 }
 
 export async function deleteUpload({ userId, uploadId, bucket, path, previewPdfBucket, previewPdfPath }) {
