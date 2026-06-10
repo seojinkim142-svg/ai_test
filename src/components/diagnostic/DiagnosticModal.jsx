@@ -66,10 +66,8 @@ export default function DiagnosticModal({ userId, docId, onGoToQuiz, onGoToSumma
 
   return (
     <div className="fixed inset-0 z-[165] flex items-center justify-center px-4">
-      <button
-        type="button"
-        aria-label="진단 테스트 창 닫기"
-        onClick={handleClose}
+      <div
+        aria-hidden="true"
         className={`absolute inset-0 ${
           theme === "light" ? "bg-slate-900/25" : "bg-black/75"
         } backdrop-blur-[2px]`}
