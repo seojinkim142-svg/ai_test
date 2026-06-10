@@ -85,11 +85,11 @@ const resolveAllowOrigin = (req) => {
   if (allowedOrigins.has("*")) return "*";
 
   const firstAllowed = [...allowedOrigins][0];
-  return firstAllowed || requestOrigin || "*";
+  return firstAllowed || "";
 };
 
 const buildCorsHeaders = (allowOrigin) => ({
-  "Access-Control-Allow-Origin": allowOrigin || "*",
+  "Access-Control-Allow-Origin": allowOrigin || "",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
   Vary: "Origin",
@@ -181,6 +181,36 @@ export default async function handler(req, res) {
     sendJson(res, 405, { message: "Method not allowed." }, allowOrigin);
     return;
   }
+
+  // ── Supabase JWT authentication ───────────────────────────────────────────
+  const authHeader = text(req.headers["x-supabase-auth"] || req.headers["authorization"]);
+  const jwtToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (supabaseUrl && supabaseServiceKey) {
+    if (!jwtToken) {
+      sendJson(res, 401, { message: "Authentication required." }, allowOrigin);
+      return;
+    }
+    try {
+      const userRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+        headers: {
+          Authorization: `Bearer ${jwtToken}`,
+          apikey: supabaseServiceKey,
+        },
+      });
+      if (!userRes.ok) {
+        sendJson(res, 401, { message: "Invalid or expired session." }, allowOrigin);
+        return;
+      }
+    } catch {
+      sendJson(res, 503, { message: "Authentication service unavailable." }, allowOrigin);
+      return;
+    }
+  }
+  // ─────────────────────────────────────────────────────────────────────────
 
   let body;
   try {

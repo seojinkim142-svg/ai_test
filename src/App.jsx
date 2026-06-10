@@ -1,7 +1,10 @@
-﻿import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { Suspense, lazy, useCallback, useEffect, useMemo, useRef } from "react";
 import { Capacitor } from "@capacitor/core";
 import { useLayoutEffect } from "react";
 import StartPage from "./pages/StartPage";
+import ProfilePinDialog from "./components/ProfilePinDialog";
+import FeedbackDialog from "./components/FeedbackDialog";
+import DiagnosticModal from "./components/diagnostic/DiagnosticModal";
 import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
 import { useAdMobBanner } from "./hooks/useAdMobBanner";
 import { useUserTier } from "./hooks/useUserTier";
@@ -44,6 +47,7 @@ import {
   fetchExtractedText,
   getThemeFromUser,
   saveTheme,
+  fetchLatestDiagnosticResult,
 } from "./services/supabase";
 import { ensureUploadPreviewPdf as ensureUploadPreviewPdfRequest } from "./services/document";
 import {
@@ -127,13 +131,76 @@ import {
   readTopicStructureFromHighlights,
   writeTopicStructureToHighlights,
 } from "./utils/studyArtifacts";
-import { clearPaymentReturnPending, readPaymentReturnPending } from "./utils/paymentReturn";
+import {
+  clearPaymentReturnPending,
+  readPaymentReturnPending,
+  extractPaymentReturnParams,
+  isNativePaymentCallbackUrl,
+  PAYMENT_RETURN_QUERY_KEYS as PAYMENT_RETURN_QUERY_KEYS_FROM_MODULE,
+} from "./utils/paymentReturn";
 import { getTutorCopy } from "./utils/tutorCopy";
+import {
+  useAuthStore,
+  useUiStore,
+  useDocumentStore,
+  useSummaryStore,
+  useQuizStore,
+  useFlashcardStore,
+  useMockExamStore,
+  usePremiumStore,
+  useTutorStore,
+  useDiagnosticStore,
+} from "./stores";
 import {
   buildFolderAggregateDocId,
   isFolderAggregateDocId,
   parseFolderAggregateDocId,
 } from "./utils/appShared";
+import { buildStoragePathCandidates, isSafeStoragePathForReuse } from "./utils/storageHelpers";
+import { hasMojibakeText, containsInternalAiDetail, sanitizeUiText, extractUserVisibleErrorPrefix } from "./utils/errorHandler";
+import {
+  formatTutorEvidenceLabel,
+  normalizeTutorRequestPayload,
+  buildTutorHistoryMessageContent,
+  buildTutorImageEvidenceBlock,
+  buildTutorHistoryStorageKey,
+  buildChapterRangeStorageKey,
+  TUTOR_HISTORY_STORAGE_PREFIX,
+  TUTOR_HISTORY_MAX_MESSAGES,
+  CHAPTER_RANGE_STORAGE_PREFIX,
+} from "./utils/tutorHelpers";
+import {
+  isDbId,
+  createLocalEntityId,
+  getChapterRangeSourceLabel,
+  buildDetectedChapterRangeNotice,
+  AUTO_CHAPTER_FALLBACK_NOTICE,
+  formatPartialSummaryDefaultName,
+  parseChapterNumberSelectionInput,
+  normalizeUsageCountValue,
+  normalizeFreeUsageCounts,
+  buildFreeUsageFallback,
+  normalizeQuestionKey,
+  DEFAULT_QUIZ_MIX,
+  DEFAULT_QUIZ_MIX_INPUT,
+  parseQuizMixInput,
+  LIMIT_USAGE_KEY_MAP,
+} from "./utils/appStateHelpers";
+import { normalizeDiagnosticResultRow, isDiagnosticSkipped } from "./utils/diagnosticUtils";
+import {
+  normalizeInstructorEmphasisInput,
+  normalizeSavedPartialSummaryEntries,
+  normalizeSavedInstructorEmphasisEntries,
+  readFreeUsageCountsFromHighlights,
+  writeFreeUsageCountsToHighlights,
+  bumpFreeUsageCount,
+  readPartialSummaryBundleFromHighlights,
+  writePartialSummaryBundleToHighlights,
+  writeReviewNotesBundleToHighlights,
+  writeExamCramBundleToHighlights,
+  FREE_USAGE_ARTIFACT_KEY,
+  INSTRUCTOR_EMPHASIS_MAX_LENGTH,
+} from "./utils/studyArtifacts";
 
 const AuthPanel = lazy(() => import("./components/AuthPanel"));
 const Header = lazy(() => import("./components/Header"));
@@ -149,17 +216,7 @@ const NativeAppPlugin =
     ? Capacitor.registerPlugin("App")
     : null;
 
-const PAYMENT_RETURN_QUERY_KEYS = [
-  "pg_token",
-  "kakaoPay",
-  "nicePay",
-  "np_token",
-  "orderId",
-  "amount",
-  "message",
-  "niceBilling",
-  "trial",
-];
+const PAYMENT_RETURN_QUERY_KEYS = PAYMENT_RETURN_QUERY_KEYS_FROM_MODULE;
 const NATIVE_PAYMENT_RETURN_FALLBACK_MS = 1200;
 const trimSchemeSeparators = (value) => String(value || "").trim().replace(/:\/*$/, "");
 const revokeObjectUrlIfNeeded = (value) => {
@@ -178,1119 +235,173 @@ const toPreviewPdfFileName = (fileName) => {
 const NATIVE_PAYMENT_RETURN_SCHEME = trimSchemeSeparators(
   import.meta.env.VITE_NATIVE_APP_SCHEME || "com.tjwls.examstudyai"
 );
-const NATIVE_PAYMENT_RETURN_HOST = "auth";
-const NATIVE_PAYMENT_RETURN_PATH = "/callback";
-const OUTPUT_LANGUAGE_STORAGE_KEY = "zeusian-output-language";
-const DEFAULT_OUTPUT_LANGUAGE = "ko";
-const AVAILABLE_OUTPUT_LANGUAGES = ["en", "zh", "ja", "hi", "ko"];
-
-function extractPaymentReturnParams(rawUrl) {
-  const source = String(rawUrl || "").trim();
-  if (!source) return null;
-
-  try {
-    const parsed = new URL(source);
-    const nextParams = new URLSearchParams();
-
-    PAYMENT_RETURN_QUERY_KEYS.forEach((key) => {
-      const value = parsed.searchParams.get(key);
-      if (value != null && value !== "") {
-        nextParams.set(key, value);
-      }
-    });
-
-    return nextParams.toString() ? nextParams : null;
-  } catch {
-    return null;
-  }
-}
-
-function isNativePaymentCallbackUrl(rawUrl) {
-  const source = String(rawUrl || "").trim();
-  if (!source || !NATIVE_PAYMENT_RETURN_SCHEME) return false;
-
-  try {
-    const parsed = new URL(source);
-    return (
-      parsed.protocol === `${NATIVE_PAYMENT_RETURN_SCHEME}:` &&
-      parsed.hostname === NATIVE_PAYMENT_RETURN_HOST &&
-      String(parsed.pathname || "").startsWith(NATIVE_PAYMENT_RETURN_PATH)
-    );
-  } catch {
-    return false;
-  }
-}
-
-function buildStoragePathCandidates(rawPath) {
-  const source = String(rawPath || "").trim();
-  if (!source) return [];
-
-  const seen = new Set();
-  const candidates = [];
-  const addCandidate = (value) => {
-    const normalized = String(value || "")
-      .trim()
-      .replace(/\\/g, "/")
-      .replace(/^\/+/, "");
-    if (!normalized || seen.has(normalized)) return;
-    seen.add(normalized);
-    candidates.push(normalized);
-  };
-
-  addCandidate(source);
-
-  if (/%[0-9A-Fa-f]{2}/.test(source)) {
-    try {
-      addCandidate(decodeURIComponent(source));
-    } catch {
-      // Ignore malformed escape sequences.
-    }
-  }
-
-  try {
-    const decoded = decodeURI(source);
-    addCandidate(decoded);
-    addCandidate(encodeURI(decoded));
-  } catch {
-    // Ignore malformed URI sequences.
-  }
-
-  addCandidate(encodeURI(source));
-  return candidates;
-}
-
-function isSafeStoragePathForReuse(rawPath) {
-  const value = String(rawPath || "").trim();
-  if (!value) return false;
-  if (value.includes("%")) return false;
-  return /^[\x20-\x7E]+$/.test(value);
-}
-
-const CHAPTER_RANGE_STORAGE_PREFIX = "zeusian:chapter-ranges:v1";
-const TUTOR_HISTORY_STORAGE_PREFIX = "zeusian:tutor-history:v1";
-const TUTOR_HISTORY_MAX_MESSAGES = 60;
-const PARTIAL_SUMMARY_ARTIFACT_KEY = "__partial_summary_state_v1";
-const PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY = "__partial_summary_library_v1";
-const FREE_USAGE_ARTIFACT_KEY = "__free_usage_v1";
-const INSTRUCTOR_EMPHASIS_ARTIFACT_KEY = "__instructor_emphasis_v1";
-const INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY = "__instructor_emphasis_library_v1";
-const INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY = "__instructor_emphasis_active_id_v1";
-const LEGACY_HIGHLIGHTS_WRAP_KEY = "__legacy_highlights_payload_v1";
-const INSTRUCTOR_EMPHASIS_MAX_LENGTH = 2000;
-const MOJIBAKE_COMPAT_CHAR_RE = /[\uF900-\uFAFF]/;
-const INTERNAL_AI_PROVIDER_RE = /\b(?:deepseek|openai)\b/i;
-const INTERNAL_AI_DETAIL_RE =
-  /\b(?:api error|internal server error|request failed|service unavailable|upstream|api key|retry in \d+s|status code|unauthorized|forbidden)\b/i;
-const USER_VISIBLE_ERROR_PREFIX_RE =
-  /^(.+?(?:실패했습니다|오류가 발생했습니다|불러오지 못했습니다|읽지 못했습니다|찾지 못했습니다|생성되지 않았습니다|이용할 수 없습니다|준비하지 못했습니다|failed|error))/i;
-
-function normalizeInstructorEmphasisInput(value) {
-  const normalized = String(value || "")
-    .replace(/\r\n/g, "\n")
-    .split("\0")
-    .join("")
-    .trim();
-  if (!normalized) return "";
-  if (normalized.length <= INSTRUCTOR_EMPHASIS_MAX_LENGTH) return normalized;
-  return normalized.slice(0, INSTRUCTOR_EMPHASIS_MAX_LENGTH).trim();
-}
-
-function hasMojibakeText(value) {
-  const text = String(value || "");
-  if (!text) return false;
-  if (text.includes("\uFFFD")) return true;
-  if (MOJIBAKE_COMPAT_CHAR_RE.test(text)) return true;
-  if (/[?]{2,}/.test(text) && /[\u3131-\uD79D]/.test(text)) return true;
-  return false;
-}
-
-function containsInternalAiDetail(value) {
-  const text = String(value || "").trim();
-  if (!text) return false;
-  return INTERNAL_AI_PROVIDER_RE.test(text) || INTERNAL_AI_DETAIL_RE.test(text);
-}
-
-function extractUserVisibleErrorPrefix(value) {
-  const text = String(value || "").trim();
-  if (!text) return "";
-
-  const colonPrefix = text.split(":")[0]?.trim().replace(/[.。]+$/, "") || "";
-  if (colonPrefix && !containsInternalAiDetail(colonPrefix)) {
-    return colonPrefix;
-  }
-
-  const matchedPrefix = text.match(USER_VISIBLE_ERROR_PREFIX_RE)?.[1]?.trim().replace(/[.。]+$/, "") || "";
-  if (matchedPrefix && !containsInternalAiDetail(matchedPrefix)) {
-    return matchedPrefix;
-  }
-
-  return "";
-}
-
-function sanitizeUiText(value, fallback = "") {
-  const text = String(value || "").trim();
-  if (!text) return "";
-  const normalizedFallback = String(fallback || "").trim();
-  if (hasMojibakeText(text)) return normalizedFallback;
-
-  if (containsInternalAiDetail(text)) {
-    const prefix = extractUserVisibleErrorPrefix(text);
-    if (prefix) {
-      return `${prefix}. 잠시 후 다시 시도해주세요.`;
-    }
-    return normalizedFallback || "AI 처리 중 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
-  }
-
-  return text;
-}
-
-const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function isDbId(id) { return UUID_REGEX.test(String(id || "")); }
-
-function createLocalEntityId(prefix) {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `${prefix}-${crypto.randomUUID()}`;
-  }
-  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function getChapterRangeSourceLabel(source) {
-  if (source === "outline") return "PDF 개요(북마크)";
-  if (source === "toc_pages_ocr") return "앞쪽 목차 페이지(OCR)";
-  if (source === "toc_pages") return "앞쪽 목차 페이지";
-  return "자동 분석";
-}
-
-function buildDetectedChapterRangeNotice(detected) {
-  const warning = String(detected?.warning || "").trim();
-  if (warning) return warning;
-
-  const label = getChapterRangeSourceLabel(detected?.source);
-  if (detected?.source === "outline") {
-    return `${label} 기준으로 챕터 범위를 자동 설정했습니다.`;
-  }
-  return `${label} 기준으로 챕터 범위를 자동 설정했습니다. 페이지 범위가 맞는지 한 번 확인해주세요.`;
-}
-
-const AUTO_CHAPTER_FALLBACK_NOTICE =
-  "목차를 찾지 못해 페이지 수 기준 임시 범위를 사용 중입니다. 필요하면 '목차 자동 추출'을 다시 누르거나 직접 범위를 수정해주세요.";
-
-function buildTutorHistoryStorageKey({ userId, docId }) {
-  const normalizedDocId = String(docId || "").trim();
-  if (!normalizedDocId) return "";
-  const normalizedUserId = String(userId || "guest").trim() || "guest";
-  return `${TUTOR_HISTORY_STORAGE_PREFIX}:${normalizedUserId}:${normalizedDocId}`;
-}
-
-function buildChapterRangeStorageKey({ userId, scopeId, docId }) {
-  const normalizedDocId = String(docId || "").trim();
-  if (!normalizedDocId) return "";
-  const normalizedUserId = String(userId || "guest").trim() || "guest";
-  const normalizedScopeId = String(scopeId || "default").trim() || "default";
-  return `${CHAPTER_RANGE_STORAGE_PREFIX}:${normalizedUserId}:${normalizedScopeId}:${normalizedDocId}`;
-}
-
-function formatPartialSummaryDefaultName(dateInput) {
-  const date = dateInput ? new Date(dateInput) : new Date();
-  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 16).replace("T", " ");
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
-  const hh = String(date.getHours()).padStart(2, "0");
-  const min = String(date.getMinutes()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
-}
-
-function normalizeSavedPartialSummaryEntries(input) {
-  const list = Array.isArray(input) ? input : [];
-  const normalized = [];
-  for (const entry of list) {
-    const summaryText = String(entry?.summary || "").trim();
-    if (!summaryText) continue;
-
-    const createdAtSource = String(entry?.createdAt || "").trim();
-    const updatedAtSource = String(entry?.updatedAt || "").trim();
-    const createdAtDate = new Date(createdAtSource || Date.now());
-    const updatedAtDate = new Date(updatedAtSource || createdAtDate.getTime());
-    const createdAt = Number.isNaN(createdAtDate.getTime())
-      ? new Date().toISOString()
-      : createdAtDate.toISOString();
-    const updatedAt = Number.isNaN(updatedAtDate.getTime())
-      ? createdAt
-      : updatedAtDate.toISOString();
-    const id =
-      typeof entry?.id === "string" && entry.id.trim() ? entry.id.trim() : createPremiumProfileId();
-    const nameRaw = String(entry?.name || "");
-    const name = nameRaw.trim() || formatPartialSummaryDefaultName(createdAt);
-    const range = String(entry?.range || "").trim();
-
-    normalized.push({
-      id,
-      name,
-      summary: summaryText,
-      range,
-      createdAt,
-      updatedAt,
-    });
-  }
-
-  normalized.sort((left, right) => {
-    const l = new Date(left.updatedAt).getTime() || 0;
-    const r = new Date(right.updatedAt).getTime() || 0;
-    return r - l;
-  });
-  return normalized;
-}
-
-function normalizeSavedInstructorEmphasisEntries(input) {
-  const list = Array.isArray(input) ? input : [];
-  const normalized = [];
-  for (const entry of list) {
-    const text = normalizeInstructorEmphasisInput(entry?.text);
-    if (!text) continue;
-
-    const createdAtSource = String(entry?.createdAt || "").trim();
-    const updatedAtSource = String(entry?.updatedAt || "").trim();
-    const createdAtDate = new Date(createdAtSource || Date.now());
-    const updatedAtDate = new Date(updatedAtSource || createdAtDate.getTime());
-    const createdAt = Number.isNaN(createdAtDate.getTime())
-      ? new Date().toISOString()
-      : createdAtDate.toISOString();
-    const updatedAt = Number.isNaN(updatedAtDate.getTime())
-      ? createdAt
-      : updatedAtDate.toISOString();
-    const id =
-      typeof entry?.id === "string" && entry.id.trim() ? entry.id.trim() : createPremiumProfileId();
-    normalized.push({
-      id,
-      text,
-      createdAt,
-      updatedAt,
-    });
-  }
-
-  normalized.sort((left, right) => {
-    const l = new Date(left.updatedAt).getTime() || 0;
-    const r = new Date(right.updatedAt).getTime() || 0;
-    return r - l;
-  });
-  return normalized;
-}
-
-function buildTutorPageCandidates(prompt, totalPages) {
-  const text = String(prompt || "");
-  const maxPages = Number.parseInt(totalPages, 10);
-  if (!text || !Number.isFinite(maxPages) || maxPages <= 0) return [];
-
-  const pages = new Set();
-  const addPage = (page) => {
-    const parsed = Number.parseInt(page, 10);
-    if (!Number.isFinite(parsed)) return;
-    if (parsed < 1 || parsed > maxPages) return;
-    pages.add(parsed);
-  };
-  const addRange = (start, end, cap = 18) => {
-    const parsedStart = Number.parseInt(start, 10);
-    const parsedEnd = Number.parseInt(end, 10);
-    if (!Number.isFinite(parsedStart) || !Number.isFinite(parsedEnd)) return;
-    const lo = Math.max(1, Math.min(parsedStart, parsedEnd));
-    const hi = Math.min(maxPages, Math.max(parsedStart, parsedEnd));
-    let count = 0;
-    for (let page = lo; page <= hi; page += 1) {
-      addPage(page);
-      count += 1;
-      if (count >= cap) break;
-    }
-  };
-  const addWindow = (center, before = 1, after = 2) => {
-    const parsed = Number.parseInt(center, 10);
-    if (!Number.isFinite(parsed)) return;
-    for (let page = parsed - before; page <= parsed + after; page += 1) {
-      addPage(page);
-    }
-  };
-
-  const pageRangeRe = /(\d{1,4})\s*(?:-|~|to|부터)\s*(\d{1,4})\s*(?:p|page|페이지|쪽)?/gi;
-  for (const match of text.matchAll(pageRangeRe)) {
-    addRange(match[1], match[2]);
-  }
-
-  const pageFromRe = /(\d{1,4})\s*(?:p|page|페이지|쪽)\s*(?:부터|이후)?/gi;
-  for (const match of text.matchAll(pageFromRe)) {
-    const base = Number.parseInt(match[1], 10);
-    if (!Number.isFinite(base)) continue;
-    addRange(base, Math.min(maxPages, base + 10), 12);
-  }
-
-  const pageSuffixRe = /(\d{1,4})\s*(?:p|page|페이지|쪽)/gi;
-  for (const match of text.matchAll(pageSuffixRe)) {
-    addWindow(match[1], 1, 2);
-  }
-
-  const pagePrefixRe = /(?:p|page|페이지|쪽)\s*(\d{1,4})/gi;
-  for (const match of text.matchAll(pagePrefixRe)) {
-    addWindow(match[1], 1, 2);
-  }
-
-  return [...pages].sort((a, b) => a - b).slice(0, 24);
-}
-
-function escapeRegex(source) {
-  return String(source || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function extractTutorSectionCandidates(prompt) {
-  const text = String(prompt || "");
-  if (!text) return [];
-  const found = text.match(/\b\d+(?:\.\d+){1,3}\b/g) || [];
-  const unique = [];
-  const seen = new Set();
-  for (const token of found) {
-    const normalized = String(token || "").trim();
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    unique.push(normalized);
-    if (unique.length >= 4) break;
-  }
-  return unique;
-}
-
-function extractTutorProblemTokenCandidates(prompt) {
-  const text = String(prompt || "");
-  if (!text) return [];
-
-  const found = [];
-  const add = (value) => {
-    const token = String(value || "").trim();
-    if (!token) return;
-    if (!found.includes(token)) found.push(token);
-  };
-
-  const patterns = [
-    /(?:문제|question|q\.?)\s*(\d{1,3}(?:\.\d{1,3})?)/gi,
-    /(\d{1,3}(?:\.\d{1,3})?)\s*번\s*(?:문제|question)?/gi,
-  ];
-  for (const re of patterns) {
-    for (const match of text.matchAll(re)) {
-      add(match?.[1]);
-      if (found.length >= 4) return found;
-    }
-  }
-  return found;
-}
-
-function incrementSectionToken(sectionToken) {
-  const parts = String(sectionToken || "")
-    .split(".")
-    .map((part) => Number.parseInt(part, 10));
-  if (!parts.length || parts.some((value) => !Number.isFinite(value) || value < 0)) return "";
-  parts[parts.length - 1] += 1;
-  return parts.join(".");
-}
-
-function buildTutorSectionBoundaryPatterns(sectionToken) {
-  const token = String(sectionToken || "").trim();
-  if (!token) return [];
-  const patterns = [];
-
-  const nextSibling = incrementSectionToken(token);
-  if (nextSibling) {
-    patterns.push(new RegExp(`(?:^|[^0-9])${escapeRegex(nextSibling)}(?:[^0-9]|$)`, "i"));
-  }
-
-  const parts = token.split(".").map((part) => Number.parseInt(part, 10));
-  if (parts.length >= 2 && Number.isFinite(parts[0])) {
-    const nextMajor = parts[0] + 1;
-    patterns.push(
-      new RegExp(
-        [
-          `\\b${nextMajor}\\.\\d+\\b`,
-          `\\bchapter\\s*${nextMajor}\\b`,
-          `\\bchap\\.?\\s*${nextMajor}\\b`,
-          `\\bch\\.?\\s*${nextMajor}\\b`,
-          `\\bsection\\s*${nextMajor}\\b`,
-          `\\bsec\\.?\\s*${nextMajor}\\b`,
-          `제\\s*${nextMajor}\\s*장`,
-          `${nextMajor}\\s*장`,
-        ].join("|"),
-        "i"
-      )
-    );
-  }
-
-  return patterns;
-}
-
-function detectTutorSectionPageRange(pageEntries, sectionToken) {
-  const pages = Array.isArray(pageEntries) ? pageEntries : [];
-  const token = String(sectionToken || "").trim();
-  if (!pages.length || !token) return null;
-
-  const targetRe = new RegExp(`(?:^|[^0-9])${escapeRegex(token)}(?:[^0-9]|$)`, "i");
-  const startIndex = pages.findIndex((entry) => targetRe.test(String(entry?.text || "")));
-  if (startIndex < 0) return null;
-
-  const boundaryPatterns = buildTutorSectionBoundaryPatterns(token);
-  let endIndex = pages.length - 1;
-  for (let idx = startIndex + 1; idx < pages.length; idx += 1) {
-    const text = String(pages[idx]?.text || "");
-    if (!text) continue;
-    if (boundaryPatterns.some((pattern) => pattern.test(text))) {
-      endIndex = Math.max(startIndex, idx - 1);
-      break;
-    }
-  }
-
-  const startPage = Number.parseInt(pages[startIndex]?.pageNumber, 10);
-  const endPage = Number.parseInt(pages[endIndex]?.pageNumber, 10);
-  if (!Number.isFinite(startPage) || !Number.isFinite(endPage)) return null;
-  return {
-    section: token,
-    startPage,
-    endPage: Math.max(startPage, endPage),
-  };
-}
-
-function extractTutorEvidenceEntries(rawEvidenceText) {
-  const source = String(rawEvidenceText || "");
-  if (!source) return [];
-  const entries = [];
-  const re = /\[(p\.\d+|img(?:\.\d+)?)\]\s*\n([\s\S]*?)(?=\n\s*\[(?:p\.\d+|img(?:\.\d+)?)\]\s*\n|$)/gi;
-  for (const match of source.matchAll(re)) {
-    const rawLabel = String(match?.[1] || "").trim().toLowerCase();
-    const pageNumber = Number.parseInt(rawLabel.match(/^p\.(\d+)$/i)?.[1] || "", 10);
-    const text = String(match?.[2] || "").replace(/\s+/g, " ").trim();
-    if (!rawLabel || !text) continue;
-    entries.push({ label: rawLabel, pageNumber, text });
-  }
-  return entries;
-}
-
-function formatTutorEvidenceLabel(entry) {
-  if (Number.isFinite(entry?.pageNumber)) {
-    return `p.${entry.pageNumber}`;
-  }
-  if (/^img(?:\.\d+)?$/i.test(String(entry?.label || ""))) {
-    return "screenshot";
-  }
-  return "evidence";
-}
-
-function buildTutorForcedFallbackAnswer(question, rawEvidenceText) {
-  const entries = extractTutorEvidenceEntries(rawEvidenceText);
-  if (!entries.length) {
-    return "\uB2F5\uBCC0 \uC0DD\uC131\uC774 \uBD88\uC548\uC815\uD574 \uBB38\uC11C \uBCF8\uBB38 \uADFC\uAC70\uB97C \uBC14\uB85C \uB9CC\uB4E4\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4. \uAC19\uC740 \uC9C8\uBB38\uC744 \uB2E4\uC2DC \uBCF4\uB0B4\uC8FC\uC2DC\uBA74 \uC989\uC2DC \uC7AC\uC2DC\uB3C4\uD558\uACA0\uC2B5\uB2C8\uB2E4.";
-  }
-
-  const terms = String(question || "")
-    .toLowerCase()
-    .match(/[0-9a-z\uAC00-\uD7A3.]+/g);
-  const keywords = (terms || []).filter((token) => token.length >= 2).slice(0, 12);
-
-  const scored = entries
-    .map((entry, index) => {
-      const lower = entry.text.toLowerCase();
-      let score = 0;
-      for (const token of keywords) {
-        if (lower.includes(token)) score += token.includes(".") ? 3 : 1;
-      }
-      return { ...entry, index, score };
-    })
-    .sort((a, b) => b.score - a.score || a.index - b.index);
-
-  const selected = scored.slice(0, Math.min(3, scored.length));
-  const lines = [
-    "\uBAA8\uB378 \uC751\uB2F5\uC774 \uBE44\uC5B4 \uBB38\uC11C \uBCF8\uBB38 \uADFC\uAC70 \uAE30\uC900\uC73C\uB85C \uD575\uC2EC \uB0B4\uC6A9\uC744 \uBA3C\uC800 \uC815\uB9AC\uD569\uB2C8\uB2E4.",
-  ];
-  for (const item of selected) {
-    const snippet = item.text.length > 280 ? `${item.text.slice(0, 280)}...` : item.text;
-    lines.push(`- ${formatTutorEvidenceLabel(item)}: ${snippet}`);
-  }
-  lines.push(
-    "\uC6D0\uD558\uC2DC\uBA74 \uC704 \uADFC\uAC70 \uD398\uC774\uC9C0\uB97C \uAE30\uC900\uC73C\uB85C \uC9C8\uBB38\uD558\uC2E0 \uD56D\uBAA9\uC744 \uB2E8\uACC4\uBCC4\uB85C \uC774\uC5B4\uC11C \uC790\uC138\uD788 \uC124\uBA85\uD558\uACA0\uC2B5\uB2C8\uB2E4."
-  );
-  return lines.join("\n");
-}
-
-function resolveTutorReplyText(rawReply, { question, rawEvidenceText }) {
-  const reply = String(rawReply || "").trim();
-  const invalidPatterns = [
-    /\uBAA8\uB378(?:\uC774)?\s*\uBE48\s*\uC751\uB2F5/iu,
-    /\uAC19\uC740\s*\uC9C8\uBB38\uC744\s*\uD55C\s*\uBC88\s*\uB354/iu,
-    /\uC9C8\uBB38\uC744\s*\uC870\uAE08\s*\uB354\s*\uAD6C\uCCB4/iu,
-    /\uC9C0\uAE08\uC740\s*\uB2F5\uBCC0\uC744\s*\uC0DD\uC131\uD558\uC9C0\s*\uBABB/iu,
-    /\uC694\uCCAD\s*\uAD6C\uAC04.*\uB2E4\uC2DC\s*\uC77D/iu,
-  ];
-  if (!reply || invalidPatterns.some((pattern) => pattern.test(reply))) {
-    return buildTutorForcedFallbackAnswer(question, rawEvidenceText);
-  }
-  return reply;
-}
-
-function normalizeTutorRequestPayload(rawInput) {
-  if (typeof rawInput === "string") {
-    const prompt = String(rawInput || "").trim();
-    return {
-      prompt,
-      displayPrompt: prompt,
-      attachmentFile: null,
-    };
-  }
-
-  const prompt = String(rawInput?.prompt || rawInput?.text || "").trim();
-  const displayPrompt = String(rawInput?.displayPrompt || prompt).trim();
-  const attachmentFile =
-    rawInput?.attachmentFile instanceof File
-      ? rawInput.attachmentFile
-      : rawInput?.attachment?.file instanceof File
-        ? rawInput.attachment.file
-        : null;
-
-  return {
-    prompt,
-    displayPrompt: displayPrompt || prompt,
-    attachmentFile,
-  };
-}
-
-function buildTutorHistoryMessageContent(message) {
-  const baseContent = String(message?.content || "").trim();
-  const attachmentName = String(message?.attachmentName || "").trim();
-  const attachmentText = String(message?.attachmentText || "").trim();
-  const parts = [];
-
-  if (baseContent) parts.push(baseContent);
-  if (attachmentName) parts.push(`[Attached image: ${attachmentName}]`);
-  if (attachmentText) parts.push(`[Screenshot OCR]\n${attachmentText}`);
-
-  return parts.join("\n\n").trim();
-}
-
-function buildTutorImageEvidenceBlock({ attachmentName, attachmentType, dimensions, ocrText }) {
-  const safeText = String(ocrText || "").trim();
-  if (!safeText) return "";
-
-  const width = Number.parseInt(dimensions?.width, 10);
-  const height = Number.parseInt(dimensions?.height, 10);
-  const sizeLabel =
-    Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0
-      ? `${width}x${height}`
-      : "";
-
-  return [
-    "[img.1]",
-    `Attached screenshot: ${String(attachmentName || "image").trim() || "image"}`,
-    attachmentType ? `Type: ${attachmentType}` : "",
-    sizeLabel ? `Rendered size: ${sizeLabel}` : "",
-    "",
-    safeText,
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
-function parseChapterNumberSelectionInput(rawInput, chapters) {
-  const available = Array.isArray(chapters) ? chapters : [];
-  const chapterNumbers = available
-    .map((chapter) => Number.parseInt(chapter?.chapterNumber, 10))
-    .filter((num) => Number.isFinite(num) && num > 0);
-  const chapterNumberSet = new Set(chapterNumbers);
-  if (!chapterNumbers.length) {
-    return { chapterNumbers: [], error: "설정에서 사용 가능한 챕터가 없습니다." };
-  }
-
-  const cleaned = String(rawInput || "").replace(/\s+/g, "");
-  if (!cleaned) {
-    return { chapterNumbers, error: "" };
-  }
-
-  const selected = new Set();
-  const tokens = cleaned.split(",").filter(Boolean);
-  for (const token of tokens) {
-    if (token.includes("-")) {
-      const [startRaw, endRaw] = token.split("-");
-      const start = Number.parseInt(startRaw, 10);
-      const end = Number.parseInt(endRaw, 10);
-      if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0 || start > end) {
-        return { chapterNumbers: [], error: `올바르지 않은 챕터 범위입니다: "${token}"` };
-      }
-      for (let chapterNumber = start; chapterNumber <= end; chapterNumber += 1) {
-        selected.add(chapterNumber);
-      }
-    } else {
-      const chapterNumber = Number.parseInt(token, 10);
-      if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) {
-        return { chapterNumbers: [], error: `올바르지 않은 챕터 번호입니다: "${token}"` };
-      }
-      selected.add(chapterNumber);
-    }
-  }
-
-  const filtered = [...selected]
-    .filter((num) => chapterNumberSet.has(num))
-    .sort((left, right) => left - right);
-
-  if (!filtered.length) {
-    return {
-      chapterNumbers: [],
-      error: `No matching chapters found in configured range. Available: ${chapterNumbers.join(", ")}`,
-    };
-  }
-  return { chapterNumbers: filtered, error: "" };
-}
-
-function isPlainObject(value) {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function normalizeUsageCountValue(value) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
-
-function normalizeFreeUsageCounts(value, fallback = null) {
-  const base = isPlainObject(value) ? value : {};
-  const fallbackBase = isPlainObject(fallback) ? fallback : {};
-  return {
-    summary: normalizeUsageCountValue(base.summary ?? fallbackBase.summary),
-    quiz: normalizeUsageCountValue(base.quiz ?? fallbackBase.quiz),
-    ox: normalizeUsageCountValue(base.ox ?? fallbackBase.ox),
-    flashcards: normalizeUsageCountValue(base.flashcards ?? fallbackBase.flashcards),
-  };
-}
-
-function buildFreeUsageFallback({ summary = null, quiz = null, ox = null } = {}) {
-  return normalizeFreeUsageCounts({
-    summary: String(summary || "").trim() ? 1 : 0,
-    quiz: quiz ? 1 : 0,
-    ox: Array.isArray(ox?.items) && ox.items.length > 0 ? 1 : 0,
-    flashcards: 0,
-  });
-}
-
-function readFreeUsageCountsFromHighlights(highlightsValue, fallback = null) {
-  const fallbackCounts = normalizeFreeUsageCounts(null, fallback);
-  const base = isPlainObject(highlightsValue) ? highlightsValue : null;
-  const raw = isPlainObject(base?.[FREE_USAGE_ARTIFACT_KEY]) ? base[FREE_USAGE_ARTIFACT_KEY] : null;
-  const counts = normalizeFreeUsageCounts(raw, fallbackCounts);
-  return {
-    summary: Math.max(counts.summary, fallbackCounts.summary),
-    quiz: Math.max(counts.quiz, fallbackCounts.quiz),
-    ox: Math.max(counts.ox, fallbackCounts.ox),
-    flashcards: Math.max(counts.flashcards, fallbackCounts.flashcards),
-  };
-}
-
-function writeFreeUsageCountsToHighlights(highlightsValue, counts) {
-  const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
-  if (!isPlainObject(highlightsValue) && highlightsValue != null) {
-    base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
-  }
-
-  const normalizedCounts = normalizeFreeUsageCounts(counts);
-  if (Object.values(normalizedCounts).some((count) => count > 0)) {
-    base[FREE_USAGE_ARTIFACT_KEY] = normalizedCounts;
-  } else {
-    delete base[FREE_USAGE_ARTIFACT_KEY];
-  }
-
-  return Object.keys(base).length > 0 ? base : null;
-}
-
-function bumpFreeUsageCount(counts, feature) {
-  const normalizedCounts = normalizeFreeUsageCounts(counts);
-  if (!Object.prototype.hasOwnProperty.call(normalizedCounts, feature)) {
-    return normalizedCounts;
-  }
-  return {
-    ...normalizedCounts,
-    [feature]: normalizedCounts[feature] + 1,
-  };
-}
-
-const LIMIT_USAGE_KEY_MAP = Object.freeze({
-  maxSummary: "summary",
-  maxQuiz: "quiz",
-  maxOx: "ox",
-  maxFlashcards: "flashcards",
-});
-
-function readPartialSummaryBundleFromHighlights(highlightsValue) {
-  const base = isPlainObject(highlightsValue) ? highlightsValue : null;
-  const rawState = isPlainObject(base?.[PARTIAL_SUMMARY_ARTIFACT_KEY])
-    ? base[PARTIAL_SUMMARY_ARTIFACT_KEY]
-    : null;
-  const summary = String(rawState?.summary || "").trim();
-  const range = String(rawState?.range || "").trim();
-  const libraryRaw = base?.[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY];
-  const library = normalizeSavedPartialSummaryEntries(libraryRaw);
-  const instructorLibraryRaw = base?.[INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY];
-  const instructorEmphasisLibrary = normalizeSavedInstructorEmphasisEntries(instructorLibraryRaw);
-  const rawInstructorEmphasis = base?.[INSTRUCTOR_EMPHASIS_ARTIFACT_KEY];
-  const legacyInstructorText = normalizeInstructorEmphasisInput(
-    typeof rawInstructorEmphasis === "string" ? rawInstructorEmphasis : rawInstructorEmphasis?.text
-  );
-  let mergedInstructorLibrary = instructorEmphasisLibrary;
-  if (!mergedInstructorLibrary.length && legacyInstructorText) {
-    const nowIso = new Date().toISOString();
-    mergedInstructorLibrary = [
-      {
-        id: createPremiumProfileId(),
-        text: legacyInstructorText,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-      },
-    ];
-  }
-  const requestedActiveId = String(base?.[INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY] || "").trim();
-  const activeInstructorEmphasisId =
-    mergedInstructorLibrary.find((item) => item.id === requestedActiveId)?.id ||
-    mergedInstructorLibrary[0]?.id ||
-    "";
-  const instructorEmphasis =
-    mergedInstructorLibrary.find((item) => item.id === activeInstructorEmphasisId)?.text || "";
-  return {
-    summary,
-    range,
-    library,
-    instructorEmphasisLibrary: mergedInstructorLibrary,
-    activeInstructorEmphasisId,
-    instructorEmphasis,
-  };
-}
-
-function writePartialSummaryBundleToHighlights(
-  highlightsValue,
-  {
-    summary,
-    range,
-    library,
-    instructorEmphasis,
-    instructorEmphasisLibrary,
-    activeInstructorEmphasisId,
-  } = {}
-) {
-  const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
-  if (!isPlainObject(highlightsValue) && highlightsValue != null) {
-    base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
-  }
-
-  const existingSummaryState = isPlainObject(base?.[PARTIAL_SUMMARY_ARTIFACT_KEY])
-    ? base[PARTIAL_SUMMARY_ARTIFACT_KEY]
-    : null;
-  const normalizedSummary =
-    summary === undefined
-      ? String(existingSummaryState?.summary || "").trim()
-      : String(summary || "").trim();
-  const normalizedRange =
-    range === undefined ? String(existingSummaryState?.range || "").trim() : String(range || "").trim();
-  const normalizedLibrary = normalizeSavedPartialSummaryEntries(
-    library === undefined ? base?.[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY] : library
-  );
-  const currentInstructorLibrary = normalizeSavedInstructorEmphasisEntries(
-    base?.[INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY]
-  );
-  const explicitInstructorLibrary = normalizeSavedInstructorEmphasisEntries(instructorEmphasisLibrary);
-  let normalizedInstructorLibrary =
-    instructorEmphasisLibrary === undefined ? currentInstructorLibrary : explicitInstructorLibrary;
-  const normalizedInstructorEmphasis = normalizeInstructorEmphasisInput(instructorEmphasis);
-  if (instructorEmphasis !== undefined) {
-    if (normalizedInstructorEmphasis) {
-      const nowIso = new Date().toISOString();
-      const newItem = {
-        id: createPremiumProfileId(),
-        text: normalizedInstructorEmphasis,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-      };
-      normalizedInstructorLibrary = normalizeSavedInstructorEmphasisEntries([
-        newItem,
-        ...normalizedInstructorLibrary,
-      ]);
-    } else {
-      normalizedInstructorLibrary = [];
-    }
-  }
-  const requestedActiveId = String(activeInstructorEmphasisId || "").trim();
-  const normalizedActiveInstructorEmphasisId =
-    normalizedInstructorLibrary.find((item) => item.id === requestedActiveId)?.id ||
-    normalizedInstructorLibrary[0]?.id ||
-    "";
-  const activeInstructorText =
-    normalizedInstructorLibrary.find((item) => item.id === normalizedActiveInstructorEmphasisId)?.text || "";
-
-  if (normalizedSummary) {
-    base[PARTIAL_SUMMARY_ARTIFACT_KEY] = {
-      summary: normalizedSummary,
-      range: normalizedRange,
-      updatedAt: new Date().toISOString(),
-    };
-  } else {
-    delete base[PARTIAL_SUMMARY_ARTIFACT_KEY];
-  }
-
-  if (normalizedLibrary.length > 0) {
-    base[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY] = normalizedLibrary;
-  } else {
-    delete base[PARTIAL_SUMMARY_LIBRARY_ARTIFACT_KEY];
-  }
-
-  if (normalizedInstructorLibrary.length > 0) {
-    base[INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY] = normalizedInstructorLibrary;
-  } else {
-    delete base[INSTRUCTOR_EMPHASIS_LIBRARY_ARTIFACT_KEY];
-  }
-
-  if (normalizedActiveInstructorEmphasisId) {
-    base[INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY] = normalizedActiveInstructorEmphasisId;
-  } else {
-    delete base[INSTRUCTOR_EMPHASIS_ACTIVE_ID_ARTIFACT_KEY];
-  }
-
-  if (activeInstructorText) {
-    base[INSTRUCTOR_EMPHASIS_ARTIFACT_KEY] = {
-      text: activeInstructorText,
-      updatedAt: new Date().toISOString(),
-    };
-  } else {
-    delete base[INSTRUCTOR_EMPHASIS_ARTIFACT_KEY];
-  }
-
-  return Object.keys(base).length > 0 ? base : null;
-}
-
-function writeReviewNotesBundleToHighlights(highlightsValue, reviewNotes) {
-  const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
-  if (!isPlainObject(highlightsValue) && highlightsValue != null) {
-    base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
-  }
-
-  const normalizedNotes = normalizeReviewNoteEntries(reviewNotes);
-  if (normalizedNotes.length > 0) {
-    base.__review_notes_v1 = normalizedNotes;
-  } else {
-    delete base.__review_notes_v1;
-  }
-
-  return Object.keys(base).length > 0 ? base : null;
-}
-
-function writeExamCramBundleToHighlights(
-  highlightsValue,
-  { content = "", scopeLabel = "", updatedAt = new Date().toISOString() } = {}
-) {
-  const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
-  if (!isPlainObject(highlightsValue) && highlightsValue != null) {
-    base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
-  }
-
-  const normalizedContent = String(content || "").trim();
-  if (normalizedContent) {
-    base.__exam_cram_v1 = {
-      content: normalizedContent,
-      scopeLabel: String(scopeLabel || "").trim(),
-      updatedAt,
-    };
-  } else {
-    delete base.__exam_cram_v1;
-  }
-
-  return Object.keys(base).length > 0 ? base : null;
-}
-
-function normalizeQuestionKey(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 220);
-}
-
-const DEFAULT_QUIZ_MIX = Object.freeze({
-  multipleChoice: 4,
-  shortAnswer: 1,
-  ox: 0,
-});
-
-const DEFAULT_QUIZ_MIX_INPUT = `${DEFAULT_QUIZ_MIX.multipleChoice}-${DEFAULT_QUIZ_MIX.shortAnswer}`;
-
-function parseQuizMixInput(value) {
-  const raw = String(value || "").trim();
-  if (!raw) {
-    return {
-      mix: null,
-      total: 0,
-      error: "문항 비율을 입력해주세요. 형식: 객관식-주관식 (예: 4-1)",
-    };
-  }
-
-  const parts = raw
-    .split(/[^0-9]+/)
-    .filter(Boolean)
-    .map((part) => Number.parseInt(part, 10));
-
-  if (parts.length !== 2 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
-    return {
-      mix: null,
-      total: 0,
-      error: "문항 비율은 객관식-주관식 형식으로 입력해주세요. 예: 4-1",
-    };
-  }
-
-  const [multipleChoice, shortAnswer] = parts;
-  const total = multipleChoice + shortAnswer;
-  if (total <= 0) {
-    return {
-      mix: null,
-      total: 0,
-      error: "최소 1문항 이상 입력해주세요.",
-    };
-  }
-
-  return {
-    mix: {
-      multipleChoice,
-      shortAnswer,
-      ox: 0,
-    },
-    total,
-    error: "",
-  };
-}
-
 function App() {
-  const [file, setFile] = useState(null);
-  const [extractedText, setExtractedText] = useState("");
-  const [previewText, setPreviewText] = useState("");
-  const [pageInfo, setPageInfo] = useState({ used: 0, total: 0 });
-  const [pdfUrl, setPdfUrl] = useState(null);
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
-  const [isLoadingText, setIsLoadingText] = useState(false);
-  const [isLoadingQuiz, setIsLoadingQuiz] = useState(false);
-  const [isLoadingSummary, setIsLoadingSummary] = useState(false);
-  const [isExportingSummary, setIsExportingSummary] = useState(false);
-  const [theme, setTheme] = useState("light");
-  const [outputLanguage, setOutputLanguage] = useState(() => {
-    if (typeof window === "undefined") return DEFAULT_OUTPUT_LANGUAGE;
-    const stored = String(window.localStorage.getItem(OUTPUT_LANGUAGE_STORAGE_KEY) || "")
-      .trim()
-      .toLowerCase();
-    if (AVAILABLE_OUTPUT_LANGUAGES.includes(stored)) return stored;
-    // 저장값 없으면 브라우저 언어 자동 감지
-    const browserLang = (navigator.language || "").slice(0, 2).toLowerCase();
-    return AVAILABLE_OUTPUT_LANGUAGES.includes(browserLang) ? browserLang : DEFAULT_OUTPUT_LANGUAGE;
-  });
-  const [summary, setSummary] = useState("");
+  // ─── Store subscriptions ────────────────────────────────────────────────────
+  const {
+    isSigningOut, setIsSigningOut,
+    showPayment, setShowPayment,
+    paymentReturnSignal, setPaymentReturnSignal,
+    showSettings, setShowSettings,
+    showAuth, setShowAuth,
+    showGuestIntro, setShowGuestIntro,
+    skipPromoSplash, setSkipPromoSplash,
+    allowGuestLandingAfterSignOut, setAllowGuestLandingAfterSignOut,
+    setUser, setAuthReady, setTierInfo,
+  } = useAuthStore();
 
-  const [questionStyleProfileContent, setQuestionStyleProfileContent] = useState("");
-  const [questionStyleProfileScopeLabel, setQuestionStyleProfileScopeLabel] = useState("");
-  const [quizSets, setQuizSets] = useState([]);
-  const [quizMixInput, setQuizMixInput] = useState(DEFAULT_QUIZ_MIX_INPUT);
-  const [oxItems, setOxItems] = useState(null);
-  const [oxSelections, setOxSelections] = useState({});
-  const [oxExplanationOpen, setOxExplanationOpen] = useState({});
-  const [isLoadingOx, setIsLoadingOx] = useState(false);
-  const [thumbnailUrl, setThumbnailUrl] = useState(null);
-  const [uploadedFiles, setUploadedFiles] = useState([]);
-  const [selectedFileId, setSelectedFileId] = useState(null);
-  const [pendingDocumentOpen, setPendingDocumentOpen] = useState(null);
-  const [panelTab, setPanelTab] = useState("summary");
-  const [splitPercent, setSplitPercent] = useState(50);
-  const [isResizingSplit, setIsResizingSplit] = useState(false);
-  const [isSigningOut, setIsSigningOut] = useState(false);
-  const [showPayment, setShowPayment] = useState(false);
-  const [paymentReturnSignal, setPaymentReturnSignal] = useState(0);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showAuth, setShowAuth] = useState(false);
-  const [showGuestIntro, setShowGuestIntro] = useState(() => !AUTH_ENABLED);
-  const [skipPromoSplash, setSkipPromoSplash] = useState(false);
-  const [allowGuestLandingAfterSignOut, setAllowGuestLandingAfterSignOut] = useState(false);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [visitedPages, setVisitedPages] = useState(() => new Set());
-  const [mockExams, setMockExams] = useState([]);
-  const [isLoadingMockExams, setIsLoadingMockExams] = useState(false);
-  const [isGeneratingMockExam, setIsGeneratingMockExam] = useState(false);
-  const [mockExamStatus, setMockExamStatus] = useState("");
-  const [mockExamError, setMockExamError] = useState("");
-  const paymentAbortFallbackTimerRef = useRef(null);
-  const [activeMockExamId, setActiveMockExamId] = useState(null);
-  const [showMockExamAnswers, setShowMockExamAnswers] = useState(false);
-  const [isMockExamMenuOpen, setIsMockExamMenuOpen] = useState(false);
-  const [flashcards, setFlashcards] = useState([]);
-  const [isLoadingFlashcards, setIsLoadingFlashcards] = useState(false);
-  const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false);
-  const [flashcardStatus, setFlashcardStatus] = useState("");
-  const [flashcardError, setFlashcardError] = useState("");
-  const [flashcardScores, setFlashcardScores] = useState([]);
-  const [vocabQuizScores, setVocabQuizScores] = useState([]);
-  const [tutorMessages, setTutorMessages] = useState([]);
-  const [isTutorLoading, setIsTutorLoading] = useState(false);
-  const [tutorError, setTutorError] = useState("");
-  const tutorRequestInFlightRef = useRef(false);
-  const [isFeedbackDialogOpen, setIsFeedbackDialogOpen] = useState(false);
-  const [feedbackCategory, setFeedbackCategory] = useState("general");
-  const [feedbackInput, setFeedbackInput] = useState("");
-  const [feedbackError, setFeedbackError] = useState("");
-  const [isSubmittingFeedback, setIsSubmittingFeedback] = useState(false);
-  const [isManualSyncing, setIsManualSyncing] = useState(false);
-  const [isPageSummaryOpen, setIsPageSummaryOpen] = useState(false);
-  const [pageSummaryInput, setPageSummaryInput] = useState("");
-  const [pageSummaryError, setPageSummaryError] = useState("");
-  const [isPageSummaryLoading, setIsPageSummaryLoading] = useState(false);
-  const [partialSummary, setPartialSummary] = useState("");
-  const [partialSummaryRange, setPartialSummaryRange] = useState("");
-  const [savedPartialSummaries, setSavedPartialSummaries] = useState([]);
-  const [reviewNotes, setReviewNotes] = useState([]);
-  const [instructorEmphasisInput, setInstructorEmphasisInput] = useState("");
-  const [savedInstructorEmphases, setSavedInstructorEmphases] = useState([]);
-  const [activeInstructorEmphasisId, setActiveInstructorEmphasisId] = useState("");
-  const [isSavedPartialSummaryOpen, setIsSavedPartialSummaryOpen] = useState(false);
-  const [reviewNotesChapterSelectionInput, setReviewNotesChapterSelectionInput] = useState("");
-  const [examCramContent, setExamCramContent] = useState("");
-  const [examCramUpdatedAt, setExamCramUpdatedAt] = useState("");
-  const [examCramScopeLabel, setExamCramScopeLabel] = useState("");
-  const [isGeneratingExamCram, setIsGeneratingExamCram] = useState(false);
-  const [examCramStatus, setExamCramStatus] = useState("");
-  const [examCramError, setExamCramError] = useState("");
-  const [quizChapterSelectionInput, setQuizChapterSelectionInput] = useState("");
-  const [quizPromptAddonInput, setQuizPromptAddonInput] = useState("");
-  const [quizDifficulty, setQuizDifficultyRaw] = useState(() => {
-    const saved = localStorage.getItem("quizDifficulty");
-    return ["하", "중", "상"].includes(saved) ? saved : null;
-  });
-  const setQuizDifficulty = (value) => {
-    const normalized = ["하", "중", "상"].includes(value) ? value : null;
-    setQuizDifficultyRaw(normalized);
-    if (normalized) {
-      localStorage.setItem("quizDifficulty", normalized);
-    } else {
-      localStorage.removeItem("quizDifficulty");
-    }
-  };
-  const [oxChapterSelectionInput, setOxChapterSelectionInput] = useState("");
-  const [flashcardChapterSelectionInput, setFlashcardChapterSelectionInput] = useState("");
-  const [flashcardGenerateCount, setFlashcardGenerateCount] = useState(8);
-  const [mockExamChapterSelectionInput, setMockExamChapterSelectionInput] = useState("");
-  const [mockExamPromptAddonInput, setMockExamPromptAddonInput] = useState("");
-  const [isChapterRangeOpen, setIsChapterRangeOpen] = useState(false);
-  const [chapterRangeInput, setChapterRangeInput] = useState("");
-  const [autoChapterRangeInput, setAutoChapterRangeInput] = useState("");
-  const [chapterRangeError, setChapterRangeError] = useState("");
-  const [chapterRangeNotice, setChapterRangeNotice] = useState("");
-  const [isDetectingChapterRanges, setIsDetectingChapterRanges] = useState(false);
-  // ─── 폴더 통합 퀴즈 state ────────────────────────────────────────────────────
-  const [folderQuizQuestions, setFolderQuizQuestions] = useState(null); // { multipleChoice: [], shortAnswer: [] }
-  const [isLoadingFolderQuiz, setIsLoadingFolderQuiz] = useState(false);
-  const [folderQuizError, setFolderQuizError] = useState("");
-  const [folderSelectedChoices, setFolderSelectedChoices] = useState({});
-  const [folderRevealedChoices, setFolderRevealedChoices] = useState({});
-  const [folderShortAnswerInput, setFolderShortAnswerInput] = useState({});
-  const [folderShortAnswerResult, setFolderShortAnswerResult] = useState({});
-  const [artifacts, setArtifacts] = useState(null);
-  const [topicStructure, setTopicStructure] = useState(null);
-  const [isLoadingTopicStructure, setIsLoadingTopicStructure] = useState(false);
-  const [topicStructureError, setTopicStructureError] = useState("");
+  const {
+    theme, setTheme,
+    outputLanguage, setOutputLanguage,
+    panelTab, setPanelTab,
+    splitPercent, setSplitPercent,
+    isResizingSplit, setIsResizingSplit,
+    isFeedbackDialogOpen, setIsFeedbackDialogOpen,
+    feedbackCategory, setFeedbackCategory,
+    feedbackInput, setFeedbackInput,
+    feedbackError, setFeedbackError,
+    isSubmittingFeedback, setIsSubmittingFeedback,
+    isManualSyncing, setIsManualSyncing,
+    usageCounts, setUsageCounts,
+    folderTutorMode, setFolderTutorMode,
+    semanticSearchResults, setSemanticSearchResults,
+    isSemanticSearching, setIsSemanticSearching,
+    compareResult, setCompareResult,
+    isComparing, setIsComparing,
+    compareError, setCompareError,
+    folderQuizQuestions, setFolderQuizQuestions,
+    isLoadingFolderQuiz, setIsLoadingFolderQuiz,
+    folderQuizError, setFolderQuizError,
+    folderSelectedChoices, setFolderSelectedChoices,
+    folderRevealedChoices, setFolderRevealedChoices,
+    folderShortAnswerInput, setFolderShortAnswerInput,
+    folderShortAnswerResult, setFolderShortAnswerResult,
+    sidebarOpen, setSidebarOpen,
+    showPremiumProfilePicker, setShowPremiumProfilePicker,
+    showProfilePinDialog, setShowProfilePinDialog,
+    profilePinInputs, setProfilePinInputs,
+    profilePinError, setProfilePinError,
+  } = useUiStore();
+
+  const {
+    file, setFile,
+    extractedText, setExtractedText,
+    previewText, setPreviewText,
+    pageInfo, setPageInfo,
+    pdfUrl, setPdfUrl,
+    status, setStatus,
+    error, setError,
+    isLoadingText, setIsLoadingText,
+    thumbnailUrl, setThumbnailUrl,
+    currentPage, setCurrentPage,
+    visitedPages, setVisitedPages,
+    uploadedFiles, setUploadedFiles,
+    selectedFileId, setSelectedFileId,
+    pendingDocumentOpen, setPendingDocumentOpen,
+    folders, setFolders,
+    selectedFolderId, setSelectedFolderId,
+    selectedUploadIds, setSelectedUploadIds,
+    isFolderLoading, setIsFolderLoading,
+    artifacts, setArtifacts,
+    allArtifacts, setAllArtifacts,
+  } = useDocumentStore();
+
+  const {
+    summary, setSummary,
+    isLoadingSummary, setIsLoadingSummary,
+    isExportingSummary, setIsExportingSummary,
+    partialSummary, setPartialSummary,
+    partialSummaryRange, setPartialSummaryRange,
+    savedPartialSummaries, setSavedPartialSummaries,
+    isSavedPartialSummaryOpen, setIsSavedPartialSummaryOpen,
+    isPageSummaryOpen, setIsPageSummaryOpen,
+    pageSummaryInput, setPageSummaryInput,
+    pageSummaryError, setPageSummaryError,
+    isPageSummaryLoading, setIsPageSummaryLoading,
+    instructorEmphasisInput, setInstructorEmphasisInput,
+    savedInstructorEmphases, setSavedInstructorEmphases,
+    activeInstructorEmphasisId, setActiveInstructorEmphasisId,
+    chapterRangeInput, setChapterRangeInput,
+    autoChapterRangeInput, setAutoChapterRangeInput,
+    chapterRangeError, setChapterRangeError,
+    chapterRangeNotice, setChapterRangeNotice,
+    isChapterRangeOpen, setIsChapterRangeOpen,
+    isDetectingChapterRanges, setIsDetectingChapterRanges,
+    topicStructure, setTopicStructure,
+    isLoadingTopicStructure, setIsLoadingTopicStructure,
+    topicStructureError, setTopicStructureError,
+  } = useSummaryStore();
+
+  const {
+    questionStyleProfileContent, setQuestionStyleProfileContent,
+    questionStyleProfileScopeLabel, setQuestionStyleProfileScopeLabel,
+    quizSets, setQuizSets,
+    isLoadingQuiz, setIsLoadingQuiz,
+    quizMixInput, setQuizMixInput,
+    oxItems, setOxItems,
+    oxSelections, setOxSelections,
+    oxExplanationOpen, setOxExplanationOpen,
+    isLoadingOx, setIsLoadingOx,
+    quizChapterSelectionInput, setQuizChapterSelectionInput,
+    quizPromptAddonInput, setQuizPromptAddonInput,
+    quizDifficulty, setQuizDifficulty,
+    oxChapterSelectionInput, setOxChapterSelectionInput,
+  } = useQuizStore();
+
+  const {
+    flashcards, setFlashcards,
+    isLoadingFlashcards, setIsLoadingFlashcards,
+    isGeneratingFlashcards, setIsGeneratingFlashcards,
+    flashcardStatus, setFlashcardStatus,
+    flashcardError, setFlashcardError,
+    flashcardScores, setFlashcardScores,
+    vocabQuizScores, setVocabQuizScores,
+    flashcardChapterSelectionInput, setFlashcardChapterSelectionInput,
+    flashcardGenerateCount, setFlashcardGenerateCount,
+  } = useFlashcardStore();
+
+  const {
+    mockExams, setMockExams,
+    isLoadingMockExams, setIsLoadingMockExams,
+    isGeneratingMockExam, setIsGeneratingMockExam,
+    mockExamStatus, setMockExamStatus,
+    mockExamError, setMockExamError,
+    activeMockExamId, setActiveMockExamId,
+    showMockExamAnswers, setShowMockExamAnswers,
+    isMockExamMenuOpen, setIsMockExamMenuOpen,
+    mockExamChapterSelectionInput, setMockExamChapterSelectionInput,
+    mockExamPromptAddonInput, setMockExamPromptAddonInput,
+    examCramContent, setExamCramContent,
+    examCramUpdatedAt, setExamCramUpdatedAt,
+    examCramScopeLabel, setExamCramScopeLabel,
+    isGeneratingExamCram, setIsGeneratingExamCram,
+    examCramStatus, setExamCramStatus,
+    examCramError, setExamCramError,
+    reviewNotes, setReviewNotes,
+    reviewNotesChapterSelectionInput, setReviewNotesChapterSelectionInput,
+  } = useMockExamStore();
+
+  const {
+    premiumProfiles, setPremiumProfiles,
+    activePremiumProfileId, setActivePremiumProfileId,
+    premiumSpaceMode, setPremiumSpaceMode,
+  } = usePremiumStore();
+
+  const {
+    tutorMessages, setTutorMessages,
+    isTutorLoading, setIsTutorLoading,
+    tutorError, setTutorError,
+  } = useTutorStore();
+
+  const {
+    diagnosticResult,
+    setIsDiagnosticModalOpen,
+    setDiagnosticStatus,
+    setDiagnosticError,
+    setDiagnosticItems,
+    setDiagnosticCurrentIndex,
+    setDiagnosticResult,
+    resetDiagnostic,
+  } = useDiagnosticStore();
   const downloadCacheRef = useRef(new Map()); // storagePath -> { file, thumbnail, remoteUrl, bucket }
   const backfillInProgressRef = useRef(false);
   const summaryRequestedRef = useRef(false);
@@ -1323,39 +434,21 @@ function App() {
   const isFreeTier = tier === "free";
   const isPremiumTier = tier === "premium";
   const isFolderFeatureEnabled = !isFreeTier;
-  const [usageCounts, setUsageCounts] = useState({ summary: 0, quiz: 0, ox: 0, flashcards: 0 });
   const usageCountsByDocRef = useRef(new Map());
-  const [folders, setFolders] = useState([]);
-  const [selectedFolderId, setSelectedFolderId] = useState("all");
-  const [selectedUploadIds, setSelectedUploadIds] = useState([]);
-  const [isFolderLoading, setIsFolderLoading] = useState(false);
-  // ─── Ponder-style features ───────────────────────────────────────────────
-  const [allArtifacts, setAllArtifacts] = useState([]);
-  const [semanticSearchResults, setSemanticSearchResults] = useState(null);
-  const [sidebarOpen, setSidebarOpen] = useState(() => {
-    try {
-      const saved = localStorage.getItem("sidebarOpen");
-      return saved === null ? true : saved === "true";
-    } catch {
-      return true;
-    }
-  });
-  const [isSemanticSearching, setIsSemanticSearching] = useState(false);
-  const [compareResult, setCompareResult] = useState("");
-  const [isComparing, setIsComparing] = useState(false);
-  const [compareError, setCompareError] = useState("");
-  const [folderTutorMode, setFolderTutorMode] = useState(false);
-  const [premiumProfiles, setPremiumProfiles] = useState([]);
-  const [activePremiumProfileId, setActivePremiumProfileId] = useState(null);
-  const [showPremiumProfilePicker, setShowPremiumProfilePicker] = useState(false);
-  const [showProfilePinDialog, setShowProfilePinDialog] = useState(false);
-  const [profilePinInputs, setProfilePinInputs] = useState({
-    currentPin: "",
-    nextPin: "",
-    confirmPin: "",
-  });
-  const [profilePinError, setProfilePinError] = useState("");
-  const [premiumSpaceMode, setPremiumSpaceMode] = useState(PREMIUM_SPACE_MODE_PROFILE);
+
+  // ─── Sync hooks → stores ────────────────────────────────────────────────────
+  // showGuestIntro 초기화 (AUTH_ENABLED=false 이면 true)
+  useEffect(() => {
+    if (!AUTH_ENABLED) setShowGuestIntro(true);
+  }, []);
+  // useSupabaseAuth → authStore sync
+  useEffect(() => { setUser(user); }, [user, setUser]);
+  useEffect(() => { setAuthReady(authReady); }, [authReady, setAuthReady]);
+  // useUserTier → authStore sync
+  useEffect(() => {
+    setTierInfo({ tier, tierExpiresAt, tierRemainingDays, loadingTier });
+  }, [tier, tierExpiresAt, tierRemainingDays, loadingTier, setTierInfo]);
+
   const premiumProfileHydratedRef = useRef(false);
   const premiumProfileSyncSignatureRef = useRef("");
   const premiumProfileSessionUserIdRef = useRef(null); // tracks which user has authenticated via PIN
@@ -1404,10 +497,6 @@ function App() {
   const safeTutorError = useMemo(
     () => sanitizeUiText(tutorError, "튜터 응답 처리 중 오류가 발생했습니다."),
     [tutorError]
-  );
-  const safeProfilePinError = useMemo(
-    () => sanitizeUiText(profilePinError, "PIN 입력을 다시 확인해주세요."),
-    [profilePinError]
   );
   const isNativePlatform = Capacitor.isNativePlatform();
   const shouldForceNativeAuthEntry =
@@ -1460,10 +549,6 @@ function App() {
     }
     return openAiModulePromiseRef.current;
   }, []);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(OUTPUT_LANGUAGE_STORAGE_KEY, outputLanguage);
-  }, [outputLanguage]);
   const requestPreviewPdfConversion = useCallback(
     async (item, { force = false } = {}) => {
       const uploadId = item?.id;
@@ -1860,12 +945,6 @@ function App() {
     setProfilePinError("");
   }, []);
 
-  const handleChangeProfilePinInput = useCallback((field, value) => {
-    const sanitized = String(value || "").replace(/\D/g, "").slice(0, 4);
-    setProfilePinInputs((prev) => ({ ...prev, [field]: sanitized }));
-    setProfilePinError("");
-  }, []);
-
   const handleCloseProfilePicker = useCallback(() => {
     if (!activePremiumProfileId) return;
     setShowPremiumProfilePicker(false);
@@ -1916,79 +995,6 @@ function App() {
       return { ok: true };
     },
     [premiumProfiles, resetActiveDocumentState, setSidebarOpen, user?.id]
-  );
-
-  const handleDisableProfilePin = useCallback(
-    (profileId) => {
-      setPremiumProfiles((prev) =>
-        prev.map((p) => (p.id === profileId ? { ...p, pinDisabled: true } : p))
-      );
-    },
-    []
-  );
-
-  const handleDisablePinWithAuth = useCallback(() => {
-    if (!activePremiumProfileId) return;
-    const currentProfile = premiumProfiles.find((p) => p.id === activePremiumProfileId);
-    if (!currentProfile) return;
-    const inputPin = normalizePremiumProfilePinInput(profilePinInputs.currentPin);
-    if (!inputPin) {
-      setProfilePinError("현재 PIN 4자리를 입력해주세요.");
-      return;
-    }
-    if (inputPin !== sanitizePremiumProfilePin(currentProfile.pin)) {
-      setProfilePinError("현재 PIN이 올바르지 않습니다.");
-      return;
-    }
-    handleDisableProfilePin(activePremiumProfileId);
-    handleCloseProfilePinDialog();
-    setStatus("PIN 보호가 해제되었습니다.");
-  }, [activePremiumProfileId, handleCloseProfilePinDialog, handleDisableProfilePin, premiumProfiles, profilePinInputs.currentPin]);
-
-  const handleSubmitProfilePinChange = useCallback(
-    (event) => {
-      event.preventDefault();
-      if (!activePremiumProfileId) {
-        setProfilePinError("선택한 프로필이 없습니다.");
-        return;
-      }
-      const currentProfile = premiumProfiles.find((profile) => profile.id === activePremiumProfileId);
-      if (!currentProfile) {
-        setProfilePinError("선택한 프로필을 열 수 없습니다.");
-        return;
-      }
-      const currentPin = normalizePremiumProfilePinInput(profilePinInputs.currentPin);
-      const nextPin = normalizePremiumProfilePinInput(profilePinInputs.nextPin);
-      const confirmPin = normalizePremiumProfilePinInput(profilePinInputs.confirmPin);
-
-      if (!currentPin || !nextPin || !confirmPin) {
-        setProfilePinError("모든 PIN은 4자리 숫자여야 합니다.");
-        return;
-      }
-      if (currentPin !== sanitizePremiumProfilePin(currentProfile.pin)) {
-        setProfilePinError("현재 PIN이 올바르지 않습니다.");
-        return;
-      }
-      if (nextPin !== confirmPin) {
-        setProfilePinError("새 PIN과 확인 PIN이 올바르지 않습니다.");
-        return;
-      }
-      if (nextPin === currentPin) {
-        setProfilePinError("새 PIN은 현재 PIN과 달라야 합니다.");
-        return;
-      }
-
-      setPremiumProfiles((prev) =>
-        prev.map((profile) =>
-          profile.id === activePremiumProfileId ? { ...profile, pin: nextPin } : profile
-        )
-      );
-      setShowProfilePinDialog(false);
-      setProfilePinInputs({ currentPin: "", nextPin: "", confirmPin: "" });
-      setStatus("프로필 PIN이 변경됐습니다.");
-      setStatus("프로필 PIN이 변경됐습니다.");
-    },
-    [activePremiumProfileId, premiumProfiles, profilePinInputs]
   );
 
   const handleRenamePremiumProfile = useCallback(
@@ -2276,22 +1282,6 @@ function App() {
       setAllowGuestLandingAfterSignOut(false);
     }
   }, [user]);
-
-  useEffect(() => {
-    if (!showProfilePinDialog) return undefined;
-    const prevOverflow = document.body.style.overflow;
-    const handleKeyDown = (event) => {
-      if (event.key === "Escape") {
-        handleCloseProfilePinDialog();
-      }
-    };
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.body.style.overflow = prevOverflow;
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [handleCloseProfilePinDialog, showProfilePinDialog]);
 
   const loadFolders = useCallback(
     async () => {
@@ -2699,7 +1689,7 @@ function App() {
       clearPaymentAbortFallback();
       const nextPaymentParams = extractPaymentReturnParams(rawUrl);
       if (!nextPaymentParams) {
-        if (isNativePaymentCallbackUrl(rawUrl) && readPaymentReturnPending()) {
+        if (isNativePaymentCallbackUrl(rawUrl, NATIVE_PAYMENT_RETURN_SCHEME) && readPaymentReturnPending()) {
           paymentAbortFallbackTimerRef.current = window.setTimeout(() => {
             paymentAbortFallbackTimerRef.current = null;
             if (!readPaymentReturnPending()) return;
@@ -3508,6 +2498,7 @@ function App() {
       setAutoChapterRangeInput("");
       setChapterRangeError("");
       oxAutoRequestedRef.current = false;
+      resetDiagnostic();
       applyUsageCountsForDoc(nextDocId, usageCountsByDocRef.current.get(String(nextDocId || "").trim()));
       const artifactsPromise = loadArtifacts(nextDocId);
 
@@ -3548,6 +2539,38 @@ function App() {
         }
         if (loaded?.summary) {
           setStatus("Loaded saved summary.");
+        }
+
+        if (user?.id) {
+          try {
+            const diagnosticRow = await fetchLatestDiagnosticResult({ userId: user.id, docId: nextDocId });
+            if (fileOpenRequestSeqRef.current !== requestSeq) return;
+            if (diagnosticRow) {
+              setDiagnosticResult(normalizeDiagnosticResultRow(diagnosticRow));
+              setDiagnosticStatus("completed");
+            } else if (normalizedInitialText && !isDiagnosticSkipped(user.id, nextDocId)) {
+              setIsDiagnosticModalOpen(true);
+              setDiagnosticStatus("generating");
+              try {
+                const { generateDiagnosticQuiz } = await getOpenAiService();
+                const diagnosticData = await generateDiagnosticQuiz(normalizedInitialText, { outputLanguage });
+                if (fileOpenRequestSeqRef.current !== requestSeq) return;
+                if (diagnosticData?.items?.length) {
+                  setDiagnosticItems(diagnosticData.items);
+                  setDiagnosticCurrentIndex(0);
+                  setDiagnosticStatus("in-progress");
+                } else {
+                  setDiagnosticStatus("error");
+                }
+              } catch (diagErr) {
+                if (fileOpenRequestSeqRef.current !== requestSeq) return;
+                setDiagnosticError(diagErr.message);
+                setDiagnosticStatus("error");
+              }
+            }
+          } catch (diagCheckErr) {
+            console.warn("diagnostic result check failed", diagCheckErr);
+          }
         }
       } catch (err) {
         if (fileOpenRequestSeqRef.current !== requestSeq) return;
@@ -8362,120 +7385,53 @@ function App() {
     onFolderStudy: handleFolderStudy,
   };
   const detailPageProps = {
+    // Layout / navigation
     detailContainerRef,
     splitStyle,
-    pdfUrl,
     documentUrl: activeDocumentUrl,
-    file,
     pendingDocumentOpen,
-    pageInfo,
-    currentPage,
     handlePageChange,
     handleDragStart,
-    panelTab,
-    setPanelTab,
     outputLanguage,
+    // Summary callbacks
     requestSummary,
     requestMindMap,
     mindmapData,
     isLoadingMindmap,
     onJumpToSummaryPage: handlePageChange,
-    isLoadingSummary,
-    isLoadingText,
-    previewText,
+    diagnosticResult,
     isFreeTier,
     hasReachedSummaryLimit: hasReached("maxSummary"),
     hasReachedQuizLimit: hasReached("maxQuiz"),
     hasReachedOxLimit: hasReached("maxOx"),
     hasReachedFlashcardLimit: hasReached("maxFlashcards"),
-    summary,
-    instructorEmphasisInput,
-    setInstructorEmphasisInput,
-    savedInstructorEmphases,
-    activeInstructorEmphasisId,
     handleSaveInstructorEmphasis,
     handleSelectInstructorEmphasis,
     handleDeleteInstructorEmphasis,
     cycleActiveInstructorEmphasis,
-    partialSummary,
-    partialSummaryRange,
-    savedPartialSummaries,
-    isSavedPartialSummaryOpen,
-    setIsPageSummaryOpen,
-    setIsSavedPartialSummaryOpen,
-    setPageSummaryError,
-    isPageSummaryOpen,
-    pageSummaryInput,
-    setPageSummaryInput,
-    pageSummaryError: safePageSummaryError,
-    handleSummaryByPages,
     handleSaveCurrentPartialSummary,
     handleLoadSavedPartialSummary,
-    handleRenameSavedPartialSummary,
-    handleNormalizeSavedPartialSummaryName,
     handleDeleteSavedPartialSummary,
-    isPageSummaryLoading,
-    isChapterRangeOpen,
-    setIsChapterRangeOpen,
-    chapterRangeInput,
-    setChapterRangeInput,
-    chapterRangeError: safeChapterRangeError,
-    chapterRangeNotice: safeChapterRangeNotice,
-    setChapterRangeError,
-    setChapterRangeNotice,
+    handleSummaryByPages,
     handleAutoDetectChapterRanges,
-    isDetectingChapterRanges,
     handleConfirmChapterRanges,
     handleExportSummaryPdf,
-    isExportingSummary,
-    status: safeStatus,
-    error: safeError,
     summaryRef,
-    mockExams,
+    // MockExam callbacks
     mockExamMenuRef,
     mockExamMenuButtonRef,
-    isMockExamMenuOpen,
-    setIsMockExamMenuOpen,
-    isLoadingMockExams,
     activeMockExam,
     activeMockExamTitle,
     formatMockExamTitle: getMockExamTitle,
     handleDeleteMockExam,
     handleCreateMockExam,
-    mockExamChapterSelectionInput,
-    setMockExamChapterSelectionInput,
-    mockExamPromptAddonInput,
-    setMockExamPromptAddonInput,
-    isGeneratingMockExam,
-    selectedFileId,
     handleExportMockExam,
     mockExamOrderedItems,
     mockExamPrintRef,
     mockExamPages,
-    showMockExamAnswers,
-    setShowMockExamAnswers,
-    mockExamStatus: safeMockExamStatus,
-    mockExamError: safeMockExamError,
-    setActiveMockExamId,
-    isLoadingQuiz,
+    // Quiz callbacks
     shortPreview,
     requestQuestions,
-    quizChapterSelectionInput,
-    setQuizChapterSelectionInput,
-    quizPromptAddonInput,
-    setQuizPromptAddonInput,
-    quizDifficulty,
-    setQuizDifficulty,
-    quizMixInput,
-    setQuizMixInput,
-    quizMix,
-    setQuizMix: (nextMix) => {
-      const nextMultipleChoice = Math.max(0, Number(nextMix?.multipleChoice) || 0);
-      const nextShortAnswer = Math.max(0, Number(nextMix?.shortAnswer) || 0);
-      setQuizMixInput(`${nextMultipleChoice}-${nextShortAnswer}`);
-    },
-    quizMixError,
-    quizSets,
     deleteQuiz: handleDeleteQuiz,
     deleteQuizItem: handleDeleteQuizItem,
     handleChoiceSelect,
@@ -8484,7 +7440,7 @@ function App() {
     handleQuizOxSelect,
     handleToggleQuizOxExplanation,
     regenerateQuiz,
-    reviewNotes: reviewNotesPanelState.items,
+    // ReviewNotes callbacks
     reviewNoteSections: configuredReviewSections,
     reviewNotesSectionSelectionInput: reviewNotesChapterSelectionInput,
     setReviewNotesSectionSelectionInput: setReviewNotesChapterSelectionInput,
@@ -8494,78 +7450,41 @@ function App() {
     examCramSectionError: examCramState.error,
     examCramReferenceCounts: examCramState.referenceCounts,
     examCramHasAnySource: examCramState.hasAnySource,
-    examCramContent,
-    examCramUpdatedAt,
-    examCramScopeLabel,
-    examCramStatus: safeExamCramStatus,
-    examCramError: safeExamCramError,
-    isGeneratingExamCram,
     handleReviewNoteAttempt,
     handleDeleteReviewNote,
     handleGenerateExamCram,
     handleCreateReviewNotesMockExam,
-    isLoadingOx,
+    // OX callbacks
     requestOxQuiz,
-    oxChapterSelectionInput,
-    setOxChapterSelectionInput,
     regenerateOxQuiz,
-    oxItems,
-    oxSelections,
     handleOxSelect,
-    setOxSelections,
-    oxExplanationOpen,
-    setOxExplanationOpen,
-    flashcards,
-    isLoadingFlashcards,
+    // Flashcard callbacks
     handleAddFlashcard,
     handleDeleteFlashcard,
     handleDeleteAllFlashcards,
     handleUpdateFlashcard,
     handleDeduplicateFlashcards,
     handleSaveFlashcardScore,
-    flashcardScores,
-    vocabQuizScores,
     handleSaveVocabQuizScore,
     handleGenerateFlashcards,
     handleGenerateVocabularyFlashcards,
     handleReextractVocabulary,
     handleRegenerateFlashcards,
     isVocabularyFile: Boolean(activeUploadItem?.isVocabulary),
-    flashcardChapterSelectionInput,
-    setFlashcardChapterSelectionInput,
-    flashcardGenerateCount,
-    setFlashcardGenerateCount,
-    isGeneratingFlashcards,
-    extractedText,
-    flashcardStatus: safeFlashcardStatus,
-    flashcardError: safeFlashcardError,
-    tutorMessages,
-    isTutorLoading,
-    tutorError: safeTutorError,
+    // Tutor callbacks
     tutorNotice,
     handleSendTutorMessage,
     handleResetTutor,
     // 폴더 튜터 모드
-    folderTutorMode,
     onToggleFolderTutorMode: () => setFolderTutorMode((v) => !v),
     canUseFolderTutorMode: Boolean(selectedFolderId && selectedFolderId !== "all" && uploadedFiles.some((f) => String(f.folderId || "") === String(selectedFolderId))),
     folderName: folders.find((f) => String(f.id) === String(selectedFolderId))?.name || "",
-    // 학습 구조
-    topicStructure,
-    isLoadingTopicStructure,
-    topicStructureError,
+    // 학습 구조 callbacks
     onRequestTopicStructure: requestTopicStructure,
     onExplainConcept: explainConceptForPanel,
     // 폴더 통합 퀴즈
     isFolderMode,
     currentFolderInfo,
-    folderQuizQuestions,
-    isLoadingFolderQuiz,
-    folderQuizError,
-    folderSelectedChoices,
-    folderRevealedChoices,
-    folderShortAnswerInput,
-    folderShortAnswerResult,
     onRequestFolderQuiz: () => currentFolderInfo && requestFolderQuiz(currentFolderInfo.folderId),
     onFolderSelectChoice: handleFolderSelectChoice,
     onFolderShortAnswerChange: handleFolderShortAnswerChange,
@@ -8676,184 +7595,30 @@ function App() {
           />
         </Suspense>
       )}
-      {showProfilePinDialog && activePremiumProfile && (
-        <div className="fixed inset-0 z-[155] flex items-center justify-center px-4">
-          <button
-            type="button"
-            aria-label="PIN 변경 창 닫기"
-            onClick={handleCloseProfilePinDialog}
-            className={`absolute inset-0 ${theme === "light" ? "bg-slate-900/25" : "bg-black/75"} backdrop-blur-[2px]`}
-          />
-          <form
-            onSubmit={handleSubmitProfilePinChange}
-            className={`relative z-[156] w-full max-w-md rounded-2xl border p-5 ${
-              theme === "light"
-                ? "border-slate-200 bg-white text-slate-900 shadow-[0_20px_80px_rgba(15,23,42,0.2)]"
-                : "border-white/10 bg-slate-950/[0.97] text-slate-100 shadow-[0_20px_80px_rgba(0,0,0,0.72)]"
-            }`}
-          >
-            <p className="text-sm font-semibold">{activePremiumProfile.name} PIN 변경</p>
-            <p className={`mt-1 text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
-              현재 PIN을 입력하고 새 4자리 PIN을 설정해주세요.
-            </p>
-            <div className="mt-4 space-y-2">
-              <input
-                name="current-pin"
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                value={profilePinInputs.currentPin}
-                onChange={(event) => handleChangeProfilePinInput("currentPin", event.target.value)}
-                placeholder="현재 PIN"
-                className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                  theme === "light" ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
-                }`}
-              />
-              <input
-                name="new-pin"
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                value={profilePinInputs.nextPin}
-                onChange={(event) => handleChangeProfilePinInput("nextPin", event.target.value)}
-                placeholder="새 PIN"
-                className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                  theme === "light" ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
-                }`}
-              />
-              <input
-                name="confirm-new-pin"
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                value={profilePinInputs.confirmPin}
-                onChange={(event) => handleChangeProfilePinInput("confirmPin", event.target.value)}
-                placeholder="새 PIN 확인"
-                className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                  theme === "light" ? "border-slate-300 bg-white text-slate-900" : "border-white/15 bg-white/5 text-slate-100"
-                }`}
-              />
-            </div>
-            {safeProfilePinError && <p className="mt-2 text-xs text-rose-300">{safeProfilePinError}</p>}
-            <div className="mt-4 flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={handleDisablePinWithAuth}
-                className={`ghost-button text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}
-                data-ghost-size="sm"
-                style={{ "--ghost-color": "148, 163, 184" }}
-                title="현재 PIN 인증 후 이 프로필의 PIN을 해제합니다"
-              >
-                PIN 없이 사용
-              </button>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleCloseProfilePinDialog}
-                  className={`ghost-button text-xs ${theme === "light" ? "text-slate-700" : "text-slate-200"}`}
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "148, 163, 184" }}
-                >
-                  취소
-                </button>
-                <button
-                  type="submit"
-                  className="ghost-button text-xs text-emerald-100"
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "52, 211, 153" }}
-                >
-                  변경
-                </button>
-              </div>
-            </div>
-          </form>
-        </div>
-      )}
-      {isFeedbackDialogOpen && (
-        <div className="fixed inset-0 z-[165] flex items-center justify-center px-4">
-          <button
-            type="button"
-            aria-label="\uD53C\uB4DC\uBC31 \uCC3D \uB2EB\uAE30"
-            onClick={handleCloseFeedbackDialog}
-            className={`absolute inset-0 ${
-              theme === "light" ? "bg-slate-900/25" : "bg-black/75"
-            } backdrop-blur-[2px]`}
-          />
-          <form
-            onSubmit={handleSubmitFeedback}
-            className={`relative z-[166] w-full max-w-lg rounded-2xl border p-5 ${
-              theme === "light"
-                ? "border-slate-200 bg-white text-slate-900 shadow-[0_20px_80px_rgba(15,23,42,0.2)]"
-                : "border-white/10 bg-slate-950/[0.97] text-slate-100 shadow-[0_20px_80px_rgba(0,0,0,0.72)]"
-            }`}
-          >
-            <p className="text-sm font-semibold">{"\uD53C\uB4DC\uBC31 \uBCF4\uB0B4\uAE30"}</p>
-            <p className={`mt-1 text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
-              {"\uBC84\uADF8, \uAE30\uB2A5 \uC81C\uC548, \uC0AC\uC6A9\uC131 \uAC1C\uC120 \uC758\uACAC\uC744 \uC790\uC720\uB86D\uAC8C \uB0A8\uACA8 \uC8FC\uC138\uC694."}
-            </p>
-            <div className="mt-4 space-y-3">
-              <select
-                name="feedback-category"
-                value={feedbackCategory}
-                onChange={(event) => setFeedbackCategory(event.target.value)}
-                className={`h-11 w-full rounded-xl border px-3 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                  theme === "light"
-                    ? "border-slate-300 bg-white text-slate-900"
-                    : "border-white/15 bg-white/5 text-slate-100"
-                }`}
-              >
-                <option value="general">{"\uC77C\uBC18"}</option>
-                <option value="bug">{"\uBC84\uADF8 \uC81C\uBCF4"}</option>
-                <option value="feature">{"\uAE30\uB2A5 \uC81C\uC548"}</option>
-                <option value="ux">{"\uC0AC\uC6A9\uC131 \uC758\uACAC"}</option>
-              </select>
-              <textarea
-                name="feedback-message"
-                value={feedbackInput}
-                onChange={(event) => setFeedbackInput(event.target.value)}
-                rows={7}
-                maxLength={2000}
-                placeholder={"\uC5B4\uB5A4 \uBB38\uC81C\uB97C \uACAA\uC73C\uC168\uB294\uC9C0, \uC5B4\uB5BB\uAC8C \uAC1C\uC120\uD558\uBA74 \uC88B\uC744\uC9C0 \uC791\uC131\uD574 \uC8FC\uC138\uC694."}
-                className={`w-full resize-y rounded-xl border px-3 py-2 text-sm outline-none ring-1 ring-transparent transition focus:border-emerald-300/60 focus:ring-emerald-300/40 ${
-                  theme === "light"
-                    ? "border-slate-300 bg-white text-slate-900"
-                    : "border-white/15 bg-white/5 text-slate-100"
-                }`}
-              />
-              <div className="flex items-center justify-between text-[11px]">
-                <span className={theme === "light" ? "text-slate-500" : "text-slate-400"}>
-                  {"\uBB38\uB9E5: "}{file?.name || "\uC120\uD0DD\uB41C \uBB38\uC11C \uC5C6\uC74C"}
-                </span>
-                <span className={theme === "light" ? "text-slate-500" : "text-slate-400"}>
-                  {feedbackInput.length}/2000
-                </span>
-              </div>
-            </div>
-            {feedbackError && <p className="mt-2 text-xs text-rose-300">{feedbackError}</p>}
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={handleCloseFeedbackDialog}
-                disabled={isSubmittingFeedback}
-                className={`ghost-button text-xs ${theme === "light" ? "text-slate-700" : "text-slate-200"}`}
-                data-ghost-size="sm"
-                style={{ "--ghost-color": "148, 163, 184" }}
-              >
-                {"\uCDE8\uC18C"}
-              </button>
-              <button
-                type="submit"
-                disabled={isSubmittingFeedback}
-                className="ghost-button text-xs text-emerald-100"
-                data-ghost-size="sm"
-                style={{ "--ghost-color": "52, 211, 153" }}
-              >
-                {isSubmittingFeedback ? "\uC804\uC1A1 \uC911..." : "\uC804\uC1A1"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
+      <ProfilePinDialog
+        onChangePin={(profileId, newPin) => {
+          setPremiumProfiles((prev) =>
+            prev.map((p) => (p.id === profileId ? { ...p, pin: newPin } : p))
+          );
+          setStatus("프로필 PIN이 변경됐습니다.");
+        }}
+        onDisablePin={(profileId) => {
+          setPremiumProfiles((prev) =>
+            prev.map((p) => (p.id === profileId ? { ...p, pinDisabled: true } : p))
+          );
+          setStatus("PIN 보호가 해제되었습니다.");
+        }}
+      />
+      <FeedbackDialog
+        onSubmitFeedback={handleSubmitFeedback}
+        fileName={file?.name}
+      />
+      <DiagnosticModal
+        userId={user?.id}
+        docId={selectedFileId}
+        onGoToQuiz={() => setPanelTab("quiz")}
+        onGoToSummary={() => setPanelTab("summary")}
+      />
       {isResizingSplit && showDetail && (
         <div className="pointer-events-none fixed inset-0 z-[160] cursor-col-resize" aria-hidden="true" />
       )}

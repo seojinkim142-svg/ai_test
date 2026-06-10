@@ -25,7 +25,7 @@ export default async function handler(req, res) {
 
   if (req.method === "OPTIONS") {
     res.writeHead(204, {
-      "Access-Control-Allow-Origin": allowOrigin || "*",
+      "Access-Control-Allow-Origin": allowOrigin || "",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
       "Access-Control-Allow-Methods": "GET, OPTIONS",
       "Cache-Control": "no-store",

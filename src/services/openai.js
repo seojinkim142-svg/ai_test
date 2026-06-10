@@ -1,6 +1,7 @@
 import { Capacitor } from "@capacitor/core";
 import { MODEL } from "../constants";
 import { resolvePublicAppOrigin } from "../utils/appOrigin";
+import { getAccessToken } from "./supabase";
 
 const DIRECT_DEEPSEEK_BASE_RE = /^https:\/\/api\.deepseek\.com(?:$|\/)/i;
 const DIRECT_OPENAI_BASE_RE = /^https:\/\/api\.openai\.com(?:$|\/)/i;
@@ -2483,6 +2484,19 @@ async function postChatRequest(
   const headers = {
     "Content-Type": "application/json",
   };
+
+  // 앱 프록시 경유 시 Supabase 세션 토큰을 Authorization 헤더에 추가
+  if (target.usesAppProxy) {
+    try {
+      const accessToken = await getAccessToken();
+      if (accessToken) {
+        headers["Authorization"] = `Bearer ${accessToken}`;
+      }
+    } catch {
+      // 토큰 취득 실패 시 무시 (서버에서 인증 미설정이면 통과됨)
+    }
+  }
+
   const requestBody = target.usesAppProxy ? { ...(body || {}), provider: target.provider } : body;
 
   let response;
@@ -2755,6 +2769,102 @@ export async function generateQuiz(
   };
   
   // 캐시 저장
+  setCachedResult(cacheKey, result);
+  return result;
+}
+
+const DIAGNOSTIC_DIFFICULTY_PLAN = ["하", "중", "중", "상"];
+
+function buildDiagnosticQuizPrompt(extractedText, { outputLanguage = "ko" } = {}) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
+
+  return `
+You are a professor creating a short diagnostic quiz from lecture material.
+
+[Difficulty definitions]
+하 (Basic)
+- Tests recognition of key terms, definitions, or simple facts stated in the document.
+
+중 (Intermediate)
+- Tests understanding of relationships between concepts, or application to a standard scenario.
+
+상 (Advanced)
+- Tests synthesis, multi-step reasoning, edge cases, or application to a combined/modified scenario.
+
+[Rules]
+- Generate exactly ${DIAGNOSTIC_DIFFICULTY_PLAN.length} multiple-choice questions (4 options each), one per difficulty level in this exact order: ${DIAGNOSTIC_DIFFICULTY_PLAN.join(", ")}.
+- Each question must cover a different topic/concept from the document so the result reflects overall understanding, not a single section.
+- Each question must have exactly one unambiguously correct answer.
+- Do not ask verbatim recall — always rephrase and shift the angle of asking.
+- Avoid pure memorization prompts (raw URLs, names, single numbers).
+- For each question, include a short "topic" label (2-6 words) naming the concept being tested.
+- Include answerIndex, explanation, and difficulty ("하", "중", or "상" matching the order above).
+
+[Output format]
+- Return JSON only.
+
+[JSON schema]
+{
+  "items": [
+    {
+      "question": "...",
+      "choices": ["...", "...", "...", "..."],
+      "answerIndex": 1,
+      "difficulty": "하",
+      "topic": "...",
+      "explanation": "..."
+    }
+  ]
+}
+
+[Language]
+- Write all question/topic/explanation text in ${outputLanguageLabel}.
+
+[Document]
+${extractedText}
+  `.trim();
+}
+
+export async function generateDiagnosticQuiz(extractedText, { outputLanguage = "ko" } = {}) {
+  const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
+
+  const cacheKey = getCacheKey(extractedText, {
+    version: "diagnostic-v1",
+    type: "diagnostic",
+    outputLanguage,
+  });
+
+  const cached = getCachedResult(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const prompt = buildDiagnosticQuizPrompt(extractedText, { outputLanguage });
+
+  const data = await postChatRequest(
+    {
+      model: MODEL,
+      messages: [
+        {
+          role: "system",
+          content: `Generate exactly ${DIAGNOSTIC_DIFFICULTY_PLAN.length} ${outputLanguageLabel} multiple-choice diagnostic questions (4 options each) from the user's text only, one per difficulty level in order ${DIAGNOSTIC_DIFFICULTY_PLAN.join(", ")}. Each question must test a different topic and include a short topic label. Respond with JSON only using the provided schema.`,
+        },
+        { role: "user", content: prompt },
+      ],
+      response_format: { type: "json_object" },
+    },
+    { retries: 1 }
+  );
+
+  const content = data.choices?.[0]?.message?.content?.trim() || "";
+  const sanitized = sanitizeJson(content);
+  const parsed = parseJsonSafe(sanitized, "diagnostic quiz JSON");
+  const items = (Array.isArray(parsed?.items) ? parsed.items : [])
+    .map(normalizeGeneratedItem)
+    .filter((item) => !isLowValueStudyPrompt(String(item?.question || "").trim()))
+    .slice(0, DIAGNOSTIC_DIFFICULTY_PLAN.length);
+
+  const result = { items };
   setCachedResult(cacheKey, result);
   return result;
 }

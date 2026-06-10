@@ -428,3 +428,186 @@ export const chunkMockExamPages = (orderedItems) => {
   }
   return pages;
 };
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const isDbId = (id) => UUID_REGEX.test(String(id || ""));
+
+export const createLocalEntityId = (prefix) => {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+export const getChapterRangeSourceLabel = (source) => {
+  if (source === "outline") return "PDF 개요(북마크)";
+  if (source === "toc_pages_ocr") return "앞쪽 목차 페이지(OCR)";
+  if (source === "toc_pages") return "앞쪽 목차 페이지";
+  return "자동 분석";
+};
+
+export const AUTO_CHAPTER_FALLBACK_NOTICE =
+  "목차를 찾지 못해 페이지 수 기준 임시 범위를 사용 중입니다. 필요하면 '목차 자동 추출'을 다시 누르거나 직접 범위를 수정해주세요.";
+
+export const buildDetectedChapterRangeNotice = (detected) => {
+  const warning = String(detected?.warning || "").trim();
+  if (warning) return warning;
+
+  const label = getChapterRangeSourceLabel(detected?.source);
+  if (detected?.source === "outline") {
+    return `${label} 기준으로 챕터 범위를 자동 설정했습니다.`;
+  }
+  return `${label} 기준으로 챕터 범위를 자동 설정했습니다. 페이지 범위가 맞는지 한 번 확인해주세요.`;
+};
+
+export const formatPartialSummaryDefaultName = (dateInput) => {
+  const date = dateInput ? new Date(dateInput) : new Date();
+  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 16).replace("T", " ");
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+};
+
+export const parseChapterNumberSelectionInput = (rawInput, chapters) => {
+  const available = Array.isArray(chapters) ? chapters : [];
+  const chapterNumbers = available
+    .map((chapter) => Number.parseInt(chapter?.chapterNumber, 10))
+    .filter((num) => Number.isFinite(num) && num > 0);
+  const chapterNumberSet = new Set(chapterNumbers);
+  if (!chapterNumbers.length) {
+    return { chapterNumbers: [], error: "설정에서 사용 가능한 챕터가 없습니다." };
+  }
+
+  const cleaned = String(rawInput || "").replace(/\s+/g, "");
+  if (!cleaned) {
+    return { chapterNumbers, error: "" };
+  }
+
+  const selected = new Set();
+  const tokens = cleaned.split(",").filter(Boolean);
+  for (const token of tokens) {
+    if (token.includes("-")) {
+      const [startRaw, endRaw] = token.split("-");
+      const start = Number.parseInt(startRaw, 10);
+      const end = Number.parseInt(endRaw, 10);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0 || start > end) {
+        return { chapterNumbers: [], error: `올바르지 않은 챕터 범위입니다: "${token}"` };
+      }
+      for (let chapterNumber = start; chapterNumber <= end; chapterNumber += 1) {
+        selected.add(chapterNumber);
+      }
+    } else {
+      const chapterNumber = Number.parseInt(token, 10);
+      if (!Number.isFinite(chapterNumber) || chapterNumber <= 0) {
+        return { chapterNumbers: [], error: `올바르지 않은 챕터 번호입니다: "${token}"` };
+      }
+      selected.add(chapterNumber);
+    }
+  }
+
+  const filtered = [...selected]
+    .filter((num) => chapterNumberSet.has(num))
+    .sort((left, right) => left - right);
+
+  if (!filtered.length) {
+    return {
+      chapterNumbers: [],
+      error: `No matching chapters found in configured range. Available: ${chapterNumbers.join(", ")}`,
+    };
+  }
+  return { chapterNumbers: filtered, error: "" };
+};
+
+export const normalizeUsageCountValue = (value) => {
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+};
+
+export const normalizeFreeUsageCounts = (value, fallback = null) => {
+  const base = isPlainObject(value) ? value : {};
+  const fallbackBase = isPlainObject(fallback) ? fallback : {};
+  return {
+    summary: normalizeUsageCountValue(base.summary ?? fallbackBase.summary),
+    quiz: normalizeUsageCountValue(base.quiz ?? fallbackBase.quiz),
+    ox: normalizeUsageCountValue(base.ox ?? fallbackBase.ox),
+    flashcards: normalizeUsageCountValue(base.flashcards ?? fallbackBase.flashcards),
+  };
+};
+
+export const buildFreeUsageFallback = ({ summary = null, quiz = null, ox = null } = {}) => {
+  return normalizeFreeUsageCounts({
+    summary: String(summary || "").trim() ? 1 : 0,
+    quiz: quiz ? 1 : 0,
+    ox: Array.isArray(ox?.items) && ox.items.length > 0 ? 1 : 0,
+    flashcards: 0,
+  });
+};
+
+export const normalizeQuestionKey = (value) =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 220);
+
+export const DEFAULT_QUIZ_MIX = Object.freeze({
+  multipleChoice: 4,
+  shortAnswer: 1,
+  ox: 0,
+});
+
+export const DEFAULT_QUIZ_MIX_INPUT = `${DEFAULT_QUIZ_MIX.multipleChoice}-${DEFAULT_QUIZ_MIX.shortAnswer}`;
+
+export const parseQuizMixInput = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return {
+      mix: null,
+      total: 0,
+      error: "문항 비율을 입력해주세요. 형식: 객관식-주관식 (예: 4-1)",
+    };
+  }
+
+  const parts = raw
+    .split(/[^0-9]+/)
+    .filter(Boolean)
+    .map((part) => Number.parseInt(part, 10));
+
+  if (parts.length !== 2 || parts.some((part) => !Number.isFinite(part) || part < 0)) {
+    return {
+      mix: null,
+      total: 0,
+      error: "문항 비율은 객관식-주관식 형식으로 입력해주세요. 예: 4-1",
+    };
+  }
+
+  const [multipleChoice, shortAnswer] = parts;
+  const total = multipleChoice + shortAnswer;
+  if (total <= 0) {
+    return {
+      mix: null,
+      total: 0,
+      error: "최소 1문항 이상 입력해주세요.",
+    };
+  }
+
+  return {
+    mix: {
+      multipleChoice,
+      shortAnswer,
+      ox: 0,
+    },
+    total,
+    error: "",
+  };
+};
+
+export const LIMIT_USAGE_KEY_MAP = Object.freeze({
+  maxSummary: "summary",
+  maxQuiz: "quiz",
+  maxOx: "ox",
+  maxFlashcards: "flashcards",
+});
