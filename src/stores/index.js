@@ -7,3 +7,4 @@ export { useFlashcardStore } from "./flashcardStore";
 export { useMockExamStore } from "./mockExamStore";
 export { usePremiumStore } from "./premiumStore";
 export { useTutorStore } from "./tutorStore";
+export { useDiagnosticStore } from "./diagnosticStore";
