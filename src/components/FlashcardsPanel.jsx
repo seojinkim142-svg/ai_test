@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import FlashcardGenerateForm from "./flashcards/FlashcardGenerateForm";
 import FlashcardList from "./flashcards/FlashcardList";
+import { isCardDue } from "../utils/spacedRepetition";
+import { normalizeFlashcardFront } from "../utils/flashcardUtils";
 
 const SCORE_HISTORY_STORAGE_KEY = "flashcardExamHistory";
+const REVIEW_BATCH_SIZE = 20;
 
 function loadLocalScoreHistory() {
   if (typeof window === "undefined") return [];
@@ -32,6 +35,7 @@ function FlashcardsPanel({
   onDelete,
   onDeleteAll,
   onUpdate,
+  onUpdateSrs,
   onDeduplicate,
   onSaveScore,
   savedScores,
@@ -72,15 +76,17 @@ function FlashcardsPanel({
   const suppressClickRef = useRef(false);
   const panelTopRef = useRef(null);
 
-  // savedScores(Supabase) 있으면 우선, 없으면 localStorage fallback
-  const scoreHistory = (savedScores && savedScores.length > 0) ? savedScores : localScoreHistory;
+  // Supabase 저장 성공분 + localStorage 저장분(저장 실패/게스트)을 합쳐 표시
+  const scoreHistory = [...(savedScores || []), ...localScoreHistory]
+    .sort((a, b) => new Date(b.createdAt || b.created_at) - new Date(a.createdAt || a.created_at))
+    .slice(0, 50);
 
   // 중복 카드 수 계산
   const duplicateCount = (() => {
     const seen = new Set();
     let count = 0;
     for (const card of (cards || [])) {
-      const key = String(card.front || "").trim().toLowerCase();
+      const key = normalizeFlashcardFront(card.front);
       if (!key) continue;
       if (seen.has(key)) count++;
       else seen.add(key);
@@ -93,10 +99,22 @@ function FlashcardsPanel({
     new Set((cards || []).map((c) => c.category).filter(Boolean))
   ).sort();
 
+  // 카드 목록이 바뀌어 현재 선택된 카테고리가 더 이상 존재하지 않으면 필터 초기화
+  useEffect(() => {
+    if (activeCategory && !categories.includes(activeCategory)) {
+      setActiveCategory(null);
+    }
+  }, [activeCategory, categories]);
+
   // 카테고리 필터 적용
   const filteredCards = activeCategory
     ? (cards || []).filter((c) => c.category === activeCategory)
     : (cards || []);
+
+  // 오늘 복습할 카드 (간격 반복 due)
+  const dueCards = filteredCards.filter((c) => isCardDue(c));
+  // 한 세션에 복습할 카드 수 제한 (마이그레이션 직후 등 due 카드가 한꺼번에 몰릴 수 있음)
+  const reviewBatchSize = Math.min(dueCards.length, REVIEW_BATCH_SIZE);
 
   const shuffleCards = useCallback((list) => {
     const shuffled = [...list];
@@ -143,29 +161,38 @@ function FlashcardsPanel({
   const accuracy = totalQuestions ? Math.round((knownCount / totalQuestions) * 100) : 0;
 
   const persistScoreRecord = useCallback(
-    ({ known, unknown, total }) => {
+    async ({ known, unknown, total }) => {
       const safeTotal = Math.max(0, Number(total) || 0);
       const safeKnown = Math.max(0, Number(known) || 0);
       const safeUnknown = Math.max(0, Number(unknown) || 0);
       const acc = safeTotal ? Math.round((safeKnown / safeTotal) * 100) : 0;
-      const record = {
-        id: examSessionId || `${Date.now()}`,
-        createdAt: new Date().toISOString(),
-        created_at: new Date().toISOString(),
-        total: safeTotal,
-        known: safeKnown,
-        unknown: safeUnknown,
-        accuracy: acc,
-      };
-      // localStorage 저장
-      setLocalScoreHistory((prev) => {
-        const next = [record, ...prev].slice(0, 50);
-        saveLocalScoreHistory(next);
-        return next;
-      });
-      // Supabase 저장
+
+      let savedRemotely = false;
       if (onSaveScore) {
-        onSaveScore({ total: safeTotal, known: safeKnown, unknown: safeUnknown, accuracy: acc });
+        try {
+          const result = await onSaveScore({ total: safeTotal, known: safeKnown, unknown: safeUnknown, accuracy: acc });
+          savedRemotely = Boolean(result);
+        } catch {
+          savedRemotely = false;
+        }
+      }
+
+      // Supabase 저장에 성공하면 localStorage에는 중복 기록하지 않음
+      if (!savedRemotely) {
+        const record = {
+          id: examSessionId || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          createdAt: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          total: safeTotal,
+          known: safeKnown,
+          unknown: safeUnknown,
+          accuracy: acc,
+        };
+        setLocalScoreHistory((prev) => {
+          const next = [record, ...prev].slice(0, 50);
+          saveLocalScoreHistory(next);
+          return next;
+        });
       }
       setHasSavedScore(true);
     },
@@ -188,6 +215,8 @@ function FlashcardsPanel({
       setExamIndex(nextIndex);
       setIsFlipped(false);
 
+      onUpdateSrs?.(examCards[examIndex], result);
+
       if (!hasSavedScore && nextIndex >= examCards.length) {
         persistScoreRecord({
           known: nextKnown,
@@ -202,6 +231,7 @@ function FlashcardsPanel({
       hasSavedScore,
       isExamComplete,
       knownCount,
+      onUpdateSrs,
       persistScoreRecord,
       unknownCount,
       unknownCards,
@@ -301,6 +331,8 @@ function FlashcardsPanel({
         generateButtonTitle={generateButtonTitle}
         duplicateCount={duplicateCount}
         canStartExam={canStartExam}
+        dueCount={reviewBatchSize}
+        onStartReview={() => startExam(shuffleCards(dueCards).slice(0, REVIEW_BATCH_SIZE), true)}
         scoreHistory={scoreHistory}
         showScoreHistory={showScoreHistory}
         setShowScoreHistory={setShowScoreHistory}
