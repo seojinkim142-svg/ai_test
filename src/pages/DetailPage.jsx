@@ -11,70 +11,117 @@ import ReviewNotesPanel from "../components/ReviewNotesPanel";
 import SummaryCard from "../components/SummaryCard";
 import MindMapView from "../components/MindMapView";
 import TopicStructurePanel from "../components/TopicStructurePanel";
-import PredictedScoreBadge from "../components/diagnostic/PredictedScoreBadge";
-import ChapterRangeSection from "../components/summary/ChapterRangeSection";
-import InstructorEmphasisSection from "../components/summary/InstructorEmphasisSection";
-import PartialSummarySection from "../components/summary/PartialSummarySection";
 import { getDetailCopy } from "../utils/detailCopy";
-import {
-  useDocumentStore,
-  useSummaryStore,
-  useQuizStore,
-  useFlashcardStore,
-  useMockExamStore,
-  useTutorStore,
-  useUiStore,
-} from "../stores";
-import { parseQuizMixInput } from "../utils/appStateHelpers";
 
 export default function DetailPage({
-  // Layout / navigation
   detailContainerRef,
   splitStyle,
+  pdfUrl,
   documentUrl,
+  file,
   pendingDocumentOpen,
+  pageInfo,
+  currentPage,
   handlePageChange,
   handleDragStart,
+  panelTab,
+  setPanelTab,
   outputLanguage = "ko",
-  // Summary callbacks
   requestSummary,
   requestMindMap,
   mindmapData,
   isLoadingMindmap,
   onJumpToSummaryPage,
-  diagnosticResult,
+  isLoadingSummary,
+  isLoadingText,
+  previewText,
   isFreeTier,
   hasReachedSummaryLimit = false,
   hasReachedQuizLimit = false,
   hasReachedOxLimit = false,
   hasReachedFlashcardLimit = false,
+  summary,
+  instructorEmphasisInput,
+  setInstructorEmphasisInput,
+  savedInstructorEmphases,
+  activeInstructorEmphasisId,
   handleSaveInstructorEmphasis,
   handleSelectInstructorEmphasis,
   handleDeleteInstructorEmphasis,
   cycleActiveInstructorEmphasis,
+  partialSummary,
+  partialSummaryRange,
+  savedPartialSummaries,
+  isSavedPartialSummaryOpen,
+  setIsSavedPartialSummaryOpen,
   handleSaveCurrentPartialSummary,
   handleLoadSavedPartialSummary,
   handleDeleteSavedPartialSummary,
+  setIsPageSummaryOpen,
+  setPageSummaryError,
+  isPageSummaryOpen,
+  pageSummaryInput,
+  setPageSummaryInput,
+  pageSummaryError,
   handleSummaryByPages,
+  isPageSummaryLoading,
+  isChapterRangeOpen,
+  setIsChapterRangeOpen,
+  chapterRangeInput,
+  setChapterRangeInput,
+  chapterRangeError,
+  chapterRangeNotice,
+  setChapterRangeError,
+  setChapterRangeNotice,
   handleAutoDetectChapterRanges,
+  isDetectingChapterRanges,
   handleConfirmChapterRanges,
   handleExportSummaryPdf,
+  isExportingSummary,
+  status,
+  error,
   summaryRef,
-  // MockExam callbacks
+  mockExams,
   mockExamMenuRef,
   mockExamMenuButtonRef,
+  isMockExamMenuOpen,
+  setIsMockExamMenuOpen,
+  isLoadingMockExams,
   activeMockExam,
   activeMockExamTitle,
   formatMockExamTitle,
   handleDeleteMockExam,
   handleCreateMockExam,
+  mockExamChapterSelectionInput,
+  setMockExamChapterSelectionInput,
+  mockExamPromptAddonInput,
+  setMockExamPromptAddonInput,
+  isGeneratingMockExam,
+  selectedFileId,
   handleExportMockExam,
   mockExamOrderedItems,
   mockExamPrintRef,
   mockExamPages,
-  // Quiz callbacks
+  showMockExamAnswers,
+  setShowMockExamAnswers,
+  mockExamStatus,
+  mockExamError,
+  setActiveMockExamId,
+  isLoadingQuiz,
   shortPreview,
   requestQuestions,
+  quizChapterSelectionInput,
+  setQuizChapterSelectionInput,
+  quizPromptAddonInput,
+  setQuizPromptAddonInput,
+  quizDifficulty,
+  setQuizDifficulty,
+  quizMixInput,
+  setQuizMixInput,
+  quizMix,
+  setQuizMix,
+  quizMixError,
+  quizSets,
   handleChoiceSelect,
   handleShortAnswerChange,
   handleShortAnswerCheck,
@@ -83,7 +130,7 @@ export default function DetailPage({
   regenerateQuiz,
   deleteQuiz,
   deleteQuizItem,
-  // ReviewNotes callbacks
+  reviewNotes,
   reviewNoteSections,
   reviewNotesSectionSelectionInput,
   setReviewNotesSectionSelectionInput,
@@ -93,167 +140,81 @@ export default function DetailPage({
   examCramSectionError,
   examCramReferenceCounts,
   examCramHasAnySource,
+  examCramContent,
+  examCramUpdatedAt,
+  examCramScopeLabel,
+  examCramStatus,
+  examCramError,
+  isGeneratingExamCram,
   handleReviewNoteAttempt,
   handleDeleteReviewNote,
   handleGenerateExamCram,
   handleCreateReviewNotesMockExam,
-  // OX callbacks
+  isLoadingOx,
   requestOxQuiz,
+  oxChapterSelectionInput,
+  setOxChapterSelectionInput,
   regenerateOxQuiz,
+  oxItems,
+  oxSelections,
   handleOxSelect,
-  // Flashcard callbacks
+  setOxSelections,
+  oxExplanationOpen,
+  setOxExplanationOpen,
+  flashcards,
+  isLoadingFlashcards,
   handleAddFlashcard,
   handleDeleteFlashcard,
   handleDeleteAllFlashcards,
   handleUpdateFlashcard,
   handleDeduplicateFlashcards,
   handleSaveFlashcardScore,
+  flashcardScores,
+  vocabQuizScores,
   handleSaveVocabQuizScore,
   handleGenerateFlashcards,
   handleGenerateVocabularyFlashcards,
   handleReextractVocabulary,
   handleRegenerateFlashcards,
   isVocabularyFile = false,
-  // Tutor callbacks
+  flashcardChapterSelectionInput,
+  setFlashcardChapterSelectionInput,
+  flashcardGenerateCount = 8,
+  setFlashcardGenerateCount,
+  isGeneratingFlashcards,
+  extractedText,
+  flashcardStatus,
+  flashcardError,
+  tutorMessages,
+  isTutorLoading,
+  tutorError,
   tutorNotice,
   handleSendTutorMessage,
   handleResetTutor,
+  folderTutorMode = false,
   onToggleFolderTutorMode,
   canUseFolderTutorMode = false,
   folderName = "",
-  // Topic structure callbacks
+  topicStructure,
+  isLoadingTopicStructure,
+  topicStructureError,
   onRequestTopicStructure,
   onExplainConcept,
-  // Folder mode
+  // 폴더 통합 퀴즈
   isFolderMode = false,
   currentFolderInfo = null,
+  folderQuizQuestions,
+  isLoadingFolderQuiz = false,
+  folderQuizError = "",
+  folderSelectedChoices,
+  folderRevealedChoices,
+  folderShortAnswerInput,
+  folderShortAnswerResult,
   onRequestFolderQuiz,
   onFolderSelectChoice,
   onFolderShortAnswerChange,
   onFolderShortAnswerCheck,
 }) {
-  // ── Store subscriptions ──────────────────────────────────────────────────────
-  const {
-    pdfUrl,
-    file,
-    pageInfo,
-    currentPage,
-    status,
-    error,
-    isLoadingText,
-    previewText,
-    extractedText,
-    selectedFileId,
-  } = useDocumentStore();
-
-  const {
-    summary,
-    isLoadingSummary,
-    isExportingSummary,
-    isPageSummaryOpen,
-    setIsPageSummaryOpen,
-    pageSummaryInput,
-    setPageSummaryInput,
-    pageSummaryError,
-    setPageSummaryError,
-    isPageSummaryLoading,
-    chapterRangeError,
-    setChapterRangeError,
-    isChapterRangeOpen,
-    setIsChapterRangeOpen,
-    topicStructure,
-    isLoadingTopicStructure,
-    topicStructureError,
-  } = useSummaryStore();
-
-  const {
-    isLoadingQuiz,
-    quizMixInput,
-    setQuizMixInput,
-    quizChapterSelectionInput,
-    setQuizChapterSelectionInput,
-    quizPromptAddonInput,
-    setQuizPromptAddonInput,
-    quizDifficulty,
-    setQuizDifficulty,
-    quizSets,
-    oxItems,
-    oxSelections,
-    setOxSelections,
-    oxExplanationOpen,
-    setOxExplanationOpen,
-    isLoadingOx,
-    oxChapterSelectionInput,
-    setOxChapterSelectionInput,
-  } = useQuizStore();
-
-  const {
-    flashcards,
-    isLoadingFlashcards,
-    isGeneratingFlashcards,
-    flashcardStatus,
-    flashcardError,
-    flashcardScores,
-    vocabQuizScores,
-    flashcardChapterSelectionInput,
-    setFlashcardChapterSelectionInput,
-    flashcardGenerateCount,
-    setFlashcardGenerateCount,
-  } = useFlashcardStore();
-
-  const {
-    mockExams,
-    isLoadingMockExams,
-    isGeneratingMockExam,
-    mockExamStatus,
-    mockExamError,
-    activeMockExamId,
-    setActiveMockExamId,
-    showMockExamAnswers,
-    setShowMockExamAnswers,
-    isMockExamMenuOpen,
-    setIsMockExamMenuOpen,
-    mockExamChapterSelectionInput,
-    setMockExamChapterSelectionInput,
-    mockExamPromptAddonInput,
-    setMockExamPromptAddonInput,
-    examCramContent,
-    examCramUpdatedAt,
-    examCramScopeLabel,
-    isGeneratingExamCram,
-    examCramStatus,
-    examCramError,
-    reviewNotes,
-  } = useMockExamStore();
-
-  const {
-    tutorMessages,
-    isTutorLoading,
-    tutorError,
-  } = useTutorStore();
-
-  const {
-    panelTab,
-    setPanelTab,
-    folderTutorMode,
-    folderQuizQuestions,
-    isLoadingFolderQuiz,
-    folderQuizError,
-    folderSelectedChoices,
-    folderRevealedChoices,
-    folderShortAnswerInput,
-    folderShortAnswerResult,
-  } = useUiStore();
-
-  // Derived state
-  const parsedQuizMix = useMemo(() => parseQuizMixInput(quizMixInput), [quizMixInput]);
-  const quizMix = parsedQuizMix.mix;
-  const quizMixError = parsedQuizMix.error;
-  const setQuizMix = useCallback((nextMix) => {
-    const nextMultipleChoice = Math.max(0, Number(nextMix?.multipleChoice) || 0);
-    const nextShortAnswer = Math.max(0, Number(nextMix?.shortAnswer) || 0);
-    setQuizMixInput(`${nextMultipleChoice}-${nextShortAnswer}`);
-  }, [setQuizMixInput]);
   const isNativePlatform = useMemo(() => Capacitor.isNativePlatform(), []);
   const copy = useMemo(() => getDetailCopy(outputLanguage), [outputLanguage]);
   const [summaryViewMode, setSummaryViewMode] = useState("text"); // "text" | "mindmap"
@@ -276,7 +237,41 @@ export default function DetailPage({
     [copy, isVocabularyFile]
   );
   const normalizeChapterSelectionInput = (value) => String(value || "").replace(/\s+/g, "");
+  const truncateText = (value, maxLength = 30) => {
+    const normalized = String(value || "").trim();
+    if (normalized.length <= maxLength) return normalized;
+    return `${normalized.slice(0, maxLength)}...`;
+  };
   const mindmapContainerRef = useRef(null);
+  const emphasisTextareaRef = useRef(null);
+  const savedInstructorScrollRef = useRef(null);
+  const savedInstructorScrollTimerRef = useRef(null);
+  const partialSummaryListRef = useRef(null);
+  const emphasisWheelRowHeight = 38;
+  const emphasisWheelViewportHeight = emphasisWheelRowHeight * 5;
+  const emphasisWheelCenterOffset = (emphasisWheelViewportHeight - emphasisWheelRowHeight) / 2;
+  const normalizedSavedInstructorEmphases = useMemo(
+    () => (Array.isArray(savedInstructorEmphases) ? savedInstructorEmphases : []),
+    [savedInstructorEmphases]
+  );
+  const normalizedSavedPartialSummaries = useMemo(
+    () => (Array.isArray(savedPartialSummaries) ? savedPartialSummaries : []),
+    [savedPartialSummaries]
+  );
+  const activeInstructorEmphasis = useMemo(
+    () =>
+      normalizedSavedInstructorEmphases.find((item) => item.id === activeInstructorEmphasisId) ||
+      normalizedSavedInstructorEmphases[0] ||
+      null,
+    [activeInstructorEmphasisId, normalizedSavedInstructorEmphases]
+  );
+  const activeInstructorEmphasisIndex = useMemo(
+    () =>
+      activeInstructorEmphasis
+        ? normalizedSavedInstructorEmphases.findIndex((item) => item.id === activeInstructorEmphasis.id)
+        : -1,
+    [activeInstructorEmphasis, normalizedSavedInstructorEmphases]
+  );
   const pendingDocumentId = String(pendingDocumentOpen?.id || "").trim();
   const isPendingDocumentOpen = Boolean(pendingDocumentId);
   const pendingDocumentName =
@@ -311,6 +306,61 @@ export default function DetailPage({
     }
   }, [isVocabularyFile]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    const target = emphasisTextareaRef.current;
+    if (!target) return;
+    target.style.height = "auto";
+    const next = Math.max(44, Math.min(240, target.scrollHeight));
+    target.style.height = `${next}px`;
+    target.style.overflowY = target.scrollHeight > 240 ? "auto" : "hidden";
+  }, [instructorEmphasisInput]);
+
+  useEffect(() => {
+    return () => {
+      if (savedInstructorScrollTimerRef.current) {
+        clearTimeout(savedInstructorScrollTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleSavedInstructorWheelSelect = useCallback(() => {
+    const container = savedInstructorScrollRef.current;
+    if (!container || normalizedSavedInstructorEmphases.length === 0) return;
+    const nearestIndex = Math.max(
+      0,
+      Math.min(
+        normalizedSavedInstructorEmphases.length - 1,
+        Math.round(container.scrollTop / emphasisWheelRowHeight)
+      )
+    );
+    const nearest = normalizedSavedInstructorEmphases[nearestIndex];
+    if (!nearest || nearest.id === activeInstructorEmphasis?.id) return;
+    handleSelectInstructorEmphasis(nearest.id);
+  }, [
+    activeInstructorEmphasis?.id,
+    emphasisWheelRowHeight,
+    handleSelectInstructorEmphasis,
+    normalizedSavedInstructorEmphases,
+  ]);
+
+  const handleSavedInstructorWheelScroll = useCallback(() => {
+    if (savedInstructorScrollTimerRef.current) {
+      clearTimeout(savedInstructorScrollTimerRef.current);
+    }
+    savedInstructorScrollTimerRef.current = setTimeout(() => {
+      handleSavedInstructorWheelSelect();
+      savedInstructorScrollTimerRef.current = null;
+    }, 90);
+  }, [handleSavedInstructorWheelSelect]);
+
+  const handleSavedInstructorClick = useCallback(
+    (itemId) => {
+      handleSelectInstructorEmphasis(itemId);
+      emphasisTextareaRef.current?.focus();
+    },
+    [handleSelectInstructorEmphasis]
+  );
+
   const resizeHandle = (
     <div className="hidden w-8 shrink-0 items-stretch justify-center px-1 lg:flex">
       <button
@@ -330,6 +380,24 @@ export default function DetailPage({
       </button>
     </div>
   );
+
+  useEffect(() => {
+    const container = savedInstructorScrollRef.current;
+    if (!container || normalizedSavedInstructorEmphases.length === 0) return;
+    const targetIndex = activeInstructorEmphasisIndex >= 0 ? activeInstructorEmphasisIndex : 0;
+    const targetTop = Math.max(0, targetIndex * emphasisWheelRowHeight);
+    if (Math.abs(container.scrollTop - targetTop) < 1) return;
+    container.scrollTo({ top: targetTop, behavior: "smooth" });
+  }, [
+    activeInstructorEmphasisIndex,
+    emphasisWheelRowHeight,
+    normalizedSavedInstructorEmphases.length,
+  ]);
+
+  useEffect(() => {
+    if (!isSavedPartialSummaryOpen) return;
+    partialSummaryListRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [isSavedPartialSummaryOpen]);
 
   if (isPendingDocumentOpen) {
     return (
@@ -495,7 +563,6 @@ export default function DetailPage({
       {resizeHandle}
 
       <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
-        <PredictedScoreBadge result={diagnosticResult} />
         <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 sm:grid-cols-7 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
           {detailTabs.map((item) => {
             const active = panelTab === item.id;
@@ -664,18 +731,219 @@ export default function DetailPage({
                   )}
                 </div>
               )}
-              <ChapterRangeSection
-                isLoadingSummary={isLoadingSummary}
-                isLoadingText={isLoadingText}
-                onAutoDetect={handleAutoDetectChapterRanges}
-                onConfirm={handleConfirmChapterRanges}
-              />
-              <InstructorEmphasisSection
-                onSave={handleSaveInstructorEmphasis}
-                onDelete={handleDeleteInstructorEmphasis}
-                onSelect={handleSelectInstructorEmphasis}
-                onCycle={cycleActiveInstructorEmphasis}
-              />
+              {isChapterRangeOpen && (
+                <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-100">사용자 지정 챕터 범위</p>
+                      <p className="text-xs text-slate-400">
+                        형식: 챕터번호:시작-끝 (예: 1:1-12, 2:13-24)
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsChapterRangeOpen(false)}
+                      className="ghost-button text-[11px] text-slate-200"
+                      data-ghost-size="sm"
+                      style={{ "--ghost-color": "148, 163, 184" }}
+                    >
+                      닫기
+                    </button>
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    <textarea
+                      value={chapterRangeInput}
+                      onChange={(event) => {
+                        setChapterRangeInput(event.target.value);
+                        setChapterRangeError("");
+                        setChapterRangeNotice("");
+                      }}
+                      placeholder={`1:1-12\n2:13-24\n3:25-38`}
+                      rows={4}
+                      className="w-full resize-y rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-100 outline-none ring-1 ring-transparent transition focus:border-emerald-300/50 focus:ring-emerald-300/40"
+                    />
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={handleAutoDetectChapterRanges}
+                        disabled={isLoadingSummary || isLoadingText || isDetectingChapterRanges}
+                        className="ghost-button text-xs text-slate-200"
+                        data-ghost-size="sm"
+                        style={{ "--ghost-color": "100, 116, 139" }}
+                      >
+                        {isDetectingChapterRanges ? "목차 추출 중..." : "목차 자동 추출"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleConfirmChapterRanges}
+                        disabled={isLoadingSummary || isLoadingText || isDetectingChapterRanges}
+                        className="ghost-button text-xs text-emerald-100"
+                        data-ghost-size="sm"
+                        style={{ "--ghost-color": "52, 211, 153" }}
+                      >
+                        확인
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-400">
+                      목차 자동 추출 또는 직접 입력한 범위는 요약 생성 시 챕터 분할 기준으로 적용됩니다.
+                    </p>
+                  </div>
+                  {chapterRangeError && (
+                    <p className="mt-2 rounded-lg bg-red-500/10 px-3 py-2 text-xs text-red-200 ring-1 ring-red-400/30">
+                      {chapterRangeError}
+                    </p>
+                  )}
+                  {!chapterRangeError && chapterRangeNotice && (
+                    <p className="mt-2 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-100 ring-1 ring-amber-300/20">
+                      {chapterRangeNotice}
+                    </p>
+                  )}
+                </div>
+              )}
+              <div className="hidden mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-200">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-100">
+                      {"\uAD50\uC218\uB2D8/\uAC15\uC0AC \uAC15\uC870 \uD3EC\uC778\uD2B8"}
+                    </p>
+                    <p className="text-xs text-slate-400">
+                      {
+                        "\uD559\uC2B5 \uC911 \uBC18\uB4DC\uC2DC \uD655\uC778\uD558\uB77C\uACE0 \uD55C \uD3EC\uC778\uD2B8\uB97C \uBA54\uBAA8\uD558\uC138\uC694."
+                      }
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleSaveInstructorEmphasis()}
+                    className="ghost-button text-xs text-emerald-100"
+                    data-ghost-size="sm"
+                    style={{ "--ghost-color": "52, 211, 153" }}
+                  >
+                    {"\uC800\uC7A5"}
+                  </button>
+                </div>
+                <textarea
+                  ref={emphasisTextareaRef}
+                  value={instructorEmphasisInput}
+                  onChange={(event) => setInstructorEmphasisInput(event.target.value)}
+                  rows={1}
+                  maxLength={2000}
+                  placeholder={
+                    "\uC608) 3\uC7A5 \uC815\uB9AC \uBB38\uC81C\uB294 \uAE30\uCD9C \uD45C\uD604\uC744 \uADF8\uB300\uB85C \uBB3B\uB294\uB2E4. \uAD6C\uBD84 \uAC1C\uB150(A vs B)\uC744 \uBE44\uAD50\uD558\uB294 \uC720\uD615\uC774 \uC790\uC8FC \uB098\uC628\uB2E4."
+                  }
+                  className="mt-3 w-full resize-none rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm leading-relaxed text-slate-100 outline-none ring-1 ring-transparent transition focus:border-emerald-300/50 focus:ring-emerald-300/40"
+                />
+                <p className="mt-1 text-right text-[11px] text-slate-400">
+                  {String(instructorEmphasisInput || "").length}/2000
+                </p>
+                {normalizedSavedInstructorEmphases.length > 0 && (
+                  <div className="mt-3 rounded-xl border border-white/10 bg-slate-900/35 p-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] text-slate-300">
+                        {`\uC800\uC7A5\uB41C \uAC15\uC870 \uD3EC\uC778\uD2B8 ${normalizedSavedInstructorEmphases.length}\uAC1C`}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteInstructorEmphasis(activeInstructorEmphasis?.id)}
+                        disabled={!activeInstructorEmphasis}
+                        className="ghost-button text-[11px] text-slate-200"
+                        data-ghost-size="sm"
+                        style={{ "--ghost-color": "226, 232, 240" }}
+                      >
+                        선택 삭제
+                      </button>
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <div
+                          className="pointer-events-none absolute inset-x-1 top-1/2 z-20 -translate-y-1/2 rounded-lg border border-emerald-300/45 bg-emerald-400/10 shadow-[0_0_18px_rgba(52,211,153,0.18)]"
+                          style={{ height: `${emphasisWheelRowHeight}px` }}
+                        />
+                        <div className="pointer-events-none absolute inset-x-0 top-0 z-20 h-10 rounded-t-lg bg-gradient-to-b from-slate-950/95 to-transparent" />
+                        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-10 rounded-b-lg bg-gradient-to-t from-slate-950/95 to-transparent" />
+                        <div
+                          ref={savedInstructorScrollRef}
+                          onScroll={handleSavedInstructorWheelScroll}
+                          className="relative overflow-y-auto rounded-lg snap-y snap-mandatory"
+                          style={{
+                            height: `${emphasisWheelViewportHeight}px`,
+                            scrollPaddingTop: `${emphasisWheelCenterOffset}px`,
+                            scrollPaddingBottom: `${emphasisWheelCenterOffset}px`,
+                          }}
+                        >
+                          <div
+                            style={{
+                              paddingTop: `${emphasisWheelCenterOffset}px`,
+                              paddingBottom: `${emphasisWheelCenterOffset}px`,
+                            }}
+                          >
+                            {normalizedSavedInstructorEmphases.map((item, idx) => {
+                              const isActive = item.id === activeInstructorEmphasis?.id;
+                              const distance =
+                                activeInstructorEmphasisIndex >= 0
+                                  ? Math.abs(idx - activeInstructorEmphasisIndex)
+                                  : 999;
+                              return (
+                                <button
+                                  key={item.id}
+                                  type="button"
+                                  data-emphasis-id={item.id}
+                                  onClick={() => handleSavedInstructorClick(item.id)}
+                                  className={`mx-1 flex w-[calc(100%-0.5rem)] snap-center items-center gap-2 rounded-lg px-3 text-left text-xs transition ${
+                                    isActive
+                                      ? "bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-300/60"
+                                      : "text-slate-300 hover:bg-white/5"
+                                  } ${distance >= 2 ? "opacity-35" : distance === 1 ? "opacity-70" : "opacity-100"}`}
+                                  style={{ height: `${emphasisWheelRowHeight}px` }}
+                                >
+                                  <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                                    {idx + 1}
+                                  </span>
+                                  <span
+                                    className="truncate leading-relaxed"
+                                    title={String(item.text || "").trim()}
+                                  >
+                                    {truncateText(item.text, 30)}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex h-[190px] shrink-0 flex-col items-center justify-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => cycleActiveInstructorEmphasis(-1)}
+                          disabled={normalizedSavedInstructorEmphases.length < 2}
+                          className="ghost-button h-7 w-7 text-[11px] text-slate-200"
+                          data-ghost-size="sm"
+                          style={{ "--ghost-color": "148, 163, 184", padding: 0 }}
+                          aria-label="이전 강조"
+                        >
+                          {"˄"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => cycleActiveInstructorEmphasis(1)}
+                          disabled={normalizedSavedInstructorEmphases.length < 2}
+                          className="ghost-button h-7 w-7 text-[11px] text-slate-200"
+                          data-ghost-size="sm"
+                          style={{ "--ghost-color": "148, 163, 184", padding: 0 }}
+                          aria-label="다음 강조"
+                        >
+                          {"˅"}
+                        </button>
+                      </div>
+                    </div>
+                    {activeInstructorEmphasis && (
+                      <p className="mt-2 text-[11px] text-emerald-200">
+                        {`\uD604\uC7AC \uC120\uD0DD: ${activeInstructorEmphasisIndex + 1}\uBC88`}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
               {isLoadingSummary && <p className="mt-2 text-sm text-slate-300">{"\uC694\uC57D \uC0DD\uC131 \uC911..."}</p>}
               {!isLoadingSummary && summary && summaryViewMode === "mindmap" && (
                 <div className="mt-3">
@@ -753,12 +1021,103 @@ export default function DetailPage({
               {!isLoadingSummary && !summary && (
                 <p className="mt-2 text-sm text-slate-400">{"\uC694\uC57D\uC774 \uC900\uBE44\uB418\uBA74 \uD45C\uC2DC\uB429\uB2C8\uB2E4."}</p>
               )}
-              {!isLoadingSummary && (
-                <PartialSummarySection
-                  onSave={handleSaveCurrentPartialSummary}
-                  onLoad={handleLoadSavedPartialSummary}
-                  onDelete={handleDeleteSavedPartialSummary}
-                />
+              {!isLoadingSummary && (partialSummary || normalizedSavedPartialSummaries.length > 0) && (
+                <div className="mt-4 rounded-2xl border border-emerald-400/20 bg-emerald-500/5 p-3 text-sm text-slate-100">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-emerald-100">
+                        {"\uBD80\uBD84 \uC694\uC57D"}
+                      </p>
+                      <p className="text-xs text-slate-300">
+                        {partialSummaryRange
+                          ? `\uC120\uD0DD \uBC94\uC704: ${partialSummaryRange}`
+                          : "\uC120\uD0DD \uD398\uC774\uC9C0 \uC694\uC57D \uACB0\uACFC"}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSaveCurrentPartialSummary}
+                        disabled={!String(partialSummary || "").trim()}
+                        className="ghost-button text-xs text-emerald-100"
+                        data-ghost-size="sm"
+                        style={{ "--ghost-color": "52, 211, 153" }}
+                      >
+                        {"\uC800\uC7A5"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsSavedPartialSummaryOpen((prev) => !prev)}
+                        className="ghost-button text-xs text-slate-200"
+                        data-ghost-size="sm"
+                        style={{ "--ghost-color": "148, 163, 184" }}
+                      >
+                        {isSavedPartialSummaryOpen
+                          ? `\uC800\uC7A5 \uBAA9\uB85D \uB2EB\uAE30 (${normalizedSavedPartialSummaries.length})`
+                          : `\uC800\uC7A5 \uBAA9\uB85D (${normalizedSavedPartialSummaries.length})`}
+                      </button>
+                    </div>
+                  </div>
+
+                  {isSavedPartialSummaryOpen && (
+                    <div ref={partialSummaryListRef} className="mt-3 max-h-[240px] space-y-2 overflow-auto pr-1">
+                      {normalizedSavedPartialSummaries.length === 0 ? (
+                        <p className="rounded-lg border border-white/10 bg-slate-900/35 px-3 py-2 text-xs text-slate-400">
+                          {"\uC800\uC7A5\uB41C \uBD80\uBD84 \uC694\uC57D\uC774 \uC5C6\uC2B5\uB2C8\uB2E4."}
+                        </p>
+                      ) : (
+                        normalizedSavedPartialSummaries.map((item) => (
+                          <div
+                            key={item.id}
+                            className="flex items-center justify-between gap-2 rounded-lg border border-white/10 bg-slate-900/35 px-3 py-2"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-xs font-semibold text-slate-100">
+                                {String(item.name || "").trim() || "\uBB34\uC81C"}
+                              </p>
+                              <p className="truncate text-[11px] text-slate-400">
+                                {String(item.range || "").trim()
+                                  ? `\uBC94\uC704: ${String(item.range || "").trim()}`
+                                  : "\uBC94\uC704 \uC815\uBCF4 \uC5C6\uC74C"}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleLoadSavedPartialSummary(item.id)}
+                                className="ghost-button text-[11px] text-emerald-100"
+                                data-ghost-size="sm"
+                                style={{ "--ghost-color": "52, 211, 153" }}
+                              >
+                                {"\uBD88\uB7EC\uC624\uAE30"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteSavedPartialSummary(item.id)}
+                                className="ghost-button text-[11px] text-slate-200"
+                                data-ghost-size="sm"
+                                style={{ "--ghost-color": "148, 163, 184" }}
+                              >
+                                {"\uC0AD\uC81C"}
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+
+                  {partialSummary ? (
+                    <SummaryCard summary={partialSummary} />
+                  ) : (
+                    <p className="mt-3 text-xs text-slate-400">
+                      {
+                        "\uC544\uC9C1 \uD604\uC7AC \uBB38\uC11C\uC758 \uBD80\uBD84 \uC694\uC57D \uACB0\uACFC\uAC00 \uC5C6\uC2B5\uB2C8\uB2E4."
+                      }
+                    </p>
+                  )}
+
+                </div>
               )}
             </div>
           )}

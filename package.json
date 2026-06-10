@@ -37,7 +37,6 @@
     "@studio-freight/lenis": "^1.0.42",
     "@supabase/supabase-js": "^2.89.0",
     "clsx": "^2.1.1",
-    "dompurify": "^3.4.8",
     "framer-motion": "^12.40.0",
     "geist": "^1.7.1",
     "gsap": "^3.15.0",
