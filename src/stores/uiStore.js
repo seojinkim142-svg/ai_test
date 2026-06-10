@@ -76,7 +76,10 @@ export const useUiStore = create((set) => ({
   folderShortAnswerResult: {},
 
   // Actions
-  setTheme: (theme) => set({ theme }),
+  setTheme: (fn) =>
+    set((state) => ({
+      theme: typeof fn === "function" ? fn(state.theme) : fn,
+    })),
   setOutputLanguage: (lang) => {
     set({ outputLanguage: lang });
     try {
@@ -120,7 +123,10 @@ export const useUiStore = create((set) => ({
       usageCounts: typeof fn === "function" ? fn(state.usageCounts) : fn,
     })),
 
-  setFolderTutorMode: (v) => set({ folderTutorMode: v }),
+  setFolderTutorMode: (fn) =>
+    set((state) => ({
+      folderTutorMode: typeof fn === "function" ? fn(state.folderTutorMode) : fn,
+    })),
 
   setSemanticSearchResults: (v) => set({ semanticSearchResults: v }),
   setIsSemanticSearching: (v) => set({ isSemanticSearching: v }),
