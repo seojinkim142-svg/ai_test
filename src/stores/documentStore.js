@@ -33,8 +33,14 @@ export const useDocumentStore = create((set) => ({
 
   // Actions
   setFile: (file) => set({ file }),
-  setExtractedText: (extractedText) => set({ extractedText }),
-  setPreviewText: (previewText) => set({ previewText }),
+  setExtractedText: (fn) =>
+    set((state) => ({
+      extractedText: typeof fn === "function" ? fn(state.extractedText) : fn,
+    })),
+  setPreviewText: (fn) =>
+    set((state) => ({
+      previewText: typeof fn === "function" ? fn(state.previewText) : fn,
+    })),
   setPageInfo: (fn) =>
     set((state) => ({
       pageInfo: typeof fn === "function" ? fn(state.pageInfo) : fn,
@@ -45,7 +51,10 @@ export const useDocumentStore = create((set) => ({
   setIsLoadingText: (isLoadingText) => set({ isLoadingText }),
   setThumbnailUrl: (thumbnailUrl) => set({ thumbnailUrl }),
 
-  setCurrentPage: (currentPage) => set({ currentPage }),
+  setCurrentPage: (fn) =>
+    set((state) => ({
+      currentPage: typeof fn === "function" ? fn(state.currentPage) : fn,
+    })),
   setVisitedPages: (fn) =>
     set((state) => ({
       visitedPages: typeof fn === "function" ? fn(state.visitedPages) : fn,
@@ -62,7 +71,10 @@ export const useDocumentStore = create((set) => ({
     set((state) => ({
       folders: typeof fn === "function" ? fn(state.folders) : fn,
     })),
-  setSelectedFolderId: (selectedFolderId) => set({ selectedFolderId }),
+  setSelectedFolderId: (fn) =>
+    set((state) => ({
+      selectedFolderId: typeof fn === "function" ? fn(state.selectedFolderId) : fn,
+    })),
   setSelectedUploadIds: (fn) =>
     set((state) => ({
       selectedUploadIds: typeof fn === "function" ? fn(state.selectedUploadIds) : fn,
