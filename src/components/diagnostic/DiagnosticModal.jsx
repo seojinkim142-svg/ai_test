@@ -1,6 +1,6 @@
 import { useUiStore, useDiagnosticStore } from "../../stores";
 import { saveDiagnosticResult } from "../../services/supabase";
-import { computeDiagnosticResult } from "../../utils/diagnosticUtils";
+import { computeDiagnosticResult, markDiagnosticSkipped } from "../../utils/diagnosticUtils";
 import DiagnosticQuestionStep from "./DiagnosticQuestionStep";
 import DiagnosticResultView from "./DiagnosticResultView";
 
@@ -26,6 +26,7 @@ export default function DiagnosticModal({ userId, docId, onGoToQuiz, onGoToSumma
   const handleClose = () => {
     if (diagnosticStatus === "in-progress" || diagnosticStatus === "generating") {
       setDiagnosticStatus("skipped");
+      markDiagnosticSkipped(userId, docId);
     }
     setIsDiagnosticModalOpen(false);
   };
@@ -110,6 +111,7 @@ export default function DiagnosticModal({ userId, docId, onGoToQuiz, onGoToSumma
           <DiagnosticResultView
             result={diagnosticResult}
             theme={theme}
+            onClose={handleClose}
             onGoToQuiz={handleGoToQuiz}
             onGoToSummary={handleGoToSummary}
           />

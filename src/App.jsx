@@ -186,7 +186,7 @@ import {
   parseQuizMixInput,
   LIMIT_USAGE_KEY_MAP,
 } from "./utils/appStateHelpers";
-import { normalizeDiagnosticResultRow } from "./utils/diagnosticUtils";
+import { normalizeDiagnosticResultRow, isDiagnosticSkipped } from "./utils/diagnosticUtils";
 import {
   normalizeInstructorEmphasisInput,
   normalizeSavedPartialSummaryEntries,
@@ -2548,7 +2548,7 @@ function App() {
             if (diagnosticRow) {
               setDiagnosticResult(normalizeDiagnosticResultRow(diagnosticRow));
               setDiagnosticStatus("completed");
-            } else if (normalizedInitialText && !loaded?.summary) {
+            } else if (normalizedInitialText && !loaded?.summary && !isDiagnosticSkipped(user.id, nextDocId)) {
               setIsDiagnosticModalOpen(true);
               setDiagnosticStatus("generating");
               try {

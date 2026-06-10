@@ -1,10 +1,20 @@
-export default function DiagnosticResultView({ result, theme, onGoToQuiz, onGoToSummary }) {
+export default function DiagnosticResultView({ result, theme, onClose, onGoToQuiz, onGoToSummary }) {
   if (!result) return null;
   const { predictedScore, totalQuestions, correctCount, topicBreakdown, feedback } = result;
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col items-center gap-1 py-2 text-center">
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="닫기"
+          className={`text-lg leading-none ${theme === "light" ? "text-slate-400 hover:text-slate-600" : "text-slate-500 hover:text-slate-300"}`}
+        >
+          {"×"}
+        </button>
+      </div>
+      <div className="-mt-6 flex flex-col items-center gap-1 py-2 text-center">
         <span className={`text-xs ${theme === "light" ? "text-slate-500" : "text-slate-400"}`}>
           {"당신의 현재 예상 점수는"}
         </span>

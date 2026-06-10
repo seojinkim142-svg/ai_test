@@ -47,6 +47,31 @@ export function normalizeDiagnosticResultRow(row) {
   };
 }
 
+const DIAGNOSTIC_SKIP_STORAGE_PREFIX = "diagnostic_skipped_";
+
+function getDiagnosticSkipKey(userId, docId) {
+  return `${DIAGNOSTIC_SKIP_STORAGE_PREFIX}${userId || "guest"}_${docId}`;
+}
+
+// 진단 테스트를 도중에 닫은 문서는 다시 열어도 자동 팝업하지 않도록 기록
+export function isDiagnosticSkipped(userId, docId) {
+  if (typeof localStorage === "undefined" || !docId) return false;
+  try {
+    return localStorage.getItem(getDiagnosticSkipKey(userId, docId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function markDiagnosticSkipped(userId, docId) {
+  if (typeof localStorage === "undefined" || !docId) return;
+  try {
+    localStorage.setItem(getDiagnosticSkipKey(userId, docId), "1");
+  } catch {
+    // localStorage unavailable - safe to ignore
+  }
+}
+
 export function getDiagnosticFeedback(predictedScore) {
   if (predictedScore >= 90) {
     return { tier: "최상위권", message: "이 자료를 거의 완벽히 이해하고 있어요. 마무리 점검만 하면 충분해요." };
