@@ -1,4 +1,6 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+
+const PAGE_SIZE = 30;
 
 /**
  * FlashcardList
@@ -12,6 +14,14 @@ function FlashcardList({ cards, filteredCards, isLoading, isGenerating, onDelete
   const [editBack, setEditBack] = useState("");
   const [editHint, setEditHint] = useState("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  // 카드 개수가 바뀌면(카테고리 전환, 생성/삭제 등) 처음부터 다시 표시
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [filteredCards.length]);
+
+  const visibleCards = filteredCards.slice(0, visibleCount);
 
   const startEdit = useCallback((card) => {
     setEditingCardId(card.id);
@@ -45,7 +55,7 @@ function FlashcardList({ cards, filteredCards, isLoading, isGenerating, onDelete
         <p className="text-sm text-slate-400">선택한 카테고리에 카드가 없습니다.</p>
       )}
       {!isLoading &&
-        filteredCards.map((card) => {
+        visibleCards.map((card) => {
           const isEditing = editingCardId === card.id;
           return (
             <div
@@ -143,6 +153,17 @@ function FlashcardList({ cards, filteredCards, isLoading, isGenerating, onDelete
             </div>
           );
         })}
+      {!isLoading && filteredCards.length > visibleCount && (
+        <button
+          type="button"
+          onClick={() => setVisibleCount((prev) => prev + PAGE_SIZE)}
+          className="ghost-button w-full text-sm text-slate-200"
+          data-ghost-size="sm"
+          style={{ "--ghost-color": "148, 163, 184" }}
+        >
+          더 보기 ({filteredCards.length - visibleCount}개 더)
+        </button>
+      )}
     </div>
   );
 }

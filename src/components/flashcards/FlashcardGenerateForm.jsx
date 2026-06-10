@@ -28,6 +28,8 @@ function FlashcardGenerateForm({
   generateButtonTitle,
   duplicateCount,
   canStartExam,
+  dueCount = 0,
+  onStartReview,
   scoreHistory,
   showScoreHistory,
   setShowScoreHistory,
@@ -111,6 +113,18 @@ function FlashcardGenerateForm({
         >
           {isExamMode ? "시험 종료" : "시험치기"}
         </button>
+        {!isExamMode && dueCount > 0 && onStartReview && (
+          <button
+            type="button"
+            onClick={onStartReview}
+            disabled={!canStartExam}
+            className="ghost-button text-sm text-amber-200"
+            data-ghost-size="sm"
+            style={{ "--ghost-color": "251, 191, 36" }}
+          >
+            오늘 복습 ({dueCount}개)
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setShowScoreHistory((prev) => !prev)}

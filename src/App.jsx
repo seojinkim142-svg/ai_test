@@ -23,6 +23,7 @@ import {
   listFlashcards,
   deleteFlashcard,
   updateFlashcard,
+  updateFlashcardSrs,
   deleteFlashcards,
   deleteAllFlashcardsForDeck,
   saveFlashcardScore,
@@ -187,6 +188,8 @@ import {
   LIMIT_USAGE_KEY_MAP,
 } from "./utils/appStateHelpers";
 import { normalizeDiagnosticResultRow, isDiagnosticSkipped } from "./utils/diagnosticUtils";
+import { normalizeFlashcardFront } from "./utils/flashcardUtils";
+import { computeNextSrsState } from "./utils/spacedRepetition";
 import {
   normalizeInstructorEmphasisInput,
   normalizeSavedPartialSummaryEntries,
@@ -5867,7 +5870,7 @@ function App() {
     // created_at 오름차순으로 정렬 (오래된 것 우선)
     const sorted = [...flashcards].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
     for (const card of sorted) {
-      const key = String(card.front || "").trim().toLowerCase();
+      const key = normalizeFlashcardFront(card.front);
       if (!key) continue;
       if (seen.has(key)) {
         toDelete.push(card.id);
@@ -5909,15 +5912,17 @@ function App() {
   const handleSaveFlashcardScore = useCallback(
     async ({ total, known, unknown, accuracy }) => {
       const deckId = selectedFileId || "default";
-      if (user) {
-        try {
-          const saved = await saveFlashcardScore({ userId: user.id, deckId, total, known, unknown, accuracy });
-          if (saved) {
-            setFlashcardScores((prev) => [saved, ...prev].slice(0, 50));
-          }
-        } catch {
-          // 저장 실패 시 무시 (localStorage fallback 있음)
+      if (!user) return null;
+      try {
+        const saved = await saveFlashcardScore({ userId: user.id, deckId, total, known, unknown, accuracy });
+        if (saved) {
+          setFlashcardScores((prev) => [saved, ...prev].slice(0, 50));
+          return saved;
         }
+        return null;
+      } catch {
+        // 저장 실패 시 null 반환 (localStorage fallback이 처리)
+        return null;
       }
     },
     [user, selectedFileId]
@@ -5926,22 +5931,43 @@ function App() {
   const handleSaveVocabQuizScore = useCallback(
     async ({ total, score, accuracy, category }) => {
       const deckId = (selectedFileId || "default") + "_vq";
-      if (user) {
-        try {
-          const saved = await saveFlashcardScore({
-            userId: user.id, deckId,
-            total, known: score, unknown: total - score, accuracy,
-          });
-          if (saved) {
-            setVocabQuizScores((prev) => [{ ...saved, category }, ...prev].slice(0, 100));
-          }
-        } catch {}
+      if (!user) return null;
+      try {
+        const saved = await saveFlashcardScore({
+          userId: user.id, deckId,
+          total, known: score, unknown: total - score, accuracy,
+        });
+        if (saved) {
+          const merged = { ...saved, category };
+          setVocabQuizScores((prev) => [merged, ...prev].slice(0, 100));
+          return merged;
+        }
+        return null;
+      } catch {
+        return null;
       }
     },
     [user, selectedFileId]
   );
 
-  const handleGenerateFlashcards = useCallback(async () => {
+  const handleUpdateFlashcardSrs = useCallback(
+    async (card, result) => {
+      if (!card?.id) return;
+      const nextState = computeNextSrsState(card, result);
+      setFlashcards((prev) => prev.map((c) => (c.id === card.id ? { ...c, ...nextState } : c)));
+      if (user && isDbId(card.id)) {
+        try {
+          await updateFlashcardSrs({ userId: user.id, cardId: card.id, srsState: nextState });
+        } catch {
+          // 저장 실패해도 로컬 상태는 이미 갱신됨
+        }
+      }
+    },
+    [user]
+  );
+
+  const handleGenerateFlashcards = useCallback(async (options = {}) => {
+    const { replaceCardIds = null } = options;
     if (isGeneratingFlashcards) return;
     if (AUTH_ENABLED && !user) {
       setFlashcardError("먼저 로그인해 주세요.");
@@ -6001,6 +6027,16 @@ function App() {
       if (cleaned.length === 0) {
         throw new Error("본문에서 유효한 플래시카드를 생성하지 못했습니다.");
       }
+      // 새 카드 생성에 성공한 뒤에만 기존 카드를 제거 (실패 시 카드 손실 방지)
+      if (replaceCardIds?.length) {
+        const dbIds = replaceCardIds.filter((id) => isDbId(id));
+        try {
+          if (user && dbIds.length) await deleteFlashcards({ userId: user.id, cardIds: dbIds });
+        } catch {
+          // 삭제 실패해도 새 카드 생성은 계속 진행
+        }
+        setFlashcards([]);
+      }
       const deckId = selectedFileId || "default";
       const saved = user
         ? await addFlashcards({ userId: user.id, deckId, cards: cleaned })
@@ -6048,7 +6084,8 @@ function App() {
     persistArtifacts,
   ]);
 
-  const handleGenerateVocabularyFlashcards = useCallback(async () => {
+  const handleGenerateVocabularyFlashcards = useCallback(async (options = {}) => {
+    const { replaceCardIds = null } = options;
     if (isGeneratingFlashcards) return;
     if (AUTH_ENABLED && !user) { setFlashcardError("먼저 로그인해 주세요."); return; }
     if (!file || !selectedFileId) { setFlashcardError("먼저 파일을 열어 주세요."); return; }
@@ -6065,12 +6102,16 @@ function App() {
       const { totalPages } = await getPageTexts(file, [1], { maxCharsPerPage: 1 });
 
       const { generateVocabularyFlashcards } = await getOpenAiService();
-      const seenFronts = new Set(flashcards.map((c) => String(c.front || "").trim().toLowerCase()));
+      // 재추출 시에는 기존 카드의 단어를 중복으로 취급하지 않음 (전체 교체 대상)
+      const seenFronts = new Set(
+        replaceCardIds ? [] : flashcards.map((c) => normalizeFlashcardFront(c.front))
+      );
       const deckId = selectedFileId || "default";
 
       const PARALLEL = 3; // 3페이지 동시 병렬 처리
       let savedCards = [];
       let failedBatches = 0;
+      let replacedOldCards = !replaceCardIds?.length;
 
       for (let bi = 1; bi <= totalPages; bi += PARALLEL) {
         const pageNums = Array.from(
@@ -6101,8 +6142,9 @@ function App() {
           for (const card of cards) {
             const front = String(card?.front || "").trim();
             const back = String(card?.back || "").trim();
-            if (front && back && !seenFronts.has(front.toLowerCase())) {
-              seenFronts.add(front.toLowerCase());
+            const normalizedFront = normalizeFlashcardFront(front);
+            if (front && back && !seenFronts.has(normalizedFront)) {
+              seenFronts.add(normalizedFront);
               newCards.push({
                 front,
                 back,
@@ -6114,6 +6156,18 @@ function App() {
         }
 
         if (newCards.length === 0) continue;
+
+        // 첫 배치 추출에 성공한 시점에만 기존 카드를 제거 (실패 시 카드 손실 방지)
+        if (!replacedOldCards) {
+          const dbIds = replaceCardIds.filter((id) => isDbId(id));
+          try {
+            if (user && dbIds.length) await deleteFlashcards({ userId: user.id, cardIds: dbIds });
+          } catch {
+            // 삭제 실패해도 새 카드 추출은 계속 진행
+          }
+          setFlashcards([]);
+          replacedOldCards = true;
+        }
 
         // 중간 저장 (버퍼 없이 바로 저장 — 순서 보장)
         const saved = user
@@ -6145,37 +6199,17 @@ function App() {
 
   const handleReextractVocabulary = useCallback(async () => {
     if (isGeneratingFlashcards) return;
-    // 기존 카드 전체 삭제 후 재추출
-    const allIds = flashcards.map((c) => c.id).filter((id) => isDbId(id));
-    if (allIds.length > 0) {
-      try {
-        if (user) await deleteFlashcards({ userId: user.id, cardIds: allIds });
-        setFlashcards([]);
-      } catch {
-        // 삭제 실패해도 계속 진행
-      }
-    } else {
-      setFlashcards([]);
-    }
-    await handleGenerateVocabularyFlashcards();
-  }, [isGeneratingFlashcards, flashcards, user, handleGenerateVocabularyFlashcards]);
+    // 새 카드 추출에 성공한 뒤에만 기존 카드를 교체 (실패 시 기존 카드 보존)
+    const existingIds = flashcards.map((c) => c.id);
+    await handleGenerateVocabularyFlashcards({ replaceCardIds: existingIds });
+  }, [isGeneratingFlashcards, flashcards, handleGenerateVocabularyFlashcards]);
 
   const handleRegenerateFlashcards = useCallback(async () => {
     if (isGeneratingFlashcards) return;
-    // 기존 카드 전체 삭제 후 재생성
-    const allIds = flashcards.map((c) => c.id).filter((id) => isDbId(id));
-    if (allIds.length > 0) {
-      try {
-        if (user) await deleteFlashcards({ userId: user.id, cardIds: allIds });
-        setFlashcards([]);
-      } catch {
-        // 삭제 실패해도 계속 진행
-      }
-    } else {
-      setFlashcards([]);
-    }
-    await handleGenerateFlashcards();
-  }, [isGeneratingFlashcards, flashcards, user, handleGenerateFlashcards]);
+    // 새 카드 생성에 성공한 뒤에만 기존 카드를 교체 (실패 시 기존 카드 보존)
+    const existingIds = flashcards.map((c) => c.id);
+    await handleGenerateFlashcards({ replaceCardIds: existingIds });
+  }, [isGeneratingFlashcards, flashcards, handleGenerateFlashcards]);
 
   const handleResetTutor = useCallback(() => {
     setTutorMessages([]);
@@ -7496,6 +7530,7 @@ function App() {
     handleDeleteFlashcard,
     handleDeleteAllFlashcards,
     handleUpdateFlashcard,
+    handleUpdateFlashcardSrs,
     handleDeduplicateFlashcards,
     handleSaveFlashcardScore,
     handleSaveVocabQuizScore,

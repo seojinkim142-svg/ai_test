@@ -46,8 +46,10 @@ function VocabQuizPanel({ cards = [], savedScores, onSaveScore }) {
   const [wrongCards, setWrongCards] = useState([]); // 오답 추적 [{ front, back }]
   const [localScores, setLocalScores] = useState(() => loadLocalScores());
 
-  // Supabase 점수가 있으면 우선, 없으면 localStorage
-  const scoreHistory = savedScores && savedScores.length > 0 ? savedScores : localScores;
+  // Supabase 저장 성공분 + localStorage 저장분(저장 실패/게스트)을 합쳐 표시
+  const scoreHistory = [...(savedScores || []), ...localScores]
+    .sort((a, b) => new Date(b.createdAt || b.created_at) - new Date(a.createdAt || a.created_at))
+    .slice(0, 100);
 
   const categories = useMemo(
     () => Array.from(new Set((cards || []).map((c) => c.category).filter(Boolean))).sort(),
@@ -84,21 +86,31 @@ function VocabQuizPanel({ cards = [], savedScores, onSaveScore }) {
     setView("quiz");
   }, [filteredCards, adjustedCount]);
 
-  const finishQuiz = useCallback((finalScore, total, finalWrongCards) => {
+  const finishQuiz = useCallback(async (finalScore, total, finalWrongCards) => {
     const pct = total ? Math.round((finalScore / total) * 100) : 0;
-    const record = {
-      id: `${Date.now()}`,
-      createdAt: new Date().toISOString(),
-      total,
-      score: finalScore,
-      accuracy: pct,
-      category: selectedCategory || "전체",
-    };
-    saveLocalScore(record);
-    setLocalScores(loadLocalScores());
     setWrongCards(finalWrongCards);
+
+    let savedRemotely = false;
     if (onSaveScore) {
-      onSaveScore({ total, score: finalScore, accuracy: pct, category: selectedCategory || "전체" });
+      try {
+        const result = await onSaveScore({ total, score: finalScore, accuracy: pct, category: selectedCategory || "전체" });
+        savedRemotely = Boolean(result);
+      } catch {
+        savedRemotely = false;
+      }
+    }
+    // Supabase 저장에 성공하면 localStorage에는 중복 기록하지 않음
+    if (!savedRemotely) {
+      const record = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        createdAt: new Date().toISOString(),
+        total,
+        score: finalScore,
+        accuracy: pct,
+        category: selectedCategory || "전체",
+      };
+      saveLocalScore(record);
+      setLocalScores(loadLocalScores());
     }
     setView("done");
   }, [selectedCategory, onSaveScore]);
