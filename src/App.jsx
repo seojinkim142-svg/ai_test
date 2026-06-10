@@ -2605,6 +2605,38 @@ function App() {
     ]
   );
 
+  const handleRetakeDiagnostic = useCallback(async () => {
+    const sourceText = String(extractedText || "").trim();
+    if (!sourceText) return;
+    resetDiagnostic();
+    setIsDiagnosticModalOpen(true);
+    setDiagnosticStatus("generating");
+    try {
+      const { generateDiagnosticQuiz } = await getOpenAiService();
+      const diagnosticData = await generateDiagnosticQuiz(sourceText, { outputLanguage });
+      if (diagnosticData?.items?.length) {
+        setDiagnosticItems(diagnosticData.items);
+        setDiagnosticCurrentIndex(0);
+        setDiagnosticStatus("in-progress");
+      } else {
+        setDiagnosticStatus("error");
+      }
+    } catch (err) {
+      setDiagnosticError(err.message);
+      setDiagnosticStatus("error");
+    }
+  }, [
+    extractedText,
+    outputLanguage,
+    getOpenAiService,
+    resetDiagnostic,
+    setIsDiagnosticModalOpen,
+    setDiagnosticStatus,
+    setDiagnosticItems,
+    setDiagnosticCurrentIndex,
+    setDiagnosticError,
+  ]);
+
   const handleFileChange = useCallback(
     async (event, targetFolderId = null) => {
       if (AUTH_ENABLED && !user) {
@@ -7400,6 +7432,7 @@ function App() {
     isLoadingMindmap,
     onJumpToSummaryPage: handlePageChange,
     diagnosticResult,
+    onRetakeDiagnostic: handleRetakeDiagnostic,
     isFreeTier,
     hasReachedSummaryLimit: hasReached("maxSummary"),
     hasReachedQuizLimit: hasReached("maxQuiz"),
