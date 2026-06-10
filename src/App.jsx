@@ -2548,7 +2548,7 @@ function App() {
             if (diagnosticRow) {
               setDiagnosticResult(normalizeDiagnosticResultRow(diagnosticRow));
               setDiagnosticStatus("completed");
-            } else if (normalizedInitialText && !loaded?.summary && !isDiagnosticSkipped(user.id, nextDocId)) {
+            } else if (normalizedInitialText && !isDiagnosticSkipped(user.id, nextDocId)) {
               setIsDiagnosticModalOpen(true);
               setDiagnosticStatus("generating");
               try {
