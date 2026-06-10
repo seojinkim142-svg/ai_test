@@ -417,6 +417,47 @@ export async function listFlashcardScores({ userId, deckId }) {
   return data || [];
 }
 
+const DIAGNOSTIC_RESULTS_TABLE = "diagnostic_results";
+
+export async function saveDiagnosticResult({
+  userId,
+  docId,
+  totalQuestions,
+  correctCount,
+  predictedScore,
+  topicBreakdown,
+}) {
+  if (!supabase || !userId || !docId) return null;
+  const { data, error } = await supabase
+    .from(DIAGNOSTIC_RESULTS_TABLE)
+    .insert({
+      user_id: userId,
+      doc_id: String(docId),
+      total_questions: totalQuestions,
+      correct_count: correctCount,
+      predicted_score: predictedScore,
+      topic_breakdown: topicBreakdown || [],
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function fetchLatestDiagnosticResult({ userId, docId }) {
+  if (!supabase || !userId || !docId) return null;
+  const { data, error } = await supabase
+    .from(DIAGNOSTIC_RESULTS_TABLE)
+    .select("*")
+    .eq("user_id", userId)
+    .eq("doc_id", String(docId))
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
 export async function deleteUpload({ userId, uploadId, bucket, path, previewPdfBucket, previewPdfPath }) {
   const client = requireSupabase();
   requireUser(userId);

@@ -11,6 +11,7 @@ import ReviewNotesPanel from "../components/ReviewNotesPanel";
 import SummaryCard from "../components/SummaryCard";
 import MindMapView from "../components/MindMapView";
 import TopicStructurePanel from "../components/TopicStructurePanel";
+import PredictedScoreBadge from "../components/diagnostic/PredictedScoreBadge";
 import ChapterRangeSection from "../components/summary/ChapterRangeSection";
 import InstructorEmphasisSection from "../components/summary/InstructorEmphasisSection";
 import PartialSummarySection from "../components/summary/PartialSummarySection";
@@ -41,6 +42,7 @@ export default function DetailPage({
   mindmapData,
   isLoadingMindmap,
   onJumpToSummaryPage,
+  diagnosticResult,
   isFreeTier,
   hasReachedSummaryLimit = false,
   hasReachedQuizLimit = false,
@@ -493,6 +495,7 @@ export default function DetailPage({
       {resizeHandle}
 
       <div className="flex flex-col gap-4 lg:min-w-0 lg:flex-1 lg:h-full lg:max-h-full lg:overflow-hidden">
+        <PredictedScoreBadge result={diagnosticResult} />
         <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 sm:grid-cols-7 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
           {detailTabs.map((item) => {
             const active = panelTab === item.id;

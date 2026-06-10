@@ -4,6 +4,7 @@ import { useLayoutEffect } from "react";
 import StartPage from "./pages/StartPage";
 import ProfilePinDialog from "./components/ProfilePinDialog";
 import FeedbackDialog from "./components/FeedbackDialog";
+import DiagnosticModal from "./components/diagnostic/DiagnosticModal";
 import { useSupabaseAuth } from "./hooks/useSupabaseAuth";
 import { useAdMobBanner } from "./hooks/useAdMobBanner";
 import { useUserTier } from "./hooks/useUserTier";
@@ -46,6 +47,7 @@ import {
   fetchExtractedText,
   getThemeFromUser,
   saveTheme,
+  fetchLatestDiagnosticResult,
 } from "./services/supabase";
 import { ensureUploadPreviewPdf as ensureUploadPreviewPdfRequest } from "./services/document";
 import {
@@ -147,6 +149,7 @@ import {
   useMockExamStore,
   usePremiumStore,
   useTutorStore,
+  useDiagnosticStore,
 } from "./stores";
 import {
   buildFolderAggregateDocId,
@@ -183,6 +186,7 @@ import {
   parseQuizMixInput,
   LIMIT_USAGE_KEY_MAP,
 } from "./utils/appStateHelpers";
+import { normalizeDiagnosticResultRow } from "./utils/diagnosticUtils";
 import {
   normalizeInstructorEmphasisInput,
   normalizeSavedPartialSummaryEntries,
@@ -387,6 +391,17 @@ function App() {
     isTutorLoading, setIsTutorLoading,
     tutorError, setTutorError,
   } = useTutorStore();
+
+  const {
+    diagnosticResult,
+    setIsDiagnosticModalOpen,
+    setDiagnosticStatus,
+    setDiagnosticError,
+    setDiagnosticItems,
+    setDiagnosticCurrentIndex,
+    setDiagnosticResult,
+    resetDiagnostic,
+  } = useDiagnosticStore();
   const downloadCacheRef = useRef(new Map()); // storagePath -> { file, thumbnail, remoteUrl, bucket }
   const backfillInProgressRef = useRef(false);
   const summaryRequestedRef = useRef(false);
@@ -2483,6 +2498,7 @@ function App() {
       setAutoChapterRangeInput("");
       setChapterRangeError("");
       oxAutoRequestedRef.current = false;
+      resetDiagnostic();
       applyUsageCountsForDoc(nextDocId, usageCountsByDocRef.current.get(String(nextDocId || "").trim()));
       const artifactsPromise = loadArtifacts(nextDocId);
 
@@ -2523,6 +2539,38 @@ function App() {
         }
         if (loaded?.summary) {
           setStatus("Loaded saved summary.");
+        }
+
+        if (user?.id) {
+          try {
+            const diagnosticRow = await fetchLatestDiagnosticResult({ userId: user.id, docId: nextDocId });
+            if (fileOpenRequestSeqRef.current !== requestSeq) return;
+            if (diagnosticRow) {
+              setDiagnosticResult(normalizeDiagnosticResultRow(diagnosticRow));
+              setDiagnosticStatus("completed");
+            } else if (normalizedInitialText && !loaded?.summary) {
+              setIsDiagnosticModalOpen(true);
+              setDiagnosticStatus("generating");
+              try {
+                const { generateDiagnosticQuiz } = await getOpenAiService();
+                const diagnosticData = await generateDiagnosticQuiz(normalizedInitialText, { outputLanguage });
+                if (fileOpenRequestSeqRef.current !== requestSeq) return;
+                if (diagnosticData?.items?.length) {
+                  setDiagnosticItems(diagnosticData.items);
+                  setDiagnosticCurrentIndex(0);
+                  setDiagnosticStatus("in-progress");
+                } else {
+                  setDiagnosticStatus("error");
+                }
+              } catch (diagErr) {
+                if (fileOpenRequestSeqRef.current !== requestSeq) return;
+                setDiagnosticError(diagErr.message);
+                setDiagnosticStatus("error");
+              }
+            }
+          } catch (diagCheckErr) {
+            console.warn("diagnostic result check failed", diagCheckErr);
+          }
         }
       } catch (err) {
         if (fileOpenRequestSeqRef.current !== requestSeq) return;
@@ -7351,6 +7399,7 @@ function App() {
     mindmapData,
     isLoadingMindmap,
     onJumpToSummaryPage: handlePageChange,
+    diagnosticResult,
     isFreeTier,
     hasReachedSummaryLimit: hasReached("maxSummary"),
     hasReachedQuizLimit: hasReached("maxQuiz"),
@@ -7563,6 +7612,12 @@ function App() {
       <FeedbackDialog
         onSubmitFeedback={handleSubmitFeedback}
         fileName={file?.name}
+      />
+      <DiagnosticModal
+        userId={user?.id}
+        docId={selectedFileId}
+        onGoToQuiz={() => setPanelTab("quiz")}
+        onGoToSummary={() => setPanelTab("summary")}
       />
       {isResizingSplit && showDetail && (
         <div className="pointer-events-none fixed inset-0 z-[160] cursor-col-resize" aria-hidden="true" />
