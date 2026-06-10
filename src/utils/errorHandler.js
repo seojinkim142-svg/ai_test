@@ -227,6 +227,62 @@ export const errorLogger = {
   }
 };
 
+const MOJIBAKE_COMPAT_CHAR_RE = /[\uF900-\uFAFF]/;
+const INTERNAL_AI_PROVIDER_RE = /\b(?:deepseek|openai)\b/i;
+const INTERNAL_AI_DETAIL_RE =
+  /\b(?:api error|internal server error|request failed|service unavailable|upstream|api key|retry in \d+s|status code|unauthorized|forbidden)\b/i;
+const USER_VISIBLE_ERROR_PREFIX_RE =
+  /^(.+?(?:실패했습니다|오류가 발생했습니다|불러오지 못했습니다|읽지 못했습니다|찾지 못했습니다|생성되지 않았습니다|이용할 수 없습니다|준비하지 못했습니다|failed|error))/i;
+
+export function hasMojibakeText(value) {
+  const text = String(value || "");
+  if (!text) return false;
+  if (text.includes("\uFFFD")) return true;
+  if (MOJIBAKE_COMPAT_CHAR_RE.test(text)) return true;
+  if (/[?]{2,}/.test(text) && /[\u3131-\uD79D]/.test(text)) return true;
+  return false;
+}
+
+export function containsInternalAiDetail(value) {
+  const text = String(value || "").trim();
+  if (!text) return false;
+  return INTERNAL_AI_PROVIDER_RE.test(text) || INTERNAL_AI_DETAIL_RE.test(text);
+}
+
+export function extractUserVisibleErrorPrefix(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  const colonPrefix = text.split(":")[0]?.trim().replace(/[.。]+$/, "") || "";
+  if (colonPrefix && !containsInternalAiDetail(colonPrefix)) {
+    return colonPrefix;
+  }
+
+  const matchedPrefix = text.match(USER_VISIBLE_ERROR_PREFIX_RE)?.[1]?.trim().replace(/[.。]+$/, "") || "";
+  if (matchedPrefix && !containsInternalAiDetail(matchedPrefix)) {
+    return matchedPrefix;
+  }
+
+  return "";
+}
+
+export function sanitizeUiText(value, fallback = "") {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const normalizedFallback = String(fallback || "").trim();
+  if (hasMojibakeText(text)) return normalizedFallback;
+
+  if (containsInternalAiDetail(text)) {
+    const prefix = extractUserVisibleErrorPrefix(text);
+    if (prefix) {
+      return `${prefix}. 잠시 후 다시 시도해주세요.`;
+    }
+    return normalizedFallback || "AI 처리 중 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
+  }
+
+  return text;
+}
+
 export default {
   AppError,
   ErrorCodes,

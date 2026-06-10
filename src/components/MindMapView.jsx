@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import DOMPurify from "dompurify";
 import { generateDocAnswer } from "../services/openai";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -102,7 +103,7 @@ function MathText({ text, style }) {
             <span
               key={i}
               dangerouslySetInnerHTML={{
-                __html: katex.renderToString(p.value, { throwOnError: false, displayMode: false, output: "html" }),
+                __html: DOMPurify.sanitize(katex.renderToString(p.value, { throwOnError: false, displayMode: false, output: "html" })),
               }}
             />
           );

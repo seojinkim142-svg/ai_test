@@ -112,11 +112,11 @@ const resolveNotifyAllowOrigin = (req) => {
   if (allowedOrigins.has("*")) return "*";
 
   const firstAllowed = [...allowedOrigins][0];
-  return firstAllowed || requestOrigin || "*";
+  return firstAllowed || "";
 };
 
 const buildNotifyCorsHeaders = (allowOrigin) => ({
-  "Access-Control-Allow-Origin": allowOrigin || "*",
+  "Access-Control-Allow-Origin": allowOrigin || "",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
   Vary: "Origin",
