@@ -107,6 +107,7 @@ export default function DetailPage({
   handleDeleteFlashcard,
   handleDeleteAllFlashcards,
   handleUpdateFlashcard,
+  handleUpdateFlashcardSrs,
   handleDeduplicateFlashcards,
   handleSaveFlashcardScore,
   handleSaveVocabQuizScore,
@@ -938,6 +939,7 @@ export default function DetailPage({
                 onDelete={handleDeleteFlashcard}
                 onDeleteAll={handleDeleteAllFlashcards}
                 onUpdate={handleUpdateFlashcard}
+                onUpdateSrs={handleUpdateFlashcardSrs}
                 onDeduplicate={handleDeduplicateFlashcards}
                 onSaveScore={handleSaveFlashcardScore}
                 savedScores={flashcardScores}

@@ -390,6 +390,27 @@ export async function updateFlashcard({ userId, cardId, front, back, hint }) {
   return data;
 }
 
+export async function updateFlashcardSrs({ userId, cardId, srsState }) {
+  const client = requireSupabase();
+  requireUser(userId);
+  if (!cardId) throw new Error("cardId is required");
+  const { data, error } = await client
+    .from(FLASHCARDS_TABLE)
+    .update({
+      srs_due_at: srsState.srs_due_at,
+      srs_interval_days: srsState.srs_interval_days,
+      srs_ease_factor: srsState.srs_ease_factor,
+      srs_repetitions: srsState.srs_repetitions,
+      srs_last_reviewed_at: srsState.srs_last_reviewed_at,
+    })
+    .eq("id", cardId)
+    .eq("user_id", userId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 const FLASHCARD_SCORES_TABLE = "flashcard_scores";
 
 export async function saveFlashcardScore({ userId, deckId, total, known, unknown, accuracy }) {
