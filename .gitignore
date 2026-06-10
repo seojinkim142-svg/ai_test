@@ -13,6 +13,7 @@ node_modules
 .env.*
 *.local
 supabase.env
+supabase/.temp
 
 # Build outputs
 dist
