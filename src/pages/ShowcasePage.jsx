@@ -1,12 +1,12 @@
 import { Fragment, memo, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Sparkles, ArrowRight, Check, ChevronDown, Star, FileText, ListChecks, Layers, MessageCircle, ClipboardCheck, RefreshCw } from "lucide-react";
-import { Button } from "./ui/button";
-import { Hero } from "./ui/animated-hero";
-import { ContainerScroll } from "./ui/container-scroll-animation";
-import RadialOrbitalTimeline from "./ui/radial-orbital-timeline";
+import { Button } from "../components/ui/button";
+import { Hero } from "../components/ui/animated-hero";
+import { ContainerScroll } from "../components/ui/container-scroll-animation";
+import RadialOrbitalTimeline from "../components/ui/radial-orbital-timeline";
 import { COMPANY_INFO_ITEMS, LEGAL_LINKS } from "../legal/companyInfo";
-import { OUTPUT_LANGUAGE_OPTIONS, SHOWCASE_COPY } from "../pages/showcaseCopy";
+import { OUTPUT_LANGUAGE_OPTIONS, SHOWCASE_COPY } from "./showcaseCopy";
 
 const FOOTER_COMPANY_INFO = COMPANY_INFO_ITEMS.find((item) => item.label === "상호") ?? COMPANY_INFO_ITEMS[0];
 
@@ -14,15 +14,11 @@ const TIMELINE_ICONS = [FileText, ListChecks, Layers, MessageCircle, ClipboardCh
 const TIMELINE_RELATED_IDS = [[2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 1]];
 const TIMELINE_ENERGY = [100, 90, 80, 70, 60, 95];
 
-const scrollToFeatures = () => {
-  if (typeof document === "undefined") return;
-  document.getElementById("features")?.scrollIntoView({ behavior: "smooth" });
-};
-
-const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko", setOutputLanguage }) {
+const ShowcasePage = memo(function ShowcasePage() {
   const [activePlanId, setActivePlanId] = useState("premium");
+  const [language, setLanguage] = useState("ko");
 
-  const copy = SHOWCASE_COPY[outputLanguage] ?? SHOWCASE_COPY.ko;
+  const copy = SHOWCASE_COPY[language] ?? SHOWCASE_COPY.ko;
 
   const featureTimeline = useMemo(
     () =>
@@ -72,8 +68,8 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
             <label className="relative hidden sm:block">
               <span className="sr-only">{copy.nav.language}</span>
               <select
-                value={outputLanguage}
-                onChange={(e) => setOutputLanguage?.(e.target.value)}
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
                 className="appearance-none rounded-full border border-[#E5E5E0] bg-white px-4 py-2 pr-8 text-sm text-[#0A0A0A] outline-none transition hover:border-[#006FEE]"
               >
                 {OUTPUT_LANGUAGE_OPTIONS.map((option) => (
@@ -86,7 +82,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                 <ChevronDown className="h-4 w-4" />
               </span>
             </label>
-            <Button variant="primary" size="sm" onClick={onStart}>{copy.nav.start}</Button>
+            <Button variant="primary" size="sm">{copy.nav.start}</Button>
           </div>
         </nav>
 
@@ -96,8 +92,8 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
           titlePrefix={copy.hero.titlePrefix}
           titles={copy.hero.titles}
           description={copy.hero.description}
-          secondaryAction={{ label: copy.hero.secondaryAction, onClick: scrollToFeatures }}
-          primaryAction={{ label: copy.hero.primaryAction, icon: ArrowRight, onClick: onStart }}
+          secondaryAction={{ label: copy.hero.secondaryAction }}
+          primaryAction={{ label: copy.hero.primaryAction, icon: ArrowRight }}
         />
       </header>
 
@@ -224,11 +220,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
 
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setActivePlanId(plan.id);
-                        onStart?.();
-                      }}
+                      onClick={() => setActivePlanId(plan.id)}
                       className={`group relative inline-flex w-full items-center justify-center gap-2 overflow-hidden rounded-full px-5 py-3 text-sm font-semibold ring-offset-2 transition-all duration-300 ease-out hover:ring-2 hover:ring-[#006FEE] hover:ring-offset-1 ${
                         isActive
                           ? "bg-[#006FEE] text-white"
@@ -324,8 +316,8 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
           {copy.cta.description}
         </p>
         <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-          <Button variant="primary" size="lg" onClick={onStart}>{copy.cta.primary}</Button>
-          <Button variant="ghost" size="lg" onClick={onStart}>{copy.cta.secondary}</Button>
+          <Button variant="primary" size="lg">{copy.cta.primary}</Button>
+          <Button variant="ghost" size="lg">{copy.cta.secondary}</Button>
         </div>
       </section>
 
@@ -416,4 +408,4 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
   );
 });
 
-export default LandingIntro;
+export default ShowcasePage;
