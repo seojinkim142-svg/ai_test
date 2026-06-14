@@ -86,13 +86,21 @@ export default function NavRail({
   });
   const inputRef = useRef(null);
 
-  const isOpen = isHovering || pinned || searchOpen;
+  const isOpen = isHovering || pinned;
 
   const togglePinned = () => {
     setPinned((prev) => {
       const next = !prev;
       try { localStorage.setItem("navRailPinned", String(next)); } catch { /* ignore */ }
       return next;
+    });
+  };
+
+  const pinOpen = () => {
+    setPinned((prev) => {
+      if (prev) return prev;
+      try { localStorage.setItem("navRailPinned", "true"); } catch { /* ignore */ }
+      return true;
     });
   };
 
@@ -176,7 +184,7 @@ export default function NavRail({
   ];
 
   const emailInitial = (user?.email || "?").charAt(0).toUpperCase();
-  const railState = searchOpen ? "search" : isOpen ? "open" : "closed";
+  const railState = !isOpen ? "closed" : searchOpen ? "search" : "open";
 
   return (
     <div className="relative z-30 w-[3.25rem] shrink-0">
@@ -232,12 +240,16 @@ export default function NavRail({
             icon={Search}
             label="자료 검색"
             active={searchOpen}
-            onClick={() => onToggleSearch?.(!searchOpen)}
+            onClick={() => {
+              const next = !searchOpen;
+              onToggleSearch?.(next);
+              if (next) pinOpen();
+            }}
             isOpen={isOpen}
           />
         </nav>
 
-        {searchOpen && (
+        {searchOpen && isOpen && (
           <div className="flex flex-1 flex-col gap-4 overflow-y-auto border-t border-white/10 px-3 pb-4 pt-3">
             <section>
               <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-slate-300">
@@ -339,7 +351,7 @@ export default function NavRail({
           </div>
         )}
 
-        {!searchOpen && <div className="flex-1" />}
+        {!(searchOpen && isOpen) && <div className="flex-1" />}
 
         <div className="flex flex-col gap-1 border-t border-white/10 p-2">
           <NavItem
