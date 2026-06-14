@@ -212,7 +212,7 @@ const PaymentPage = lazy(() => import("./components/PaymentPage"));
 const SettingsDialog = lazy(() => import("./components/SettingsDialog"));
 const DetailPage = lazy(() => import("./pages/DetailPage"));
 const PremiumProfilePicker = lazy(() => import("./components/PremiumProfilePicker"));
-const LeftSidebar = lazy(() => import("./components/LeftSidebar"));
+const NavRail = lazy(() => import("./components/NavRail"));
 
 const NativeAppPlugin =
   Capacitor.isNativePlatform() && Capacitor.isPluginAvailable("App")
@@ -7723,13 +7723,14 @@ function App() {
         <div className="flex flex-1">
           {showHeader && (
             <Suspense fallback={null}>
-              <LeftSidebar
-                isOpen={sidebarOpen}
-                onToggle={() => setSidebarOpen((v) => {
-                  const next = !v;
-                  try { localStorage.setItem("sidebarOpen", String(next)); } catch {}
-                  return next;
-                })}
+              <NavRail
+                showDetail={showDetail}
+                panelTab={panelTab}
+                onGoHome={goBackToList}
+                onSelectPanelTab={setPanelTab}
+                onOpenSettings={openSettings}
+                user={user}
+                onSignOut={handleSignOut}
                 uploadedFiles={uploadedFiles}
                 allArtifacts={allArtifacts}
                 onSemanticSearch={handleSemanticSearch}
@@ -7737,6 +7738,11 @@ function App() {
                 isSemanticSearching={isSemanticSearching}
                 outputLanguage={outputLanguage}
                 onSelectFile={handleSelectFile}
+                searchOpen={sidebarOpen}
+                onToggleSearch={(next) => {
+                  setSidebarOpen(next);
+                  try { localStorage.setItem("sidebarOpen", String(next)); } catch {}
+                }}
               />
             </Suspense>
           )}
