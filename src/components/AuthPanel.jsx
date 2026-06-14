@@ -5,8 +5,6 @@ const AUTH_COPY = {
   ko: {
     titleSignup: "계정 생성",
     titleLogin: "로그인",
-    descriptionSignup: "Google, 카카오 또는 이메일로 바로 계정을 만들 수 있습니다.",
-    descriptionLogin: "이미 계정이 있다면 원하는 방식으로 바로 로그인하세요.",
     providerGoogle: "Google로 계속",
     providerKakao: "카카오로 계속",
     orDivider: "또는",
@@ -14,7 +12,8 @@ const AUTH_COPY = {
     passwordLabel: "비밀번호",
     emailPlaceholder: "이메일",
     passwordPlaceholder: "비밀번호",
-    forgotPassword: "비밀번호를 잊으셨나요?",
+    forgotPasswordLead: "비밀번호를 잊으셨나요?",
+    resetPasswordAction: "비밀번호 재설정",
     createAccount: "계정 생성",
     login: "로그인",
     toggleToLogin: "이미 계정이 있으신가요? 로그인",
@@ -37,8 +36,6 @@ const AUTH_COPY = {
   en: {
     titleSignup: "Create Account",
     titleLogin: "Log In",
-    descriptionSignup: "Create your account right away with Google, Kakao, or email.",
-    descriptionLogin: "If you already have an account, sign in with the method you prefer.",
     providerGoogle: "Continue with Google",
     providerKakao: "Continue with Kakao",
     orDivider: "or",
@@ -46,7 +43,8 @@ const AUTH_COPY = {
     passwordLabel: "Password",
     emailPlaceholder: "Email",
     passwordPlaceholder: "Password",
-    forgotPassword: "Forgot your password?",
+    forgotPasswordLead: "Forgot your password?",
+    resetPasswordAction: "Reset password",
     createAccount: "Create Account",
     login: "Log In",
     toggleToLogin: "Already have an account? Log in",
@@ -69,8 +67,6 @@ const AUTH_COPY = {
   zh: {
     titleSignup: "创建账号",
     titleLogin: "登录",
-    descriptionSignup: "可立即通过 Google、Kakao 或邮箱创建账号。",
-    descriptionLogin: "如果你已经有账号，可以直接用想要的方式登录。",
     providerGoogle: "使用 Google 继续",
     providerKakao: "使用 Kakao 继续",
     orDivider: "或",
@@ -78,7 +74,8 @@ const AUTH_COPY = {
     passwordLabel: "密码",
     emailPlaceholder: "邮箱",
     passwordPlaceholder: "密码",
-    forgotPassword: "忘记密码？",
+    forgotPasswordLead: "忘记密码？",
+    resetPasswordAction: "重置密码",
     createAccount: "创建账号",
     login: "登录",
     toggleToLogin: "已经有账号了吗？登录",
@@ -101,8 +98,6 @@ const AUTH_COPY = {
   ja: {
     titleSignup: "アカウント作成",
     titleLogin: "ログイン",
-    descriptionSignup: "Google、Kakao、またはメールですぐにアカウントを作成できます。",
-    descriptionLogin: "すでにアカウントがある場合は、希望する方法ですぐにログインできます。",
     providerGoogle: "Googleで続ける",
     providerKakao: "Kakaoで続ける",
     orDivider: "または",
@@ -110,7 +105,8 @@ const AUTH_COPY = {
     passwordLabel: "パスワード",
     emailPlaceholder: "メールアドレス",
     passwordPlaceholder: "パスワード",
-    forgotPassword: "パスワードをお忘れですか？",
+    forgotPasswordLead: "パスワードをお忘れですか？",
+    resetPasswordAction: "パスワードを再設定",
     createAccount: "アカウント作成",
     login: "ログイン",
     toggleToLogin: "すでにアカウントをお持ちですか？ ログイン",
@@ -133,8 +129,6 @@ const AUTH_COPY = {
   hi: {
     titleSignup: "खाता बनाएँ",
     titleLogin: "लॉग इन",
-    descriptionSignup: "Google, Kakao या ईमेल से तुरंत खाता बनाया जा सकता है।",
-    descriptionLogin: "यदि आपका खाता पहले से है, तो अपनी पसंद के तरीके से तुरंत लॉग इन करें।",
     providerGoogle: "Google के साथ जारी रखें",
     providerKakao: "Kakao के साथ जारी रखें",
     orDivider: "या",
@@ -142,7 +136,8 @@ const AUTH_COPY = {
     passwordLabel: "पासवर्ड",
     emailPlaceholder: "ईमेल",
     passwordPlaceholder: "पासवर्ड",
-    forgotPassword: "पासवर्ड भूल गए?",
+    forgotPasswordLead: "पासवर्ड भूल गए?",
+    resetPasswordAction: "पासवर्ड रीसेट करें",
     createAccount: "खाता बनाएँ",
     login: "लॉग इन",
     toggleToLogin: "क्या आपका खाता पहले से है? लॉग इन करें",
@@ -196,9 +191,6 @@ function AuthPanel({ user, onAuth, theme = "light", outputLanguage = "ko" }) {
   const isLight = theme === "light";
   const shellClass = isLight ? "text-slate-900" : "text-slate-100";
   const bodyClass = isLight ? "text-slate-600" : "text-slate-400";
-  const cardClass = isLight
-    ? "border-slate-200 bg-white/80 shadow-xl shadow-slate-900/5 backdrop-blur-xl"
-    : "border-white/10 bg-slate-900/50 shadow-xl shadow-black/20 backdrop-blur-xl";
   const buttonClass = isLight
     ? "border-slate-300 bg-white/70 text-slate-900 hover:border-slate-400 hover:bg-white"
     : "border-white/12 bg-white/[0.03] text-slate-100 hover:border-white/24 hover:bg-white/[0.06]";
@@ -215,7 +207,6 @@ function AuthPanel({ user, onAuth, theme = "light", outputLanguage = "ko" }) {
   const copy = getAuthCopy(outputLanguage);
 
   const title = isSignup ? copy.titleSignup : copy.titleLogin;
-  const description = isSignup ? copy.descriptionSignup : copy.descriptionLogin;
 
   const resetMessages = () => {
     setError("");
@@ -310,7 +301,7 @@ function AuthPanel({ user, onAuth, theme = "light", outputLanguage = "ko" }) {
 
   if (user) {
     return (
-      <div className={`w-full max-w-md rounded-3xl border p-6 text-center sm:p-8 ${cardClass} ${shellClass}`}>
+      <div className={`w-full max-w-md text-center ${shellClass}`}>
         <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{copy.accountLinked}</h1>
         <p className={`mt-3 text-sm leading-7 ${bodyClass}`}>{user.email}</p>
         <button
@@ -340,13 +331,26 @@ function AuthPanel({ user, onAuth, theme = "light", outputLanguage = "ko" }) {
   }
 
   return (
-    <div className={`w-full max-w-md rounded-3xl border p-6 sm:p-8 ${cardClass} ${shellClass}`}>
-      <div className="text-center">
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1>
-        <p className={`mt-2 text-sm leading-6 ${bodyClass}`}>{description}</p>
+    <div className={`w-full max-w-md ${shellClass}`}>
+      <div className="flex items-center gap-2.5">
+        <img
+          src="/apple-touch-icon.png"
+          alt=""
+          aria-hidden="true"
+          decoding="async"
+          className="h-8 w-8 rounded-[8px] object-cover"
+        />
+        <span className="text-base font-semibold">Zeusian.ai</span>
       </div>
 
-      <div className="mt-8 grid grid-cols-2 gap-3">
+      <div className="mt-8">
+        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1>
+        <button type="button" onClick={handleModeChange} className={`mt-1 text-sm font-medium transition ${subtleButtonClass}`}>
+          {isSignup ? copy.toggleToLogin : copy.toggleToSignup}
+        </button>
+      </div>
+
+      <div className="mt-6 grid grid-cols-2 gap-3">
         {providerItems.map((item) => (
           <button
             key={item.key}
@@ -384,19 +388,9 @@ function AuthPanel({ user, onAuth, theme = "light", outputLanguage = "ko" }) {
           />
         </div>
         <div className="flex flex-col gap-1.5">
-          <div className="flex items-center justify-between">
-            <label htmlFor="auth-password" className="text-sm font-medium">
-              {copy.passwordLabel}
-            </label>
-            <button
-              type="button"
-              onClick={handleForgotPassword}
-              disabled={loading}
-              className={`text-xs font-medium transition ${subtleButtonClass}`}
-            >
-              {copy.forgotPassword}
-            </button>
-          </div>
+          <label htmlFor="auth-password" className="text-sm font-medium">
+            {copy.passwordLabel}
+          </label>
           <input
             id="auth-password"
             name="auth-password"
@@ -416,11 +410,17 @@ function AuthPanel({ user, onAuth, theme = "light", outputLanguage = "ko" }) {
         </button>
       </form>
 
-      <div className="mt-6 text-center">
-        <button type="button" onClick={handleModeChange} className={`text-sm font-medium transition ${subtleButtonClass}`}>
-          {isSignup ? copy.toggleToLogin : copy.toggleToSignup}
+      <p className={`mt-4 text-center text-sm ${bodyClass}`}>
+        {copy.forgotPasswordLead}{" "}
+        <button
+          type="button"
+          onClick={handleForgotPassword}
+          disabled={loading}
+          className={`font-medium underline underline-offset-4 transition ${legalLinkClass}`}
+        >
+          {copy.resetPasswordAction}
         </button>
-      </div>
+      </p>
 
       <p className={`mt-5 text-center text-xs leading-6 ${noticeClass}`}>
         {copy.noticeLead}{" "}
