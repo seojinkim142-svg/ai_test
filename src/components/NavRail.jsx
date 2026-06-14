@@ -2,17 +2,33 @@ import { lazy, useRef, useState, Suspense } from "react";
 import { motion } from "framer-motion";
 import {
   BookMarked,
+  FileText,
   GraduationCap,
   Home,
+  ListChecks,
+  ListTree,
   LogOut,
   MessagesSquare,
+  NotebookPen,
   Search,
   Settings,
   Sparkles,
 } from "lucide-react";
 import { cn } from "../lib/utils";
+import { getDetailCopy } from "../utils/detailCopy";
 
 const KnowledgeGapPanel = lazy(() => import("./KnowledgeGapPanel"));
+
+const TAB_ICONS = {
+  topicStructure: ListTree,
+  summary: FileText,
+  quiz: ListChecks,
+  reviewNotes: NotebookPen,
+  mockExam: GraduationCap,
+  flashcards: BookMarked,
+  vocabQuiz: Sparkles,
+  tutor: MessagesSquare,
+};
 
 const railVariants = {
   open: { width: "14rem" },
@@ -63,6 +79,7 @@ export default function NavRail({
   onGoHome,
   onSelectPanelTab,
   onOpenSettings,
+  isVocabularyFile = false,
   user,
   onSignOut,
   // 자료 검색
@@ -145,6 +162,22 @@ export default function NavRail({
     filenameMatches.length === 0 &&
     semanticOnlyResults.length === 0;
 
+  const copy = getDetailCopy(outputLanguage);
+  const detailTabs = isVocabularyFile
+    ? [
+        { id: "flashcards", label: copy.tabs.flashcards },
+        { id: "vocabQuiz", label: copy.tabs.vocabQuiz },
+      ]
+    : [
+        { id: "topicStructure", label: copy.tabs.topicStructure },
+        { id: "summary", label: copy.tabs.summary },
+        { id: "quiz", label: copy.tabs.quiz },
+        { id: "reviewNotes", label: copy.tabs.reviewNotes },
+        { id: "mockExam", label: copy.tabs.mockExam },
+        { id: "flashcards", label: copy.tabs.flashcards },
+        { id: "tutor", label: copy.tabs.tutor },
+      ];
+
   const navItems = [
     {
       key: "home",
@@ -153,34 +186,13 @@ export default function NavRail({
       active: !showDetail,
       onClick: onGoHome,
     },
-    {
-      key: "flashcards",
-      label: "플래시카드",
-      icon: BookMarked,
-      active: showDetail && panelTab === "flashcards",
-      onClick: () => onSelectPanelTab?.("flashcards"),
-    },
-    {
-      key: "mockExam",
-      label: "모의고사",
-      icon: GraduationCap,
-      active: showDetail && panelTab === "mockExam",
-      onClick: () => onSelectPanelTab?.("mockExam"),
-    },
-    {
-      key: "tutor",
-      label: "AI 튜터",
-      icon: MessagesSquare,
-      active: showDetail && panelTab === "tutor",
-      onClick: () => onSelectPanelTab?.("tutor"),
-    },
-    {
-      key: "vocabQuiz",
-      label: "단어 퀴즈",
-      icon: Sparkles,
-      active: showDetail && panelTab === "vocabQuiz",
-      onClick: () => onSelectPanelTab?.("vocabQuiz"),
-    },
+    ...detailTabs.map((item) => ({
+      key: item.id,
+      label: item.label,
+      icon: TAB_ICONS[item.id] || FileText,
+      active: showDetail && panelTab === item.id,
+      onClick: () => onSelectPanelTab?.(item.id),
+    })),
   ];
 
   const emailInitial = (user?.email || "?").charAt(0).toUpperCase();
