@@ -10,9 +10,26 @@ export default function RadialOrbitalTimeline({ timelineData }) {
   const [pulseEffect, setPulseEffect] = useState({});
   const [centerOffset] = useState({ x: 0, y: 0 });
   const [activeNodeId, setActiveNodeId] = useState(null);
+  const [containerWidth, setContainerWidth] = useState(0);
   const containerRef = useRef(null);
   const orbitRef = useRef(null);
   const nodeRefs = useRef({});
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) setContainerWidth(entry.contentRect.width);
+    });
+    observer.observe(element);
+    setContainerWidth(element.offsetWidth);
+
+    return () => observer.disconnect();
+  }, []);
+
+  const radius = containerWidth > 0 ? Math.max(100, Math.min(200, containerWidth / 2 - 50)) : 200;
 
   const handleContainerClick = (e) => {
     if (e.target === containerRef.current || e.target === orbitRef.current) {
@@ -87,7 +104,6 @@ export default function RadialOrbitalTimeline({ timelineData }) {
 
   const calculateNodePosition = (index, total) => {
     const angle = ((index / total) * 360 + rotationAngle) % 360;
-    const radius = 200;
     const radian = (angle * Math.PI) / 180;
 
     const x = radius * Math.cos(radian) + centerOffset.x;
@@ -137,7 +153,10 @@ export default function RadialOrbitalTimeline({ timelineData }) {
             <div className="w-8 h-8 rounded-full bg-white/90 backdrop-blur-md"></div>
           </div>
 
-          <div className="absolute w-96 h-96 rounded-full border border-[#E5E5E0]"></div>
+          <div
+            className="absolute rounded-full border border-[#E5E5E0]"
+            style={{ width: `${radius * 2}px`, height: `${radius * 2}px` }}
+          ></div>
 
           {timelineData.map((item, index) => {
             const position = calculateNodePosition(index, timelineData.length);
