@@ -201,6 +201,17 @@ export async function signOut() {
   if (error) throw error;
 }
 
+export async function resetPasswordForEmail(email) {
+  const client = requireSupabase();
+  const options = {};
+  if (SUPABASE_REDIRECT) {
+    options.redirectTo = SUPABASE_REDIRECT;
+  }
+  const { data, error } = await client.auth.resetPasswordForEmail(email, options);
+  if (error) throw error;
+  return data;
+}
+
 export async function signInWithProvider(provider) {
   const client = requireSupabase();
   const options = {
