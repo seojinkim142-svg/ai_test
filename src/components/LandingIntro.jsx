@@ -344,35 +344,20 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
         </div>
       </section>
 
-      <footer className="border-t border-[#E5E5E0] bg-[#FBFBF9] px-5 py-8 text-[#0A0A0A] sm:px-6 sm:py-10 lg:px-8 lg:py-12">
+      <footer className="border-t border-[#E5E5E0] bg-[#FBFBF9] px-5 py-12 text-[#0A0A0A] sm:px-6 lg:px-8">
         <div className="mx-auto max-w-7xl">
-          <div className="flex items-center justify-between border-b border-[#E5E5E0] pb-5 lg:pb-6">
-            <div className="flex items-center gap-3">
-              <img
-                src="/apple-touch-icon.png"
-                alt=""
-                aria-hidden="true"
-                decoding="async"
-                className="h-9 w-9 rounded-[8px] object-cover"
-              />
-              <p className="text-base font-semibold text-[#0A0A0A]">Zeusian.ai</p>
-            </div>
-
-            <div className="hidden flex-wrap gap-3 lg:flex">
-              {visibleLegalLinks.map((link) => (
-                <a
-                  key={link.href}
-                  href={link.href}
-                  className="rounded-full border border-[#E5E5E0] bg-white px-4 py-2 text-sm text-[#0A0A0A] transition hover:border-[#006FEE] hover:text-[#006FEE]"
-                >
-                  {link.label}
-                </a>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid gap-8 pt-6 lg:grid-cols-[minmax(260px,1.05fr)_minmax(0,1fr)] lg:gap-10 lg:pt-8">
-            <div className="space-y-3">
+          <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4 lg:gap-8">
+            <div className="space-y-3 sm:col-span-2 lg:col-span-1">
+              <div className="flex items-center gap-3">
+                <img
+                  src="/apple-touch-icon.png"
+                  alt=""
+                  aria-hidden="true"
+                  decoding="async"
+                  className="h-9 w-9 rounded-[8px] object-cover"
+                />
+                <p className="text-base font-semibold text-[#0A0A0A]">Zeusian.ai</p>
+              </div>
               <div className="max-w-sm">
                 <p className="font-display text-2xl font-semibold leading-tight tracking-[-0.02em] text-[#0A0A0A] sm:text-3xl">
                   {copy.footer.titleLine1}
@@ -383,38 +368,15 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                   {copy.footer.description}
                 </p>
               </div>
-              {FOOTER_COMPANY_INFO ? (
-                <div className="text-xs leading-6 text-[#999999]">
-                  <p>{copy.footer.companyLabel}: {FOOTER_COMPANY_INFO.value}</p>
-                  <p>contact: hestra.co@gmail.com</p>
-                </div>
-              ) : null}
             </div>
 
-            <div className="grid grid-cols-2 gap-6 sm:grid-cols-4 lg:grid-cols-4">
-              {copy.footer.groups.map((group) => (
-                <div key={group.title}>
-                  <p className="text-xs font-semibold uppercase tracking-wider text-[#0A0A0A]">{group.title}</p>
-                  <div className="mt-3 space-y-2.5">
-                    {group.links.map((link) => (
-                      <a
-                        key={`${group.title}-${link.href}-${link.label}`}
-                        href={link.href}
-                        className="block text-sm text-[#666666] transition hover:text-[#006FEE]"
-                      >
-                        {link.label}
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              ))}
-
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-[#0A0A0A]">{copy.footer.legal}</p>
+            {copy.footer.groups.map((group) => (
+              <div key={group.title}>
+                <p className="text-xs font-semibold uppercase tracking-wider text-[#0A0A0A]">{group.title}</p>
                 <div className="mt-3 space-y-2.5">
-                  {visibleLegalLinks.map((link) => (
+                  {group.links.map((link) => (
                     <a
-                      key={`legal-column-${link.href}`}
+                      key={`${group.title}-${link.href}-${link.label}`}
                       href={link.href}
                       className="block text-sm text-[#666666] transition hover:text-[#006FEE]"
                     >
@@ -423,7 +385,27 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                   ))}
                 </div>
               </div>
-            </div>
+            ))}
+          </div>
+
+          <div className="mt-10 flex flex-col items-center justify-between gap-4 border-t border-[#E5E5E0] pt-6 text-center sm:flex-row sm:text-left">
+            {FOOTER_COMPANY_INFO ? (
+              <div className="text-xs leading-6 text-[#999999]">
+                <p>{copy.footer.companyLabel}: {FOOTER_COMPANY_INFO.value}</p>
+                <p>contact: hestra.co@gmail.com</p>
+              </div>
+            ) : null}
+            <nav className="flex flex-wrap justify-center gap-4 text-sm">
+              {visibleLegalLinks.map((link) => (
+                <a
+                  key={link.href}
+                  href={link.href}
+                  className="text-[#666666] transition hover:text-[#006FEE]"
+                >
+                  {link.label}
+                </a>
+              ))}
+            </nav>
           </div>
         </div>
       </footer>
