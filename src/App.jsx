@@ -7586,7 +7586,7 @@ function App() {
   }
 
   const isGuestFreeMode = !AUTH_ENABLED && !user;
-  const isGuestPromo = isGuestFreeMode && showGuestIntro;
+  const isGuestPromo = !user && !showDetail && (AUTH_ENABLED || showGuestIntro);
   const showHeader = Boolean(user || showDetail || (isGuestFreeMode && !showGuestIntro));
   const showAmbient = showHeader;
 
