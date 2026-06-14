@@ -33,6 +33,12 @@ body {
     #06080f;
 }
 
+html.light-theme,
+html.light-theme body {
+  background: #fbfbf9;
+  color: #0a0a0a;
+}
+
 /* Hide text caret on non-editable UI to avoid caret-browsing artifacts. */
 html,
 body,
