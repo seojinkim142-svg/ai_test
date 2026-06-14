@@ -7568,15 +7568,7 @@ function App() {
       <Suspense fallback={<div className="min-h-screen bg-black" />}>
         <LoginBackground theme={theme}>
           <div className="relative z-10 min-h-screen px-6 py-6 sm:px-8 sm:py-8">
-            <div className="flex items-center justify-start">
-              <a
-                href="/start"
-                className="text-sm font-semibold tracking-[0.18em] text-slate-100/92 transition hover:text-white"
-              >
-                Zeusian.ai
-              </a>
-            </div>
-            <div className="flex min-h-[calc(100vh-96px)] items-center justify-center">
+            <div className="flex min-h-screen items-center justify-center">
               <AuthPanel user={user} onAuth={refreshSession} theme={theme} outputLanguage={outputLanguage} />
             </div>
           </div>
