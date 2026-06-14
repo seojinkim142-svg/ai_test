@@ -41,6 +41,21 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
     [copy]
   );
 
+  const visibleLegalLinks = useMemo(
+    () =>
+      LEGAL_LINKS
+        .filter((link) => !link.href.includes("japan-transactions") || outputLanguage === "ja")
+        .map((link) => ({
+          ...link,
+          label: link.href.includes("privacy")
+            ? copy.footer.legalLinks.privacy
+            : link.href.includes("japan-transactions")
+              ? copy.footer.legalLinks.japanTransactions
+              : copy.footer.legalLinks.terms,
+        })),
+    [copy, outputLanguage]
+  );
+
   return (
     <div className="min-h-screen bg-[#FBFBF9] font-sans text-[#0A0A0A]">
       {/* Hero */}
@@ -344,7 +359,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
             </div>
 
             <div className="hidden flex-wrap gap-3 lg:flex">
-              {LEGAL_LINKS.map((link) => (
+              {visibleLegalLinks.map((link) => (
                 <a
                   key={link.href}
                   href={link.href}
@@ -397,7 +412,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#0A0A0A]">{copy.footer.legal}</p>
                 <div className="mt-3 space-y-2.5">
-                  {LEGAL_LINKS.map((link) => (
+                  {visibleLegalLinks.map((link) => (
                     <a
                       key={`legal-column-${link.href}`}
                       href={link.href}
