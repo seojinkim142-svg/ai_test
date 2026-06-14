@@ -35,10 +35,16 @@ const legalPages = {
   "/legal/japan-transactions": <LegalPage documentType="japan-transactions" />,
 };
 
+const isLightThemePage = normalizedPath === "/showcase" || promoOnlyPaths.has(normalizedPath);
+
 const rootElement =
   normalizedPath === "/showcase"
     ? <ShowcasePage />
     : legalPages[normalizedPath] ?? (promoOnlyPaths.has(normalizedPath) ? <PromoPage /> : <App />);
+
+if (typeof document !== "undefined" && isLightThemePage) {
+  document.documentElement.classList.add("light-theme");
+}
 
 if (typeof window !== "undefined") {
   window.addEventListener("vite:preloadError", (event) => {
