@@ -17,9 +17,9 @@ function getInitialOutputLanguage() {
 function getInitialSidebarOpen() {
   try {
     const saved = localStorage.getItem("sidebarOpen");
-    return saved === null ? true : saved === "true";
+    return saved === null ? false : saved === "true";
   } catch {
-    return true;
+    return false;
   }
 }
 
