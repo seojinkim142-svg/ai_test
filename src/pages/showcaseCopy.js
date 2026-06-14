@@ -89,6 +89,7 @@ export const SHOWCASE_COPY = {
       description: "Zeusian.ai(제우시안 AI)는 PDF 요약, 퀴즈, 카드, AI 튜터 흐름을 한곳에서 이어줍니다.",
       companyLabel: "상호",
       legal: "법률",
+      legalLinks: { terms: "이용약관", privacy: "개인정보처리방침" },
       groups: [
         {
           title: "서비스",
@@ -199,6 +200,7 @@ export const SHOWCASE_COPY = {
       description: "Zeusian.ai keeps summary, quiz, flashcards, and AI tutor workflows connected in one place.",
       companyLabel: "Operator",
       legal: "Legal",
+      legalLinks: { terms: "Terms of Service", privacy: "Privacy Policy" },
       groups: [
         {
           title: "Product",
@@ -309,6 +311,7 @@ export const SHOWCASE_COPY = {
       description: "Zeusian.ai 把 PDF 摘要、测验、卡片和 AI 导师流程连接在同一个地方。",
       companyLabel: "运营方",
       legal: "法律",
+      legalLinks: { terms: "服务条款", privacy: "隐私政策" },
       groups: [
         {
           title: "服务",
@@ -419,6 +422,7 @@ export const SHOWCASE_COPY = {
       description: "Zeusian.aiはPDF要約、クイズ、カード、AIチューターの流れを一か所でつなげます。",
       companyLabel: "事業者",
       legal: "法務",
+      legalLinks: { terms: "利用規約", privacy: "プライバシーポリシー", japanTransactions: "特定商取引法に基づく表記" },
       groups: [
         {
           title: "サービス",
@@ -529,6 +533,7 @@ export const SHOWCASE_COPY = {
       description: "Zeusian.ai सारांश, क्विज़, कार्ड और AI ट्यूटर को एक ही अध्ययन प्रवाह में जोड़ता है।",
       companyLabel: "संचालक",
       legal: "कानूनी",
+      legalLinks: { terms: "सेवा की शर्तें", privacy: "गोपनीयता नीति" },
       groups: [
         {
           title: "सेवा",
