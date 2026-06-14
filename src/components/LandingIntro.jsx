@@ -83,13 +83,13 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
             <a href="#pricing" className="hover:text-[#0A0A0A]">{copy.nav.pricing}</a>
             <a href="#cta" className="hover:text-[#0A0A0A]">{copy.nav.start}</a>
           </div>
-          <div className="flex items-center gap-3">
-            <label className="relative hidden sm:block">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <label className="relative">
               <span className="sr-only">{copy.nav.language}</span>
               <select
                 value={outputLanguage}
                 onChange={(e) => setOutputLanguage?.(e.target.value)}
-                className="appearance-none rounded-full border border-[#E5E5E0] bg-white px-4 py-2 pr-8 text-sm text-[#0A0A0A] outline-none transition hover:border-[#006FEE]"
+                className="appearance-none rounded-full border border-[#E5E5E0] bg-white px-3 py-1.5 pr-7 text-xs text-[#0A0A0A] outline-none transition hover:border-[#006FEE] sm:px-4 sm:py-2 sm:pr-8 sm:text-sm"
               >
                 {OUTPUT_LANGUAGE_OPTIONS.map((option) => (
                   <option key={option.code} value={option.code}>
@@ -97,8 +97,8 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                   </option>
                 ))}
               </select>
-              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-[#666666]">
-                <ChevronDown className="h-4 w-4" />
+              <span className="pointer-events-none absolute inset-y-0 right-2 flex items-center text-[#666666] sm:right-3">
+                <ChevronDown className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
               </span>
             </label>
             <Button variant="primary" size="sm" onClick={onStart}>{copy.nav.start}</Button>
