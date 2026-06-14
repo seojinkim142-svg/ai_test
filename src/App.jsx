@@ -7729,6 +7729,7 @@ function App() {
                 onGoHome={goBackToList}
                 onSelectPanelTab={setPanelTab}
                 onOpenSettings={openSettings}
+                isVocabularyFile={Boolean(activeUploadItem?.isVocabulary)}
                 user={user}
                 onSignOut={handleSignOut}
                 uploadedFiles={uploadedFiles}
