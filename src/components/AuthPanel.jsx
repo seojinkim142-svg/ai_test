@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { resetPasswordForEmail, signInWithEmail, signInWithProvider, signOut, signUpWithEmail, supabase } from "../services/supabase";
+import TermsAgreementDialog from "./TermsAgreementDialog";
 
 const AUTH_COPY = {
   ko: {
@@ -187,6 +188,9 @@ function AuthPanel({ user, onAuth, theme = "light", outputLanguage = "ko" }) {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [isSignup, setIsSignup] = useState(true);
+  const [showTermsDialog, setShowTermsDialog] = useState(false);
+  const [hasAgreedTerms, setHasAgreedTerms] = useState(false);
+  const [pendingSubmit, setPendingSubmit] = useState(false);
 
   const isLight = theme === "light";
   const shellClass = isLight ? "text-slate-900" : "text-slate-100";
@@ -226,13 +230,7 @@ function AuthPanel({ user, onAuth, theme = "light", outputLanguage = "ko" }) {
     }
   };
 
-  const handleEmailSubmit = async (event) => {
-    event.preventDefault();
-    if (!email || !password) {
-      setError(copy.missingFields);
-      return;
-    }
-
+  const performAuth = async () => {
     resetMessages();
     setLoading(true);
     try {
@@ -249,6 +247,36 @@ function AuthPanel({ user, onAuth, theme = "light", outputLanguage = "ko" }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEmailSubmit = (event) => {
+    event.preventDefault();
+    if (!email || !password) {
+      setError(copy.missingFields);
+      return;
+    }
+
+    if (isSignup && !hasAgreedTerms) {
+      setPendingSubmit(true);
+      setShowTermsDialog(true);
+      return;
+    }
+
+    performAuth();
+  };
+
+  const handleAgreeTerms = () => {
+    setHasAgreedTerms(true);
+    setShowTermsDialog(false);
+    if (pendingSubmit) {
+      setPendingSubmit(false);
+      performAuth();
+    }
+  };
+
+  const handleCloseTermsDialog = () => {
+    setShowTermsDialog(false);
+    setPendingSubmit(false);
   };
 
   const handleForgotPassword = async () => {
@@ -424,13 +452,21 @@ function AuthPanel({ user, onAuth, theme = "light", outputLanguage = "ko" }) {
 
       <p className={`mt-5 text-center text-xs leading-6 ${noticeClass}`}>
         {copy.noticeLead}{" "}
-        <a href="/terms" className={`font-medium underline underline-offset-4 ${legalLinkClass}`}>
+        <button
+          type="button"
+          onClick={() => setShowTermsDialog(true)}
+          className={`font-medium underline underline-offset-4 ${legalLinkClass}`}
+        >
           {copy.terms}
-        </a>{" "}
+        </button>{" "}
         {copy.noticeConnector}{" "}
-        <a href="/privacy" className={`font-medium underline underline-offset-4 ${legalLinkClass}`}>
+        <button
+          type="button"
+          onClick={() => setShowTermsDialog(true)}
+          className={`font-medium underline underline-offset-4 ${legalLinkClass}`}
+        >
           {copy.privacy}
-        </a>
+        </button>
         {copy.noticeTail}
       </p>
 
@@ -438,6 +474,13 @@ function AuthPanel({ user, onAuth, theme = "light", outputLanguage = "ko" }) {
         <p className="mt-6 rounded-2xl border border-red-400/20 bg-red-900/20 px-4 py-3 text-sm text-red-200">{error}</p>
       )}
       {message && <p className={`mt-4 text-center text-sm ${noticeClass}`}>{message}</p>}
+
+      <TermsAgreementDialog
+        open={showTermsDialog}
+        onOpenChange={handleCloseTermsDialog}
+        onAgree={handleAgreeTerms}
+        outputLanguage={outputLanguage}
+      />
     </div>
   );
 }
