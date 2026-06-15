@@ -13,7 +13,7 @@ const DOCUMENTS = {
 function renderBlock(block, index) {
   if (block.type === "ol") {
     return (
-      <ol key={index} className="space-y-2 pl-5 text-sm leading-7 text-slate-300 list-decimal">
+      <ol key={index} className="space-y-2 pl-5 text-sm leading-7 text-[#666666] list-decimal">
         {block.items.map((item) => (
           <li key={item}>{item}</li>
         ))}
@@ -23,7 +23,7 @@ function renderBlock(block, index) {
 
   if (block.type === "ul") {
     return (
-      <ul key={index} className="space-y-2 pl-5 text-sm leading-7 text-slate-300 list-disc">
+      <ul key={index} className="space-y-2 pl-5 text-sm leading-7 text-[#666666] list-disc">
         {block.items.map((item) => (
           <li key={item}>{item}</li>
         ))}
@@ -32,7 +32,7 @@ function renderBlock(block, index) {
   }
 
   return (
-    <p key={index} className="text-sm leading-7 text-slate-300">
+    <p key={index} className="text-sm leading-7 text-[#666666]">
       {block.text}
     </p>
   );
@@ -42,12 +42,12 @@ const LegalPage = memo(function LegalPage({ documentType = "terms" }) {
   const content = DOCUMENTS[documentType] || TERMS_CONTENT;
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.22),_transparent_30%),linear-gradient(180deg,_#04110f_0%,_#020617_100%)] text-slate-100">
-      <header className="sticky top-0 z-10 border-b border-emerald-300/10 bg-slate-950/85 backdrop-blur">
+    <div className="min-h-screen bg-[#FBFBF9] font-sans text-[#0A0A0A]">
+      <header className="sticky top-0 z-10 border-b border-[#E5E5E0] bg-[#FBFBF9]/85 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-4">
           <a
             href="/"
-            className="inline-flex items-center gap-2 rounded-full border border-emerald-300/25 px-4 py-2 text-sm font-semibold text-emerald-100 transition hover:border-emerald-200/50 hover:bg-emerald-300/10"
+            className="inline-flex items-center gap-2 rounded-full border border-[#E5E5E0] bg-white px-4 py-2 text-sm font-semibold text-[#0A0A0A] transition hover:border-[#006FEE] hover:text-[#006FEE]"
           >
             홈으로
           </a>
@@ -60,8 +60,8 @@ const LegalPage = memo(function LegalPage({ documentType = "terms" }) {
                   href={link.href}
                   className={`rounded-full border px-4 py-2 text-sm font-semibold transition ${
                     isActive
-                      ? "border-emerald-200 bg-emerald-300 text-emerald-950"
-                      : "border-emerald-300/20 text-emerald-100 hover:border-emerald-200/45 hover:bg-emerald-300/10"
+                      ? "border-[#006FEE] bg-[#006FEE] text-white"
+                      : "border-[#E5E5E0] bg-white text-[#666666] hover:border-[#006FEE] hover:text-[#006FEE]"
                   }`}
                 >
                   {link.label}
@@ -73,38 +73,41 @@ const LegalPage = memo(function LegalPage({ documentType = "terms" }) {
       </header>
 
       <main className="mx-auto max-w-6xl px-6 py-10">
-        <section className="overflow-hidden border border-slate-200/12 bg-slate-950/90 shadow-[0_30px_120px_rgba(0,0,0,0.45)]">
-          <div className="border-b border-slate-200/10 px-6 py-8 md:px-10">
+        <section className="overflow-hidden rounded-2xl border border-[#E5E5E0] bg-white shadow-sm">
+          <div className="border-b border-[#E5E5E0] px-6 py-8 md:px-10">
             <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
               <div>
-                <h1 className="text-3xl font-black tracking-tight text-white md:text-5xl">{content.title}</h1>
-                <p className="mt-3 max-w-3xl text-sm leading-7 text-slate-300 md:text-base">{content.description}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#006FEE]">{content.eyebrow}</p>
+                <h1 className="mt-2 font-display text-3xl font-semibold tracking-[-0.02em] text-[#0A0A0A] md:text-5xl">
+                  {content.title}
+                </h1>
+                <p className="mt-3 max-w-3xl text-sm leading-7 text-[#666666] md:text-base">{content.description}</p>
               </div>
-              <div className="border border-slate-200/12 bg-black/25 px-4 py-3 text-sm text-emerald-100/85">
+              <div className="rounded-full border border-[#E5E5E0] bg-[#FBFBF9] px-4 py-3 text-sm text-[#666666]">
                 시행일 {content.effectiveDate}
               </div>
             </div>
           </div>
 
-          <div className="grid gap-0 border-b border-slate-200/10 md:grid-cols-3">
+          <div className="grid gap-0 border-b border-[#E5E5E0] md:grid-cols-3">
             {COMPANY_INFO_ITEMS.map((item) => (
               <div
                 key={item.label}
-                className="border-b border-r border-slate-200/10 bg-black/10 px-6 py-4 last:border-r-0 md:px-8"
+                className="border-b border-r border-[#E5E5E0] bg-[#FBFBF9] px-6 py-4 last:border-r-0 md:px-8"
               >
-                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-emerald-300/70">{item.label}</p>
-                <p className="mt-2 text-sm leading-6 text-slate-100">{item.value}</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#006FEE]">{item.label}</p>
+                <p className="mt-2 text-sm leading-6 text-[#0A0A0A]">{item.value}</p>
               </div>
             ))}
           </div>
 
-          <div className="border-b border-slate-200/10 px-6 py-4 md:px-10">
+          <div className="border-b border-[#E5E5E0] px-6 py-4 md:px-10">
             <div className="flex flex-wrap gap-2">
               {content.sections.map((section) => (
                 <a
                   key={section.id}
                   href={`#${section.id}`}
-                  className="border border-slate-200/10 bg-white/[0.02] px-3 py-2 text-xs font-medium text-slate-300 transition hover:border-emerald-300/40 hover:text-emerald-100"
+                  className="rounded-full border border-[#E5E5E0] bg-[#FBFBF9] px-3 py-2 text-xs font-medium text-[#666666] transition hover:border-[#006FEE] hover:text-[#006FEE]"
                 >
                   {section.title}
                 </a>
@@ -112,15 +115,15 @@ const LegalPage = memo(function LegalPage({ documentType = "terms" }) {
             </div>
           </div>
 
-          <div className="max-h-[72vh] overflow-y-auto bg-[#020814]">
+          <div className="max-h-[72vh] overflow-y-auto">
             <div className="px-6 py-6 md:px-10">
               {content.sections.map((section, index) => (
                 <section
                   key={section.id}
                   id={section.id}
-                  className={`scroll-mt-24 py-7 ${index > 0 ? "border-t border-slate-200/10" : ""}`}
+                  className={`scroll-mt-24 py-7 ${index > 0 ? "border-t border-[#E5E5E0]" : ""}`}
                 >
-                  <h2 className="text-lg font-bold text-white md:text-xl">{section.title}</h2>
+                  <h2 className="text-lg font-bold text-[#0A0A0A] md:text-xl">{section.title}</h2>
                   <div className="mt-4 space-y-3">{section.blocks.map(renderBlock)}</div>
                 </section>
               ))}

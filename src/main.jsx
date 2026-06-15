@@ -35,7 +35,8 @@ const legalPages = {
   "/legal/japan-transactions": <LegalPage documentType="japan-transactions" />,
 };
 
-const isLightThemePage = normalizedPath === "/showcase" || promoOnlyPaths.has(normalizedPath);
+const isLightThemePage =
+  normalizedPath === "/showcase" || promoOnlyPaths.has(normalizedPath) || normalizedPath in legalPages;
 
 const rootElement =
   normalizedPath === "/showcase"
