@@ -5364,6 +5364,7 @@ function App() {
   }
 
   const isGuestFreeMode = !AUTH_ENABLED && !user;
+  const isGuestPromo = !user && !showDetail && (AUTH_ENABLED || showGuestIntro);
   const showHeader = Boolean(user || showDetail || (isGuestFreeMode && !showGuestIntro));
   const showAmbient = showHeader;
 
@@ -5372,7 +5373,7 @@ function App() {
       style={appShellStyle}
       className={`relative min-h-screen overflow-hidden ${
         theme === "light" ? "text-slate-900" : "text-slate-100"
-      } ${showAmbient ? "" : "bg-black"} app-banner-offset`}
+      } ${isGuestPromo ? "bg-[#FBFBF9]" : showAmbient ? "" : "bg-black"} app-banner-offset`}
     >
       {showPayment && (
         <Suspense fallback={null}>

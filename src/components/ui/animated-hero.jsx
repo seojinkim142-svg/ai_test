@@ -70,12 +70,12 @@ function Hero({
           </div>
           <div className="flex flex-row gap-3">
             {secondaryAction ? (
-              <Button size="lg" className="gap-4" variant="outline">
+              <Button size="lg" className="gap-4" variant="outline" onClick={secondaryAction.onClick}>
                 {secondaryAction.label} {SecondaryIcon ? <SecondaryIcon className="w-4 h-4" /> : null}
               </Button>
             ) : null}
             {primaryAction ? (
-              <Button size="lg" variant="primary" className="gap-4">
+              <Button size="lg" variant="primary" className="gap-4" onClick={primaryAction.onClick}>
                 {primaryAction.label} {PrimaryIcon ? <PrimaryIcon className="w-4 h-4" /> : null}
               </Button>
             ) : null}

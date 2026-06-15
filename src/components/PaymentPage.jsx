@@ -1,6 +1,5 @@
 import { Capacitor } from "@capacitor/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { approveKakaoPay, chargeKakaoPaySubscription, fetchKakaoPaySubscriptionStatus, inactiveKakaoPaySubscription, requestKakaoPayReady } from "../services/kakaopay";
 import { fetchProTrialStatus } from "../services/nicepayments";
 import { getAccessToken } from "../services/supabase";
@@ -1613,68 +1612,56 @@ function PaymentPage({
           >
             <button
               type="button"
-              onClick={() => setShowPaymentDisclosure(true)}
+              onClick={() => setShowPaymentDisclosure((prev) => !prev)}
               className={`flex w-full items-center justify-between gap-2 text-left font-semibold ${isLight ? "text-slate-900" : "text-white"}`}
             >
               <span>{PAYMENT_DISCLOSURE_TITLE}</span>
-              <span className={`text-xs font-normal ${isLight ? "text-slate-500" : "text-slate-400"}`}>보기</span>
+              <span className={`text-xs font-normal ${isLight ? "text-slate-500" : "text-slate-400"}`}>
+                {showPaymentDisclosure ? "접기" : "보기"}
+              </span>
             </button>
-          </section>
-        )}
-
-        <Dialog open={showPaymentDisclosure} onOpenChange={setShowPaymentDisclosure}>
-          <DialogContent
-            onClose={() => setShowPaymentDisclosure(false)}
-            className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-2xl"
-          >
-            <DialogHeader className="border-b border-white/10 px-6 py-4">
-              <DialogTitle>{PAYMENT_DISCLOSURE_TITLE}</DialogTitle>
-            </DialogHeader>
-
-            <div className="overflow-y-auto px-6 py-4">
-              <div className="space-y-6">
-                <p className="text-sm leading-7 text-slate-300">{PAYMENT_DISCLOSURE_NOTICE}</p>
-                {paymentDisclosureSections.map((section) => (
-                  <div key={section.title}>
-                    <h4 className="text-sm font-bold text-emerald-200">{section.title}</h4>
-                    <ul className="mt-2 list-disc space-y-2 pl-5 text-sm leading-7 text-slate-300">
-                      {section.items.map((item) => (
-                        <li key={item}>{item}</li>
-                      ))}
+            {showPaymentDisclosure && (
+              <>
+                <p className={isLight ? "mt-2 text-slate-600" : "mt-2 text-slate-300"}>{PAYMENT_DISCLOSURE_NOTICE}</p>
+                <div className={`mt-4 overflow-hidden rounded-xl border ${isLight ? "border-slate-200" : "border-white/10"}`}>
+                  {paymentDisclosureSections.map((section, index) => (
+                    <div
+                      key={section.title}
+                      className={`px-4 py-4 ${index > 0 ? (isLight ? "border-t border-slate-200" : "border-t border-white/10") : ""}`}
+                    >
+                      <p className={`font-semibold ${isLight ? "text-slate-900" : "text-white"}`}>{section.title}</p>
+                      <ul className="mt-2 space-y-1.5">
+                        {section.items.map((item) => (
+                          <li key={item} className="flex items-start gap-2">
+                            <span className="mt-1 h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+                            <span className="flex-1">{item}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                  <div className={`px-4 py-4 ${isLight ? "border-t border-slate-200 bg-slate-50/80" : "border-t border-white/10 bg-slate-950/30"}`}>
+                    <p className={`font-semibold ${isLight ? "text-slate-900" : "text-white"}`}>문의 및 약관</p>
+                    <ul className="mt-2 space-y-1.5">
+                      <li>상호: {COMPANY_INFO.operatorNameKo} ({COMPANY_INFO.operatorName})</li>
                     </ul>
-                  </div>
-                ))}
-                <div>
-                  <h4 className="text-sm font-bold text-emerald-200">문의 및 약관</h4>
-                  <p className="mt-2 text-sm leading-7 text-slate-300">
-                    상호: {COMPANY_INFO.operatorNameKo} ({COMPANY_INFO.operatorName})
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-3">
-                    {LEGAL_LINKS.filter((link) => link.href !== "/legal/japan-transactions").map((link) => (
-                      <a
-                        key={link.href}
-                        href={link.href}
-                        className="text-sm text-slate-100 underline underline-offset-2"
-                      >
-                        {link.label}
-                      </a>
-                    ))}
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      {LEGAL_LINKS.filter((link) => link.href !== "/legal/japan-transactions").map((link) => (
+                        <a
+                          key={link.href}
+                          href={link.href}
+                          className={`underline underline-offset-2 ${isLight ? "text-slate-700" : "text-slate-100"}`}
+                        >
+                          {link.label}
+                        </a>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
-            </div>
-
-            <DialogFooter className="border-t border-white/10 px-6 py-4 sm:items-center">
-              <button
-                type="button"
-                onClick={() => setShowPaymentDisclosure(false)}
-                className="inline-flex h-10 items-center justify-center rounded-xl border border-white/12 px-4 text-sm font-medium text-slate-100 transition hover:border-white/24 hover:bg-white/[0.06]"
-              >
-                닫기
-              </button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              </>
+            )}
+          </section>
+        )}
 
         {isPaidTier && (
           <p
