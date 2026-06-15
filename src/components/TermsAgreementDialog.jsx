@@ -78,7 +78,7 @@ function renderDocument(content) {
   );
 }
 
-function TermsAgreementDialog({ open, onOpenChange, onAgree, outputLanguage = "ko" }) {
+function TermsAgreementDialog({ open, onOpenChange, outputLanguage = "ko" }) {
   const [hasReadToBottom, setHasReadToBottom] = useState(false);
   const contentRef = useRef(null);
   const copy = COPY[outputLanguage] ?? COPY.ko;
@@ -118,14 +118,6 @@ function TermsAgreementDialog({ open, onOpenChange, onAgree, outputLanguage = "k
             className="inline-flex h-10 items-center justify-center rounded-xl border border-white/12 px-4 text-sm font-medium text-slate-100 transition hover:border-white/24 hover:bg-white/[0.06]"
           >
             {copy.cancel}
-          </button>
-          <button
-            type="button"
-            disabled={!hasReadToBottom}
-            onClick={onAgree}
-            className="inline-flex h-10 items-center justify-center rounded-xl bg-white px-4 text-sm font-semibold text-slate-900 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {copy.agree}
           </button>
         </DialogFooter>
       </DialogContent>
