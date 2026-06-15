@@ -58,7 +58,7 @@ function NavItem({ icon, label, active, onClick, isOpen }) {
         "flex h-9 w-full items-center gap-3 rounded-lg px-2.5 text-sm font-medium transition",
         active
           ? "bg-emerald-500/15 text-emerald-300"
-          : "text-slate-300 hover:bg-slate-800 hover:text-white"
+          : "text-slate-300 hover:text-white"
       )}
     >
       <Icon className="h-4 w-4 shrink-0" />
