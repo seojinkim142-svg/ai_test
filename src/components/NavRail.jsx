@@ -93,7 +93,6 @@ export default function NavRail({
   searchOpen = false,
   onToggleSearch,
 }) {
-  const [isHovering, setIsHovering] = useState(false);
   const [pinned, setPinned] = useState(() => {
     try { return localStorage.getItem("navRailPinned") === "true"; } catch { return false; }
   });
@@ -103,7 +102,7 @@ export default function NavRail({
   });
   const inputRef = useRef(null);
 
-  const isOpen = isHovering || pinned;
+  const isOpen = pinned;
 
   const togglePinned = () => {
     setPinned((prev) => {
@@ -183,7 +182,7 @@ export default function NavRail({
       key: "home",
       label: "홈",
       icon: Home,
-      active: !showDetail,
+      active: false,
       onClick: onGoHome,
     },
     ...detailTabs.map((item) => ({
@@ -206,8 +205,6 @@ export default function NavRail({
         animate={railState}
         variants={railVariants}
         transition={transitionProps}
-        onMouseEnter={() => setIsHovering(true)}
-        onMouseLeave={() => setIsHovering(false)}
       >
         <div className="flex h-[54px] shrink-0 items-center gap-2.5 border-b border-white/10 px-2.5">
           <img
@@ -251,7 +248,7 @@ export default function NavRail({
           <NavItem
             icon={Search}
             label="자료 검색"
-            active={searchOpen}
+            active={false}
             onClick={() => {
               const next = !searchOpen;
               onToggleSearch?.(next);
