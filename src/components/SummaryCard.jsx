@@ -889,44 +889,33 @@ function SummaryCard({
             className="mx-auto flex h-full w-full max-w-[1600px] flex-1 flex-col overflow-hidden rounded-none border-0 border-white/10 bg-slate-950/95 shadow-2xl shadow-black/60 sm:rounded-[2rem] sm:border"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-6">
-              <div>
-                <p className="mt-1 text-sm text-slate-200">웹과 태블릿에서 더 크게 읽을 수 있는 요약 뷰입니다.</p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={goPrev}
-                  disabled={!canGoPrev}
-                  className="ghost-button text-xs text-white"
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "255, 255, 255" }}
-                >
-                  이전
-                </button>
-                <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-slate-100 ring-1 ring-white/20">
-                  {safePageIndex + 1} / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  onClick={goNext}
-                  disabled={!canGoNext}
-                  className="ghost-button text-xs text-white"
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "255, 255, 255" }}
-                >
-                  다음
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsExpanded(false)}
-                  className="ghost-button text-xs text-white"
-                  data-ghost-size="sm"
-                  style={{ "--ghost-color": "255, 255, 255" }}
-                >
-                  닫기
-                </button>
-              </div>
+            <div className="flex flex-wrap items-center justify-end gap-2 border-b border-white/10 px-4 py-2 sm:px-6">
+              <button
+                type="button"
+                onClick={goPrev}
+                disabled={!canGoPrev}
+                className="inline-flex items-center justify-center rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 transition hover:bg-slate-100 disabled:opacity-50"
+              >
+                이전
+              </button>
+              <span className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold text-slate-100 ring-1 ring-white/20">
+                {safePageIndex + 1} / {totalPages}
+              </span>
+              <button
+                type="button"
+                onClick={goNext}
+                disabled={!canGoNext}
+                className="inline-flex items-center justify-center rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 transition hover:bg-slate-100 disabled:opacity-50"
+              >
+                다음
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsExpanded(false)}
+                className="inline-flex items-center justify-center rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 transition hover:bg-slate-100"
+              >
+                닫기
+              </button>
             </div>
 
             <div className="min-h-0 flex-1 p-0 sm:p-5 lg:p-6">
