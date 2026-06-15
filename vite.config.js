@@ -204,9 +204,7 @@ export default defineConfig(async ({ mode }) => {
           rewrite: (p) => p.replace(/^\/api\/openai/, ""),
           headers: {
             Authorization: `Bearer ${
-              process.env.VITE_DEEPSEEK_API_KEY ||
               process.env.DEEPSEEK_API_KEY ||
-              process.env.VITE_OPENAI_API_KEY ||
               process.env.OPENAI_API_KEY ||
               ""
             }`,

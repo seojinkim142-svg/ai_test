@@ -966,7 +966,7 @@ function PaymentPage({
       <div
         className={`max-h-[calc(100vh-3rem)] w-full max-w-4xl overflow-x-hidden overflow-y-auto rounded-3xl border shadow-2xl ring-1 ${surfaceClass}`}
       >
-        <div className={`flex items-center justify-between border-b px-5 py-4 ${headerClass}`}>
+        <div className={`sticky top-0 z-10 flex items-center justify-between border-b px-5 py-4 backdrop-blur ${headerClass}`}>
           <div>
             <h2 className="text-xl font-bold">요금제 결제</h2>
           </div>
