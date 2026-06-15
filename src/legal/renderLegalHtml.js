@@ -149,26 +149,24 @@ export function renderLegalDocumentHtml(content) {
     <script type="application/ld+json">${jsonLd}</script>
     <style>
       :root {
-        color-scheme: dark;
-        --bg: #020617;
-        --panel: rgba(2, 6, 23, 0.82);
-        --panel-soft: rgba(255, 255, 255, 0.04);
-        --border: rgba(52, 211, 153, 0.16);
-        --border-strong: rgba(52, 211, 153, 0.3);
-        --text: #f8fafc;
-        --text-soft: #cbd5e1;
-        --text-muted: #94a3b8;
-        --accent: #6ee7b7;
-        --accent-strong: #34d399;
+        color-scheme: light;
+        --bg: #fbfbf9;
+        --panel: #ffffff;
+        --panel-soft: #fbfbf9;
+        --border: #e5e5e0;
+        --border-strong: #006fee;
+        --text: #0a0a0a;
+        --text-soft: #666666;
+        --text-muted: #999999;
+        --accent: #006fee;
+        --accent-strong: #006fee;
       }
 
       * { box-sizing: border-box; }
       body {
         margin: 0;
         font-family: "Pretendard Variable", "Pretendard", "Noto Sans KR", sans-serif;
-        background:
-          radial-gradient(circle at top, rgba(16, 185, 129, 0.22), transparent 30%),
-          linear-gradient(180deg, #04110f 0%, #020617 100%);
+        background: var(--bg);
         color: var(--text);
       }
 
@@ -182,10 +180,10 @@ export function renderLegalDocumentHtml(content) {
 
       .legal-document {
         border: 1px solid var(--border);
+        border-radius: 16px;
         overflow: hidden;
         background: var(--panel);
-        box-shadow: 0 30px 120px rgba(0, 0, 0, 0.45);
-        backdrop-filter: blur(16px);
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
       }
 
       .legal-header {
@@ -203,7 +201,7 @@ export function renderLegalDocumentHtml(content) {
         font-weight: 700;
         letter-spacing: 0.28em;
         text-transform: uppercase;
-        color: rgba(110, 231, 183, 0.78);
+        color: var(--accent);
       }
 
       .legal-title {
@@ -224,8 +222,9 @@ export function renderLegalDocumentHtml(content) {
         flex-shrink: 0;
         padding: 12px 16px;
         border: 1px solid var(--border);
-        background: rgba(0, 0, 0, 0.24);
-        color: rgba(236, 253, 245, 0.9);
+        border-radius: 999px;
+        background: var(--panel-soft);
+        color: var(--text-soft);
         font-size: 14px;
         font-weight: 600;
       }
@@ -245,15 +244,16 @@ export function renderLegalDocumentHtml(content) {
         padding: 0 16px;
         border: 1px solid var(--border);
         border-radius: 999px;
-        color: rgba(236, 253, 245, 0.92);
+        background: var(--panel);
+        color: var(--text-soft);
         font-size: 14px;
         font-weight: 700;
-        transition: border-color 160ms ease, background-color 160ms ease;
+        transition: border-color 160ms ease, color 160ms ease;
       }
 
       .legal-nav-link:hover {
         border-color: var(--border-strong);
-        background: rgba(52, 211, 153, 0.08);
+        color: var(--accent);
       }
 
       .legal-company-grid {
@@ -264,9 +264,9 @@ export function renderLegalDocumentHtml(content) {
 
       .legal-company-item {
         padding: 18px 24px 16px;
-        border-right: 1px solid rgba(255, 255, 255, 0.08);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-        background: rgba(0, 0, 0, 0.12);
+        border-right: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+        background: var(--panel-soft);
       }
 
       .legal-card-label {
@@ -275,7 +275,7 @@ export function renderLegalDocumentHtml(content) {
         font-weight: 700;
         letter-spacing: 0.16em;
         text-transform: uppercase;
-        color: rgba(110, 231, 183, 0.72);
+        color: var(--accent);
       }
 
       .legal-card-value {
@@ -311,8 +311,9 @@ export function renderLegalDocumentHtml(content) {
         min-height: 38px;
         align-items: center;
         padding: 0 12px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        background: var(--panel-soft);
         color: var(--text-soft);
         font-size: 12px;
         font-weight: 500;
@@ -320,13 +321,13 @@ export function renderLegalDocumentHtml(content) {
 
       .legal-toc-link:hover {
         border-color: var(--border-strong);
-        color: rgba(236, 253, 245, 0.95);
+        color: var(--accent);
       }
 
       .legal-scroll-shell {
         max-height: 72vh;
         overflow-y: auto;
-        background: #020814;
+        background: var(--panel);
       }
 
       .legal-sections {
@@ -338,7 +339,7 @@ export function renderLegalDocumentHtml(content) {
       }
 
       .legal-section + .legal-section {
-        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        border-top: 1px solid var(--border);
       }
 
       .legal-section-title {
