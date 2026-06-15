@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -155,7 +156,28 @@ export default function MockExamPanel({
 }) {
   const [mockExamPdfUrl, setMockExamPdfUrl] = useState(null);
   const [isBuildingMockExamPdf, setIsBuildingMockExamPdf] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   const mockExamPdfUrlRef = useRef(null);
+
+  useEffect(() => {
+    if (!isExpanded) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleWindowKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsExpanded(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleWindowKeyDown);
+    };
+  }, [isExpanded]);
 
   const setAndRevokeMockExamPdfUrl = useCallback((url) => {
     if (mockExamPdfUrlRef.current) URL.revokeObjectURL(mockExamPdfUrlRef.current);
@@ -286,6 +308,97 @@ export default function MockExamPanel({
   }, [activeMockExam?.payload?.answerSheet, mockExamOrderedItems]);
 
   const normalizeInput = (value) => String(value || "").replace(/\s+/g, "");
+
+  const examContent = (
+    <>
+      {!activeMockExam && <p className="text-sm text-slate-400">선택된 모의고사가 없습니다.</p>}
+      {activeMockExam && (
+        <div className="space-y-6">
+          {mockExamOrderedItems.length === 0 && (
+            <p className="text-sm text-slate-400">모의고사 문항이 없습니다.</p>
+          )}
+          {mockExamOrderedItems.length > 0 && (
+            <div className="overflow-x-auto">
+              <div className="flex flex-col items-center gap-10" style={{ minWidth: "794px" }}>
+                {mockExamPages.map((pageItems, pageIndex) => {
+                  const isFourGrid = pageItems.length === 4;
+                  const pageStart = pageIndex === 0 ? 1 : pageIndex === 1 ? 5 : 9;
+                  return (
+                    <section
+                      key={`mock-exam-page-${pageIndex}`}
+                      className="mock-exam-page bg-white text-black shadow-sm"
+                      style={{ display: "flex", flexDirection: "column", width: "794px", minHeight: "1123px", padding: "44px 52px 48px", boxSizing: "border-box" }}
+                    >
+                      <div style={{ position: "relative", display: "flex", alignItems: "flex-start", justifyContent: "center" }}>
+                        <h4 style={{ fontSize: "18px", fontWeight: 600 }}>{activeMockExamTitle}</h4>
+                        <span style={{ position: "absolute", right: 0, top: 0, fontSize: "18px", fontWeight: 600 }}>{pageIndex + 1}</span>
+                      </div>
+                      <div style={{ marginTop: "12px", borderTop: "1px solid black" }} />
+                      <div style={{ position: "relative", flex: 1, marginTop: "0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, ...(isFourGrid ? { gridTemplateRows: "1fr 1fr", gridAutoFlow: "column" } : { gridAutoFlow: "row" }) }}>
+                        <div style={{ position: "absolute", left: "50%", top: 0, height: "100%", width: "1px", background: "rgba(0,0,0,0.8)" }} />
+                        {pageItems.map((item, idx) => {
+                          const colIdx = isFourGrid ? Math.floor(idx / 2) : idx % 2;
+                          return (
+                            <div
+                              key={`mock-exam-cell-${pageIndex}-${idx}`}
+                              style={{ paddingLeft: colIdx === 0 ? "0" : "24px", paddingRight: colIdx === 0 ? "24px" : "0", paddingTop: "24px", paddingBottom: "24px" }}
+                            >
+                              {renderMockExamItem(item, pageStart + idx)}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {showMockExamAnswers && (
+            <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
+              <p className="text-sm font-semibold text-emerald-200">정답/해설</p>
+              <div className="mt-3 space-y-2 text-xs text-slate-200">
+                {mockExamAnswerEntries.length === 0 && (
+                  <p className="rounded-lg bg-white/5 px-3 py-2 text-slate-300">답지 데이터가 없습니다.</p>
+                )}
+                {mockExamAnswerEntries.map((item, idx) => (
+                  <div key={`mock-exam-answer-${idx}`} className="rounded-lg bg-white/5 px-3 py-2">
+                    <p className="font-semibold text-emerald-200">{item.number}번 정답: {item.answer}</p>
+                    {item.explanation && (
+                      <div className="mt-1">
+                        <p className="font-semibold text-slate-100">해설</p>
+                        {renderMockRichText(item.explanation, "text-xs text-slate-200")}
+                      </div>
+                    )}
+                    {item.choiceExplanations?.length > 0 && (
+                      <div className="mt-2">
+                        <p className="font-semibold text-slate-100">선지 해설</p>
+                        <ul className="mt-1 space-y-0.5">
+                          {item.choiceExplanations.map((exp, cIdx) => (
+                            <li key={cIdx} className="flex gap-1.5 text-xs">
+                              <span className="shrink-0 font-semibold text-slate-400">{LETTERS[cIdx]}.</span>
+                              <span className="text-slate-300">{exp}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {item.evidence && (
+                      <div className="mt-1">
+                        <p className="font-semibold text-slate-100">근거</p>
+                        {renderMockRichText(item.evidence, "text-xs text-slate-200")}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
 
   return (
     <div className="rounded-3xl border border-white/5 bg-slate-900/70 p-4 shadow-lg shadow-black/30">
@@ -421,6 +534,16 @@ export default function MockExamPanel({
           >
             {showMockExamAnswers ? "정답 숨기기" : "정답 보기"}
           </button>
+          <button
+            type="button"
+            onClick={() => setIsExpanded(true)}
+            disabled={!activeMockExam || mockExamOrderedItems.length === 0}
+            className="ghost-button text-sm text-slate-200"
+            data-ghost-size="lg"
+            style={{ "--ghost-color": "148, 163, 184" }}
+          >
+            크게 보기
+          </button>
         </div>
 
         {mockExamStatus && <p className="text-sm text-emerald-200">{mockExamStatus}</p>}
@@ -471,94 +594,45 @@ export default function MockExamPanel({
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-100">
-          {!activeMockExam && <p className="text-sm text-slate-400">선택된 모의고사가 없습니다.</p>}
-          {activeMockExam && (
-            <div className="space-y-6">
-              {mockExamOrderedItems.length === 0 && (
-                <p className="text-sm text-slate-400">모의고사 문항이 없습니다.</p>
-              )}
-              {mockExamOrderedItems.length > 0 && (
-                <div className="overflow-x-auto">
-                  <div className="flex flex-col items-center gap-10" style={{ minWidth: "794px" }}>
-                    {mockExamPages.map((pageItems, pageIndex) => {
-                      const isFourGrid = pageItems.length === 4;
-                      const pageStart = pageIndex === 0 ? 1 : pageIndex === 1 ? 5 : 9;
-                      return (
-                        <section
-                          key={`mock-exam-page-${pageIndex}`}
-                          className="mock-exam-page bg-white text-black shadow-sm"
-                          style={{ display: "flex", flexDirection: "column", width: "794px", minHeight: "1123px", padding: "44px 52px 48px", boxSizing: "border-box" }}
-                        >
-                          <div style={{ position: "relative", display: "flex", alignItems: "flex-start", justifyContent: "center" }}>
-                            <h4 style={{ fontSize: "18px", fontWeight: 600 }}>{activeMockExamTitle}</h4>
-                            <span style={{ position: "absolute", right: 0, top: 0, fontSize: "18px", fontWeight: 600 }}>{pageIndex + 1}</span>
-                          </div>
-                          <div style={{ marginTop: "12px", borderTop: "1px solid black" }} />
-                          <div style={{ position: "relative", flex: 1, marginTop: "0", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, ...(isFourGrid ? { gridTemplateRows: "1fr 1fr", gridAutoFlow: "column" } : { gridAutoFlow: "row" }) }}>
-                            <div style={{ position: "absolute", left: "50%", top: 0, height: "100%", width: "1px", background: "rgba(0,0,0,0.8)" }} />
-                            {pageItems.map((item, idx) => {
-                              const colIdx = isFourGrid ? Math.floor(idx / 2) : idx % 2;
-                              return (
-                                <div
-                                  key={`mock-exam-cell-${pageIndex}-${idx}`}
-                                  style={{ paddingLeft: colIdx === 0 ? "0" : "24px", paddingRight: colIdx === 0 ? "24px" : "0", paddingTop: "24px", paddingBottom: "24px" }}
-                                >
-                                  {renderMockExamItem(item, pageStart + idx)}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </section>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {showMockExamAnswers && (
-                <div className="rounded-2xl border border-white/10 bg-slate-900/40 p-4">
-                  <p className="text-sm font-semibold text-emerald-200">정답/해설</p>
-                  <div className="mt-3 space-y-2 text-xs text-slate-200">
-                    {mockExamAnswerEntries.length === 0 && (
-                      <p className="rounded-lg bg-white/5 px-3 py-2 text-slate-300">답지 데이터가 없습니다.</p>
-                    )}
-                    {mockExamAnswerEntries.map((item, idx) => (
-                      <div key={`mock-exam-answer-${idx}`} className="rounded-lg bg-white/5 px-3 py-2">
-                        <p className="font-semibold text-emerald-200">{item.number}번 정답: {item.answer}</p>
-                        {item.explanation && (
-                          <div className="mt-1">
-                            <p className="font-semibold text-slate-100">해설</p>
-                            {renderMockRichText(item.explanation, "text-xs text-slate-200")}
-                          </div>
-                        )}
-                        {item.choiceExplanations?.length > 0 && (
-                          <div className="mt-2">
-                            <p className="font-semibold text-slate-100">선지 해설</p>
-                            <ul className="mt-1 space-y-0.5">
-                              {item.choiceExplanations.map((exp, cIdx) => (
-                                <li key={cIdx} className="flex gap-1.5 text-xs">
-                                  <span className="shrink-0 font-semibold text-slate-400">{LETTERS[cIdx]}.</span>
-                                  <span className="text-slate-300">{exp}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        {item.evidence && (
-                          <div className="mt-1">
-                            <p className="font-semibold text-slate-100">근거</p>
-                            {renderMockRichText(item.evidence, "text-xs text-slate-200")}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          {examContent}
         </div>
       </div>
+
+      {isExpanded && createPortal(
+        <div
+          className="fixed inset-0 z-[170] flex flex-col bg-slate-950/80 backdrop-blur-sm sm:px-5 sm:py-5"
+          role="dialog"
+          aria-modal="true"
+          aria-label="모의고사 확대 보기"
+          onClick={() => setIsExpanded(false)}
+        >
+          <div
+            className="mx-auto flex h-full w-full max-w-[1600px] flex-1 flex-col overflow-hidden rounded-none border-0 border-white/10 bg-slate-950/95 shadow-2xl shadow-black/60 sm:rounded-[2rem] sm:border"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="app-safe-top flex flex-wrap items-center justify-end gap-2 border-b border-white/10 px-4 py-2 sm:px-6">
+              <button
+                type="button"
+                onClick={() => setShowMockExamAnswers((prev) => !prev)}
+                className="inline-flex items-center justify-center rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 transition hover:bg-slate-100"
+              >
+                {showMockExamAnswers ? "정답 숨기기" : "정답 보기"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsExpanded(false)}
+                className="inline-flex items-center justify-center rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 transition hover:bg-slate-100"
+              >
+                닫기
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto p-3 text-sm text-slate-100 sm:p-5 lg:p-6">
+              {examContent}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
