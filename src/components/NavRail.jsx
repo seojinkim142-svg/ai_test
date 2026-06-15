@@ -1,4 +1,4 @@
-import { lazy, useRef, useState, Suspense } from "react";
+import { useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   BookMarked,
@@ -16,8 +16,6 @@ import {
 } from "lucide-react";
 import { cn } from "../lib/utils";
 import { getDetailCopy } from "../utils/detailCopy";
-
-const KnowledgeGapPanel = lazy(() => import("./KnowledgeGapPanel"));
 
 const TAB_ICONS = {
   topicStructure: ListTree,
@@ -84,7 +82,6 @@ export default function NavRail({
   onSignOut,
   // 자료 검색
   uploadedFiles = [],
-  allArtifacts = [],
   onSemanticSearch,
   semanticSearchResults = null,
   isSemanticSearching = false,
@@ -95,9 +92,6 @@ export default function NavRail({
     try { return localStorage.getItem("navRailPinned") === "true"; } catch { return false; }
   });
   const [searchQuery, setSearchQuery] = useState("");
-  const [gapCollapsed, setGapCollapsed] = useState(() => {
-    try { return localStorage.getItem("knowledgeGapCollapsed") === "true"; } catch { return false; }
-  });
   const inputRef = useRef(null);
 
   const isOpen = pinned;
@@ -125,11 +119,6 @@ export default function NavRail({
   const handleQueryChange = (e) => {
     setSearchQuery(e.target.value);
     if (semanticSearchResults) onSemanticSearch?.("");
-  };
-
-  const handleGapCollapse = (next) => {
-    setGapCollapsed(next);
-    try { localStorage.setItem("knowledgeGapCollapsed", String(next)); } catch { /* ignore */ }
   };
 
   const q = searchQuery.trim().toLowerCase();
@@ -317,24 +306,6 @@ export default function NavRail({
                   결과 없음
                 </p>
               )}
-            </section>
-
-            <div className="h-px w-full bg-slate-700/60" />
-
-            <section>
-              <p className="mb-2 text-[11px] font-bold uppercase tracking-widest text-slate-300">
-                현황
-              </p>
-              <Suspense fallback={null}>
-                <KnowledgeGapPanel
-                  uploadedFiles={uploadedFiles}
-                  allArtifacts={allArtifacts}
-                  outputLanguage={outputLanguage}
-                  collapsed={gapCollapsed}
-                  onCollapse={handleGapCollapse}
-                  onSelectFile={onSelectFile}
-                />
-              </Suspense>
             </section>
           </div>
         )}
