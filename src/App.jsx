@@ -438,6 +438,7 @@ function App() {
   const mockExamMenuButtonRef = useRef(null);
   const openAiModulePromiseRef = useRef(null);
   const tutorRequestInFlightRef = useRef(false);
+  const paymentAbortFallbackTimerRef = useRef(null);
   const { user, authReady, refreshSession, handleSignOut: authSignOut } = useSupabaseAuth();
   const { tier, tierExpiresAt, tierRemainingDays, loadingTier, refreshTier } = useUserTier(user);
   const isFreeTier = tier === "free";
