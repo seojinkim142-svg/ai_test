@@ -260,23 +260,6 @@ export default function DetailPage({
   const copy = useMemo(() => getDetailCopy(outputLanguage), [outputLanguage]);
   const [summaryViewMode, setSummaryViewMode] = useState("text"); // "text" | "mindmap"
   const [pendingTopicExamCards, setPendingTopicExamCards] = useState(null);
-  const detailTabs = useMemo(
-    () => isVocabularyFile
-      ? [
-          { id: "flashcards", label: copy.tabs.flashcards },
-          { id: "vocabQuiz", label: copy.tabs.vocabQuiz },
-        ]
-      : [
-          { id: "topicStructure", label: copy.tabs.topicStructure },
-          { id: "summary", label: copy.tabs.summary },
-          { id: "quiz", label: copy.tabs.quiz },
-          { id: "reviewNotes", label: copy.tabs.reviewNotes },
-          { id: "mockExam", label: copy.tabs.mockExam },
-          { id: "flashcards", label: copy.tabs.flashcards },
-          { id: "tutor", label: copy.tabs.tutor },
-        ],
-    [copy, isVocabularyFile]
-  );
   const normalizeChapterSelectionInput = (value) => String(value || "").replace(/\s+/g, "");
   const mindmapContainerRef = useRef(null);
   const pendingDocumentId = String(pendingDocumentOpen?.id || "").trim();
@@ -502,24 +485,6 @@ export default function DetailPage({
           onRetake={onRetakeDiagnostic}
           canRetake={Boolean(String(extractedText || "").trim())}
         />
-        <div className="grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-slate-900/80 px-3 py-2 shadow-lg shadow-black/30 sm:grid-cols-7 lg:sticky lg:top-0 lg:z-10 lg:backdrop-blur">
-          {detailTabs.map((item) => {
-            const active = panelTab === item.id;
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setPanelTab(item.id)}
-                className="ghost-button w-full text-sm text-slate-200"
-                data-ghost-size="sm"
-                data-ghost-active={active}
-                style={{ "--ghost-color": active ? "52, 211, 153" : "148, 163, 184" }}
-              >
-                {item.label}
-              </button>
-            );
-          })}
-        </div>
 
         <div className="flex-1 overflow-auto pr-1 pb-1">
           {panelTab === "topicStructure" && (

@@ -204,9 +204,7 @@ export default defineConfig(async ({ mode }) => {
           rewrite: (p) => p.replace(/^\/api\/openai/, ""),
           headers: {
             Authorization: `Bearer ${
-              process.env.VITE_DEEPSEEK_API_KEY ||
               process.env.DEEPSEEK_API_KEY ||
-              process.env.VITE_OPENAI_API_KEY ||
               process.env.OPENAI_API_KEY ||
               ""
             }`,
@@ -249,7 +247,6 @@ export default defineConfig(async ({ mode }) => {
       include: [
         'react',
         'react-dom',
-        'react-router-dom',
         '@capacitor/core',
         '@supabase/supabase-js',
       ],
@@ -257,8 +254,6 @@ export default defineConfig(async ({ mode }) => {
         'pdfjs-dist',
         'tesseract.js',
       ],
-      // 강제 사전 번들링
-      force: mode === 'development',
     },
     // 환경 변수 노출
     envPrefix: ['VITE_', 'APP_'],

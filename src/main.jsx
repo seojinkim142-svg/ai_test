@@ -21,6 +21,7 @@ import "./theme/light.css";
 import App from "./App.jsx";
 import PromoPage from "./pages/PromoPage.jsx";
 import LegalPage from "./pages/LegalPage.jsx";
+import ShowcasePage from "./pages/ShowcasePage.jsx";
 
 const IS_NATIVE_PLATFORM = Capacitor.isNativePlatform();
 const path = typeof window !== "undefined" ? window.location.pathname.toLowerCase() : "/";
@@ -34,7 +35,10 @@ const legalPages = {
   "/legal/japan-transactions": <LegalPage documentType="japan-transactions" />,
 };
 
-const rootElement = legalPages[normalizedPath] ?? (promoOnlyPaths.has(normalizedPath) ? <PromoPage /> : <App />);
+const rootElement =
+  normalizedPath === "/showcase"
+    ? <ShowcasePage />
+    : legalPages[normalizedPath] ?? (promoOnlyPaths.has(normalizedPath) ? <PromoPage /> : <App />);
 
 if (typeof window !== "undefined") {
   window.addEventListener("vite:preloadError", (event) => {

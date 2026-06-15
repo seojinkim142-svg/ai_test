@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { gsap } from "gsap";
 import { useSmoothScroll } from "../hooks/useSmoothScroll";
 import { COMPANY_INFO_ITEMS, LEGAL_LINKS } from "../legal/companyInfo";
+import TermsAgreementDialog from "./TermsAgreementDialog";
 
 const FOOTER_COMPANY_INFO = COMPANY_INFO_ITEMS.find((item) => item.label === "상호") ?? COMPANY_INFO_ITEMS[0];
 
@@ -1612,6 +1613,7 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
   const [activeFeatureId, setActiveFeatureId] = useState(FEATURE_ITEMS[0]?.id || "summary");
   const [activePlanId, setActivePlanId] = useState(DEFAULT_ACTIVE_PLAN);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showTermsDialog, setShowTermsDialog] = useState(false);
   const [navHeight, setNavHeight] = useState(DEFAULT_LANDING_NAV_HEIGHT);
   const [visibleSections, setVisibleSections] = useState({});
   const scrollRafRef = useRef(null);
@@ -2426,15 +2428,22 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
               </div>
 
               <div className="hidden flex-wrap gap-3 lg:flex">
-                {LEGAL_LINKS.map((link) => (
-                  <a
-                    key={link.href}
-                    href={link.href}
-                    className="rounded-full border border-[#E5E5E0] bg-white px-4 py-2 text-sm text-[#0A0A0A] transition hover:border-[#006FEE] hover:text-[#006FEE]"
-                  >
-                    {link.href.includes("privacy") ? copy.footer.legalLinks.privacy : copy.footer.legalLinks.terms}
-                  </a>
-                ))}
+                {LEGAL_LINKS.map((link) => {
+                  const label = link.href.includes("privacy") ? copy.footer.legalLinks.privacy : copy.footer.legalLinks.terms;
+                  const className = "rounded-full border border-[#E5E5E0] bg-white px-4 py-2 text-sm text-[#0A0A0A] transition hover:border-[#006FEE] hover:text-[#006FEE]";
+                  if (link.href === "/terms" || link.href === "/privacy") {
+                    return (
+                      <button key={link.href} type="button" onClick={() => setShowTermsDialog(true)} className={className}>
+                        {label}
+                      </button>
+                    );
+                  }
+                  return (
+                    <a key={link.href} href={link.href} className={className}>
+                      {label}
+                    </a>
+                  );
+                })}
               </div>
             </div>
 
@@ -2477,21 +2486,35 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-[#0A0A0A]">{copy.footer.legal}</p>
                   <div className="mt-3 space-y-2.5">
-                    {LEGAL_LINKS.map((link) => (
-                      <a
-                        key={`legal-column-${link.href}`}
-                        href={link.href}
-                        className="block text-sm text-[#666666] transition hover:text-[#006FEE]"
-                      >
-                        {link.href.includes("privacy") ? copy.footer.legalLinks.privacy : copy.footer.legalLinks.terms}
-                      </a>
-                    ))}
+                    {LEGAL_LINKS.map((link) => {
+                      const label = link.href.includes("privacy") ? copy.footer.legalLinks.privacy : copy.footer.legalLinks.terms;
+                      const className = "block text-sm text-[#666666] transition hover:text-[#006FEE]";
+                      if (link.href === "/terms" || link.href === "/privacy") {
+                        return (
+                          <button key={`legal-column-${link.href}`} type="button" onClick={() => setShowTermsDialog(true)} className={`${className} text-left`}>
+                            {label}
+                          </button>
+                        );
+                      }
+                      return (
+                        <a key={`legal-column-${link.href}`} href={link.href} className={className}>
+                          {label}
+                        </a>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
             </div>
         </div>
       </footer>
+
+      <TermsAgreementDialog
+        open={showTermsDialog}
+        onOpenChange={setShowTermsDialog}
+        onAgree={() => setShowTermsDialog(false)}
+        outputLanguage={outputLanguage}
+      />
     </div>
   );
 });

@@ -220,7 +220,7 @@ const PaymentPage = lazy(() => import("./components/PaymentPage"));
 const SettingsDialog = lazy(() => import("./components/SettingsDialog"));
 const DetailPage = lazy(() => import("./pages/DetailPage"));
 const PremiumProfilePicker = lazy(() => import("./components/PremiumProfilePicker"));
-const LeftSidebar = lazy(() => import("./components/LeftSidebar"));
+const NavRail = lazy(() => import("./components/NavRail"));
 
 const NativeAppPlugin =
   Capacitor.isNativePlatform() && Capacitor.isPluginAvailable("App")
@@ -5354,15 +5354,7 @@ function App() {
       <Suspense fallback={<div className="min-h-screen bg-black" />}>
         <LoginBackground theme={theme}>
           <div className="relative z-10 min-h-screen px-6 py-6 sm:px-8 sm:py-8">
-            <div className="flex items-center justify-start">
-              <a
-                href="/start"
-                className="text-sm font-semibold tracking-[0.18em] text-slate-100/92 transition hover:text-white"
-              >
-                Zeusian.ai
-              </a>
-            </div>
-            <div className="flex min-h-[calc(100vh-96px)] items-center justify-center">
+            <div className="flex min-h-screen items-center justify-center">
               <AuthPanel user={user} onAuth={refreshSession} theme={theme} outputLanguage={outputLanguage} />
             </div>
           </div>
@@ -5516,13 +5508,15 @@ function App() {
         <div className="flex flex-1">
           {showHeader && (
             <Suspense fallback={null}>
-              <LeftSidebar
-                isOpen={sidebarOpen}
-                onToggle={() => setSidebarOpen((v) => {
-                  const next = !v;
-                  try { localStorage.setItem("sidebarOpen", String(next)); } catch {}
-                  return next;
-                })}
+              <NavRail
+                showDetail={showDetail}
+                panelTab={panelTab}
+                onGoHome={goBackToList}
+                onSelectPanelTab={setPanelTab}
+                onOpenSettings={openSettings}
+                isVocabularyFile={Boolean(activeUploadItem?.isVocabulary)}
+                user={user}
+                onSignOut={handleSignOut}
                 uploadedFiles={uploadedFiles}
                 allArtifacts={allArtifacts}
                 onSemanticSearch={handleSemanticSearch}
@@ -5530,6 +5524,11 @@ function App() {
                 isSemanticSearching={isSemanticSearching}
                 outputLanguage={outputLanguage}
                 onSelectFile={handleSelectFile}
+                searchOpen={sidebarOpen}
+                onToggleSearch={(next) => {
+                  setSidebarOpen(next);
+                  try { localStorage.setItem("sidebarOpen", String(next)); } catch {}
+                }}
               />
             </Suspense>
           )}
