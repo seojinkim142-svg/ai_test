@@ -889,7 +889,7 @@ function SummaryCard({
             className="mx-auto flex h-full w-full max-w-[1600px] flex-1 flex-col overflow-hidden rounded-none border-0 border-white/10 bg-slate-950/95 shadow-2xl shadow-black/60 sm:rounded-[2rem] sm:border"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="flex flex-wrap items-center justify-end gap-2 border-b border-white/10 px-4 py-2 sm:px-6">
+            <div className="app-safe-top flex flex-wrap items-center justify-end gap-2 border-b border-white/10 px-4 py-2 sm:px-6">
               <button
                 type="button"
                 onClick={goPrev}
