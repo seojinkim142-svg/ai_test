@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import DOMPurify from "dompurify";
 import { generateDocAnswer } from "../services/openai";
 import ReactMarkdown from "react-markdown";
@@ -772,12 +773,34 @@ function useIsMobile(breakpoint = 640) {
 
 export default function MindMapView({ summary, mindmapData, onJumpToPage, containerRef }) {
   const [activeNode, setActiveNode] = useState(null);
+  const [isExpanded, setIsExpanded] = useState(false);
   const dark = useAppDark();
   const isMobile = useIsMobile();
+  const expandedContainerRef = useRef(null);
 
   const onAskAI = useCallback((label, content, color) => {
     setActiveNode({ label, content, color });
   }, []);
+
+  useEffect(() => {
+    if (!isExpanded) return undefined;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleWindowKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setIsExpanded(false);
+      }
+    };
+
+    window.addEventListener("keydown", handleWindowKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleWindowKeyDown);
+    };
+  }, [isExpanded]);
 
   const result = useMemo(
     () => (mindmapData ? jsonToFlowElements(mindmapData, onJumpToPage, onAskAI, dark) : null),
@@ -805,13 +828,13 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage, contai
   const panelBg   = dark ? "#0f172a" : "#ffffff";
   const panelBorder = dark ? "#1e293b" : "#e2e8f0";
 
-  return (
+  const body = (
     <div
-      className={`w-full overflow-hidden rounded-2xl border ${borderCls}`}
-      style={{ height: isMobile ? 480 : 680, background: canvasBg, display: "flex", position: "relative" }}
+      className={isExpanded ? "w-full overflow-hidden" : `w-full overflow-hidden rounded-2xl border ${borderCls}`}
+      style={{ height: isExpanded ? "100%" : (isMobile ? 480 : 680), background: canvasBg, display: "flex", position: "relative" }}
     >
       {/* mindmap canvas — full width on mobile */}
-      <div ref={containerRef} style={{ flex: 1, position: "relative", minWidth: 0 }}>
+      <div ref={isExpanded ? expandedContainerRef : containerRef} style={{ flex: 1, position: "relative", minWidth: 0 }}>
         <ReactFlowProvider>
           <MindMapFlow result={result} dark={dark} />
         </ReactFlowProvider>
@@ -855,5 +878,52 @@ export default function MindMapView({ summary, mindmapData, onJumpToPage, contai
         <NodeAIPanel activeNode={activeNode} onJumpToPage={onJumpToPage} dark={dark} panelBg={panelBg} panelBorder={panelBorder} />
       )}
     </div>
+  );
+
+  return (
+    <>
+      {!isExpanded && (
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setIsExpanded(true)}
+            className="absolute right-3 top-3 z-20 inline-flex items-center justify-center rounded-full bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-900 shadow-sm ring-1 ring-slate-200 transition hover:bg-white"
+          >
+            크게 보기
+          </button>
+          {body}
+        </div>
+      )}
+
+      {isExpanded && createPortal(
+        <div
+          className="fixed inset-0 z-[170] flex flex-col bg-slate-950/80 backdrop-blur-sm sm:px-5 sm:py-5"
+          role="dialog"
+          aria-modal="true"
+          aria-label="마인드맵 확대 보기"
+          onClick={() => setIsExpanded(false)}
+        >
+          <div
+            className="mx-auto flex h-full w-full max-w-[1600px] flex-1 flex-col overflow-hidden rounded-none border-0 border-white/10 bg-slate-950/95 shadow-2xl shadow-black/60 sm:rounded-[2rem] sm:border"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="app-safe-top flex flex-wrap items-center justify-end gap-2 border-b border-white/10 px-4 py-2 sm:px-6">
+              <button
+                type="button"
+                onClick={() => setIsExpanded(false)}
+                className="inline-flex items-center justify-center rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-slate-900 transition hover:bg-slate-100"
+              >
+                닫기
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 p-0 sm:p-3 lg:p-4">
+              {body}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
   );
 }
