@@ -898,9 +898,9 @@ function SummaryCard({
                   type="button"
                   onClick={goPrev}
                   disabled={!canGoPrev}
-                  className="ghost-button text-xs text-slate-200"
+                  className="ghost-button text-xs text-white"
                   data-ghost-size="sm"
-                  style={{ "--ghost-color": "148, 163, 184" }}
+                  style={{ "--ghost-color": "255, 255, 255" }}
                 >
                   이전
                 </button>
@@ -911,18 +911,18 @@ function SummaryCard({
                   type="button"
                   onClick={goNext}
                   disabled={!canGoNext}
-                  className="ghost-button text-xs text-slate-200"
+                  className="ghost-button text-xs text-white"
                   data-ghost-size="sm"
-                  style={{ "--ghost-color": "148, 163, 184" }}
+                  style={{ "--ghost-color": "255, 255, 255" }}
                 >
                   다음
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsExpanded(false)}
-                  className="ghost-button text-xs text-slate-200"
+                  className="ghost-button text-xs text-white"
                   data-ghost-size="sm"
-                  style={{ "--ghost-color": "226, 232, 240" }}
+                  style={{ "--ghost-color": "255, 255, 255" }}
                 >
                   닫기
                 </button>
