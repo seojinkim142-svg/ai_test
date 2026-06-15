@@ -220,27 +220,23 @@ export default function MockExamPanel({
   );
 
   const renderMockExamItem = useCallback(
-    (item, number, mobile = false) => {
+    (item, number) => {
       const choices = Array.isArray(item?.choices) ? item.choices : [];
       const isOx = item?.type === "ox";
       const isShort = item?.type === "quiz-short";
       const isMultiple = !isOx && !isShort;
-      const numberCls = mobile ? "text-base font-semibold text-black" : "text-[13px] font-semibold text-black";
-      const promptCls = mobile ? "text-base text-black" : "text-[13px] text-black";
-      const metaCls = mobile ? "text-sm text-black/80" : "text-[12px] text-black/80";
-      const choiceCls = mobile ? "text-sm text-black/85" : "text-[12px] text-black/85";
       return (
         <div key={`mock-exam-q-${number}`} className="space-y-2">
-          <p className={numberCls}>{number}.</p>
-          {renderMockRichText(item?.prompt, promptCls)}
-          {isOx && <p className={metaCls}>1) O  2) X</p>}
-          {isShort && <p className={metaCls}>답 ____________________</p>}
+          <p className="text-[13px] font-semibold text-black">{number}.</p>
+          {renderMockRichText(item?.prompt, "text-[13px] text-black")}
+          {isOx && <p className="text-[12px] text-black/80">1) O  2) X</p>}
+          {isShort && <p className="text-[12px] text-black/80">답 ____________________</p>}
           {isMultiple && choices.length > 0 && (
-            <div className={mobile ? "flex flex-col gap-1.5" : "grid grid-cols-2 gap-x-4 gap-y-1"}>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[12px] text-black/85">
               {choices.slice(0, 4).map((choice, idx) => (
                 <div key={`choice-${number}-${idx}`} className="flex gap-2">
-                  <span className={mobile ? "w-5 text-sm" : "w-4"}>{idx + 1})</span>
-                  {renderMockRichText(choice, `min-w-0 flex-1 ${choiceCls}`)}
+                  <span className="w-4">{idx + 1})</span>
+                  {renderMockRichText(choice, "min-w-0 flex-1 text-[12px] text-black/85")}
                 </div>
               ))}
             </div>
@@ -482,16 +478,7 @@ export default function MockExamPanel({
                 <p className="text-sm text-slate-400">모의고사 문항이 없습니다.</p>
               )}
               {mockExamOrderedItems.length > 0 && (
-                <div className="space-y-2 rounded-2xl bg-white p-4 text-black sm:hidden">
-                  {mockExamOrderedItems.map((item, idx) => (
-                    <div key={`mock-exam-mobile-q-${idx}`} className={idx > 0 ? "border-t border-black/10 pt-4" : ""}>
-                      {renderMockExamItem(item, idx + 1, true)}
-                    </div>
-                  ))}
-                </div>
-              )}
-              {mockExamOrderedItems.length > 0 && (
-                <div className="hidden overflow-x-auto sm:block">
+                <div className="overflow-x-auto">
                   <div className="flex flex-col items-center gap-10" style={{ minWidth: "794px" }}>
                     {mockExamPages.map((pageItems, pageIndex) => {
                       const isFourGrid = pageItems.length === 4;
