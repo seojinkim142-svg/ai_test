@@ -879,14 +879,14 @@ function SummaryCard({
 
       {isExpanded && (
         <div
-          className="fixed inset-0 z-[170] bg-slate-950/80 px-3 py-4 backdrop-blur-sm sm:px-5 sm:py-5"
+          className="fixed inset-0 z-[170] flex flex-col bg-slate-950/80 backdrop-blur-sm sm:px-5 sm:py-5"
           role="dialog"
           aria-modal="true"
           aria-label="요약 확대 보기"
           onClick={() => setIsExpanded(false)}
         >
           <div
-            className="mx-auto flex h-full w-full max-w-[1600px] flex-col overflow-hidden rounded-[2rem] border border-white/10 bg-slate-950/95 shadow-2xl shadow-black/60"
+            className="mx-auto flex h-full w-full max-w-[1600px] flex-1 flex-col overflow-hidden rounded-none border-0 border-white/10 bg-slate-950/95 shadow-2xl shadow-black/60 sm:rounded-[2rem] sm:border"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-4 sm:px-6">
@@ -929,10 +929,10 @@ function SummaryCard({
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 p-3 sm:p-5 lg:p-6">
+            <div className="min-h-0 flex-1 p-0 sm:p-5 lg:p-6">
               <div
                 ref={expandedScrollContainerRef}
-                className="show-scrollbar h-full overflow-auto rounded-[1.75rem] border border-white/10 bg-slate-900/50 p-4 sm:p-6 lg:p-8"
+                className="show-scrollbar h-full overflow-auto rounded-none border-0 border-white/10 bg-slate-900/50 p-4 sm:rounded-[1.75rem] sm:border sm:p-6 lg:p-8"
                 onContextMenu={handleContextMenu}
               >
                 {renderMarkdownPage(currentPage, markdownComponents)}
