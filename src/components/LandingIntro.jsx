@@ -7,6 +7,7 @@ import { ContainerScroll } from "./ui/container-scroll-animation";
 import RadialOrbitalTimeline from "./ui/radial-orbital-timeline";
 import { COMPANY_INFO_ITEMS, LEGAL_LINKS } from "../legal/companyInfo";
 import { OUTPUT_LANGUAGE_OPTIONS, SHOWCASE_COPY } from "../pages/showcaseCopy";
+import TermsAgreementDialog from "./TermsAgreementDialog";
 
 const FOOTER_COMPANY_INFO = COMPANY_INFO_ITEMS.find((item) => item.label === "상호") ?? COMPANY_INFO_ITEMS[0];
 
@@ -21,6 +22,7 @@ const scrollToFeatures = () => {
 
 const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko", setOutputLanguage }) {
   const [activePlanId, setActivePlanId] = useState("premium");
+  const [showTermsDialog, setShowTermsDialog] = useState(false);
 
   const copy = SHOWCASE_COPY[outputLanguage] ?? SHOWCASE_COPY.ko;
 
@@ -396,19 +398,37 @@ const LandingIntro = memo(function LandingIntro({ onStart, outputLanguage = "ko"
               </div>
             ) : null}
             <nav className="flex flex-wrap justify-center gap-4 text-sm">
-              {visibleLegalLinks.map((link) => (
-                <a
-                  key={link.href}
-                  href={link.href}
-                  className="text-[#666666] transition hover:text-[#006FEE]"
-                >
-                  {link.label}
-                </a>
-              ))}
+              {visibleLegalLinks.map((link) =>
+                link.href === "/terms" || link.href === "/privacy" ? (
+                  <button
+                    key={link.href}
+                    type="button"
+                    onClick={() => setShowTermsDialog(true)}
+                    className="text-[#666666] transition hover:text-[#006FEE]"
+                  >
+                    {link.label}
+                  </button>
+                ) : (
+                  <a
+                    key={link.href}
+                    href={link.href}
+                    className="text-[#666666] transition hover:text-[#006FEE]"
+                  >
+                    {link.label}
+                  </a>
+                )
+              )}
             </nav>
           </div>
         </div>
       </footer>
+
+      <TermsAgreementDialog
+        open={showTermsDialog}
+        onOpenChange={setShowTermsDialog}
+        onAgree={() => setShowTermsDialog(false)}
+        outputLanguage={outputLanguage}
+      />
     </div>
   );
 });
