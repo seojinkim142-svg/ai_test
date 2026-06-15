@@ -76,10 +76,22 @@ async function syncServiceWorkerRegistration() {
     });
 
     if (probe.ok) {
+      const hadController = Boolean(navigator.serviceWorker.controller);
       const registration = await navigator.serviceWorker.register(workerUrl);
       registration.update().catch(() => {
         // Ignore explicit update check failures.
       });
+
+      // 새 배포로 서비스워커가 교체되면, 이미 열려있던 탭은 새로고침해 최신 자산을 받도록 함
+      if (hadController) {
+        let reloaded = false;
+        navigator.serviceWorker.addEventListener("controllerchange", () => {
+          if (reloaded) return;
+          reloaded = true;
+          window.location.reload();
+        });
+      }
+
       return;
     }
   } catch (error) {
