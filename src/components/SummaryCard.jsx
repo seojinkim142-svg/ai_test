@@ -877,7 +877,7 @@ function SummaryCard({
         )}
       </div>
 
-      {isExpanded && (
+      {isExpanded && createPortal(
         <div
           className="fixed inset-0 z-[170] flex flex-col bg-slate-950/80 backdrop-blur-sm sm:px-5 sm:py-5"
           role="dialog"
@@ -939,7 +939,8 @@ function SummaryCard({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {ctxMenu && createPortal(
