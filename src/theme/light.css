@@ -153,6 +153,12 @@
   color: #0f172a !important;
 }
 
+:root.theme-light .nav-account-avatar {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+}
+
 :root.theme-light .bg-white\/5 {
   background-color: rgba(15, 23, 42, 0.04) !important;
 }

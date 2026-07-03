@@ -55,7 +55,7 @@ function NavItem({ icon, label, active, onClick, isOpen }) {
       className={cn(
         "flex h-9 w-full items-center gap-3 rounded-lg px-2.5 text-sm font-medium transition",
         active
-          ? "bg-emerald-500/15 text-emerald-300"
+          ? "bg-emerald-500/15 text-white"
           : "text-slate-300 hover:text-white"
       )}
     >
@@ -322,7 +322,7 @@ export default function NavRail({
           />
           {user && (
             <div className="flex items-center gap-2 rounded-lg px-2.5 py-1.5">
-              <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-700 text-[11px] font-semibold text-slate-200">
+              <div className="nav-account-avatar flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-700 text-[11px] font-semibold text-slate-200">
                 {emailInitial}
               </div>
               <motion.div
