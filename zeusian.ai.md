@@ -206,7 +206,7 @@
 | 프리미엄 프로필 (최대 4명) | X | X | O |
 | 공유 워크스페이스 | X | X | O |
 
-> **주의**: 정확한 제한값은 `src/utils/appStateHelpers.js`의 `PDF_MAX_SIZE_BY_TIER` 및 App.jsx의 usage count 로직을 참조. Free 티어의 생성 횟수 제한이 있으며 `FREE_USAGE_LIMITS` 객체로 관리된다.
+> **주의**: 정확한 제한값은 `src/utils/appStateHelpers.js`의 `PDF_MAX_SIZE_BY_TIER` 참조. Free 티어의 생성 횟수 제한은 `src/App.jsx`의 `limits` useMemo(요약/퀴즈/OX/플래시카드 각 1회, 업로드 4개)와 `hasReached()` 콜백으로 판정하며, 실제 카운트 저장은 `src/utils/studyArtifacts.js`의 `FREE_USAGE_ARTIFACT_KEY`(`bumpFreeUsageCount` 등)가 담당한다.
 
 ---
 
@@ -225,16 +225,17 @@ React + Vite SPA. Supabase(인증·DB·스토리지), DeepSeek AI API, Capacitor
 
 ```
 src/
-  App.jsx              # 메인 진입점 — 거대 단일 파일(~2,500줄). 상태 관리 총괄.
+  App.jsx              # 메인 진입점 — 거대 단일 파일(~5,565줄). 상태 관리 총괄.
   constants.js         # MODEL = "deepseek-chat", LETTERS
   config/auth.js       # AUTH_ENABLED 플래그
-  pages/               # 4개 페이지 컴포넌트
+  pages/               # 5개 페이지 컴포넌트
     StartPage.jsx      # 랜딩·로그인 화면
-    DetailPage.jsx     # PDF 상세 화면 (요약·퀴즈·튜터·플래시카드)
+    DetailPage.jsx     # PDF 상세 화면 (요약·퀴즈·튜터·플래시카드 등 패널 조립)
     LegalPage.jsx      # 약관/개인정보
-    PromoPage.jsx      # 프로모션
-  components/          # UI 컴포넌트 (25개)
-  hooks/               # 커스텀 훅 (9개)
+    PromoPage.jsx      # 프로모션 랜딩(다국어 출력언어 감지)
+    ShowcasePage.jsx   # 마케팅용 쇼케이스 랜딩(요금제/기능 타임라인). main.jsx에서 경로 `/showcase`일 때만 렌더링
+  components/          # UI 컴포넌트 (최상위 39개 + ui/, summary/, diagnostic/ 서브폴더)
+  hooks/               # 커스텀 훅 (19개)
   services/            # 외부 API 클라이언트
   utils/               # 순수 유틸리티
   legal/               # 약관 텍스트
@@ -246,7 +247,7 @@ api/                   # Vercel Serverless Functions
   nicepayments/        # NicePayments 카드 결제
   feedback/            # 피드백 이메일
   document/            # DOCX/PPTX → PDF 변환 (Gotenberg)
-  stripe/              # Stripe (현재 미사용 가능)
+  # stripe/ 는 삭제됨 — 결제는 kakaopay/nicepayments만 사용
 
 server/                # 로컬 개발용 독립 서버 (포트 8787~8793)
 database/              # Supabase SQL 스키마 파일

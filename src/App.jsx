@@ -2257,8 +2257,9 @@ function App() {
         if (!docIds.length) return;
         const data = await fetchMultipleDocArtifacts({ userId: user.id, docIds });
         setAllArtifacts(data || []);
-      } catch {
-        // 실패해도 무시
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn("학습 현황 불러오기에 실패했습니다: artifacts", err);
       }
     },
     [user]
@@ -4197,8 +4198,7 @@ function App() {
       resetQuizState();
       requestFolderQuiz(folderId);
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [buildFolderTutorContext, getOpenAiService]
+    [requestFolderQuiz]
   );
 
   const handleFolderSelectChoice = (questionIdx, choiceIdx) => {
