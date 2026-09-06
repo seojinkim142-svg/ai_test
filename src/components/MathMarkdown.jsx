@@ -10,6 +10,7 @@ const BARE_LATEX_INLINE_RE =
   /(^|[\s(])((?:\\(?:frac|dfrac|tfrac|sum|prod|int|sqrt|left|right|cdot|times|to|infty|leq?|geq?|neq?|approx|mathbb|mathbf|mathrm|text|lim|alpha|beta|gamma|delta|theta|lambda|mu|nu|pi|sigma|omega)[^,\n)]{0,260}))/g;
 const BRACKETED_DISPLAY_MATH_RE = /\\\[\s*([\s\S]*?)\s*\\\]/g;
 const BRACKETED_INLINE_MATH_RE = /\\\(\s*([\s\S]*?)\s*\\\)/g;
+const PLAIN_SQRT_RE = /(?<!\\)\bsqrt\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g;
 
 export const MARKDOWN_MATH_REMARK_PLUGINS = [remarkGfm, remarkMath];
 export const MARKDOWN_MATH_REHYPE_PLUGINS = [rehypeKatex];
@@ -75,8 +76,13 @@ function normalizeBracketMathDelimiters(text) {
     });
 }
 
+function normalizePlainSqrt(text) {
+  return String(text || "").replace(PLAIN_SQRT_RE, (full, expr) => `$\\sqrt{${expr}}$`);
+}
+
 export function normalizeMathMarkdown(rawText) {
-  const source = normalizeBracketMathDelimiters(String(rawText || "").replace(/\r\n/g, "\n")).trim();
+  const withRoots = normalizePlainSqrt(String(rawText || "").replace(/\r\n/g, "\n"));
+  const source = normalizeBracketMathDelimiters(withRoots).trim();
   if (!source) return "";
 
   const placeholders = [];
