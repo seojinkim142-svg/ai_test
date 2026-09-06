@@ -6,6 +6,7 @@ import {
   normalizeMathMarkdown,
 } from "./MathMarkdown";
 import { getTutorCopy } from "../utils/tutorCopy";
+import GraphRenderer from "./GraphRenderer";
 
 const TUTOR_BARE_LATEX_RE =
   /\\(?:begin|end|frac|dfrac|tfrac|sum|prod|int|sqrt|left|right|cdot|times|to|infty|leq?|geq?|neq?|approx|mathbb|mathbf|mathrm|text|quad|qquad|lim)\b/;
@@ -122,12 +123,16 @@ function AiTutorPanel({
       ul: ({ children }) => <ul className="my-2 list-disc pl-5 break-all">{children}</ul>,
       ol: ({ children }) => <ol className="my-2 list-decimal pl-5 break-all">{children}</ol>,
       li: ({ children }) => <li className="my-1 break-all">{children}</li>,
-      code: ({ inline, children }) =>
-        inline ? (
+      code: ({ inline, className, children }) => {
+        if (!inline && /language-graph\b/.test(className || "")) {
+          return <GraphRenderer raw={String(children).replace(/\n$/, "")} />;
+        }
+        return inline ? (
           <code className="rounded bg-white/10 px-1 py-0.5 text-[0.95em] break-all">{children}</code>
         ) : (
           <code className="block overflow-x-auto rounded-xl bg-black/25 p-3 text-xs">{children}</code>
-        ),
+        );
+      },
     }),
     []
   );

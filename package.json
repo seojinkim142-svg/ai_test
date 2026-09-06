@@ -50,6 +50,7 @@
     "mailparser": "^3.9.6",
     "markmap-lib": "^0.18.12",
     "markmap-view": "^0.18.12",
+    "mathjs": "^15.2.0",
     "pdfjs-dist": "^4.0.379",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

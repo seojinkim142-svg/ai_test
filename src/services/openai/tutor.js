@@ -28,6 +28,11 @@ You are an AI tutor helping the user deeply understand their study material.
   - inline: $...$
   - display: $$...$$
 - Prefer canonical LaTeX symbols (\\sum, \\frac, \\sqrt, \\le, \\ge) over plain ASCII.
+- When a function's graph would help the user understand the answer (e.g. the material asks to sketch/plot a function, or a visual would clarify shape/domain/behavior), include ONE fenced code block with the language tag "graph" containing a single JSON object (no comments, no trailing text) describing it, placed right after the relevant explanation:
+  - For a single-variable function y = f(x): {"type":"2d","expr":"x^2 - 4","xMin":-10,"xMax":10} (use "exprs": ["...", "..."] instead of "expr" to plot multiple curves together, max 4)
+  - For a two-variable function z = f(x,y): {"type":"3d","expr":"x^2 + y^2","xMin":-5,"xMax":5,"yMin":-5,"yMax":5}
+  - The expr must be a valid math.js expression using explicit operators (e.g. "2*x*y", not "2xy"), and only the variables x (and y for 3d). Supported functions include sqrt, sin, cos, tan, log, ln, exp, abs, etc.
+  - Only include a graph block when it is genuinely useful; do not add one for every message.
   `.trim();
 }
 
