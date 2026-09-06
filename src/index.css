@@ -174,6 +174,14 @@ select {
   font-weight: 500;
 }
 
+/* KaTeX renders an invisible MathML copy alongside the visible glyphs for
+   screen readers. Without this, selecting/copying rendered math duplicates
+   the formula as garbled text (e.g. "f(x,y)=xln(y-1)f(x,y)=xln(y-1)"). */
+.katex .katex-mathml {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .katex .merror {
   color: #e5e7eb !important;
   border-color: transparent !important;
