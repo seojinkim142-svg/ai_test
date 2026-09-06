@@ -64,6 +64,7 @@ import {
   extractChapterRangesFromToc,
   extractPdfTextFromPages,
   extractPdfPageTexts,
+  detectMathHeavyPageNumbers,
   generatePdfThumbnail,
   extractPdfTextWithCaching,
 } from "./utils/pdf";
@@ -4342,7 +4343,33 @@ function App() {
           if (totalPages > 0) {
             const allPageNumbers = Array.from({ length: Math.min(totalPages, 80) }, (_, i) => i + 1);
             const pageResult = await extractPdfPageTexts(file, allPageNumbers, { maxCharsPerPage: 2500 });
-            const pageEntries = Array.isArray(pageResult?.pages) ? pageResult.pages : [];
+            let pageEntries = Array.isArray(pageResult?.pages) ? pageResult.pages : [];
+
+            // 수식이 많은 페이지는 텍스트 레이어가 깨져 있을 수 있어 OCR로 다시 확인
+            const mathHeavyPages = detectMathHeavyPageNumbers(pageEntries, { maxPages: 12 });
+            if (mathHeavyPages.length) {
+              try {
+                const ocrResult = await extractPdfPageTexts(file, mathHeavyPages, {
+                  maxCharsPerPage: 2500,
+                  useOcr: true,
+                  forceOcrPages: mathHeavyPages,
+                  ocrLang: "kor+eng",
+                });
+                const ocrByPage = new Map(
+                  (ocrResult?.pages || [])
+                    .filter((p) => p?.ocrUsed && String(p?.text || "").trim())
+                    .map((p) => [p.pageNumber, p.text])
+                );
+                if (ocrByPage.size) {
+                  pageEntries = pageEntries.map((p) =>
+                    ocrByPage.has(p.pageNumber) ? { ...p, text: ocrByPage.get(p.pageNumber) } : p
+                  );
+                }
+              } catch {
+                // OCR 보강 실패해도 기존 텍스트 레이어로 계속 진행
+              }
+            }
+
             const tagged = pageEntries
               .filter((p) => String(p?.text || "").trim())
               .map((p) => `[p.${p.pageNumber}]\n${String(p.text).trim()}`)
