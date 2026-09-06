@@ -4345,16 +4345,24 @@ function App() {
             const pageResult = await extractPdfPageTexts(file, allPageNumbers, { maxCharsPerPage: 2500 });
             let pageEntries = Array.isArray(pageResult?.pages) ? pageResult.pages : [];
 
-            // 수식이 많은 페이지는 텍스트 레이어가 깨져 있을 수 있어 OCR로 다시 확인
-            const mathHeavyPages = detectMathHeavyPageNumbers(pageEntries, { maxPages: 12 });
+            // 수식이 많은 페이지는 텍스트 레이어가 깨져 있을 수 있어 OCR로 다시 확인.
+            // OCR은 느릴 수 있으므로 페이지 수와 총 대기 시간에 상한을 둬서
+            // 요약 생성 전체가 무한정 지연되지 않게 한다.
+            const mathHeavyPages = detectMathHeavyPageNumbers(pageEntries, { maxPages: 4 });
             if (mathHeavyPages.length) {
               try {
-                const ocrResult = await extractPdfPageTexts(file, mathHeavyPages, {
-                  maxCharsPerPage: 2500,
-                  useOcr: true,
-                  forceOcrPages: mathHeavyPages,
-                  ocrLang: "kor+eng",
-                });
+                const ocrTimeout = new Promise((_, reject) =>
+                  setTimeout(() => reject(new Error("timeout")), 25000)
+                );
+                const ocrResult = await Promise.race([
+                  extractPdfPageTexts(file, mathHeavyPages, {
+                    maxCharsPerPage: 2500,
+                    useOcr: true,
+                    forceOcrPages: mathHeavyPages,
+                    ocrLang: "kor+eng",
+                  }),
+                  ocrTimeout,
+                ]);
                 const ocrByPage = new Map(
                   (ocrResult?.pages || [])
                     .filter((p) => p?.ocrUsed && String(p?.text || "").trim())
@@ -4366,7 +4374,7 @@ function App() {
                   );
                 }
               } catch {
-                // OCR 보강 실패해도 기존 텍스트 레이어로 계속 진행
+                // OCR 보강 실패/타임아웃이어도 기존 텍스트 레이어로 계속 진행
               }
             }
 
