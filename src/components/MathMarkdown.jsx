@@ -81,8 +81,7 @@ function normalizePlainSqrt(text) {
 }
 
 export function normalizeMathMarkdown(rawText) {
-  const withRoots = normalizePlainSqrt(String(rawText || "").replace(/\r\n/g, "\n"));
-  const source = normalizeBracketMathDelimiters(withRoots).trim();
+  const source = normalizeBracketMathDelimiters(String(rawText || "").replace(/\r\n/g, "\n")).trim();
   if (!source) return "";
 
   const placeholders = [];
@@ -109,7 +108,7 @@ export function normalizeMathMarkdown(rawText) {
       }
       if (inCodeFence || line.includes("`")) return line;
 
-      const working = autoFixBrokenDisplayMathLine(String(line || "").replace(/\\\$/g, "$"));
+      const working = autoFixBrokenDisplayMathLine(normalizePlainSqrt(String(line || "")).replace(/\\\$/g, "$"));
       return working.replace(BARE_LATEX_INLINE_RE, (full, prefix, expr) => {
         const candidate = normalizeLatexSnippet(expr);
         if (!candidate) return full;
