@@ -682,9 +682,11 @@ function SummaryCard({
       if (typeof onAskTutor !== "function") return;
       e.preventDefault();
       e.stopPropagation();
-      const text = (
+      const rawText = (
         e.target?.ownerDocument ?? document
-      ).getSelection?.()?.toString().trim() ?? "";
+      ).getSelection?.()?.toString() ?? "";
+      // KaTeX 수식 안에서 선택하면 분수/루트 줄 사이에 줄바꿈이 섞여 들어올 수 있어 제거
+      const text = rawText.replace(/\s*\n+\s*/g, " ").replace(/\s{2,}/g, " ").trim();
       if (!text) return;
       // Keep menu inside viewport
       const menuW = 190;
