@@ -174,12 +174,20 @@ select {
   font-weight: 500;
 }
 
-/* KaTeX renders an invisible MathML copy alongside the visible glyphs for
-   screen readers. Without this, selecting/copying rendered math duplicates
-   the formula as garbled text (e.g. "f(x,y)=xln(y-1)f(x,y)=xln(y-1)"). */
-.katex .katex-mathml {
+/* KaTeX renders each formula twice: an invisible MathML copy for screen
+   readers (.katex-mathml, flat text) and the visible glyphs (.katex-html,
+   built from stacked spans for fractions/roots). Selecting the visible
+   layer copies both, and the stacked spans in .katex-html insert stray
+   line breaks (e.g. a fraction's numerator/denominator land on separate
+   lines). So we do the opposite of the "obvious" fix: hide .katex-html
+   from selection and let the flat .katex-mathml text be what gets copied. */
+.katex .katex-html {
   -webkit-user-select: none;
   user-select: none;
+}
+.katex .katex-mathml {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .katex .merror {
