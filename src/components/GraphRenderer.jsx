@@ -1,219 +1,140 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { compileExpr, parseGraphSpecJson } from "../utils/graphExpr";
+
+let plotlyPromise = null;
+function loadPlotly() {
+  if (!plotlyPromise) {
+    plotlyPromise = import("plotly.js-dist-min").then((mod) => mod.default || mod);
+  }
+  return plotlyPromise;
+}
 
 const CURVE_COLORS = ["#34d399", "#60a5fa", "#f472b6", "#fbbf24"];
 
-function Graph2D({ spec }) {
-  const width = 480;
-  const height = 300;
-  const pad = 28;
+const BASE_LAYOUT = {
+  paper_bgcolor: "rgba(0,0,0,0)",
+  plot_bgcolor: "rgba(0,0,0,0)",
+  font: { color: "#cbd5e1", size: 11 },
+  margin: { l: 40, r: 20, t: 20, b: 36 },
+};
 
-  const { paths, xMin, xMax, yMin, yMax } = useMemo(() => {
-    const samples = 240;
-    const fns = spec.exprs.map((expr) => compileExpr(expr));
-    const series = fns.map(() => []);
-    let yLo = Infinity;
-    let yHi = -Infinity;
+const AXIS_STYLE = {
+  gridcolor: "rgba(255,255,255,0.12)",
+  zerolinecolor: "rgba(255,255,255,0.25)",
+  linecolor: "rgba(255,255,255,0.2)",
+  color: "#cbd5e1",
+};
 
-    for (let i = 0; i <= samples; i += 1) {
-      const x = spec.xMin + ((spec.xMax - spec.xMin) * i) / samples;
-      fns.forEach((fn, idx) => {
-        const y = fn({ x });
-        series[idx].push([x, y]);
-        if (Number.isFinite(y)) {
-          if (y < yLo) yLo = y;
-          if (y > yHi) yHi = y;
-        }
-      });
-    }
-
-    if (!Number.isFinite(yLo) || !Number.isFinite(yHi)) {
-      yLo = -1;
-      yHi = 1;
-    }
-    if (yHi - yLo < 1e-6) {
-      yLo -= 1;
-      yHi += 1;
-    }
-    const marginY = (yHi - yLo) * 0.1;
-    yLo -= marginY;
-    yHi += marginY;
-
-    const toPx = (x) => pad + ((x - spec.xMin) / (spec.xMax - spec.xMin)) * (width - pad * 2);
-    const toPy = (y) => height - pad - ((y - yLo) / (yHi - yLo)) * (height - pad * 2);
-
-    const builtPaths = series.map((points) => {
-      let d = "";
-      let drawing = false;
-      for (const [x, y] of points) {
-        if (!Number.isFinite(y)) {
-          drawing = false;
-          continue;
-        }
-        const px = toPx(x);
-        const py = toPy(y);
-        d += drawing ? ` L ${px.toFixed(2)} ${py.toFixed(2)}` : ` M ${px.toFixed(2)} ${py.toFixed(2)}`;
-        drawing = true;
-      }
-      return d;
-    });
-
-    return { paths: builtPaths, xMin: spec.xMin, xMax: spec.xMax, yMin: yLo, yMax: yHi, toPx, toPy };
-  }, [spec]);
-
-  const zeroX = paths.toPx ? paths.toPx(0) : null;
-  const zeroY = paths.toPy ? paths.toPy(0) : null;
-
-  return (
-    <div className="my-2 overflow-x-auto rounded-2xl border border-white/10 bg-black/20 p-3">
-      <svg viewBox={`0 0 ${width} ${height}`} width="100%" className="block">
-        <rect x={0} y={0} width={width} height={height} fill="transparent" />
-        {zeroY != null && zeroY >= pad && zeroY <= height - pad && (
-          <line x1={pad} y1={zeroY} x2={width - pad} y2={zeroY} stroke="rgba(255,255,255,0.25)" strokeWidth="1" />
-        )}
-        {zeroX != null && zeroX >= pad && zeroX <= width - pad && (
-          <line x1={zeroX} y1={pad} x2={zeroX} y2={height - pad} stroke="rgba(255,255,255,0.25)" strokeWidth="1" />
-        )}
-        <rect x={pad} y={pad} width={width - pad * 2} height={height - pad * 2} fill="none" stroke="rgba(255,255,255,0.12)" />
-        {spec.exprs.map((expr, idx) => (
-          <path key={expr + idx} d={paths[idx]} fill="none" stroke={CURVE_COLORS[idx % CURVE_COLORS.length]} strokeWidth="2" />
-        ))}
-      </svg>
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-slate-400">
-        {spec.exprs.map((expr, idx) => (
-          <span key={expr + idx} className="inline-flex items-center gap-1.5">
-            <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: CURVE_COLORS[idx % CURVE_COLORS.length] }} />
-            y = {expr}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
+function buildGrid(spec) {
+  const fn = compileExpr(spec.expr);
+  const steps = 45;
+  const xs = Array.from({ length: steps + 1 }, (_, i) => spec.xMin + ((spec.xMax - spec.xMin) * i) / steps);
+  const ys = Array.from({ length: steps + 1 }, (_, i) => spec.yMin + ((spec.yMax - spec.yMin) * i) / steps);
+  const z = ys.map((y) => xs.map((x) => {
+    const value = fn({ x, y });
+    return Number.isFinite(value) ? value : null;
+  }));
+  return { xs, ys, z };
 }
 
-function Graph3D({ spec }) {
-  const canvasRef = useRef(null);
+function GraphPlot({ spec }) {
+  const containerRef = useRef(null);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const width = 480;
-    const height = 340;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    canvas.style.width = "100%";
-    canvas.style.height = `${height}px`;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, height);
+    let cancelled = false;
+    let plottedNode = null;
 
-    const fn = compileExpr(spec.expr);
-    const steps = 22;
-    const grid = [];
-    let zLo = Infinity;
-    let zHi = -Infinity;
+    loadPlotly()
+      .then((Plotly) => {
+        if (cancelled || !containerRef.current) return;
+        plottedNode = containerRef.current;
 
-    for (let i = 0; i <= steps; i += 1) {
-      const row = [];
-      const x = spec.xMin + ((spec.xMax - spec.xMin) * i) / steps;
-      for (let j = 0; j <= steps; j += 1) {
-        const y = spec.yMin + ((spec.yMax - spec.yMin) * j) / steps;
-        const z = fn({ x, y });
-        if (Number.isFinite(z)) {
-          if (z < zLo) zLo = z;
-          if (z > zHi) zHi = z;
+        if (spec.type === "3d") {
+          const { xs, ys, z } = buildGrid(spec);
+          Plotly.newPlot(
+            plottedNode,
+            [
+              {
+                type: "surface",
+                x: xs,
+                y: ys,
+                z,
+                colorscale: "Viridis",
+                showscale: false,
+                contours: { z: { show: true, usecolormap: true, project: { z: true } } },
+              },
+            ],
+            {
+              ...BASE_LAYOUT,
+              scene: {
+                xaxis: { title: "x", ...AXIS_STYLE },
+                yaxis: { title: "y", ...AXIS_STYLE },
+                zaxis: { title: "z", ...AXIS_STYLE },
+                bgcolor: "rgba(0,0,0,0)",
+              },
+              margin: { l: 0, r: 0, t: 10, b: 0 },
+            },
+            { displayModeBar: false, responsive: true }
+          );
+        } else {
+          const samples = 400;
+          const traces = spec.exprs.map((expr, idx) => {
+            const fn = compileExpr(expr);
+            const x = [];
+            const y = [];
+            for (let i = 0; i <= samples; i += 1) {
+              const xv = spec.xMin + ((spec.xMax - spec.xMin) * i) / samples;
+              const yv = fn({ x: xv });
+              x.push(xv);
+              y.push(Number.isFinite(yv) ? yv : null);
+            }
+            return {
+              type: "scatter",
+              mode: "lines",
+              x,
+              y,
+              name: `y = ${expr}`,
+              line: { color: CURVE_COLORS[idx % CURVE_COLORS.length], width: 2.5 },
+              connectgaps: false,
+            };
+          });
+          Plotly.newPlot(
+            plottedNode,
+            traces,
+            {
+              ...BASE_LAYOUT,
+              xaxis: { title: "x", ...AXIS_STYLE },
+              yaxis: { title: "y", ...AXIS_STYLE },
+              showlegend: spec.exprs.length > 1,
+              legend: { font: { color: "#cbd5e1", size: 10 }, orientation: "h", y: -0.2 },
+            },
+            { displayModeBar: false, responsive: true }
+          );
         }
-        row.push([x, y, z]);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(String(err?.message || "그래프 라이브러리를 불러오지 못했습니다."));
+      });
+
+    return () => {
+      cancelled = true;
+      if (plottedNode) {
+        loadPlotly().then((Plotly) => Plotly.purge(plottedNode)).catch(() => {});
       }
-      grid.push(row);
-    }
-    if (!Number.isFinite(zLo) || !Number.isFinite(zHi)) {
-      zLo = -1;
-      zHi = 1;
-    }
-    if (zHi - zLo < 1e-6) {
-      zLo -= 1;
-      zHi += 1;
-    }
-
-    const xSpan = spec.xMax - spec.xMin || 1;
-    const ySpan = spec.yMax - spec.yMin || 1;
-    const zSpan = zHi - zLo || 1;
-    const cosT = Math.cos(Math.PI / 6);
-    const sinT = Math.sin(Math.PI / 6);
-    const scale = 105;
-    const originX = width / 2;
-    const originY = height / 2 + 40;
-
-    const project = ([x, y, z]) => {
-      const nx = ((x - spec.xMin) / xSpan - 0.5) * 2;
-      const ny = ((y - spec.yMin) / ySpan - 0.5) * 2;
-      const nz = Number.isFinite(z) ? (((z - zLo) / zSpan) - 0.5) * 2 : 0;
-      const sx = (nx - ny) * cosT * scale;
-      const sy = (nx + ny) * sinT * scale + nz * scale * 0.85;
-      return [originX + sx, originY - sy];
     };
-
-    const colorForZ = (z) => {
-      const t = Number.isFinite(z) ? Math.min(1, Math.max(0, (z - zLo) / zSpan)) : 0.5;
-      const hue = 160 - t * 140; // emerald -> amber
-      return `hsla(${hue}, 75%, 60%, 0.75)`;
-    };
-
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= steps; i += 1) {
-      for (let j = 0; j < steps; j += 1) {
-        const a = grid[i][j];
-        const b = grid[i][j + 1];
-        if (!Number.isFinite(a[2]) || !Number.isFinite(b[2])) continue;
-        const [ax, ay] = project(a);
-        const [bx, by] = project(b);
-        ctx.strokeStyle = colorForZ((a[2] + b[2]) / 2);
-        ctx.beginPath();
-        ctx.moveTo(ax, ay);
-        ctx.lineTo(bx, by);
-        ctx.stroke();
-      }
-    }
-    for (let j = 0; j <= steps; j += 1) {
-      for (let i = 0; i < steps; i += 1) {
-        const a = grid[i][j];
-        const b = grid[i + 1][j];
-        if (!Number.isFinite(a[2]) || !Number.isFinite(b[2])) continue;
-        const [ax, ay] = project(a);
-        const [bx, by] = project(b);
-        ctx.strokeStyle = colorForZ((a[2] + b[2]) / 2);
-        ctx.beginPath();
-        ctx.moveTo(ax, ay);
-        ctx.lineTo(bx, by);
-        ctx.stroke();
-      }
-    }
-
-    // 원점 기준 축 표시
-    const axisColor = "rgba(255,255,255,0.35)";
-    ctx.strokeStyle = axisColor;
-    ctx.fillStyle = "rgba(255,255,255,0.55)";
-    ctx.font = "11px sans-serif";
-    const originPoint = project([Math.max(spec.xMin, 0), Math.max(spec.yMin, 0), zLo]);
-    const xAxisEnd = project([spec.xMax, Math.max(spec.yMin, 0), zLo]);
-    const yAxisEnd = project([Math.max(spec.xMin, 0), spec.yMax, zLo]);
-    ctx.beginPath();
-    ctx.moveTo(originPoint[0], originPoint[1]);
-    ctx.lineTo(xAxisEnd[0], xAxisEnd[1]);
-    ctx.moveTo(originPoint[0], originPoint[1]);
-    ctx.lineTo(yAxisEnd[0], yAxisEnd[1]);
-    ctx.stroke();
-    ctx.fillText("x", xAxisEnd[0] + 4, xAxisEnd[1]);
-    ctx.fillText("y", yAxisEnd[0] + 4, yAxisEnd[1]);
   }, [spec]);
 
+  if (error) {
+    return <p className="text-[11px] text-red-300">{error}</p>;
+  }
+
   return (
-    <div className="my-2 overflow-x-auto rounded-2xl border border-white/10 bg-black/20 p-3">
-      <canvas ref={canvasRef} className="block" />
-      <p className="mt-2 text-[11px] text-slate-400">z = {spec.expr}</p>
-    </div>
+    <div
+      ref={containerRef}
+      className="h-[320px] w-full"
+      style={{ minHeight: 320 }}
+    />
   );
 }
 
@@ -229,7 +150,15 @@ function GraphError({ raw }) {
 function GraphRenderer({ raw }) {
   const [spec] = useState(() => parseGraphSpecJson(raw));
   if (!spec) return <GraphError raw={raw} />;
-  return spec.type === "3d" ? <Graph3D spec={spec} /> : <Graph2D spec={spec} />;
+
+  return (
+    <div className="my-2 overflow-hidden rounded-2xl border border-white/10 bg-black/20 p-3">
+      <GraphPlot spec={spec} />
+      <p className="mt-1 text-[11px] text-slate-400">
+        {spec.type === "3d" ? `z = ${spec.expr}` : spec.exprs.map((e) => `y = ${e}`).join(",  ")}
+      </p>
+    </div>
+  );
 }
 
 export default GraphRenderer;

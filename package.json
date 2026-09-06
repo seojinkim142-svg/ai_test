@@ -52,6 +52,7 @@
     "markmap-view": "^0.18.12",
     "mathjs": "^15.2.0",
     "pdfjs-dist": "^4.0.379",
+    "plotly.js-dist-min": "^4.0.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-katex": "^3.1.0",

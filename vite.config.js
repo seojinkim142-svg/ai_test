@@ -20,6 +20,10 @@ function createManualChunks(id) {
     return "jspdf-runtime";
   }
 
+  if (normalizedId.includes("/plotly.js-dist-min/")) {
+    return "plotly-runtime";
+  }
+
   if (normalizedId.includes("/html2canvas/")) {
     return "html2canvas-runtime";
   }
