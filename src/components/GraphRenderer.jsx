@@ -151,7 +151,7 @@ function Graph3D({ spec }) {
       const ny = ((y - spec.yMin) / ySpan - 0.5) * 2;
       const nz = Number.isFinite(z) ? (((z - zLo) / zSpan) - 0.5) * 2 : 0;
       const sx = (nx - ny) * cosT * scale;
-      const sy = (nx + ny) * sinT * scale - nz * scale * 0.85;
+      const sy = (nx + ny) * sinT * scale + nz * scale * 0.85;
       return [originX + sx, originY - sy];
     };
 
