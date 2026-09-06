@@ -714,8 +714,8 @@ export default function DetailPage({
                       : undefined}
                     onAskTutor={typeof handleSendTutorMessage === "function" && typeof setPanelTab === "function"
                       ? (selectedText) => {
-                          setPanelTab("tutor");
                           handleSendTutorMessage(`다음 내용에 대해 자세히 설명해줘:\n\n"${selectedText}"`);
+                          setPanelTab("tutor");
                         }
                       : undefined}
                   />

@@ -63,7 +63,11 @@ export function useTutorActions({
         String(prompt || "").trim() ||
         (hasAttachment ? tutorCopy.defaultAttachmentPrompt : "");
       const effectiveDisplayPrompt = String(displayPrompt || effectivePrompt).trim();
-      if ((!effectivePrompt && !hasAttachment) || isTutorLoading || tutorRequestInFlightRef.current) {
+      if (!effectivePrompt && !hasAttachment) {
+        return false;
+      }
+      if (isTutorLoading || tutorRequestInFlightRef.current) {
+        setTutorError(tutorCopy.errors.replyFailed("이전 질문에 대한 답변을 기다리는 중입니다. 잠시 후 다시 시도해주세요."));
         return false;
       }
 
