@@ -1299,13 +1299,7 @@ export async function extractPdfPageTexts(file, pageNumbers, options = {}) {
     ocrMaxPixels = DEFAULT_OCR_MAX_PIXELS,
     onOcrProgress,
     maxCharsPerPage = 6000,
-    forceOcrPages = [],
   } = options || {};
-  const forceOcrPageSet = new Set(
-    (forceOcrPages || [])
-      .map((page) => Number.parseInt(page, 10))
-      .filter((page) => Number.isFinite(page) && page > 0)
-  );
   const progressReporter = createOcrProgressReporter(onOcrProgress);
   const totalPages = pdf.numPages;
   const normalizedPages = Array.from(
@@ -1329,7 +1323,7 @@ export async function extractPdfPageTexts(file, pageNumbers, options = {}) {
     };
     pages.push(entry);
     pageEntries.set(pageNumber, entry);
-    if (!normalized || forceOcrPageSet.has(pageNumber)) missingPages.push(pageNumber);
+    if (!normalized) missingPages.push(pageNumber);
   }
 
   if (useOcr && missingPages.length > 0) {
@@ -1365,26 +1359,6 @@ export async function extractPdfPageTexts(file, pageNumbers, options = {}) {
     pages: pages.sort((a, b) => a.pageNumber - b.pageNumber),
     totalPages,
   };
-}
-
-// 수식 조판용 폰트는 ToUnicode 매핑이 없거나 잘못된 경우가 많아, 화면엔 정상으로
-// 보여도 텍스트 레이어 추출 결과는 글자가 뒤바뀐 채로 나올 수 있다(예: y가 r로
-// 추출). 그런 페이지는 요약 인용문 등에서 텍스트 레이어 대신 OCR을 우선하도록
-// "수식이 많아 보이는 페이지"를 휴리스틱으로 골라낸다.
-const MATH_HINT_RE =
-  /[=√±≤≥≠∞∫∑∏]|\\frac|\\sqrt|\bsqrt\(|\b(?:sin|cos|tan|log|ln|lim)\b|[a-zA-Z]\s*\(\s*x\s*,?\s*y?\s*\)/gi;
-
-export function detectMathHeavyPageNumbers(pageEntries, { maxPages = 12, minHints = 3 } = {}) {
-  const scored = (Array.isArray(pageEntries) ? pageEntries : [])
-    .map((entry) => {
-      const text = String(entry?.text || "");
-      const hintCount = (text.match(MATH_HINT_RE) || []).length;
-      return { pageNumber: Number.parseInt(entry?.pageNumber, 10), hintCount };
-    })
-    .filter((entry) => Number.isFinite(entry.pageNumber) && entry.hintCount >= minHints)
-    .sort((a, b) => b.hintCount - a.hintCount)
-    .slice(0, maxPages);
-  return scored.map((entry) => entry.pageNumber);
 }
 
 export async function extractPdfTextByRanges(

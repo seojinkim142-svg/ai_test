@@ -38,6 +38,7 @@ export default function DetailPage({
   outputLanguage = "ko",
   // Summary callbacks
   requestSummary,
+  onEditSummary,
   requestMindMap,
   mindmapData,
   isLoadingMindmap,
@@ -705,6 +706,7 @@ export default function DetailPage({
                   <SummaryCard
                     summary={summary}
                     renderExportPages={isExportingSummary}
+                    onEditSummary={onEditSummary}
                     onJumpToEvidencePage={typeof onJumpToSummaryPage === "function"
                       ? (pageNumber, ...rest) => {
                           onJumpToSummaryPage(pageNumber, ...rest);

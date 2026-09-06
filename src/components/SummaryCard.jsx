@@ -473,6 +473,7 @@ function SummaryCard({
   onResolveEvidence,
   onJumpToEvidencePage,
   onAskTutor,
+  onEditSummary,
 }) {
   const normalizedSummary = useMemo(
     () => normalizeMathMarkdown(sanitizeSummaryForMath(summary)).trim(),
@@ -481,6 +482,7 @@ function SummaryCard({
   const hasSummary = normalizedSummary.length > 0;
   const [isExpanded, setIsExpanded] = useState(false);
   const [ctxMenu, setCtxMenu] = useState(null); // { x, y, text }
+  const [formulaEdit, setFormulaEdit] = useState(null); // { x, y, oldTex, value }
   const summaryKey = normalizedSummary;
 
   const pages = useMemo(() => splitSummaryIntoPages(normalizedSummary), [normalizedSummary]);
@@ -709,6 +711,50 @@ function SummaryCard({
     };
   }, [ctxMenu]);
 
+  // 수식이 OCR/폰트 매핑 오류로 깨져 보일 때, 더블클릭으로 직접 고칠 수 있게 함
+  const handleFormulaDoubleClick = useCallback(
+    (e) => {
+      if (typeof onEditSummary !== "function") return;
+      const katexEl = e.target?.closest?.(".katex");
+      if (!katexEl) return;
+      const annotation = katexEl.querySelector('.katex-mathml annotation[encoding="application/x-tex"]');
+      const oldTex = String(annotation?.textContent || "").trim();
+      if (!oldTex) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const menuW = 320;
+      const menuH = 150;
+      const x = Math.min(Math.max(8, e.clientX), window.innerWidth - menuW - 8);
+      const y = Math.min(e.clientY, window.innerHeight - menuH - 8);
+      setFormulaEdit({ x, y, oldTex, value: oldTex });
+    },
+    [onEditSummary]
+  );
+
+  const handleSaveFormulaEdit = useCallback(() => {
+    if (!formulaEdit) return;
+    const nextTex = String(formulaEdit.value || "").trim();
+    if (!nextTex || nextTex === formulaEdit.oldTex) {
+      setFormulaEdit(null);
+      return;
+    }
+    const updated = normalizedSummary.replace(formulaEdit.oldTex, nextTex);
+    if (updated !== normalizedSummary) {
+      onEditSummary?.(updated);
+    }
+    setFormulaEdit(null);
+  }, [formulaEdit, normalizedSummary, onEditSummary]);
+
+  useEffect(() => {
+    if (!formulaEdit) return;
+    const close = (e) => {
+      if (e.target?.closest?.("[data-formula-edit-popup]")) return;
+      setFormulaEdit(null);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [formulaEdit]);
+
   const handleCardKeyDown = useCallback(
     (event) => {
       if (isInteractiveElement(event.target)) return;
@@ -839,6 +885,7 @@ function SummaryCard({
               className="mx-auto aspect-[210/297] w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950/45 p-4 shadow-inner shadow-black/30 md:p-7"
               onClick={handleSummaryPageClick}
               onContextMenu={handleContextMenu}
+              onDoubleClick={handleFormulaDoubleClick}
             >
               <div ref={scrollContainerRef} className="show-scrollbar h-full overflow-auto pr-1">
                 {renderMarkdownPage(currentPage, markdownComponents)}
@@ -925,6 +972,7 @@ function SummaryCard({
                 ref={expandedScrollContainerRef}
                 className="show-scrollbar h-full overflow-auto rounded-none border-0 border-white/10 bg-slate-900/50 p-4 sm:rounded-[1.75rem] sm:border sm:p-6 lg:p-8"
                 onContextMenu={handleContextMenu}
+                onDoubleClick={handleFormulaDoubleClick}
               >
                 {renderMarkdownPage(currentPage, markdownComponents)}
               </div>
@@ -951,6 +999,53 @@ function SummaryCard({
             <span className="text-violet-300">✦</span>
             AI 튜터에게 질문
           </button>
+        </div>,
+        document.body
+      )}
+
+      {formulaEdit && createPortal(
+        <div
+          data-formula-edit-popup
+          className="fixed z-[9999] w-[320px] rounded-xl bg-slate-800 p-3 shadow-2xl ring-1 ring-white/15"
+          style={{ left: formulaEdit.x, top: formulaEdit.y }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <p className="mb-2 text-[11px] text-slate-400">수식이 잘못 보이면 직접 고쳐주세요 (LaTeX)</p>
+          <textarea
+            autoFocus
+            value={formulaEdit.value}
+            onChange={(e) => setFormulaEdit((prev) => (prev ? { ...prev, value: e.target.value } : prev))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                handleSaveFormulaEdit();
+              } else if (e.key === "Escape") {
+                setFormulaEdit(null);
+              }
+            }}
+            rows={3}
+            className="w-full resize-none rounded-lg border border-white/10 bg-slate-900 px-2.5 py-2 text-[13px] text-slate-100 outline-none focus:border-emerald-300/60"
+          />
+          <div className="mt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setFormulaEdit(null)}
+              className="ghost-button text-xs text-slate-200"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "148, 163, 184" }}
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              onClick={handleSaveFormulaEdit}
+              className="ghost-button text-xs text-emerald-100"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "52, 211, 153" }}
+            >
+              저장
+            </button>
+          </div>
         </div>,
         document.body
       )}

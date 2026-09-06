@@ -64,7 +64,6 @@ import {
   extractChapterRangesFromToc,
   extractPdfTextFromPages,
   extractPdfPageTexts,
-  detectMathHeavyPageNumbers,
   generatePdfThumbnail,
   extractPdfTextWithCaching,
 } from "./utils/pdf";
@@ -4343,41 +4342,7 @@ function App() {
           if (totalPages > 0) {
             const allPageNumbers = Array.from({ length: Math.min(totalPages, 80) }, (_, i) => i + 1);
             const pageResult = await extractPdfPageTexts(file, allPageNumbers, { maxCharsPerPage: 2500 });
-            let pageEntries = Array.isArray(pageResult?.pages) ? pageResult.pages : [];
-
-            // 수식이 많은 페이지는 텍스트 레이어가 깨져 있을 수 있어 OCR로 다시 확인.
-            // OCR은 느릴 수 있으므로 페이지 수와 총 대기 시간에 상한을 둬서
-            // 요약 생성 전체가 무한정 지연되지 않게 한다.
-            const mathHeavyPages = detectMathHeavyPageNumbers(pageEntries, { maxPages: 4 });
-            if (mathHeavyPages.length) {
-              try {
-                const ocrTimeout = new Promise((_, reject) =>
-                  setTimeout(() => reject(new Error("timeout")), 25000)
-                );
-                const ocrResult = await Promise.race([
-                  extractPdfPageTexts(file, mathHeavyPages, {
-                    maxCharsPerPage: 2500,
-                    useOcr: true,
-                    forceOcrPages: mathHeavyPages,
-                    ocrLang: "kor+eng",
-                  }),
-                  ocrTimeout,
-                ]);
-                const ocrByPage = new Map(
-                  (ocrResult?.pages || [])
-                    .filter((p) => p?.ocrUsed && String(p?.text || "").trim())
-                    .map((p) => [p.pageNumber, p.text])
-                );
-                if (ocrByPage.size) {
-                  pageEntries = pageEntries.map((p) =>
-                    ocrByPage.has(p.pageNumber) ? { ...p, text: ocrByPage.get(p.pageNumber) } : p
-                  );
-                }
-              } catch {
-                // OCR 보강 실패/타임아웃이어도 기존 텍스트 레이어로 계속 진행
-              }
-            }
-
+            const pageEntries = Array.isArray(pageResult?.pages) ? pageResult.pages : [];
             const tagged = pageEntries
               .filter((p) => String(p?.text || "").trim())
               .map((p) => `[p.${p.pageNumber}]\n${String(p.text).trim()}`)
@@ -4465,6 +4430,13 @@ function App() {
     } finally {
       setIsLoadingSummary(false);
     }
+  };
+
+  // OCR/폰트 매핑 오류 등으로 요약 속 수식이 깨져 있을 때 사용자가 직접 고칠 수 있게 함
+  const handleEditSummaryText = (nextSummaryText) => {
+    const next = String(nextSummaryText || "");
+    setSummary(next);
+    persistArtifacts({ summary: next });
   };
 
   const { mindmapData, isLoadingMindmap, requestMindMap } = useMindmap({
@@ -5283,6 +5255,7 @@ function App() {
     outputLanguage,
     // Summary callbacks
     requestSummary,
+    onEditSummary: handleEditSummaryText,
     requestMindMap,
     mindmapData,
     isLoadingMindmap,
