@@ -13,7 +13,7 @@ import {
 } from "../utils/tutorHelpers";
 import {
   useTutorStore,
-  useUiStore,
+  useDocumentStore,
 } from "../stores";
 
 export function useTutorActions({
@@ -45,7 +45,7 @@ export function useTutorActions({
     setTutorError,
   } = useTutorStore();
 
-  const { setStatus } = useUiStore();
+  const { setStatus } = useDocumentStore();
 
   const handleResetTutor = useCallback(() => {
     setTutorMessages([]);
