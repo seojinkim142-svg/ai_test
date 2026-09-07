@@ -60,21 +60,27 @@ function normalizeTutorMathMarkdown(rawContent) {
       continue;
     }
 
-    const bulletMatch = line.match(/^(\s*(?:[-*]|\d+\.)\s+)(.+)$/);
+    // 인용문(>) 표시는 수식 여부 판단 전에 떼어내야 ">"가 비교연산자로
+    // 오인되거나 $$ 안에 함께 갇혀 깨지는 걸 막을 수 있다.
+    const quoteMatch = line.match(/^(\s*>+\s*)(.*)$/);
+    const quotePrefix = quoteMatch ? quoteMatch[1] : "";
+    const afterQuote = quoteMatch ? quoteMatch[2] : line;
+
+    const bulletMatch = afterQuote.match(/^(\s*(?:[-*]|\d+\.)\s+)(.+)$/);
     if (bulletMatch) {
       const prefix = bulletMatch[1];
       const body = bulletMatch[2];
       if (looksLikeStandaloneEquation(body)) {
-        normalized.push(`${prefix}$${normalizeTutorMathLine(body)}$`);
+        normalized.push(`${quotePrefix}${prefix}$${normalizeTutorMathLine(body)}$`);
       } else {
         normalized.push(line);
       }
       continue;
     }
 
-    const trimmed = line.trim();
+    const trimmed = afterQuote.trim();
     if (looksLikeStandaloneEquation(trimmed)) {
-      normalized.push(`$$${normalizeTutorMathLine(trimmed)}$$`);
+      normalized.push(`${quotePrefix}$$${normalizeTutorMathLine(trimmed)}$$`);
       continue;
     }
     normalized.push(line);
@@ -123,6 +129,11 @@ function AiTutorPanel({
       ul: ({ children }) => <ul className="my-2 list-disc pl-5 break-all">{children}</ul>,
       ol: ({ children }) => <ol className="my-2 list-decimal pl-5 break-all">{children}</ol>,
       li: ({ children }) => <li className="my-1 break-all">{children}</li>,
+      blockquote: ({ children }) => (
+        <blockquote className="my-2 border-l-2 border-white/20 pl-3 not-italic text-slate-100">
+          {children}
+        </blockquote>
+      ),
       code: ({ inline, className, children }) => {
         if (!inline && /language-graph\b/.test(className || "")) {
           return <GraphRenderer raw={String(children).replace(/\n$/, "")} />;
