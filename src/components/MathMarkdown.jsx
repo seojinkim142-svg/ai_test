@@ -81,7 +81,12 @@ function normalizePlainSqrt(text) {
 }
 
 export function normalizeMathMarkdown(rawText) {
-  const source = normalizeBracketMathDelimiters(String(rawText || "").replace(/\r\n/g, "\n")).trim();
+  const bracketNormalized = normalizeBracketMathDelimiters(String(rawText || "").replace(/\r\n/g, "\n"));
+  // 모델이 "$$$$식$$"처럼 여는 구분자를 $$를 두 번 겹쳐 쓰는 경우가 잦다. 그러면
+  // 앞의 "$$$$"가 자기들끼리 빈 짝으로 먼저 매칭되고, 뒤의 실제 식은 닫는 $$를
+  // 잃어버려 렌더링되지 않는다. 3개 이상 연속된 $는 항상 오타이므로 $$ 두 개로
+  // 정리해 애초에 잘못 짝지어질 여지를 없앤다.
+  const source = bracketNormalized.replace(/\${3,}/g, "$$$$").trim();
   if (!source) return "";
 
   const placeholders = [];
