@@ -91,7 +91,24 @@ export function normalizeMathMarkdown(rawText) {
     return token;
   };
 
-  let prepared = source.replace(/\$\$[\s\S]*?\$\$|\$[^$\n]+\$/g, (match) => toPlaceholder(match));
+  // 모델이 \begin{aligned}...\end{aligned} 같은 블록 안에서 줄마다 각각 $$로
+  // 감싸는 경우가 있다(예: "\begin{aligned}$$ ... $$&=... $$ ... $$\end{aligned}").
+  // 이런 상태에서 아래의 일반 $$...$$ 추출 정규식을 그대로 돌리면 서로 다른 줄의
+  // $$끼리 잘못 짝지어져 렌더링이 통째로 깨진다. 그 전에 환경 블록 전체(및 바로
+  // 붙어있는 $ 기호)를 찾아 내부의 $ 기호를 모두 지우고 하나의 $$...$$ 블록으로
+  // 합쳐서 플레이스홀더로 박아둔다.
+  let prepared = source.replace(
+    /\$*\s*(\\begin\{([A-Za-z*]+)\}[\s\S]*?\\end\{\2\})\s*\$*/g,
+    (full, envBlock) => {
+      if (!envBlock.includes("$")) return full;
+      const cleaned = envBlock.replace(/\${1,2}/g, " ").replace(/\s{2,}/g, " ").trim();
+      const normalizedEnv = normalizeLatexSnippet(cleaned);
+      if (!normalizedEnv) return full;
+      return toPlaceholder(`$$${normalizedEnv}$$`);
+    }
+  );
+
+  prepared = prepared.replace(/\$\$[\s\S]*?\$\$|\$[^$\n]+\$/g, (match) => toPlaceholder(match));
   prepared = prepared.replace(LATEX_ENV_BLOCK_RE, (match) => {
     const normalized = normalizeLatexSnippet(match);
     if (!normalized) return match;
