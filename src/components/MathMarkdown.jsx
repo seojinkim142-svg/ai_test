@@ -117,7 +117,16 @@ export function normalizeMathMarkdown(rawText) {
     })
     .join("\n");
 
-  return normalized.replace(/@@MATH_(\d+)@@/g, (full, idx) => placeholders[Number(idx)] || full);
+  // 플레이스홀더 값 안에 또 다른 플레이스홀더가 들어있을 수 있어(예: \begin{aligned}
+  // 블록이 이미 치환된 여러 개의 $$...$$ 조각을 통째로 감쌀 때) 한 번만 치환하면
+  // 안쪽 토큰이 "@@MATH_N@@" 문자 그대로 남는다. 더 이상 바뀌지 않을 때까지 반복한다.
+  let result = normalized;
+  for (let pass = 0; pass < 5; pass += 1) {
+    const next = result.replace(/@@MATH_(\d+)@@/g, (full, idx) => placeholders[Number(idx)] ?? full);
+    if (next === result) break;
+    result = next;
+  }
+  return result;
 }
 
 function MathMarkdown({ content, className = "", components }) {
