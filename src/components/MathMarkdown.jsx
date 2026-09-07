@@ -101,6 +101,19 @@ export function normalizeMathMarkdown(rawText) {
     /\$*\s*(\\begin\{([A-Za-z*]+)\}[\s\S]*?\\end\{\2\})\s*\$*/g,
     (full, envBlock) => {
       if (!envBlock.includes("$")) return full;
+      // 안전장치: \begin/\end 짝이 실제로는 안 맞는데(사이에 다른 \end가 없거나
+      // 모델이 \begin을 잘못 반복한 경우) 정규식이 훨씬 뒤의 \end까지 통째로
+      // 삼켜버릴 수 있다. 그러면 그 사이에 있던 마크다운 제목/굵게/인용문까지
+      // 전부 수식 취급돼 화면이 완전히 깨진다. 정말 하나의 수식 블록이라고 보기
+      // 힘든 특징(너무 길거나, 빈 줄로 문단이 나뉘거나, 마크다운 구문이 섞임)이
+      // 보이면 손대지 않고 그대로 둔다.
+      const looksLikeRunawayMatch =
+        envBlock.length > 700 ||
+        /\n[ \t]*\n/.test(envBlock) ||
+        /^#{1,6}\s/m.test(envBlock) ||
+        /\*\*[^*]/.test(envBlock) ||
+        /^>\s/m.test(envBlock);
+      if (looksLikeRunawayMatch) return full;
       const cleaned = envBlock.replace(/\${1,2}/g, " ").replace(/\s{2,}/g, " ").trim();
       const normalizedEnv = normalizeLatexSnippet(cleaned);
       if (!normalizedEnv) return full;
