@@ -130,7 +130,7 @@ function AiTutorPanel({
       ol: ({ children }) => <ol className="my-2 list-decimal pl-5 break-all">{children}</ol>,
       li: ({ children }) => <li className="my-1 break-all">{children}</li>,
       blockquote: ({ children }) => (
-        <blockquote className="my-2 border-l-2 border-white/20 pl-3 not-italic text-slate-100">
+        <blockquote className="my-2 border-l-2 border-current/20 pl-3 not-italic text-current">
           {children}
         </blockquote>
       ),
