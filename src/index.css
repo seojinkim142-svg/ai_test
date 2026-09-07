@@ -169,7 +169,7 @@ select {
 }
 
 .katex-error {
-  color: #e5e7eb !important;
+  color: currentColor !important;
   background: transparent !important;
   font-weight: 500;
 }
@@ -191,7 +191,7 @@ select {
 }
 
 .katex .merror {
-  color: #e5e7eb !important;
+  color: currentColor !important;
   border-color: transparent !important;
   background: transparent !important;
 }
