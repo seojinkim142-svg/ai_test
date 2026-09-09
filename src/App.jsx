@@ -2324,13 +2324,6 @@ function App() {
     [persistTutorHistory, selectedFileId, setActiveTutorConversationId, setTutorError, setTutorMessages]
   );
 
-  const handleNewTutorConversation = useCallback(() => {
-    setActiveTutorConversationId("");
-    setTutorMessages([]);
-    setTutorError("");
-    persistTutorHistory(selectedFileId, []);
-  }, [persistTutorHistory, selectedFileId, setActiveTutorConversationId, setTutorError, setTutorMessages]);
-
   const handleDeleteTutorConversation = useCallback(
     (conversationId) => {
       const nextSessions = tutorConversationsRef.current.filter((item) => item.id !== conversationId);
@@ -5367,7 +5360,6 @@ function App() {
     tutorConversations,
     activeTutorConversationId,
     onSelectTutorConversation: handleSelectTutorConversation,
-    onNewTutorConversation: handleNewTutorConversation,
     onDeleteTutorConversation: handleDeleteTutorConversation,
     requestMindMap,
     mindmapData,

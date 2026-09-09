@@ -2,7 +2,6 @@ const TUTOR_COPY = {
   ko: {
     title: "AI 튜터",
     currentDocument: (fileName) => `현재 문서: ${fileName}`,
-    resetChat: "대화 초기화",
     scrollToLatest: "최근 대화로 이동",
     conversationHistory: "대화 내역",
     newConversation: "새 대화",
@@ -45,7 +44,6 @@ const TUTOR_COPY = {
   en: {
     title: "AI Tutor",
     currentDocument: (fileName) => `Current document: ${fileName}`,
-    resetChat: "Reset chat",
     scrollToLatest: "Jump to latest",
     conversationHistory: "History",
     newConversation: "New chat",
@@ -87,7 +85,6 @@ const TUTOR_COPY = {
   zh: {
     title: "AI 导学",
     currentDocument: (fileName) => `当前文档：${fileName}`,
-    resetChat: "重置对话",
     scrollToLatest: "跳到最新",
     conversationHistory: "对话记录",
     newConversation: "新对话",
@@ -126,7 +123,6 @@ const TUTOR_COPY = {
   ja: {
     title: "AIチューター",
     currentDocument: (fileName) => `現在の文書: ${fileName}`,
-    resetChat: "会話をリセット",
     scrollToLatest: "最新へ移動",
     conversationHistory: "会話履歴",
     newConversation: "新しい会話",
@@ -168,7 +164,6 @@ const TUTOR_COPY = {
   hi: {
     title: "AI ट्यूटर",
     currentDocument: (fileName) => `वर्तमान दस्तावेज़: ${fileName}`,
-    resetChat: "चैट रीसेट करें",
     scrollToLatest: "नवीनतम पर जाएं",
     conversationHistory: "बातचीत इतिहास",
     newConversation: "नई बातचीत",

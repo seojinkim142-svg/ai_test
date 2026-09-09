@@ -42,7 +42,6 @@ export default function DetailPage({
   tutorConversations,
   activeTutorConversationId,
   onSelectTutorConversation,
-  onNewTutorConversation,
   onDeleteTutorConversation,
   requestMindMap,
   mindmapData,
@@ -950,7 +949,6 @@ export default function DetailPage({
               activeConversationId={activeTutorConversationId}
               conversationKey={activeTutorConversationId}
               onSelectConversation={onSelectTutorConversation}
-              onNewConversation={onNewTutorConversation}
               onDeleteConversation={onDeleteTutorConversation}
               folderMode={folderTutorMode}
               folderName={folderName}

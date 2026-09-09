@@ -123,7 +123,6 @@ function AiTutorPanel({
   conversations = [],
   activeConversationId = "",
   onSelectConversation,
-  onNewConversation,
   onDeleteConversation,
 }) {
   const [input, setInput] = useState("");
@@ -254,6 +253,7 @@ function AiTutorPanel({
   const handleReset = () => {
     setInput("");
     clearAttachment();
+    setIsHistoryOpen(false);
     onReset?.();
   };
 
@@ -269,7 +269,6 @@ function AiTutorPanel({
     setAttachmentError("");
   };
 
-  const canReset = Boolean(messages?.length || input.trim() || attachmentFile || error || attachmentError);
   const hasMessages = Array.isArray(messages) && messages.length > 0;
   const showEmptyState = !hasMessages && !isLoading;
 
@@ -310,30 +309,15 @@ function AiTutorPanel({
               {conversations.length > 0 ? ` (${conversations.length})` : ""}
             </button>
           )}
-          {typeof onNewConversation === "function" && (
-            <button
-              type="button"
-              onClick={() => {
-                setIsHistoryOpen(false);
-                onNewConversation();
-              }}
-              disabled={isLoading}
-              className="ghost-button text-xs text-emerald-100"
-              data-ghost-size="sm"
-              style={{ "--ghost-color": "52, 211, 153" }}
-            >
-              {copy.newConversation}
-            </button>
-          )}
           <button
             type="button"
             onClick={handleReset}
-            disabled={!canReset || isLoading}
-            className="ghost-button text-xs text-slate-200"
+            disabled={isLoading}
+            className="ghost-button text-xs text-emerald-100"
             data-ghost-size="sm"
-            style={{ "--ghost-color": "148, 163, 184" }}
+            style={{ "--ghost-color": "52, 211, 153" }}
           >
-            {copy.resetChat}
+            {copy.newConversation}
           </button>
         </div>
       </div>
