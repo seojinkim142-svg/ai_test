@@ -785,11 +785,16 @@ function formatChapterSummaryMarkdown(parsed, summaryInput) {
           for (const f of coreFindings) {
             const point = sanitizeSummaryLine(f?.point || "", 180);
             const quote = sanitizeSummaryLine(f?.quote || "", 280);
+            const quoteTranslation = sanitizeSummaryLine(f?.quoteTranslation || "", 320);
             const anchor = sanitizeSummaryLine(f?.anchor || "", 20);
             if (!point && !quote) continue;
             if (looksLikeMojibake(point) || looksLikeMojibake(quote)) continue;
             if (point) markdown.push("- **" + point + "**");
             if (quote) markdown.push('  > "' + quote + '"' + (anchor ? " " + anchor : ""));
+            // 원문이 출력 언어와 다른 언어일 때만 모델이 번역을 채운다
+            if (quote && quoteTranslation && !looksLikeMojibake(quoteTranslation)) {
+              markdown.push("  > ↳ " + quoteTranslation);
+            }
           }
           markdown.push("");
         }
@@ -994,7 +999,7 @@ Apply the 5-stage pipeline and return ${outputLanguageLabel} JSON with this sche
           "sectionTitle": "...",
           "keySummary": "core argument of this section (1-2 sentences)",
           "coreFindings": [
-            { "point": "...", "quote": "verbatim from source", "anchor": "[p.N]", "tier": "T1" }
+            { "point": "...", "quote": "verbatim from source", "quoteTranslation": "", "anchor": "[p.N]", "tier": "T1" }
           ],
           "weakEvidence": [
             { "claim": "...", "tier": "T2" }
@@ -1027,6 +1032,7 @@ Pipeline rules:
   · T3 — cross-reference to another section/source cited in the text
 - **DRAFT**: Populate sections fields:
   · "coreFindings": T1 evidence only. Each entry must have a verbatim "quote".
+    · "quoteTranslation": if the verbatim "quote" is NOT written in ${outputLanguageLabel}, translate it into ${outputLanguageLabel} here (keep numbers, symbols and formulas as-is). If the quote is already in ${outputLanguageLabel}, use an empty string "". Never replace the original "quote" with the translation — the original must stay verbatim.
   · "weakEvidence": T2 claims. Include only when direct quote is unavailable.
   · "unresolvedConflicts": contradictions or ambiguities in the document. Empty array if none.
   · "coverageGaps": topics mentioned but underexplained. Empty array if none.
