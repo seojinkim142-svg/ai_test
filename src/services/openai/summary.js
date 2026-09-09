@@ -335,9 +335,14 @@ ${sections.join("\n\n")}
 
 const CHAPTER_MIN_DISTANCE = 350;
 const CHAPTER_MIN_CHARS = 500;
-const MAX_CHAPTER_COUNT = 10;
-const MAX_CHAPTER_MODEL_CHARS = 2800;
-const MAX_TOTAL_CHAPTER_MODEL_CHARS = 22000;
+// 요약은 챕터를 여러 배치로 나눠 여러 번 호출하므로, 예전처럼 문서를 22,000자로
+// 깎아낼 필요가 없다. 긴 챕터는 잘라내는 대신 파트로 쪼개서 전부 모델에 보낸다.
+const MAX_CHAPTER_COUNT = 40;
+const MAX_CHAPTER_MODEL_CHARS = 9000;
+// 한 번의 API 호출에 담는 원문 총량 (모델 컨텍스트 여유를 두고 보수적으로 잡음)
+const MAX_REQUEST_SOURCE_CHARS = 24000;
+// 요약 1회당 최대 호출 수 — 비용과 소요 시간의 상한
+const MAX_SUMMARY_REQUESTS = 8;
 export const MAX_LEGACY_SUMMARY_SOURCE_CHARS = 22000;
 const VISUAL_HINT_RE = /(?:figure|fig\.?|table|chart|graph|plot|diagram|illustration)/i;
 const CHAPTER_PATTERNS = [
@@ -422,6 +427,32 @@ export function shrinkWithTail(text, maxChars) {
   return `${normalized.slice(0, head)} ... ${normalized.slice(-tail)}`.trim();
 }
 
+// 긴 구간을 잘라 버리지 않고 여러 파트로 쪼갠다. 예전에는 shrinkWithTail 로
+// 앞 75% + 뒤 25% 만 남기고 중간을 통째로 버려서, 문서 중반이 요약에서
+// 통으로 빠지는 문제가 있었다.
+export function splitTextIntoParts(text, maxChars) {
+  const normalized = normalizeSummarySource(text);
+  if (!normalized) return [];
+  if (normalized.length <= maxChars) return [normalized];
+
+  const parts = [];
+  let start = 0;
+  while (start < normalized.length) {
+    let end = Math.min(normalized.length, start + maxChars);
+    if (end < normalized.length) {
+      // 문장 중간에서 끊기지 않도록 가까운 문장 경계로 당긴다
+      const boundary = normalized.lastIndexOf(". ", end);
+      if (boundary > start + Math.floor(maxChars * 0.6)) {
+        end = boundary + 1;
+      }
+    }
+    const part = normalized.slice(start, end).trim();
+    if (part) parts.push(part);
+    start = end;
+  }
+  return parts.length ? parts : [normalized];
+}
+
 function extractVisualHints(sectionText, maxHints = 4) {
   const normalized = normalizeSummarySource(sectionText);
   if (!normalized) return [];
@@ -478,7 +509,12 @@ function splitByChapterAnchors(normalizedText) {
 }
 
 function splitIntoVirtualChapters(normalizedText) {
-  const targetCount = Math.max(2, Math.min(6, Math.ceil(normalizedText.length / 4500)));
+  // 예전에는 6개로 묶어 챕터마다 2만자 넘게 몰리고 그 중 대부분이 잘려나갔다.
+  // 이제는 파트 단위로 전부 보내므로, 챕터당 분량을 모델 입력 한도에 맞춘다.
+  const targetCount = Math.max(
+    2,
+    Math.min(MAX_CHAPTER_COUNT, Math.ceil(normalizedText.length / MAX_CHAPTER_MODEL_CHARS))
+  );
   const chunkSize = Math.ceil(normalizedText.length / targetCount);
   const sections = [];
   let start = 0;
@@ -553,21 +589,47 @@ function normalizeManualChapterSections(chapterSections) {
     .sort((left, right) => left.chapterNumber - right.chapterNumber);
 }
 
+// 챕터 하나가 너무 길면 잘라내지 않고 "(1/3)" 같은 파트로 나눈다.
+function expandSectionsIntoParts(sections, buildEntry) {
+  const expanded = [];
+  for (const section of sections) {
+    const parts = splitTextIntoParts(section.text, MAX_CHAPTER_MODEL_CHARS);
+    parts.forEach((partText, partIndex) => {
+      expanded.push(
+        buildEntry({
+          section,
+          text: partText,
+          partIndex,
+          partCount: parts.length,
+          index: expanded.length,
+        })
+      );
+    });
+    if (expanded.length >= MAX_CHAPTER_COUNT) break;
+  }
+  return expanded.slice(0, MAX_CHAPTER_COUNT);
+}
+
+function withPartSuffix(title, partIndex, partCount) {
+  if (partCount <= 1) return title;
+  return `${title} (${partIndex + 1}/${partCount})`;
+}
+
 export function buildChapterSummaryInput(extractedText, { scope, chapterSections } = {}) {
   const manualSections = normalizeManualChapterSections(chapterSections);
   if (manualSections.length > 0) {
-    const perChapterBudget = Math.max(
-      500,
-      Math.floor(MAX_TOTAL_CHAPTER_MODEL_CHARS / Math.max(1, manualSections.length))
-    );
-    const chapterTextLimit = Math.min(MAX_CHAPTER_MODEL_CHARS, perChapterBudget);
     return {
       scope: scope || "Custom chapter ranges",
       mode: "manual",
-      chapters: manualSections.map((section, index) => ({
+      chapters: expandSectionsIntoParts(manualSections, ({ section, text, partIndex, partCount, index }) => ({
         ...section,
-        id: section.id || `ch_${index + 1}`,
-        text: shrinkWithTail(section.text, chapterTextLimit),
+        id: `ch_${index + 1}`,
+        chapterTitle: withPartSuffix(
+          section.chapterTitle || section.title || `Chapter ${index + 1}`,
+          partIndex,
+          partCount
+        ),
+        text,
       })),
     };
   }
@@ -581,29 +643,16 @@ export function buildChapterSummaryInput(extractedText, { scope, chapterSections
   const mode = anchoredSections.length >= 2 ? "detected" : "virtual";
   const sections = mode === "detected" ? anchoredSections : splitIntoVirtualChapters(normalizedText);
 
-  let limited = sections;
-  if (sections.length > MAX_CHAPTER_COUNT) {
-    const kept = sections.slice(0, MAX_CHAPTER_COUNT - 1);
-    const remained = sections.slice(MAX_CHAPTER_COUNT - 1);
-    kept.push({
-      title: `Merged sections (${remained.length} chapters)`,
-      text: remained.map((section) => `${section.title} ${section.text}`).join(" "),
-    });
-    limited = kept;
-  }
-
-  const perChapterBudget = Math.max(
-    900,
-    Math.floor(MAX_TOTAL_CHAPTER_MODEL_CHARS / Math.max(1, limited.length))
-  );
-  const chapterTextLimit = Math.min(MAX_CHAPTER_MODEL_CHARS, perChapterBudget);
-
-  const chapters = limited.map((section, index) => ({
+  const chapters = expandSectionsIntoParts(sections, ({ section, text, partIndex, partCount, index }) => ({
     id: `ch_${index + 1}`,
     chapterNumber: index + 1,
-    chapterTitle: cleanChapterTitle(section.title, `Chapter ${index + 1}`),
-    text: shrinkWithTail(section.text, chapterTextLimit),
-    visualHints: extractVisualHints(section.text, 5),
+    chapterTitle: withPartSuffix(
+      cleanChapterTitle(section.title, `Chapter ${index + 1}`),
+      partIndex,
+      partCount
+    ),
+    text,
+    visualHints: extractVisualHints(text, 5),
   }));
 
   return { scope: scope || "Full document", mode, chapters };
@@ -958,17 +1007,68 @@ function formatChapterSummaryMarkdown(parsed, summaryInput) {
   return markdown.join("\n").trim();
 }
 
-async function generateChapterSummary(extractedText, { scope, chapterSections, outputLanguage = "ko", hasPageTags = false } = {}) {
+// 챕터를 한 번의 호출에 담을 수 있는 분량씩 묶는다.
+// 한 번에 다 보내면 입력이 잘려 문서 중반이 통째로 요약에서 빠진다.
+function buildChapterBatches(chapters) {
+  const batches = [];
+  let current = [];
+  let currentChars = 0;
+
+  for (const chapter of chapters) {
+    const chapterChars = String(chapter?.text || "").length;
+    if (current.length > 0 && currentChars + chapterChars > MAX_REQUEST_SOURCE_CHARS) {
+      batches.push(current);
+      current = [];
+      currentChars = 0;
+      if (batches.length >= MAX_SUMMARY_REQUESTS) break;
+    }
+    current.push(chapter);
+    currentChars += chapterChars;
+  }
+  if (current.length > 0 && batches.length < MAX_SUMMARY_REQUESTS) {
+    batches.push(current);
+  }
+  return batches;
+}
+
+async function generateChapterSummary(
+  extractedText,
+  { scope, chapterSections, outputLanguage = "ko", hasPageTags = false, onProgress } = {}
+) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const summaryInput = buildChapterSummaryInput(extractedText, { scope, chapterSections });
   if (!summaryInput.chapters.length) return "";
 
-  const payload = {
-    scope: summaryInput.scope,
-    mode: summaryInput.mode,
-    chapters: summaryInput.chapters,
-  };
+  const batches = buildChapterBatches(summaryInput.chapters);
+  const mergedChapters = [];
+  const mergedOverview = [];
 
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
+    onProgress?.({ current: batchIndex + 1, total: batches.length });
+    const parsedBatch = await requestChapterSummaryBatch({
+      payload: {
+        scope: summaryInput.scope,
+        mode: summaryInput.mode,
+        chapters: batches[batchIndex],
+      },
+      outputLanguageLabel,
+      hasPageTags,
+      // 이어지는 배치는 앞부분이 이미 요약됐음을 알려 개요 중복을 막는다
+      isContinuation: batchIndex > 0,
+    });
+    if (Array.isArray(parsedBatch?.chapters)) mergedChapters.push(...parsedBatch.chapters);
+    if (Array.isArray(parsedBatch?.overview)) mergedOverview.push(...parsedBatch.overview);
+  }
+
+  if (!mergedChapters.length) return "";
+
+  return formatChapterSummaryMarkdown(
+    { overview: mergedOverview.slice(0, 4), chapters: mergedChapters },
+    summaryInput
+  );
+}
+
+async function requestChapterSummaryBatch({ payload, outputLanguageLabel, hasPageTags, isContinuation }) {
   const citationRule = hasPageTags
     ? `- Source text contains [p.N] page markers. Append [p.N] after every "quote", "explanation", and formula. Only use page numbers visible in the source. Do NOT fabricate.`
     : `- No page markers detected. Omit anchors but still extract verbatim quotes.`;
@@ -1045,6 +1145,8 @@ Pipeline rules:
 - If no visual evidence: "visuals": []. If no sample solving: "sampleQuestionSolving": [].
 - Do not mention chapter detection/splitting logic.
 - Preserve chapter ids exactly as input.
+- **COVERAGE (critical)**: Return one entry in "chapters" for EVERY chapter given in Input, in the same order. Never stop early, never skip a chapter, and never merge two input chapters into one. The input is one slice of a longer document — the page numbers you see do not tell you whether the document has ended.
+${isContinuation ? '- This slice continues a document whose earlier part was already summarized. Return "overview": [] and summarize only the chapters given here.' : ""}
 ${citationRule}
 - Return strict JSON only.
 
@@ -1054,6 +1156,7 @@ ${JSON.stringify(payload)}
         },
       ],
       temperature: 1,
+      max_tokens: 16384,
       response_format: { type: "json_object" },
     },
     { retries: 1 }
@@ -1061,15 +1164,21 @@ ${JSON.stringify(payload)}
 
   const content = data.choices?.[0]?.message?.content?.trim() || "";
   const sanitized = sanitizeJson(content);
-  const parsed = parseJsonSafe(sanitized, "chapter summary JSON");
-  return formatChapterSummaryMarkdown(parsed, summaryInput);
+  return parseJsonSafe(sanitized, "chapter summary JSON");
 }
 
 // ─── Summary Generate exports ──────────────────────────────────────────────
 
 export async function generateSummary(
   extractedText,
-  { scope, chapterized = true, chapterSections = null, outputLanguage = "ko", pageTaggedText = null } = {}
+  {
+    scope,
+    chapterized = true,
+    chapterSections = null,
+    outputLanguage = "ko",
+    pageTaggedText = null,
+    onProgress = null,
+  } = {}
 ) {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const normalizedPageTagged = String(pageTaggedText || "").trim();
@@ -1083,10 +1192,19 @@ export async function generateSummary(
 
   if (chapterized) {
     try {
-      const chapterSummary = await generateChapterSummary(chapterSourceText, { scope, chapterSections, outputLanguage, hasPageTags: Boolean(normalizedPageTagged) });
+      const chapterSummary = await generateChapterSummary(chapterSourceText, {
+        scope,
+        chapterSections,
+        outputLanguage,
+        hasPageTags: Boolean(normalizedPageTagged),
+        onProgress,
+      });
       if (chapterSummary) return chapterSummary;
-    } catch {
-      // fallback to legacy summary
+    } catch (err) {
+      // legacy 요약으로 폴백한다. 예전에는 조용히 삼켜서, 출력이 잘려 JSON 파싱이
+      // 깨졌을 때 왜 요약이 부실해졌는지 알 수 없었다.
+      // eslint-disable-next-line no-console
+      console.warn("챕터 요약 실패 — 단순 요약으로 대체합니다:", err?.message || err);
     }
   }
 

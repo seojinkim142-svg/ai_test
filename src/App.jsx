@@ -4441,14 +4441,16 @@ function App() {
         try {
           const totalPages = pageInfo.total || pageInfo.used || 0;
           if (totalPages > 0) {
-            const allPageNumbers = Array.from({ length: Math.min(totalPages, 80) }, (_, i) => i + 1);
+            const allPageNumbers = Array.from({ length: Math.min(totalPages, 400) }, (_, i) => i + 1);
             const pageResult = await extractPdfPageTexts(file, allPageNumbers, { maxCharsPerPage: 2500 });
             const pageEntries = Array.isArray(pageResult?.pages) ? pageResult.pages : [];
             const tagged = pageEntries
               .filter((p) => String(p?.text || "").trim())
               .map((p) => `[p.${p.pageNumber}]\n${String(p.text).trim()}`)
               .join("\n\n");
-            if (tagged) pageTaggedText = tagged.slice(0, 50000);
+            // 요약은 이 텍스트를 여러 배치로 나눠 보내므로 여기서 잘라낼 필요가 없다.
+            // 예전에는 5만자에서 잘려 문서 중반 이후가 요약에서 통째로 빠졌다.
+            if (tagged) pageTaggedText = tagged;
           }
         } catch {
           // non-critical — summary still works without page tags
@@ -4462,11 +4464,15 @@ function App() {
             chapterSections: customChapterSections,
             instructorEmphasis: instructorEmphasisText,
             outputLanguage,
+            onProgress: ({ current, total }) =>
+              setStatus(total > 1 ? `AI로 요약을 생성하는 중... (${current}/${total})` : "AI로 요약을 생성하는 중..."),
           })
         : generateSummary(summarySourceText, {
             instructorEmphasis: instructorEmphasisText,
             outputLanguage,
             pageTaggedText,
+            onProgress: ({ current, total }) =>
+              setStatus(total > 1 ? `AI로 요약을 생성하는 중... (${current}/${total})` : "AI로 요약을 생성하는 중..."),
           });
       const questionStyleProfilePromise = generateQuestionStyleProfile(questionStyleSourceText, {
         scopeLabel: questionStyleScopeLabel,
