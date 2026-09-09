@@ -39,6 +39,11 @@ export default function DetailPage({
   // Summary callbacks
   requestSummary,
   onEditSummary,
+  tutorConversations,
+  activeTutorConversationId,
+  onSelectTutorConversation,
+  onNewTutorConversation,
+  onDeleteTutorConversation,
   requestMindMap,
   mindmapData,
   isLoadingMindmap,
@@ -941,6 +946,12 @@ export default function DetailPage({
               outputLanguage={outputLanguage}
               onSend={handleSendTutorMessage}
               onReset={handleResetTutor}
+              conversations={tutorConversations}
+              activeConversationId={activeTutorConversationId}
+              conversationKey={activeTutorConversationId}
+              onSelectConversation={onSelectTutorConversation}
+              onNewConversation={onNewTutorConversation}
+              onDeleteConversation={onDeleteTutorConversation}
               folderMode={folderTutorMode}
               folderName={folderName}
               canUseFolderMode={canUseFolderTutorMode}

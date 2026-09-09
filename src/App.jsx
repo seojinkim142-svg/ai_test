@@ -137,6 +137,9 @@ import {
   writeQuestionStyleProfileToHighlights,
   writeConceptTagsToHighlights,
   readConceptTagsFromHighlights,
+  readTutorConversationsFromHighlights,
+  writeTutorConversationsToHighlights,
+  upsertTutorConversation,
   readTopicStructureFromHighlights,
   writeTopicStructureToHighlights,
 } from "./utils/studyArtifacts";
@@ -399,6 +402,8 @@ function App() {
 
   const {
     tutorMessages, setTutorMessages,
+    tutorConversations, setTutorConversations,
+    activeTutorConversationId, setActiveTutorConversationId,
     isTutorLoading, setIsTutorLoading,
     tutorError, setTutorError,
   } = useTutorStore();
@@ -1211,6 +1216,7 @@ function App() {
         const examCramBundle = readExamCramFromHighlights(mapped.highlights);
         const questionStyleBundle = readQuestionStyleProfileFromHighlights(mapped.highlights);
         const storedTopicStructure = readTopicStructureFromHighlights(mapped.highlights);
+        const storedTutorConversations = readTutorConversationsFromHighlights(mapped.highlights);
         const activeInstructorText = normalizeInstructorEmphasisInput(
           partialBundle.instructorEmphasisLibrary.find(
             (item) => item.id === partialBundle.activeInstructorEmphasisId
@@ -1260,6 +1266,14 @@ function App() {
             }));
           }
         }
+        // DB에 저장된 대화 세션 목록을 복원하고, 가장 최근 대화를 열어둔다
+        setTutorConversations(storedTutorConversations);
+        if (storedTutorConversations.length > 0) {
+          const latest = storedTutorConversations[0];
+          setActiveTutorConversationId(latest.id);
+          setTutorMessages(latest.messages);
+        }
+
         if (storedTopicStructure) {
           setTopicStructure(storedTopicStructure);
           topicStructureRequestedRef.current = true;
@@ -2246,6 +2260,100 @@ function App() {
       }
     },
     [artifacts, selectedFileId, user]
+  );
+
+  // ── AI 튜터 대화 세션 (DB 저장/전환) ──────────────────────────────────────
+  // persistArtifacts 가 오래된 artifacts 클로저를 잡지 않도록 최신 값을 ref 로 따라간다
+  const artifactsRef = useRef(null);
+  useEffect(() => {
+    artifactsRef.current = artifacts;
+  }, [artifacts]);
+
+  const tutorConversationsRef = useRef([]);
+  useEffect(() => {
+    tutorConversationsRef.current = tutorConversations;
+  }, [tutorConversations]);
+
+  // 첫 메시지가 생기면 새 대화 세션 id 를 발급한다
+  useEffect(() => {
+    if (!tutorMessages.length || activeTutorConversationId) return;
+    setActiveTutorConversationId(
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `tutor-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    );
+  }, [tutorMessages.length, activeTutorConversationId, setActiveTutorConversationId]);
+
+  // 대화 내용을 DB(artifacts.highlights_json)에 저장한다.
+  // 메시지마다 쓰면 부담이 크므로 잠시 멈췄을 때 한 번만 반영한다.
+  const tutorConversationSaveTimerRef = useRef(null);
+  useEffect(() => {
+    if (!user || !selectedFileId || !activeTutorConversationId) return undefined;
+    if (tutorConversationSaveTimerRef.current) {
+      clearTimeout(tutorConversationSaveTimerRef.current);
+    }
+    tutorConversationSaveTimerRef.current = setTimeout(() => {
+      const nextSessions = upsertTutorConversation(tutorConversationsRef.current, {
+        id: activeTutorConversationId,
+        messages: tutorMessages,
+      });
+      tutorConversationsRef.current = nextSessions;
+      setTutorConversations(nextSessions);
+      void persistArtifacts({
+        highlights: writeTutorConversationsToHighlights(artifactsRef.current?.highlights, nextSessions),
+      });
+    }, 1500);
+    return () => {
+      if (tutorConversationSaveTimerRef.current) {
+        clearTimeout(tutorConversationSaveTimerRef.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tutorMessages, activeTutorConversationId, selectedFileId, user]);
+
+  // 목록에서 다른 대화를 고르면 그 대화로 갈아끼운다
+  const handleSelectTutorConversation = useCallback(
+    (conversationId) => {
+      const target = tutorConversationsRef.current.find((item) => item.id === conversationId);
+      if (!target) return;
+      setActiveTutorConversationId(target.id);
+      setTutorMessages(target.messages);
+      setTutorError("");
+      persistTutorHistory(selectedFileId, target.messages);
+    },
+    [persistTutorHistory, selectedFileId, setActiveTutorConversationId, setTutorError, setTutorMessages]
+  );
+
+  const handleNewTutorConversation = useCallback(() => {
+    setActiveTutorConversationId("");
+    setTutorMessages([]);
+    setTutorError("");
+    persistTutorHistory(selectedFileId, []);
+  }, [persistTutorHistory, selectedFileId, setActiveTutorConversationId, setTutorError, setTutorMessages]);
+
+  const handleDeleteTutorConversation = useCallback(
+    (conversationId) => {
+      const nextSessions = tutorConversationsRef.current.filter((item) => item.id !== conversationId);
+      tutorConversationsRef.current = nextSessions;
+      setTutorConversations(nextSessions);
+      void persistArtifacts({
+        highlights: writeTutorConversationsToHighlights(artifactsRef.current?.highlights, nextSessions),
+      });
+      if (conversationId === activeTutorConversationId) {
+        setActiveTutorConversationId("");
+        setTutorMessages([]);
+        persistTutorHistory(selectedFileId, []);
+      }
+    },
+    [
+      activeTutorConversationId,
+      persistArtifacts,
+      persistTutorHistory,
+      selectedFileId,
+      setActiveTutorConversationId,
+      setTutorConversations,
+      setTutorMessages,
+    ]
   );
 
   // ─── 학습 현황: 모든 파일의 artifact 일괄 로드 ───────────────────────────
@@ -5256,6 +5364,11 @@ function App() {
     // Summary callbacks
     requestSummary,
     onEditSummary: handleEditSummaryText,
+    tutorConversations,
+    activeTutorConversationId,
+    onSelectTutorConversation: handleSelectTutorConversation,
+    onNewTutorConversation: handleNewTutorConversation,
+    onDeleteTutorConversation: handleDeleteTutorConversation,
     requestMindMap,
     mindmapData,
     isLoadingMindmap,

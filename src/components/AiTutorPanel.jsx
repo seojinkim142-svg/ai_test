@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import {
   MARKDOWN_MATH_REHYPE_PLUGINS,
@@ -89,6 +89,16 @@ function normalizeTutorMathMarkdown(rawContent) {
   return normalized.join("\n");
 }
 
+function formatConversationDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  const sameDay = date.toDateString() === now.toDateString();
+  return sameDay
+    ? date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+    : date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 function buildAttachmentLabel(message, copy) {
   const attachmentName = String(message?.attachmentName || "").trim();
   if (!attachmentName) return "";
@@ -109,6 +119,12 @@ function AiTutorPanel({
   folderName = "",
   canUseFolderMode = false,
   onToggleFolderMode,
+  conversationKey = "",
+  conversations = [],
+  activeConversationId = "",
+  onSelectConversation,
+  onNewConversation,
+  onDeleteConversation,
 }) {
   const [input, setInput] = useState("");
   const [attachmentFile, setAttachmentFile] = useState(null);
@@ -117,7 +133,44 @@ function AiTutorPanel({
   const textareaRef = useRef(null);
   const isComposingRef = useRef(false);
   const submitTriggeredAtRef = useRef(0);
+  const scrollRef = useRef(null);
+  const isNearBottomRef = useRef(true);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const copy = useMemo(() => getTutorCopy(outputLanguage), [outputLanguage]);
+
+  const scrollToBottom = useCallback((behavior = "smooth") => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior });
+    isNearBottomRef.current = true;
+    setShowScrollToBottom(false);
+  }, []);
+
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const nearBottom = distanceFromBottom < 80;
+    isNearBottomRef.current = nearBottom;
+    setShowScrollToBottom(!nearBottom && el.scrollHeight - el.clientHeight > 120);
+  }, []);
+
+  // 대화를 열거나 다른 대화로 전환하면 가장 최근 메시지(맨 아래)부터 보여준다
+  useEffect(() => {
+    const id = requestAnimationFrame(() => scrollToBottom("auto"));
+    return () => cancelAnimationFrame(id);
+  }, [conversationKey, scrollToBottom]);
+
+  // 새 메시지가 오면 이미 하단을 보고 있던 경우에만 따라 내려간다
+  useEffect(() => {
+    if (!isNearBottomRef.current) {
+      handleScroll();
+      return;
+    }
+    const id = requestAnimationFrame(() => scrollToBottom("smooth"));
+    return () => cancelAnimationFrame(id);
+  }, [messages?.length, isLoading, scrollToBottom, handleScroll]);
 
   const markdownComponents = useMemo(
     () => ({
@@ -245,6 +298,33 @@ function AiTutorPanel({
               폴더 전체
             </button>
           )}
+          {typeof onSelectConversation === "function" && (
+            <button
+              type="button"
+              onClick={() => setIsHistoryOpen((prev) => !prev)}
+              className="ghost-button text-xs text-slate-200"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "148, 163, 184" }}
+            >
+              {copy.conversationHistory}
+              {conversations.length > 0 ? ` (${conversations.length})` : ""}
+            </button>
+          )}
+          {typeof onNewConversation === "function" && (
+            <button
+              type="button"
+              onClick={() => {
+                setIsHistoryOpen(false);
+                onNewConversation();
+              }}
+              disabled={isLoading}
+              className="ghost-button text-xs text-emerald-100"
+              data-ghost-size="sm"
+              style={{ "--ghost-color": "52, 211, 153" }}
+            >
+              {copy.newConversation}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleReset}
@@ -258,13 +338,60 @@ function AiTutorPanel({
         </div>
       </div>
 
+      {isHistoryOpen && typeof onSelectConversation === "function" && (
+        <div className="max-h-56 overflow-auto rounded-2xl border border-white/10 bg-black/20 p-2">
+          {conversations.length === 0 ? (
+            <p className="px-2 py-3 text-center text-xs text-slate-400">{copy.noConversations}</p>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {conversations.map((conversation) => {
+                const isActive = conversation.id === activeConversationId;
+                return (
+                  <li key={conversation.id} className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsHistoryOpen(false);
+                        onSelectConversation(conversation.id);
+                      }}
+                      className={`min-w-0 flex-1 rounded-lg px-3 py-2 text-left text-xs transition ${
+                        isActive
+                          ? "bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-300/30"
+                          : "text-slate-200 hover:bg-white/10"
+                      }`}
+                    >
+                      <span className="block truncate font-medium">{conversation.title}</span>
+                      <span className="mt-0.5 block text-[10px] text-slate-400">
+                        {formatConversationDate(conversation.updatedAt)} · {conversation.messages.length}
+                      </span>
+                    </button>
+                    {typeof onDeleteConversation === "function" && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteConversation(conversation.id)}
+                        aria-label={copy.deleteConversation}
+                        title={copy.deleteConversation}
+                        className="shrink-0 rounded-lg px-2 py-2 text-xs text-slate-500 transition hover:bg-red-500/10 hover:text-red-300"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+
       {notice && (
         <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-200">
           {notice}
         </div>
       )}
 
-      <div className="flex-1 overflow-auto">
+      <div className="relative min-h-0 flex-1">
+        <div ref={scrollRef} onScroll={handleScroll} className="show-scrollbar h-full overflow-auto">
         <div className="flex flex-col gap-3">
           {showEmptyState && (
             <p className="self-center text-sm text-slate-500">
@@ -317,7 +444,20 @@ function AiTutorPanel({
               <p className="mt-2">{copy.generatingAnswer}</p>
             </div>
           )}
+          </div>
         </div>
+
+        {showScrollToBottom && (
+          <button
+            type="button"
+            onClick={() => scrollToBottom("smooth")}
+            aria-label={copy.scrollToLatest}
+            title={copy.scrollToLatest}
+            className="absolute bottom-3 left-1/2 z-10 flex h-9 w-9 -translate-x-1/2 items-center justify-center rounded-full border border-white/15 bg-slate-800/90 text-slate-100 shadow-lg shadow-black/30 backdrop-blur transition hover:bg-slate-700/90"
+          >
+            <span aria-hidden="true" className="text-base leading-none">↓</span>
+          </button>
+        )}
       </div>
 
       {(attachmentError || error) && (

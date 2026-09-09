@@ -5,6 +5,10 @@ export const useTutorStore = create((set) => ({
   isTutorLoading: false,
   tutorError: "",
 
+  // 문서별 AI 튜터 대화 세션 목록(DB의 artifacts.highlights_json 에 저장됨)
+  tutorConversations: [],
+  activeTutorConversationId: "",
+
   // Actions
   setTutorMessages: (fn) =>
     set((state) => ({
@@ -12,4 +16,9 @@ export const useTutorStore = create((set) => ({
     })),
   setIsTutorLoading: (v) => set({ isTutorLoading: v }),
   setTutorError: (v) => set({ tutorError: v }),
+  setTutorConversations: (fn) =>
+    set((state) => ({
+      tutorConversations: typeof fn === "function" ? fn(state.tutorConversations) : fn,
+    })),
+  setActiveTutorConversationId: (v) => set({ activeTutorConversationId: v }),
 }));

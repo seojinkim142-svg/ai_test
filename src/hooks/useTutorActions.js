@@ -43,6 +43,7 @@ export function useTutorActions({
     tutorMessages, setTutorMessages,
     isTutorLoading, setIsTutorLoading,
     setTutorError,
+    setActiveTutorConversationId,
   } = useTutorStore();
 
   const { setStatus } = useDocumentStore();
@@ -53,7 +54,9 @@ export function useTutorActions({
     setTutorError("");
     setIsTutorLoading(false);
     tutorRequestInFlightRef.current = false;
-  }, [persistTutorHistory, selectedFileId]);
+    // 활성 대화 id 를 비워 새 대화로 시작한다. 이전 대화는 목록에 그대로 남는다.
+    setActiveTutorConversationId("");
+  }, [persistTutorHistory, selectedFileId, setActiveTutorConversationId]);
 
   const handleSendTutorMessage = useCallback(
     (requestPayload) => {

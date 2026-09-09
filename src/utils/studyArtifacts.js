@@ -625,3 +625,114 @@ export function readTopicStructureFromHighlights(highlightsValue) {
   if (stored.version !== 1) return null;
   return stored;
 }
+
+// ── AI 튜터 대화 세션 ────────────────────────────────────────────────────────
+// 기존에는 localStorage 에만 남아서 기기를 바꾸면 대화가 사라졌다.
+// 문서별 artifacts(highlights_json)에 세션 목록을 함께 저장해 DB 에서 불러온다.
+const TUTOR_CONVERSATIONS_ARTIFACT_KEY = "__tutor_conversations_v1";
+export const TUTOR_CONVERSATION_MAX_SESSIONS = 20;
+export const TUTOR_CONVERSATION_MAX_MESSAGES = 60;
+const TUTOR_CONVERSATION_MAX_CONTENT = 4000;
+
+function normalizeTutorMessage(message) {
+  if (!isPlainObject(message)) return null;
+  const role = message.role === "assistant" ? "assistant" : message.role === "user" ? "user" : "";
+  if (!role) return null;
+  const content = String(message.content || "").slice(0, TUTOR_CONVERSATION_MAX_CONTENT);
+  const attachmentName = String(message.attachmentName || "").trim();
+  if (!content && !attachmentName) return null;
+  return {
+    id: String(message.id || "").trim() || undefined,
+    role,
+    content,
+    ...(attachmentName ? { attachmentName } : {}),
+  };
+}
+
+export function buildTutorConversationTitle(messages) {
+  const firstUser = (Array.isArray(messages) ? messages : []).find(
+    (msg) => msg?.role === "user" && String(msg?.content || "").trim()
+  );
+  const raw = String(firstUser?.content || "").replace(/\s+/g, " ").trim();
+  if (!raw) return "새 대화";
+  return raw.length > 40 ? `${raw.slice(0, 40)}...` : raw;
+}
+
+export function normalizeTutorConversation(session) {
+  if (!isPlainObject(session)) return null;
+  const id = String(session.id || "").trim();
+  if (!id) return null;
+  const messages = (Array.isArray(session.messages) ? session.messages : [])
+    .map((msg) => normalizeTutorMessage(msg))
+    .filter(Boolean)
+    .slice(-TUTOR_CONVERSATION_MAX_MESSAGES);
+  if (!messages.length) return null;
+  return {
+    id,
+    title: String(session.title || "").trim() || buildTutorConversationTitle(messages),
+    createdAt: String(session.createdAt || "") || new Date().toISOString(),
+    updatedAt: String(session.updatedAt || "") || new Date().toISOString(),
+    messages,
+  };
+}
+
+export function readTutorConversationsFromHighlights(highlightsValue) {
+  if (!isPlainObject(highlightsValue)) return [];
+  const stored = highlightsValue[TUTOR_CONVERSATIONS_ARTIFACT_KEY];
+  const sessions = Array.isArray(stored?.sessions) ? stored.sessions : [];
+  return sessions
+    .map((session) => normalizeTutorConversation(session))
+    .filter(Boolean)
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+    .slice(0, TUTOR_CONVERSATION_MAX_SESSIONS);
+}
+
+export function writeTutorConversationsToHighlights(highlightsValue, sessions) {
+  const base = isPlainObject(highlightsValue) ? { ...highlightsValue } : {};
+  if (!isPlainObject(highlightsValue) && highlightsValue != null) {
+    base[LEGACY_HIGHLIGHTS_WRAP_KEY] = highlightsValue;
+  }
+
+  const normalized = (Array.isArray(sessions) ? sessions : [])
+    .map((session) => normalizeTutorConversation(session))
+    .filter(Boolean)
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+    .slice(0, TUTOR_CONVERSATION_MAX_SESSIONS);
+
+  if (normalized.length > 0) {
+    base[TUTOR_CONVERSATIONS_ARTIFACT_KEY] = { version: 1, sessions: normalized };
+  } else {
+    delete base[TUTOR_CONVERSATIONS_ARTIFACT_KEY];
+  }
+
+  return Object.keys(base).length > 0 ? base : null;
+}
+
+export function upsertTutorConversation(sessions, { id, messages, title } = {}) {
+  const list = (Array.isArray(sessions) ? sessions : []).map((s) => normalizeTutorConversation(s)).filter(Boolean);
+  const sessionId = String(id || "").trim();
+  if (!sessionId) return list;
+
+  const normalizedMessages = (Array.isArray(messages) ? messages : [])
+    .map((msg) => normalizeTutorMessage(msg))
+    .filter(Boolean)
+    .slice(-TUTOR_CONVERSATION_MAX_MESSAGES);
+
+  // 메시지가 비면 해당 세션을 목록에서 제거한다(대화 초기화와 같은 의미)
+  if (!normalizedMessages.length) {
+    return list.filter((session) => session.id !== sessionId);
+  }
+
+  const now = new Date().toISOString();
+  const existing = list.find((session) => session.id === sessionId);
+  const nextSession = {
+    id: sessionId,
+    title: String(title || "").trim() || existing?.title || buildTutorConversationTitle(normalizedMessages),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    messages: normalizedMessages,
+  };
+
+  const rest = list.filter((session) => session.id !== sessionId);
+  return [nextSession, ...rest].slice(0, TUTOR_CONVERSATION_MAX_SESSIONS);
+}
