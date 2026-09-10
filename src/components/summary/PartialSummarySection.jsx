@@ -11,6 +11,7 @@ function PartialSummarySection({
   onSave,
   onLoad,
   onDelete,
+  onAskTutor,
 }) {
   const {
     partialSummary,
@@ -117,7 +118,7 @@ function PartialSummarySection({
       )}
 
       {partialSummary ? (
-        <SummaryCard summary={partialSummary} />
+        <SummaryCard summary={partialSummary} onAskTutor={onAskTutor} />
       ) : (
         <p className="mt-3 text-xs text-slate-400">
           아직 현재 문서의 부분 요약 결과가 없습니다.
