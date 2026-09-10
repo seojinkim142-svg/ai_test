@@ -1045,17 +1045,42 @@ async function generateChapterSummary(
 
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex += 1) {
     onProgress?.({ current: batchIndex + 1, total: batches.length });
-    const parsedBatch = await requestChapterSummaryBatch({
-      payload: {
-        scope: summaryInput.scope,
-        mode: summaryInput.mode,
-        chapters: batches[batchIndex],
-      },
-      outputLanguageLabel,
-      hasPageTags,
-      // 이어지는 배치는 앞부분이 이미 요약됐음을 알려 개요 중복을 막는다
-      isContinuation: batchIndex > 0,
-    });
+    const batchRequest = () =>
+      requestChapterSummaryBatch({
+        payload: {
+          scope: summaryInput.scope,
+          mode: summaryInput.mode,
+          chapters: batches[batchIndex],
+        },
+        outputLanguageLabel,
+        hasPageTags,
+        // 이어지는 배치는 앞부분이 이미 요약됐음을 알려 개요 중복을 막는다
+        isContinuation: batchIndex > 0,
+      });
+
+    // 배치 하나가 실패(JSON 파싱 오류 등)해도 전체를 버리지 않는다.
+    // 예전에는 여기서 예외가 그대로 위로 튀어 올라가 generateSummary 전체가
+    // legacy 요약(옛 shrinkWithTail 절단 로직)으로 통째로 폴백됐다. 그러면
+    // 이미 성공한 다른 배치들의 결과까지 같이 날아가고, legacy 경로가 문서
+    // 중간을 통째로 잘라내 "1장은 있는데 중간이 없고 마지막 장만 조금 있는"
+    // 결과가 나왔다.
+    let parsedBatch = null;
+    try {
+      parsedBatch = await batchRequest();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(`요약 배치 ${batchIndex + 1}/${batches.length} 실패, 1회 재시도합니다:`, err?.message || err);
+      try {
+        parsedBatch = await batchRequest();
+      } catch (retryErr) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `요약 배치 ${batchIndex + 1}/${batches.length} 재시도도 실패, 이 배치는 건너뜁니다:`,
+          retryErr?.message || retryErr
+        );
+        continue;
+      }
+    }
     if (Array.isArray(parsedBatch?.chapters)) mergedChapters.push(...parsedBatch.chapters);
     if (Array.isArray(parsedBatch?.overview)) mergedOverview.push(...parsedBatch.overview);
   }
