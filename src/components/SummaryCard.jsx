@@ -157,7 +157,15 @@ function autoWrapBareLatexSegments(line, toPlaceholder) {
 }
 
 function sanitizeSummaryForMath(rawSummary) {
-  const source = String(rawSummary || "").replace(/\r\n/g, "\n");
+  // AI가 인용 표시를 "`p.101`"처럼 백틱으로 감싸는 경우가 있다. 백틱 안 내용은
+  // 마크다운에서 별도 code 노드로 떨어져 나가 배지 인식 정규식이 아예 보지
+  // 못하고, 그냥 회색 코드 칩으로만 렌더링돼 클릭이 안 된다. 렌더링 전에
+  // 백틱만 벗겨내 일반 텍스트로 돌려놓는다.
+  const withoutCitationTicks = String(rawSummary || "").replace(
+    /`(\[?(?:문서:)?p\.\d+\]?|\[T[123]\])`/g,
+    "$1"
+  );
+  const source = withoutCitationTicks.replace(/\r\n/g, "\n");
   if (!source) return "";
 
   const globalMathPlaceholders = [];
@@ -365,7 +373,12 @@ function isInteractiveElement(target) {
 
 // ── Inline citation helpers ──────────────────────────────────────────────────
 
-const INLINE_BADGE_RE = /\[(?:문서:)?p\.(\d+)\]|\[(T[123])\]/g;
+// AI가 지시받은 "[p.N]" 대괄호 형식 대신 대괄호 없이 "p.101"만 쓰는 경우가
+// 있다. 그러면 배지로 안 잡히고 일반 텍스트로 남아 클릭이 안 되는 것처럼
+// 보인다. 대괄호가 있으면 우선 그걸로 매칭하고, 없으면 "p.101" 형태도
+// 페이지 배지로 인식한다(단어 중간에 낀 경우는 제외).
+const INLINE_BADGE_RE =
+  /\[(?:문서:)?p\.(\d+)\]|\[(T[123])\]|(?<![\w[])p\.(\d{1,4})\b/g;
 
 function parseInlineBadges(text) {
   const segments = [];
@@ -376,8 +389,8 @@ function parseInlineBadges(text) {
     if (lastIndex < match.index) {
       segments.push({ type: "text", content: text.slice(lastIndex, match.index) });
     }
-    if (match[1]) {
-      segments.push({ type: "page", pageNumber: parseInt(match[1], 10) });
+    if (match[1] || match[3]) {
+      segments.push({ type: "page", pageNumber: parseInt(match[1] || match[3], 10) });
     } else {
       segments.push({ type: "tier", tier: match[2] });
     }
