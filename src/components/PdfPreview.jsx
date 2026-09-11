@@ -366,33 +366,49 @@ function PdfPreview({
     };
   }, []);
 
+  // iframe 로드/리로드는 이 effect 하나로만 처리한다. 예전에는 이 effect와
+  // "currentPage 변경 시 강제 재로드" effect가 둘 다 viewerSrc 변경에 반응해서
+  // 같은 렌더에서 서로 다른 방식으로 setIframeSrc를 호출했다(하나는 바로 새
+  // src로, 하나는 blank로 비웠다가 다시 채우는 방식). 결과가 effect 실행
+  // 순서에 우연히 의존하는 구조라 페이지 이동이 가끔 안 먹히는 원인이 됐다.
+  // "새 문서를 여는 경우"와 "같은 문서에서 페이지만 바뀌는 경우"를 여기서
+  // 한 번에 판단해서 정확히 한 가지 방식으로만 iframe을 갱신한다.
+  const prevSourceKeyRef = useRef(null);
   useEffect(() => {
+    if (useCanvasPdfPreview) return undefined;
+
     if (iframeResetTimerRef.current && typeof window !== "undefined") {
       window.clearTimeout(iframeResetTimerRef.current);
       iframeResetTimerRef.current = null;
     }
-    iframeRetrySrcRef.current = "";
+
     if (!viewerSrc) {
+      prevSourceKeyRef.current = sourceKey;
+      iframeRetrySrcRef.current = "";
       setIframeSrc("");
       setLoadedSrc("");
       setFailedSrc("");
-      return;
+      return undefined;
     }
-    setFailedSrc("");
-    setIframeSrc(viewerSrc);
-    setLoadedSrc((prev) => (stripUrlHash(prev) === stripUrlHash(viewerSrc) ? viewerSrc : ""));
-  }, [sourceKey, viewerSrc]);
 
-  // iframe 모드에서 currentPage 변경 시 강제 재로드 (Chrome PDF 뷰어는 hash 변경을 무시함)
-  const prevIframePageRef = useRef(normalizePageNumber(currentPage));
-  useEffect(() => {
-    if (useCanvasPdfPreview) return;
-    const page = normalizePageNumber(currentPage);
-    if (page === prevIframePageRef.current) return;
-    prevIframePageRef.current = page;
-    if (!viewerSrc) return;
+    const isNewDocument = sourceKey !== prevSourceKeyRef.current;
+    prevSourceKeyRef.current = sourceKey;
+    setFailedSrc("");
+
+    if (isNewDocument) {
+      // 새 문서를 여는 첫 로드는 iframe이 비어있으니 바로 채우면 된다.
+      iframeRetrySrcRef.current = "";
+      setIframeSrc(viewerSrc);
+      setLoadedSrc((prev) => (stripUrlHash(prev) === stripUrlHash(viewerSrc) ? viewerSrc : ""));
+      return undefined;
+    }
+
+    // 같은 문서에서 페이지 해시만 바뀐 경우: Chrome 내장 PDF 뷰어는 이미 로드된
+    // iframe의 해시만 바뀌는 걸 무시하므로, 한 번 비웠다가 다시 채워 강제로
+    // 새로 로드시킨다.
     retryPdfIframeLoad(viewerSrc);
-  }, [currentPage, useCanvasPdfPreview, viewerSrc, retryPdfIframeLoad]);
+    return undefined;
+  }, [sourceKey, viewerSrc, useCanvasPdfPreview, retryPdfIframeLoad]);
 
   const goToNextPage = useCallback(() => {
     if (normalizedCurrentPage >= totalPages) return;
