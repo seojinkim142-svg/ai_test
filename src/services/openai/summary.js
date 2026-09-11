@@ -16,7 +16,7 @@ export function buildSummaryPrompt(extractedText, outputLanguage = "ko") {
   const outputLanguageLabel = getOutputLanguageLabel(outputLanguage);
   const hasPageTags = /\[p\.\d+\]/.test(String(extractedText || ""));
   const anchorRule = hasPageTags
-    ? "- Source text contains [p.N] markers. Append [p.N] after every verbatim quote, factual claim, and formula. Do NOT fabricate page numbers."
+    ? "- The source text is split into blocks, each starting with a marker like [p.101] (this is the PDF file's own page number, used for navigation). Every quote/claim/formula must be tagged with the [p.N] marker of the block it came from — copy the marker literally, do not compute or guess a number. IMPORTANT: books often print their own page number inside the page content (e.g. a running header/footer like \"Interest Rates 79\"). That printed number is NOT the [p.N] marker and is usually different from it (books rarely count cover/preface/table-of-contents pages, so their own numbering runs behind the PDF's). Never use that printed number as the anchor — always use the [p.N] marker of the block."
     : "- No page markers detected. Omit page anchors but still extract verbatim quotes.";
 
   return `
@@ -1095,7 +1095,7 @@ async function generateChapterSummary(
 
 async function requestChapterSummaryBatch({ payload, outputLanguageLabel, hasPageTags, isContinuation }) {
   const citationRule = hasPageTags
-    ? `- Source text contains [p.N] page markers. Append [p.N] after every "quote", "explanation", and formula. Only use page numbers visible in the source. Do NOT fabricate.`
+    ? `- The source text is split into blocks, each starting with a marker like [p.101] (this is the PDF file's own page number, used for navigation). Every "quote", "explanation", and formula must be anchored with the [p.N] marker of the block it came from — copy the marker literally, do not compute or guess a number. IMPORTANT: books often print their own page number inside the page content (e.g. a running header/footer like "Interest Rates 79"). That printed number is NOT the [p.N] marker and is usually different from it (books rarely count cover/preface/table-of-contents pages, so their own numbering runs behind the PDF's). Never use that printed number as the anchor — always use the [p.N] marker of the block. Do NOT fabricate a marker either.`
     : `- No page markers detected. Omit anchors but still extract verbatim quotes.`;
 
   const data = await postChatRequest(
