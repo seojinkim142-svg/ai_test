@@ -6,10 +6,6 @@ export const useDocumentStore = create((set) => ({
   extractedText: "",
   previewText: "",
   pageInfo: { used: 0, total: 0 },
-  // PDF 물리 페이지 번호 -> 책에 인쇄된 쪽수. 표지/서문 때문에 둘이 다른 책
-  // PDF에서, 인용 배지에 "물리 페이지 대신 인쇄 쪽수"를 보여주기 위한 것.
-  // 라벨 없는 PDF는 빈 Map이고, 그럴 땐 물리 페이지 번호를 그대로 보여준다.
-  pageLabelMap: new Map(),
   pdfUrl: null,
   status: "",
   error: "",
@@ -48,10 +44,6 @@ export const useDocumentStore = create((set) => ({
   setPageInfo: (fn) =>
     set((state) => ({
       pageInfo: typeof fn === "function" ? fn(state.pageInfo) : fn,
-    })),
-  setPageLabelMap: (fn) =>
-    set((state) => ({
-      pageLabelMap: typeof fn === "function" ? fn(state.pageLabelMap) : fn,
     })),
   setPdfUrl: (pdfUrl) => set({ pdfUrl }),
   setStatus: (status) => set({ status }),

@@ -39,7 +39,6 @@ export default function DetailPage({
   // Summary callbacks
   requestSummary,
   onEditSummary,
-  pageLabelMap,
   tutorConversations,
   activeTutorConversationId,
   onSelectTutorConversation,
@@ -712,7 +711,6 @@ export default function DetailPage({
                     summary={summary}
                     renderExportPages={isExportingSummary}
                     onEditSummary={onEditSummary}
-                    pageLabelMap={pageLabelMap}
                     onJumpToEvidencePage={typeof onJumpToSummaryPage === "function"
                       ? (pageNumber, ...rest) => {
                           onJumpToSummaryPage(pageNumber, ...rest);
@@ -737,7 +735,6 @@ export default function DetailPage({
                   onSave={handleSaveCurrentPartialSummary}
                   onLoad={handleLoadSavedPartialSummary}
                   onDelete={handleDeleteSavedPartialSummary}
-                  pageLabelMap={pageLabelMap}
                   onJumpToEvidencePage={typeof onJumpToSummaryPage === "function"
                     ? (pageNumber, ...rest) => {
                         onJumpToSummaryPage(pageNumber, ...rest);

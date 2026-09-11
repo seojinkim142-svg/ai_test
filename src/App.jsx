@@ -64,7 +64,6 @@ import {
   extractChapterRangesFromToc,
   extractPdfTextFromPages,
   extractPdfPageTexts,
-  getPdfPageLabelMap,
   generatePdfThumbnail,
   extractPdfTextWithCaching,
 } from "./utils/pdf";
@@ -302,7 +301,6 @@ function App() {
     extractedText, setExtractedText,
     previewText, setPreviewText,
     pageInfo, setPageInfo,
-    pageLabelMap, setPageLabelMap,
     pdfUrl, setPdfUrl,
     status, setStatus,
     error, setError,
@@ -1707,7 +1705,6 @@ function App() {
       setChapterRangeError("");
       oxAutoRequestedRef.current = false;
       resetDiagnostic();
-      setPageLabelMap(new Map());
       applyUsageCountsForDoc(nextDocId, usageCountsByDocRef.current.get(String(nextDocId || "").trim()));
       const artifactsPromise = loadArtifacts(nextDocId);
 
@@ -1729,17 +1726,6 @@ function App() {
         setPreviewText(text);
         setPageInfo({ used: pagesUsed, total: totalPages });
         setThumbnailUrl(thumb);
-        // 표지/서문 때문에 PDF 물리 페이지와 책 인쇄 쪽수가 어긋나는 책 PDF가
-        // 있어, 화면 표시용으로 물리 페이지 -> 인쇄 쪽수 매핑을 따로 구해둔다.
-        // 요약 생성/이동에는 영향 없는 표시 전용 정보라 결과를 기다리지 않는다.
-        if (isPdfDocumentKind(detectSupportedDocumentKind(targetFile))) {
-          getPdfPageLabelMap(targetFile)
-            .then((map) => {
-              if (fileOpenRequestSeqRef.current !== requestSeq) return;
-              setPageLabelMap(map);
-            })
-            .catch(() => {});
-        }
         const extractEnd =
           typeof performance !== "undefined" && typeof performance.now === "function"
             ? performance.now()
@@ -5377,7 +5363,6 @@ function App() {
     // Summary callbacks
     requestSummary,
     onEditSummary: handleEditSummaryText,
-    pageLabelMap,
     tutorConversations,
     activeTutorConversationId,
     onSelectTutorConversation: handleSelectTutorConversation,

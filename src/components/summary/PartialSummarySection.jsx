@@ -12,7 +12,6 @@ function PartialSummarySection({
   onLoad,
   onDelete,
   onAskTutor,
-  pageLabelMap,
   onJumpToEvidencePage,
 }) {
   const {
@@ -123,7 +122,6 @@ function PartialSummarySection({
         <SummaryCard
           summary={partialSummary}
           onAskTutor={onAskTutor}
-          pageLabelMap={pageLabelMap}
           onJumpToEvidencePage={onJumpToEvidencePage}
         />
       ) : (
