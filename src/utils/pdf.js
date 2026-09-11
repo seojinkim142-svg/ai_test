@@ -328,6 +328,20 @@ function normalizeNumericPageLabel(value) {
   return Number.isFinite(pageNumber) && pageNumber > 0 ? pageNumber : null;
 }
 
+// 책 PDF는 표지/서문/목차 때문에 "PDF 파일상 101번째 페이지"와 "책에 인쇄된
+// 79쪽"이 다를 수 있다. 요약의 [p.N] 인용은 실제 이동을 위해 PDF 물리 페이지
+// 번호를 써야 하지만, 화면에는 사용자가 책에서 실제로 보는 인쇄 쪽수를 보여줘야
+// 헷갈리지 않는다. 물리 페이지 -> 인쇄 쪽수 매핑을 돌려준다(라벨 없으면 빈 Map).
+export async function getPdfPageLabelMap(file) {
+  const { pdf } = await loadPdfDocument(file);
+  const forward = await getPdfNumericPageLabelMap(pdf); // label -> physicalPage
+  const reverse = new Map();
+  for (const [label, physicalPage] of forward.entries()) {
+    reverse.set(physicalPage, label);
+  }
+  return reverse;
+}
+
 async function getPdfNumericPageLabelMap(pdf) {
   if (!pdf || typeof pdf.getPageLabels !== "function") return new Map();
 

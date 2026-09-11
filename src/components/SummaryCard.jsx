@@ -389,7 +389,12 @@ function parseInlineBadges(text) {
   return segments;
 }
 
-function PageAnchorBadge({ pageNumber, onJumpToPage }) {
+function PageAnchorBadge({ pageNumber, onJumpToPage, pageLabelMap }) {
+  // 표지/서문이 있는 책 PDF는 "PDF 파일상 101번째 페이지"와 "책에 인쇄된
+  // 79쪽"이 다르다. 이동은 물리 페이지(pageNumber)로 해야 하지만, 화면에는
+  // 라벨이 있으면 그걸(책에 실제로 인쇄된 쪽수) 보여줘 헷갈리지 않게 한다.
+  const displayLabel = pageLabelMap?.get?.(pageNumber);
+  const displayText = Number.isFinite(displayLabel) ? displayLabel : pageNumber;
   return (
     <span className="inline-block">
       {typeof onJumpToPage === "function" ? (
@@ -403,11 +408,11 @@ function PageAnchorBadge({ pageNumber, onJumpToPage }) {
           }}
           aria-label={`PDF ${pageNumber}페이지로 이동`}
         >
-          p.{pageNumber}
+          p.{displayText}
         </button>
       ) : (
         <span className="anchor-badge" aria-label={`PDF ${pageNumber}페이지`}>
-          p.{pageNumber}
+          p.{displayText}
         </span>
       )}
     </span>
@@ -422,32 +427,32 @@ function TierBadge({ tier }) {
   );
 }
 
-function renderWithInlineBadges(children, onJumpToPage) {
+function renderWithInlineBadges(children, onJumpToPage, pageLabelMap) {
   if (Array.isArray(children)) {
-    return children.flatMap((child, i) => renderNodeWithInlineBadges(child, onJumpToPage, i));
+    return children.flatMap((child, i) => renderNodeWithInlineBadges(child, onJumpToPage, i, pageLabelMap));
   }
-  return renderNodeWithInlineBadges(children, onJumpToPage, 0);
+  return renderNodeWithInlineBadges(children, onJumpToPage, 0, pageLabelMap);
 }
 
-function renderNodeWithInlineBadges(node, onJumpToPage, keyBase) {
+function renderNodeWithInlineBadges(node, onJumpToPage, keyBase, pageLabelMap) {
   if (typeof node === "string") {
-    return renderStringWithInlineBadges(node, onJumpToPage, keyBase);
+    return renderStringWithInlineBadges(node, onJumpToPage, keyBase, pageLabelMap);
   }
 
   if (Array.isArray(node)) {
-    return renderWithInlineBadges(node, onJumpToPage);
+    return renderWithInlineBadges(node, onJumpToPage, pageLabelMap);
   }
 
   if (isValidElement(node) && node.props?.children) {
     return cloneElement(node, {
-      children: renderWithInlineBadges(node.props.children, onJumpToPage),
+      children: renderWithInlineBadges(node.props.children, onJumpToPage, pageLabelMap),
     });
   }
 
   return node;
 }
 
-function renderStringWithInlineBadges(text, onJumpToPage, keyBase) {
+function renderStringWithInlineBadges(text, onJumpToPage, keyBase, pageLabelMap) {
   const segments = parseInlineBadges(text);
   if (segments.length === 1 && segments[0].type === "text") return [text];
   return segments.map((seg, i) => {
@@ -457,6 +462,7 @@ function renderStringWithInlineBadges(text, onJumpToPage, keyBase) {
           key={`${keyBase}-page-${i}`}
           pageNumber={seg.pageNumber}
           onJumpToPage={onJumpToPage}
+          pageLabelMap={pageLabelMap}
         />
       );
     }
@@ -474,6 +480,7 @@ function SummaryCard({
   onJumpToEvidencePage,
   onAskTutor,
   onEditSummary,
+  pageLabelMap,
 }) {
   const normalizedSummary = useMemo(
     () => normalizeMathMarkdown(sanitizeSummaryForMath(summary)).trim(),
@@ -491,37 +498,37 @@ function SummaryCard({
     () => ({
       h1: ({ children, ...props }) => (
         <h1 className="mt-4 text-xl font-bold text-white" {...props}>
-          {renderWithInlineBadges(children, onJumpToEvidencePage)}
+          {renderWithInlineBadges(children, onJumpToEvidencePage, pageLabelMap)}
         </h1>
       ),
       h2: ({ children, ...props }) => (
         <h2 className="mt-3 text-lg font-semibold text-white" {...props}>
-          {renderWithInlineBadges(children, onJumpToEvidencePage)}
+          {renderWithInlineBadges(children, onJumpToEvidencePage, pageLabelMap)}
         </h2>
       ),
       h3: ({ children, ...props }) => (
         <h3 className="mt-2 text-base font-semibold text-emerald-100" {...props}>
-          {renderWithInlineBadges(children, onJumpToEvidencePage)}
+          {renderWithInlineBadges(children, onJumpToEvidencePage, pageLabelMap)}
         </h3>
       ),
       p: ({ children, ...props }) => (
         <p className="text-sm leading-relaxed text-slate-100 md:text-[15px]" {...props}>
-          {renderWithInlineBadges(children, onJumpToEvidencePage)}
+          {renderWithInlineBadges(children, onJumpToEvidencePage, pageLabelMap)}
         </p>
       ),
       strong: ({ children, ...props }) => (
         <strong className="font-semibold text-slate-50" {...props}>
-          {renderWithInlineBadges(children, onJumpToEvidencePage)}
+          {renderWithInlineBadges(children, onJumpToEvidencePage, pageLabelMap)}
         </strong>
       ),
       em: ({ children, ...props }) => (
-        <em {...props}>{renderWithInlineBadges(children, onJumpToEvidencePage)}</em>
+        <em {...props}>{renderWithInlineBadges(children, onJumpToEvidencePage, pageLabelMap)}</em>
       ),
       ul: (props) => <ul className="list-disc space-y-1 pl-5 text-sm text-slate-100 md:text-[15px]" {...props} />,
       ol: (props) => <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-100 md:text-[15px]" {...props} />,
       li: ({ children, ...props }) => (
         <li className="leading-relaxed" {...props}>
-          {renderWithInlineBadges(children, onJumpToEvidencePage)}
+          {renderWithInlineBadges(children, onJumpToEvidencePage, pageLabelMap)}
         </li>
       ),
       code: ({ inline, className, children, ...props }) =>
@@ -541,16 +548,16 @@ function SummaryCard({
       ),
       th: ({ children, ...props }) => (
         <th className="border-b border-white/10 px-3 py-2 font-semibold text-emerald-100" {...props}>
-          {renderWithInlineBadges(children, onJumpToEvidencePage)}
+          {renderWithInlineBadges(children, onJumpToEvidencePage, pageLabelMap)}
         </th>
       ),
       td: ({ children, ...props }) => (
         <td className="border-b border-white/5 px-3 py-2 text-slate-100" {...props}>
-          {renderWithInlineBadges(children, onJumpToEvidencePage)}
+          {renderWithInlineBadges(children, onJumpToEvidencePage, pageLabelMap)}
         </td>
       ),
     }),
-    [onJumpToEvidencePage]
+    [onJumpToEvidencePage, pageLabelMap]
   );
   const exportMarkdownComponents = useMemo(
     () => ({

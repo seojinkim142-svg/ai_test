@@ -39,6 +39,7 @@ export default function DetailPage({
   // Summary callbacks
   requestSummary,
   onEditSummary,
+  pageLabelMap,
   tutorConversations,
   activeTutorConversationId,
   onSelectTutorConversation,
@@ -711,6 +712,7 @@ export default function DetailPage({
                     summary={summary}
                     renderExportPages={isExportingSummary}
                     onEditSummary={onEditSummary}
+                    pageLabelMap={pageLabelMap}
                     onJumpToEvidencePage={typeof onJumpToSummaryPage === "function"
                       ? (pageNumber, ...rest) => {
                           onJumpToSummaryPage(pageNumber, ...rest);
@@ -735,6 +737,7 @@ export default function DetailPage({
                   onSave={handleSaveCurrentPartialSummary}
                   onLoad={handleLoadSavedPartialSummary}
                   onDelete={handleDeleteSavedPartialSummary}
+                  pageLabelMap={pageLabelMap}
                   onAskTutor={typeof handleSendTutorMessage === "function" && typeof setPanelTab === "function"
                     ? (selectedText) => {
                         handleSendTutorMessage(`다음 내용에 대해 자세히 설명해줘:\n\n"${selectedText}"`);
