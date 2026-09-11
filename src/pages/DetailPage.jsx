@@ -738,6 +738,13 @@ export default function DetailPage({
                   onLoad={handleLoadSavedPartialSummary}
                   onDelete={handleDeleteSavedPartialSummary}
                   pageLabelMap={pageLabelMap}
+                  onJumpToEvidencePage={typeof onJumpToSummaryPage === "function"
+                    ? (pageNumber, ...rest) => {
+                        onJumpToSummaryPage(pageNumber, ...rest);
+                        // 모바일: PDF 패널이 화면 위에 있으므로 스크롤 맨 위로 이동
+                        window.scrollTo({ top: 0, behavior: "smooth" });
+                      }
+                    : undefined}
                   onAskTutor={typeof handleSendTutorMessage === "function" && typeof setPanelTab === "function"
                     ? (selectedText) => {
                         handleSendTutorMessage(`다음 내용에 대해 자세히 설명해줘:\n\n"${selectedText}"`);

@@ -13,6 +13,7 @@ function PartialSummarySection({
   onDelete,
   onAskTutor,
   pageLabelMap,
+  onJumpToEvidencePage,
 }) {
   const {
     partialSummary,
@@ -119,7 +120,12 @@ function PartialSummarySection({
       )}
 
       {partialSummary ? (
-        <SummaryCard summary={partialSummary} onAskTutor={onAskTutor} pageLabelMap={pageLabelMap} />
+        <SummaryCard
+          summary={partialSummary}
+          onAskTutor={onAskTutor}
+          pageLabelMap={pageLabelMap}
+          onJumpToEvidencePage={onJumpToEvidencePage}
+        />
       ) : (
         <p className="mt-3 text-xs text-slate-400">
           아직 현재 문서의 부분 요약 결과가 없습니다.
