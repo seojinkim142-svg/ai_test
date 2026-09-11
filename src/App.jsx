@@ -4689,27 +4689,42 @@ function App() {
     setStatus("부분 요약을 생성하고 있습니다...");
     setIsPageSummaryLoading(true);
     try {
-      const extracted = await extractPdfTextFromPages(file, parsed.pages, 18000, {
+      // extractPdfTextFromPages는 [p.N] 마커 없이 페이지 텍스트를 이어붙이기만
+      // 해서, 부분 요약은 AI가 인용할 진짜 페이지 근거가 아예 없었다(그래서
+      // 페이지 번호를 지어낼 수밖에 없었다). extractPdfPageTexts로 바꿔서
+      // 본 요약과 똑같이 페이지마다 [p.N] 마커를 붙여준다.
+      const pageResult = await extractPdfPageTexts(file, parsed.pages, {
         useOcr: true,
         ocrLang: "kor+eng",
         onOcrProgress: (message) => setStatus(message),
       });
-      if (!extracted?.text) {
-        const suffix = extracted?.ocrUsed
+      const pageEntries = Array.isArray(pageResult?.pages) ? pageResult.pages : [];
+      const ocrUsed = pageEntries.some((p) => p?.ocrUsed);
+      const plainText = pageEntries
+        .map((p) => String(p?.text || "").trim())
+        .filter(Boolean)
+        .join("\n\n");
+      if (!plainText) {
+        const suffix = ocrUsed
           ? " OCR까지 시도했지만 추출할 수 있는 텍스트가 없습니다."
           : "";
         throw new Error(`선택한 페이지에서 텍스트를 추출하지 못했습니다.${suffix}`);
       }
-      if (extracted?.ocrUsed) {
+      if (ocrUsed) {
         setStatus("OCR이 완료되었습니다. 부분 요약을 생성하고 있습니다...");
       }
+      const taggedText = pageEntries
+        .filter((p) => String(p?.text || "").trim())
+        .map((p) => `[p.${p.pageNumber}]\n${String(p.text).trim()}`)
+        .join("\n\n");
       setStatus("선택 범위 부분 요약 생성 중...");
       const { generateSummary } = await getOpenAiService();
-      const summarized = await generateSummary(extracted.text, {
+      const summarized = await generateSummary(plainText, {
         scope: "선택 범위에서 추출한 텍스트",
         chapterized: false,
         instructorEmphasis: getEffectiveInstructorEmphasisText(),
         outputLanguage,
+        pageTaggedText: taggedText || null,
       });
       setPartialSummary(summarized);
       setPartialSummaryRange(selectionLabel);
